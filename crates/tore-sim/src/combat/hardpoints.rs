@@ -1255,12 +1255,25 @@ const YAK141_INNER: [f64; 2] = [7.5, -2.8];
 /// clear the airframe at every sweep and the largest alternative (the GBU-30)
 /// enters it least. The station stays under the wing surface and its store
 /// streamwise from 25 to 67 degrees (docs/spec/stores-on-pylons.md).
-const TORNADO_WING_INNER: [f64; 2] = [9.5, 1.5];
+///
+/// Update (TOR-12, John 2026-11-12): the pylon stays where it was on the wing
+/// panel, so it moves with the panel's new place ([`super::swing::WING_IN_FT`]
+/// in, [`super::swing::WING_FORWARD_FT`] forward): 7.96 ft out, 1.7 ft forward.
+/// The left side mirrors it, since the left panel now mirrors the right one.
+const TORNADO_WING_INNER: [f64; 2] = [
+    9.5 - super::swing::WING_IN_FT,
+    1.5 + super::swing::WING_FORWARD_FT,
+];
 
 /// The Tornado IDS (Combat)'s outer swivelling wing pylon, feet out and
 /// forward (TOR-13, fitted, agent decision 2026-11-12; see
-/// docs/spec/stores-on-pylons.md).
-const TORNADO_WING_OUTER: [f64; 2] = [16., 1.5];
+/// docs/spec/stores-on-pylons.md). Update (TOR-12, 2026-11-12): the same place
+/// on the wing panel as before, so it moves with the panel's new place: 14.46
+/// ft out, 1.7 ft forward.
+const TORNADO_WING_OUTER: [f64; 2] = [
+    16. - super::swing::WING_IN_FT,
+    1.5 + super::swing::WING_FORWARD_FT,
+];
 
 /// How far ahead of the inboard swivelling pylon's own store the Tornado's
 /// AIM-9 side rail hangs its missile, feet (TOR-6b, fitted, agent decision
@@ -1382,6 +1395,17 @@ pub fn placed_on(
                 let r = pylon + sign * SEPARATE_SPREAD;
                 let f = forward - sign * SEPARATE_SPREAD * SEPARATE_SWEEP;
                 rack.over[index] = model.height(r, f, from, 6).map(|h| h as f32);
+            }
+        }
+        // TOR-12 (John 2026-11-12): the Tornado's wing panel stands 0.1167 ft
+        // higher than the retail wing this model is read from (the drawing
+        // rig places the panel, `tornado_animation::wing_point`; the
+        // simulation reads the retail shape), so the surface a swivelling
+        // pylon hangs from is that much higher, and the pylon stays at the
+        // same place on the panel (1.0 ft deep, not 1.12).
+        if id.source() == AircraftId::Tornado && super::swing::swivels(id, hardpoint) {
+            for over in &mut rack.over {
+                *over = over.map(|h| h + super::swing::WING_UP_FT as f32);
             }
         }
         if let Hang::Lowest { half } = moved.hang {
@@ -2510,13 +2534,19 @@ mod tests {
         assert!(swing::swivels(AircraftId::Tornado, 7));
         // The swivel carries it with the wing: at full sweep it stays outboard
         // of the pivot's fuselage side and the left station mirrors it within
-        // the source's one-unit glove offset.
+        // the source's one-unit glove offset. Update (TOR-12, 2026-11-12): the
+        // wings are exact mirrors now, so the left station is the right one
+        // mirrored at every sweep.
         let turn = (swing::SWEEP_MAX - swing::SWEEP_MIN).to_radians();
         let right = swing::swept(true, mount, turn);
         let left = swing::swept(false, [-mount[0], mount[1], mount[2]], turn);
         assert!(right[0] > pivot[0], "{right:?}");
         assert!(left[0] < -pivot[0], "{left:?}");
-        assert!((right[0] + left[0]).abs() < 1.0, "{right:?} {left:?}");
+        assert!((right[0] + left[0]).abs() < 1e-9, "{right:?} {left:?}");
+        assert!((right[2] - left[2]).abs() < 1e-9, "{right:?} {left:?}");
+        // John's wing placement: 9.5 ft out and 1.5 ft forward on the retail
+        // panel is 7.96 ft out and 1.7 ft forward on the placed one.
+        assert!((moved.right - 7.96).abs() < 1e-9 && (moved.forward - 1.7).abs() < 1e-9);
         assert_eq!(right[1], mount[1], "the height does not change");
     }
 
@@ -2641,9 +2671,11 @@ mod tests {
             assert!(pr[2] <= spread_r[2] + 1e-9 && pl[2] <= spread_l[2] + 1e-9);
             assert!(spread_r[2] - pr[2] >= previous - 1e-9, "{degrees}");
             previous = spread_r[2] - pr[2];
-            // (The left glove sits a unit further out, so the two wings' aft
-            // travel differ by a little until TOR-12 mirrors them.)
-            assert!(((spread_r[2] - pr[2]) - (spread_l[2] - pl[2])).abs() < 1.);
+            // (The left glove sat a unit further out, so the two wings' aft
+            // travel differed by a little; since TOR-12, 2026-11-12, the wings
+            // mirror and the travel is the same.)
+            assert!(((spread_r[2] - pr[2]) - (spread_l[2] - pl[2])).abs() < 1e-9);
+            assert!((pr[0] + pl[0]).abs() < 1e-9, "{degrees}: {pr:?} {pl:?}");
         }
         // The Clean version places them where the Combat does (it carries none).
         assert_eq!(

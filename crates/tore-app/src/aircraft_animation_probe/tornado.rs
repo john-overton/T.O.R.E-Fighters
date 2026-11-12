@@ -66,8 +66,16 @@ impl Side {
     fn sign(&self) -> f32 {
         if self.right { 1. } else { -1. }
     }
-    /// The glove vertices shared with the fixed fillets (x, y, z), as the shape
-    /// has them: the left glove is one unit further out.
+    /// A retail wing vertex of this side (x as the shape has it, the left
+    /// panel a unit further out) where TOR-12 placed it in the spread pose:
+    /// the witnesses name retail vertices and follow them through the placement
+    /// (the placement itself is pinned against John's Blender poses in
+    /// `tornado_animation`'s tests).
+    fn placed(&self, retail: [f32; 3]) -> [f32; 3] {
+        crate::tornado_animation::wing_point_f32(self.right, retail)
+    }
+    /// The wing's root vertices (the retail glove joint, x 9 and 10, the left
+    /// ones a unit out), placed: the five points TOR-12 moved inboard.
     fn glove(&self) -> [[f32; 3]; 5] {
         let x = |a: f32, b: f32| if self.right { a } else { b };
         [
@@ -77,20 +85,21 @@ impl Side {
             [x(10., -11.), -1., 1.],
             [x(10., -11.), -4., 0.],
         ]
+        .map(|p| self.placed(p))
     }
     /// The wing tip vertex, the witness of the sweep direction.
     fn tip(&self) -> [f32; 3] {
-        [if self.right { 33. } else { -34. }, -10., 0.]
+        self.placed([if self.right { 33. } else { -34. }, -10., 0.])
     }
     fn strip_tip(&self) -> [f32; 3] {
-        [if self.right { 30. } else { -31. }, -7., 0.]
+        self.placed([if self.right { 30. } else { -31. }, -7., 0.])
     }
     fn strip_trailing(&self) -> [f32; 3] {
-        [if self.right { 30. } else { -31. }, -9., 0.]
+        self.placed([if self.right { 30. } else { -31. }, -9., 0.])
     }
     fn strip_root(&self) -> ([f32; 3], [f32; 3]) {
         let x = if self.right { 10. } else { -11. };
-        ([x, -1., 0.], [x, -1., 1.])
+        (self.placed([x, -1., 0.]), self.placed([x, -1., 1.]))
     }
 }
 
@@ -217,8 +226,9 @@ fn fixed_moved(reference: &[Face], pose: &[Face], movers: &[&[usize]], scale: f3
         .count()
 }
 
-/// The glove seam of one wing: how far each wing vertex shared with a fixed
-/// fillet moved (feet), and the outboard (opening) and inboard (overlap) parts.
+/// The root travel of one wing: how far each root vertex (the five that were
+/// shared with the fixed glove fillets before TOR-12) moved (feet), and the
+/// outboard (opening) and inboard (into the fuselage) parts.
 #[derive(Clone, Copy, Default)]
 struct GloveSeam {
     separation: f32,
@@ -243,6 +253,69 @@ fn glove_seam(reference: &[Face], pose: &[Face], side: &Side, scale: f32) -> Glo
         }
     }
     seam
+}
+
+/// The farthest a root vertex sits from the wing's pivot, shape units: the
+/// root vertices move on circles about the pivot, so none travels more than
+/// `2 r sin(turn / 2)`.
+fn root_radius(side: &Side) -> f32 {
+    let pivot = if side.right { PIVOT_R } else { PIVOT_L };
+    side.glove()
+        .iter()
+        .map(|p| (p[0] - pivot[0]).hypot(p[1] - pivot[1]))
+        .fold(0., f32::max)
+}
+
+/// How many of a wing's five root vertices have left the fuselage in `pose`
+/// (their plan position outside every neutral fuselage face, or their height
+/// outside the skin there), and the worst vertical overshoot in feet. The
+/// fuselage is the neutral pose without the wing panels. TOR-12: John's root
+/// extension keeps the root inside the fuselage through the sweep.
+fn roots_outside(
+    fuselage: &[Face],
+    reference: &[Face],
+    pose: &[Face],
+    side: &Side,
+    scale: f32,
+) -> (usize, f32) {
+    let old = group(reference, side.wing);
+    let new = group(pose, side.wing);
+    let (mut outside, mut worst) = (0, 0f32);
+    for root in side.glove() {
+        let Some(q) = f4::witness_positions(&old, &new, root).first().copied() else {
+            outside += 1;
+            worst = f32::INFINITY;
+            continue;
+        };
+        let over = match skin_span(fuselage, q[0], q[1] + 1e-3) {
+            Some((lo, hi)) => (lo - q[2]).max(q[2] - hi).max(0.),
+            None => f32::INFINITY,
+        };
+        outside += usize::from(over > 1e-3);
+        worst = worst.max(over * scale);
+    }
+    (outside, worst)
+}
+
+/// How far the left wing is from an exact mirror of the right one in `pose`
+/// (TOR-12), feet: for every right wing vertex, the distance to the nearest
+/// left wing vertex once mirrored across the centreline, worst over both ways.
+fn mirror_error(pose: &[Face], scale: f32) -> f32 {
+    let points = |ids: &[usize]| -> Vec<[f32; 3]> {
+        pose.iter()
+            .filter(|f| ids.contains(&f.address))
+            .flat_map(|f| f.positions.iter().copied())
+            .collect()
+    };
+    let (right, left) = (points(&WING_R), points(&WING_L));
+    let nearest = |p: [f32; 3], set: &[[f32; 3]]| {
+        set.iter()
+            .map(|q| distance(mirror(p), *q))
+            .fold(f32::INFINITY, f32::min)
+    };
+    let one_way =
+        |a: &[[f32; 3]], b: &[[f32; 3]]| a.iter().map(|p| nearest(*p, b)).fold(0f32, f32::max);
+    one_way(&right, &left).max(one_way(&left, &right)) * scale
 }
 
 /// The taileron checks shared by the control sweep and the grid. `net` is the
@@ -843,11 +916,17 @@ pub(super) fn combinations(
     fs::write(out.join("sweep-flap-combinations.csv"), rows)?;
     contact_sheet(&out.join("sweep-flap-combinations.ppm"), &original, &poses)?;
 
-    // Glove seam at each sweep angle: how far the shared wing vertices pull away
-    // from the fixed fillets (separation), and the outboard (visible opening)
-    // and inboard (overlap into the glove) parts, per side, in feet.
+    // Root travel at each sweep angle (TOR-12): how far the wing's five root
+    // vertices move (separation), the outboard and inboard parts, the bound
+    // `2 r sin(turn / 2)` from the farthest root vertex's distance r to the
+    // pivot, and whether the roots stay inside the fuselage, per side, in feet.
+    let fuselage: Vec<Face> = original
+        .iter()
+        .filter(|f| !WING_R.contains(&f.address) && !WING_L.contains(&f.address))
+        .cloned()
+        .collect();
     let mut rows = String::from(
-        "sweep_deg,turn_deg,side,seam_separation_ft,seam_opening_ft,seam_overlap_ft,bound_ft\n",
+        "sweep_deg,turn_deg,side,root_travel_ft,root_outboard_ft,root_inboard_ft,bound_ft,roots_outside_fuselage,root_overshoot_ft,wing_mirror_error_ft\n",
     );
     for degrees in [25., 30., 35., 40., 45., 50., 55., 60., 65., 67.] {
         // Pick the speed that gives this sweep angle in the documented schedule.
@@ -856,11 +935,12 @@ pub(super) fn combinations(
         let turn = degrees - 25.;
         for side in &SIDES {
             let seam = glove_seam(&original, &pose, side, scale);
-            // The enclosing circle's radius is 2.55 units about the pivot.
-            let bound = 2. * 2.5495 * (turn.to_radians() / 2.).sin() as f32 * FEET;
+            let bound = 2. * root_radius(side) * (turn.to_radians() / 2.).sin() as f32 * FEET;
+            let (outside, over) = roots_outside(&fuselage, &original, &pose, side, scale);
+            let mirrored = mirror_error(&pose, scale);
             writeln!(
                 rows,
-                "{degrees},{turn},{},{},{},{},{bound}",
+                "{degrees},{turn},{},{},{},{},{bound},{outside},{over},{mirrored}",
                 if side.right { "right" } else { "left" },
                 seam.separation,
                 seam.opening,
@@ -868,7 +948,18 @@ pub(super) fn combinations(
             )?;
             if seam.separation > bound + 1e-3 {
                 failures.push(format!(
-                    "Tornado glove seam at {degrees} deg exceeds its enclosing-circle bound"
+                    "Tornado root travel at {degrees} deg exceeds its pivot-circle bound"
+                ));
+            }
+            if mirrored > 1e-4 {
+                failures.push(format!(
+                    "Tornado wings are not mirrored at {degrees} deg: {mirrored} ft"
+                ));
+            }
+            if outside > 0 {
+                failures.push(format!(
+                    "Tornado {} wing root leaves the fuselage at {degrees} deg ({outside} vertices, {over} ft)",
+                    if side.right { "right" } else { "left" }
                 ));
             }
         }

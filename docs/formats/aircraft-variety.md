@@ -6215,10 +6215,10 @@ Here, the format-level facts:
 
 | Item | Before | After |
 | --- | --- | --- |
-| Row 7 (`MK82P3.JT` x2, Wing, flags 0x505) | recorded 3.67 ft out, 3 ft forward (fuselage side) | `station_move`: 9.5 ft out, 1.5 ft forward, on the swinging panel; swivels as TOR-5 built it |
+| Row 7 (`MK82P3.JT` x2, Wing, flags 0x505) | recorded 3.67 ft out, 3 ft forward (fuselage side) | `station_move`: 9.5 ft out, 1.5 ft forward, on the swinging panel; swivels as TOR-5 built it. Update (TOR-12, 2026-11-12): 7.96 ft out, 1.7 ft forward, the same place on the panel after the panel moved |
 | Row 5 default (`F250.GAS`, Wing, x 0, capacity 2) | two tanks, 3,300 lb external | one tank at x 0, 1,650 lb; capacity, mask and place unchanged (`default_counts`, guarded to the retail row) |
 | Row 6 (`PAVEWAY.JT` x4) | x 2.00, entering the belly 0.96 ft (fin tips) | unchanged (no outboard move clears it; options with John) |
-| Tornado shape | 287 faces | 291: four glove plate faces added by the rig at load |
+| Tornado shape | 287 faces | 291: four glove plate faces added by the rig at load. Update (TOR-12, 2026-11-12): the plates are gone, the shape is 279 faces ([the wing placement](aircraft-control-surfaces.md#tornado-wing-placement-tor-12-2026-11-12)) |
 | Row 8 | retired | retired |
 
 The retail records are unchanged; row 7's recorded position is still the record's, and the

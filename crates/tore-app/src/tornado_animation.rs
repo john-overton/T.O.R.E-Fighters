@@ -16,6 +16,14 @@
 //! in flight. There is no slat, spoiler, canopy, hook or reverser word and
 //! none is invented.
 //!
+//! Update (TOR-12, 2026-11-12): John's Blender review of the wing is ported at
+//! load ([`tailor`]): the right panel is placed 1.54 ft in, 0.1167 ft up and
+//! 0.20 ft forward with its root points 2.3483 ft inboard, the left panel is an
+//! exact mirror of it, the glove plates and the twelve rear fillet faces are
+//! gone, four closing walls are added and the fuselage edge points move
+//! forward; the sweep pivots are John's. Every hinge point below that sits on
+//! the wing is the placed one.
+//!
 //! All the hinge points below are in shape units (x right, y forward, z up, 2/3
 //! ft a unit at the header scale 2) and the shape arrives with the identity
 //! per-axis scale, so a panel turned about one of them stays rigid.
@@ -48,49 +56,44 @@ pub(crate) const TAIL_L: [usize; 2] = [0x4176, 0x42f8];
 pub(crate) const RUDDER: [usize; 2] = [0x5723, 0x5750];
 /// Faces the rudder word 0x7de4 swaps in for the block (never drawn).
 const RUDDER_WORD: [usize; 2] = [0x5625, 0x5652];
-/// The glove plates (TOR-5b, 2026-11-11, John's round-3 answer T4): one thin
-/// fixed plate a side, two windings each (top first), that fills the wedge the
-/// swinging wing opens between the fixed glove and its own root as it sweeps
-/// (TOR-3 measured 2.7 to 5 ft at 67 degrees). They are new fitted geometry,
-/// not source faces, so their addresses lie past the end of the module's code
-/// (28,150 bytes) and no source word can name them. The plates are fixed to
-/// the fuselage: [`Rig::animate`] never moves them, and they lie wholly above
-/// the wing panel (which reaches z 1 at most), so no face of either passes
-/// through the other at any sweep and no seam opens inside a face.
-pub(crate) const GLOVE_PLATE_R: [usize; 2] = [0x7e00, 0x7e01];
-pub(crate) const GLOVE_PLATE_L: [usize; 2] = [0x7e02, 0x7e03];
-/// Plate height, shape units: 0.1 above the wing's top (z 1) and the glove's
-/// outer edge, so the plate never shares a plane with the sweeping panel.
-pub(crate) const GLOVE_Z: f32 = 1.1;
-const _: () = assert!(GLOVE_Z > 1., "above the wing panel's top");
-/// Plate outlines in shape units (x right, y forward), clockwise seen from
-/// above, each starting at the one reflex corner (the fan of triangles the
-/// drawing cuts every face into runs from the first vertex, which sees all the
-/// others). Fitted: the front corner is the glove's outer front corner
-/// ((10, 8), left (-10, 8)); the outline follows the wing root's edge at full
-/// sweep (the root's ends (9,1) and (9,7) land at (10.80, 0.69) and (14.82,
-/// 5.15) after 42 degrees about the pivot; left (-11.80, 0.69) and (-15.82,
-/// 5.15)) kept 0.3 unit inside the wing so no gap opens between plate and
-/// wing, passes down the rear root edge to y -1.2, and returns along the
-/// glove's outer edge (x 10, left x -10) to the front corner.
-pub(crate) const GLOVE_OUTLINE_R: [[f32; 2]; 5] = [
-    [11.02, 0.49],
-    [10.4, -1.2],
-    [10., -1.],
-    [10., 8.],
-    [14.78, 4.85],
+/// The glove plates (TOR-5b, 2026-11-11, faces `0x7e00` to `0x7e03`) are gone
+/// (TOR-12, John 2026-11-12: "the wing glove does not need to be in the shape"):
+/// the wing now sits where his Blender review put it, so nothing opens between
+/// the wing and the fuselage for a plate to fill.
+///
+/// The rear glove fillet (TOR-12, John 2026-11-12): twelve retail fuselage faces,
+/// six a side, that fill the gap behind the glove root. The wing's new root
+/// lies inside the fuselage, so they are not drawn. Right, then left.
+pub(crate) const FILLET_R: [usize; 6] = [0x4d14, 0x4d83, 0x4da4, 0x4dc7, 0x4e13, 0x4f67];
+pub(crate) const FILLET_L: [usize; 6] = [0x53c4, 0x53e5, 0x5408, 0x54dc, 0x54f2, 0x5507];
+/// The retail fuselage points at (+-10, 6, 0) move forward to y 7.254375 (4.8363
+/// ft, John 2026-11-12), so the fuselage edge covers the wing root. Eight
+/// retail faces use them (four a side) and follow.
+const EDGE_Y: f32 = 6.;
+const EDGE_Y_MOVED: f32 = 7.254_375;
+const EDGE_X: f32 = 10.;
+/// The glove box's closing walls (TOR-12, John 2026-11-12): per side an outboard
+/// wall at x +-10 (6.6667 ft) and an aft wall, new authored fuselage faces, so
+/// the glove box is closed once the wing root and the fillet no longer cover
+/// it. Their addresses lie past the end of the module's code (28,150 bytes),
+/// so no source word can name them: right outboard, right aft, left outboard,
+/// left aft. Each takes its look from the retail glove top face on its side
+/// (right `4505`, left `4211`, the fuselage skin colour). Corners are retail
+/// fuselage points (the moved ones included); they are listed in the shape's
+/// own winding, clockwise seen from outside (the stored normals point out).
+pub(crate) const WALL_ADDRESSES: [usize; 4] = [0x7e10, 0x7e11, 0x7e12, 0x7e13];
+const WALL_LOOK_R: usize = 0x4505;
+const WALL_LOOK_L: usize = 0x4211;
+/// The right walls' corners (x right, y forward, z up); the left ones mirror
+/// them with the winding reversed.
+const WALL_OUTBOARD: [[f32; 3]; 5] = [
+    [10., 6., 1.],
+    [10., 8., 1.],
+    [10., EDGE_Y_MOVED, 0.],
+    [10., 2., 0.],
+    [10., 2., 1.],
 ];
-pub(crate) const GLOVE_OUTLINE_L: [[f32; 2]; 5] = [
-    [-12.02, 0.49],
-    [-15.78, 4.85],
-    [-10., 8.],
-    [-10., -1.],
-    [-11.4, -1.2],
-];
-/// Source glove top faces the plates take their look from (the glove's outer
-/// top triangle: right `4526`, left `4232`).
-const GLOVE_LOOK_R: usize = 0x4526;
-const GLOVE_LOOK_L: usize = 0x4232;
+const WALL_AFT: [[f32; 3]; 4] = [[7., 0., 1.], [10., 2., 1.], [10., 2., 0.], [7., 0., 0.]];
 
 /// Gear word 0x7dcc adds 26 faces in three rigid pieces (TOR-4): the left main
 /// leg (x -3 to -7), the right main leg (x 3 to 7), each ten faces (the wheel
@@ -143,15 +146,11 @@ const BRAKE_HINGE: [f32; 3] = [0., -7., 2.];
 
 #[cfg(test)]
 pub(crate) use tore_sim::combat::swing::{FEET_PER_UNIT, SWEEP_MAX, pivot_feet};
-/// Wing sweep pivots, vertical axis, shape units. The glove fillets are fixed
-/// faces that share five vertices with each wing panel (right: (9,1,0), (9,1,1),
-/// (10,-1,0), (10,-1,1), (10,-4,0)), and no single point sits on all of them.
-/// The point that minimizes the worst separation of those shared vertices as the
-/// wing turns is the centre of their smallest enclosing circle, the midpoint of
-/// the (9,1) and (10,-4) corners: (9.5, -1.5), radius 2.55 units, so the seam
-/// opens at most 2 * 2.55 * sin(turn / 2) (1.83 units, 1.2 ft at the full
-/// 42 degree turn). The left glove sits one unit further out, as the source has
-/// it, so its pivot is (-10.5, -1.5). Fitted.
+/// Wing sweep pivots, vertical axis, shape units: John's (TOR-12, 2026-11-12,
+/// from his Blender review), right (6.5, -1.351025) and left (-6.5, -1.351025).
+/// They were the centre of the smallest circle round the glove corners the
+/// wing shared (9.5, -1.5 and -10.5, -1.5, fitted, TOR-3) until the glove
+/// fillets went.
 ///
 /// The pivots, the sweep range and the speed schedule live in the simulation
 /// (`tore_sim::combat::swing`, moved there in TOR-5 without changing a number),
@@ -177,14 +176,16 @@ pub(crate) const TAIL_SPINDLE: [f32; 3] = [6., -22.5, -2.];
 pub(crate) const FLAP: f64 = 0.40;
 pub(crate) const RUDDER_TRAVEL: f64 = 0.35;
 /// Strip hinge: the line along the wing's leading edge of the strip, from the
-/// glove root (10,-1) to the outer corner (30,-7). The two root vertices sit at
-/// z 0 and 1, so the mid axis goes through z 0.5 at the root; the right
-/// strip's pivot is the midpoint and the left one mirrors the pivot and axis
-/// (the left strip runs from (-11,-1) to (-31,-7)).
-const STRIP_PIVOT: [f32; 3] = [20., -4., 0.25];
-const STRIP_AXIS: [f32; 3] = [20., -6., -0.5];
-const STRIP_PIVOT_L: [f32; 3] = [-21., -4., 0.25];
-const STRIP_AXIS_L: [f32; 3] = [-20., -6., -0.5];
+/// placed root ((10, -1) in the retail wing, now x 4.16755, y -0.7, midway up
+/// the root's z 0 and 1 at z 0.675) to the placed outer corner (27.69, -6.7,
+/// 0.175). The right strip's pivot is the midpoint and the left one mirrors the
+/// pivot and axis. TOR-12 (2026-11-12) moved them with the wing (they were
+/// pivot (20, -4, 0.25), axis (20, -6, -0.5) and (-21, -4, 0.25), (-20, -6,
+/// -0.5)); `the_strip_hinge_follows_the_placed_wing` pins them.
+const STRIP_PIVOT: [f32; 3] = [15.928_775, -3.7, 0.425];
+const STRIP_AXIS: [f32; 3] = [23.522_45, -6., -0.5];
+const STRIP_PIVOT_L: [f32; 3] = [-15.928_775, -3.7, 0.425];
+const STRIP_AXIS_L: [f32; 3] = [-23.522_45, -6., -0.5];
 /// Rudder hinge, the leading edge of the lower fin block: from (0,-21,4) up and
 /// aft to (0,-26,12). A positive angle swings the trailing edge toward +X
 /// (right), as the fleet's rudders do.
@@ -205,6 +206,57 @@ pub(crate) fn tail_left(address: usize) -> bool {
 }
 pub(crate) fn rudder(address: usize) -> bool {
     RUDDER.contains(&address)
+}
+
+/// Where a retail wing point sits in the spread pose after TOR-12's placement
+/// (John, 2026-11-12), shape units (x right, y forward, z up). `right` says
+/// which panel `p` is on. The retail left panel is the right one mirrored and
+/// shifted one unit out (x_left = -x_right - 1), so a left point is taken into
+/// the right panel's frame first and the result mirrored back: the placed left
+/// panel is an exact mirror of the placed right one. In the right frame the
+/// root points (x 9 and 10, the glove vertices) move 2.3483 ft inboard along
+/// the span, then the whole panel moves 1.54 ft in, 0.20 ft forward and 0.1167
+/// ft up ([`tore_sim::combat::swing`]'s placement constants).
+pub(crate) fn wing_point(right: bool, p: [f64; 3]) -> [f64; 3] {
+    use tore_sim::combat::swing::{
+        FEET_PER_UNIT, ROOT_SHIFT_FT, WING_FORWARD_FT, WING_IN_FT, WING_UP_FT,
+    };
+    let mut r = if right { p } else { [-p[0] - 1., p[1], p[2]] };
+    // The retail right pivot sat at x 9.5; the root points are 0.5 either side.
+    if (r[0] - 9.5).abs() < 0.75 {
+        r[0] -= ROOT_SHIFT_FT / FEET_PER_UNIT;
+    }
+    let out = [
+        r[0] - WING_IN_FT / FEET_PER_UNIT,
+        r[1] + WING_FORWARD_FT / FEET_PER_UNIT,
+        r[2] + WING_UP_FT / FEET_PER_UNIT,
+    ];
+    if right {
+        out
+    } else {
+        [-out[0], out[1], out[2]]
+    }
+}
+pub(crate) fn wing_point_f32(right: bool, p: [f32; 3]) -> [f32; 3] {
+    wing_point(right, p.map(f64::from)).map(|v| v as f32)
+}
+
+/// A face's stored normal re-derived from its (moved) corners: the direction
+/// of the polygon, on the side the old normal faced, at the old length.
+fn renormal(face: &mut Face) {
+    let Some(old) = face.normal else {
+        return;
+    };
+    let Some(mut n) = crate::aircraft_animation::polygon_normal(&face.positions) else {
+        return;
+    };
+    // Stored normals are right, up, forward; the polygon's is right, forward, up.
+    let was = [old[0], old[2], old[1]];
+    if was.iter().zip(n).map(|(a, b)| a * b).sum::<f32>() < 0. {
+        n = n.map(|v| -v);
+    }
+    let length = old.iter().map(|v| v * v).sum::<f32>().sqrt();
+    face.normal = Some([n[0] * length, n[2] * length, n[1] * length]);
 }
 
 /// How far the wing panel has turned from its spread pose, radians (0 spread,
@@ -295,16 +347,35 @@ pub(crate) fn swept_shape(shape: &Shape, turn_by: f64) -> Shape {
 
 /// The wingtip vapor attachment of one side (0 left, 1 right) for a wing turn,
 /// feet right, up and forward of the aircraft. The shape's streamer record is
-/// the spread-wing tip (third-of-a-foot CE units, whatever the header scale); it
-/// is carried by the same rigid turn as the wing faces, so the vapor leaves the
-/// drawn tip at every sweep. The record's own hinge (pivot (20,2,16) CE) is not
-/// used: it is not the pivot the wing turns about.
+/// the spread-wing tip (third-of-a-foot CE units, whatever the header scale);
+/// it is carried by the same placement and rigid turn as the wing faces, so the
+/// vapor leaves the drawn tip at every sweep. The record's own hinge (pivot
+/// (20,2,16) CE) is not used: it is not the pivot the wing turns about.
+///
+/// Update (TOR-12, 2026-11-12): the record's two tips are at 22.67 ft either
+/// side, which was the retail left tip and one unit (0.67 ft) outboard of the
+/// right tip. The wings are mirrored now, so both sides take the right tip's
+/// place on the drawn panel, 33 units out, placed with the panel (an agent
+/// decision: the vapor sits on the drawn tip on both sides).
 pub(crate) fn streamer_point(
     def: &tore_formats::shape::StreamerDef,
     side: usize,
     turn: f64,
 ) -> Option<[f64; 3]> {
-    let spread = def.attachment(side, 0).ok()?.map(|v| v / 3.);
+    use tore_sim::combat::swing::FEET_PER_UNIT;
+    let record = def.attachment(side, 0).ok()?.map(|v| v / 3.);
+    // Feet right, up, forward to the right panel's frame in units (x, y, z).
+    let tip = [
+        record[0].abs() / FEET_PER_UNIT - 1.,
+        record[2] / FEET_PER_UNIT,
+        record[1] / FEET_PER_UNIT,
+    ];
+    let placed = wing_point(true, tip);
+    let spread = [
+        if side == 1 { placed[0] } else { -placed[0] } * FEET_PER_UNIT,
+        placed[2] * FEET_PER_UNIT,
+        placed[1] * FEET_PER_UNIT,
+    ];
     Some(wing_station(side == 1, spread, turn).mount)
 }
 
@@ -374,41 +445,147 @@ fn branch(
     Ok(pose)
 }
 
-/// The four glove plate faces: per side a top face and its reversed winding,
-/// taking colours, texture and flags from the glove's own outer top triangle.
-fn glove_plates(shape: &Shape) -> AppResult<Vec<Face>> {
+/// The four closing walls of the glove box: per side an outboard wall and an
+/// aft wall, each taking its look (colours, texture, flags, fog) from the retail
+/// glove top face on its side, with stored normals pointing out of the
+/// fuselage at the look face's normal length.
+fn glove_walls(shape: &Shape) -> AppResult<Vec<Face>> {
     let mut faces = Vec::new();
-    for (look, outline, ids) in [
-        (GLOVE_LOOK_R, GLOVE_OUTLINE_R, GLOVE_PLATE_R),
-        (GLOVE_LOOK_L, GLOVE_OUTLINE_L, GLOVE_PLATE_L),
-    ] {
+    let mut addresses = WALL_ADDRESSES.into_iter();
+    for (look, side) in [(WALL_LOOK_R, 1f32), (WALL_LOOK_L, -1f32)] {
         let source = one(shape, look)?;
-        if source.positions.len() != 3 || !source.positions.iter().all(|p| p[2] == 1. || p[2] == 2.)
-        {
+        if source.positions.len() != 3 || source.colors.is_empty() {
             return Err(format!("unreviewed TOR.SH glove top face {look:x}").into());
         }
-        let top: Vec<[f32; 3]> = outline.iter().map(|p| [p[0], p[1], GLOVE_Z]).collect();
-        let mut under = top.clone();
-        under.reverse();
-        for (address, positions, flip) in [(ids[0], top, 1.), (ids[1], under, -1.)] {
-            let n = positions.len();
-            faces.push(Face {
-                address,
-                colors: vec![source.colors[0]; n],
+        let length = source
+            .normal
+            .map(|n| n.iter().map(|v| v * v).sum::<f32>().sqrt());
+        for corners in [&WALL_OUTBOARD[..], &WALL_AFT[..]] {
+            let mut positions: Vec<[f32; 3]> =
+                corners.iter().map(|p| [p[0] * side, p[1], p[2]]).collect();
+            if side < 0. {
+                // Mirroring turns the winding over: put it back, keeping the
+                // first corner first (the fan of triangles runs from it).
+                positions[1..].reverse();
+            }
+            let mut face = Face {
+                address: addresses.next().ok_or("four wall addresses")?,
+                colors: vec![source.colors[0]; positions.len()],
                 uv: if source.uv.is_empty() {
                     Vec::new()
                 } else {
-                    vec![source.uv[0]; n]
+                    vec![source.uv[0]; positions.len()]
                 },
                 positions,
                 texture: source.texture.clone(),
                 subtype: source.subtype,
-                normal: source.normal.map(|v| v.map(|c| c * flip)),
+                // Placeholder with the outward direction found below.
+                normal: source.normal,
                 fog: source.fog,
-            });
+            };
+            if let Some(length) = length {
+                let n = crate::aircraft_animation::polygon_normal(&face.positions)
+                    .ok_or("degenerate glove wall")?;
+                // The winding is clockwise seen from outside, so the
+                // polygon's own normal points in; the stored one points out.
+                face.normal = Some([-n[0] * length, -n[2] * length, -n[1] * length]);
+            }
+            faces.push(face);
         }
     }
     Ok(faces)
+}
+
+/// John's TOR-12 changes to the retail faces (2026-11-12, authored geometry
+/// applied at load, no retail bytes in the repository): the wing panels placed
+/// and the left one mirrored from the right; the twelve rear fillet faces
+/// dropped; the fuselage points at (+-10, 6, 0) moved forward with the faces
+/// that use them; the four closing walls added. The glove plates (TOR-5b) are
+/// not added any more.
+fn tailor(shape: &mut Shape) -> AppResult<()> {
+    // The retail left panel must be the right one mirrored and one unit out,
+    // or mirroring it would change more than its asymmetry.
+    let panel = |ids: &[usize], shape: &Shape| -> AppResult<BTreeSet<[i32; 3]>> {
+        let mut points = BTreeSet::new();
+        for &address in ids {
+            for p in &one(shape, address)?.positions {
+                points.insert(p.map(|v| (v * 8.).round() as i32));
+            }
+        }
+        Ok(points)
+    };
+    let right = panel(&WING_R, shape)?;
+    let left = panel(&WING_L, shape)?;
+    let mirrored: BTreeSet<[i32; 3]> = right.iter().map(|p| [-p[0] - 8, p[1], p[2]]).collect();
+    if mirrored != left {
+        return Err(
+            "unreviewed TOR.SH left wing (not the right one mirrored and a unit out)".into(),
+        );
+    }
+    // The rear fillet: six triangles a side that each touch a glove root vertex.
+    let root = |side: f32| -> [[f32; 3]; 5] {
+        [
+            [side * 9. - f32::from(side < 0.), 1., 0.],
+            [side * 9. - f32::from(side < 0.), 1., 1.],
+            [side * 10. - f32::from(side < 0.), -1., 0.],
+            [side * 10. - f32::from(side < 0.), -1., 1.],
+            [side * 10. - f32::from(side < 0.), -4., 0.],
+        ]
+    };
+    for (ids, side) in [(&FILLET_R, 1f32), (&FILLET_L, -1f32)] {
+        for &address in ids {
+            let face = one(shape, address)?;
+            if face.positions.len() != 3 || !face.positions.iter().any(|p| root(side).contains(p)) {
+                return Err(format!("unreviewed TOR.SH rear fillet face {address:x}").into());
+            }
+        }
+    }
+    // The fuselage edge points: exactly four faces a side use them.
+    let uses = |face: &Face, side: f32| has(face, [side * EDGE_X, EDGE_Y, 0.]);
+    for side in [1f32, -1.] {
+        let count = shape.faces.iter().filter(|f| uses(f, side)).count();
+        if count != 4 {
+            return Err(format!("unreviewed TOR.SH fuselage edge: {count} faces").into());
+        }
+    }
+    let walls = glove_walls(shape)?;
+    for face in &mut shape.faces {
+        let a = face.address;
+        let right = wing_right(a);
+        if right || wing_left(a) {
+            for p in &mut face.positions {
+                *p = wing_point_f32(right, *p);
+            }
+            renormal(face);
+        } else if [1f32, -1.].iter().any(|side| uses(face, *side)) {
+            for p in &mut face.positions {
+                if p[0].abs() == EDGE_X && p[1] == EDGE_Y && p[2] == 0. {
+                    p[1] = EDGE_Y_MOVED;
+                }
+            }
+            renormal(face);
+        }
+    }
+    shape
+        .faces
+        .retain(|f| !FILLET_R.contains(&f.address) && !FILLET_L.contains(&f.address));
+    // The walls close the glove box on points the fuselage already has.
+    let corners: BTreeSet<[u32; 3]> = shape
+        .faces
+        .iter()
+        .flat_map(|f| f.positions.iter().map(|p| p.map(f32::to_bits)))
+        .collect();
+    for wall in &walls {
+        if let Some(p) = wall
+            .positions
+            .iter()
+            .find(|p| !corners.contains(&p.map(f32::to_bits)))
+        {
+            return Err(format!("TOR.SH glove wall corner {p:?} is not a fuselage point").into());
+        }
+    }
+    shape.faces.extend(walls);
+    Ok(())
 }
 
 fn has(face: &Face, p: [f32; 3]) -> bool {
@@ -584,8 +761,7 @@ impl Rig {
         if root != NOZZLE_PLANE - 1. || tip != FLAME_TIP {
             return Err("unreviewed TOR.SH plume extent".into());
         }
-        let plates = glove_plates(&shape)?;
-        shape.faces.extend(plates);
+        tailor(&mut shape)?;
         shape.faces.extend(
             gear.faces
                 .into_iter()
@@ -724,33 +900,136 @@ mod tests {
         s.speed = kt * 1.68781;
     }
 
-    /// The right wing's glove vertices in (x, y), for the pivot test.
-    const GLOVE_R: [[f64; 2]; 3] = [[9., 1.], [10., -1.], [10., -4.]];
+    /// The retail right wing's tip and root vertices (shape units), the
+    /// points John's Blender review moved.
+    const RETAIL_TIP: [f64; 3] = [33., -10., 0.];
+    const RETAIL_ROOT: [[f64; 3]; 5] = [
+        [9., 1., 0.],
+        [9., 1., 1.],
+        [10., -1., 0.],
+        [10., -1., 1.],
+        [10., -4., 0.],
+    ];
+
+    /// `wing_point` and the sweep against John's exported Blender poses
+    /// (`round3b-export.json`, feet, X right, Y forward, Z up): the tip, a
+    /// root vertex and a trailing-strip corner at sweep 25 and at sweep 67.
+    #[test]
+    fn the_placed_wing_matches_johns_blender_poses() {
+        let ft = FEET_PER_UNIT;
+        let world = |right: bool, p: [f64; 3], degrees: f64| {
+            let q = wing_point(right, p);
+            let mount = [q[0] * ft, q[2] * ft, q[1] * ft];
+            let turned = tore_sim::combat::swing::swept(right, mount, (degrees - 25.).to_radians());
+            [turned[0], turned[2], turned[1]]
+        };
+        let near = |a: [f64; 3], b: [f64; 3]| (0..3).all(|k| (a[k] - b[k]).abs() < 2e-5);
+        // Sweep 25 (frame 1), then sweep 67 (frame 100); the vertices are the
+        // tip (33, -10), the strip corners (30, -9) and (30, -7), a root
+        // vertex (10, -4, 0) and the high root vertex (9, 1, 1).
+        for (retail, at25, at67) in [
+            (
+                RETAIL_TIP,
+                [20.46, -6.46667, 0.11667],
+                [12.59341, -15.82786, 0.11667],
+            ),
+            (
+                [30., -9., 0.],
+                [18.46, -5.8, 0.11667],
+                [11.55321, -13.99417, 0.11667],
+            ),
+            (
+                [30., -7., 0.],
+                [18.46, -4.46667, 0.11667],
+                [12.44538, -13.00331, 0.11667],
+            ),
+            (
+                [10., -4., 0.],
+                [2.77837, -2.46667, 0.11667],
+                [2.12992, -1.02396, 0.11667],
+            ),
+            (
+                [9., 1., 1.],
+                [2.1117, 0.86667, 0.78333],
+                [3.86493, 1.89928, 0.78333],
+            ),
+        ] {
+            assert!(near(world(true, retail, 25.), at25), "{retail:?} at 25");
+            assert!(near(world(true, retail, 67.), at67), "{retail:?} at 67");
+        }
+    }
 
     #[test]
-    fn the_pivot_is_the_centre_of_the_smallest_circle_round_the_glove_vertices() {
-        // No other point has a smaller worst distance to the three glove
-        // corners: the seam opens by 2 r sin(turn / 2) at most.
-        let radius = |c: [f64; 2]| {
-            GLOVE_R
-                .iter()
-                .map(|p| ((p[0] - c[0]).powi(2) + (p[1] - c[1]).powi(2)).sqrt())
-                .fold(0., f64::max)
-        };
-        let here = radius([f64::from(PIVOT_R[0]), f64::from(PIVOT_R[1])]);
-        assert!((here - 2.5495).abs() < 1e-3);
-        for dx in -20..=20 {
-            for dy in -20..=20 {
-                let c = [
-                    f64::from(PIVOT_R[0]) + f64::from(dx) * 0.1,
-                    f64::from(PIVOT_R[1]) + f64::from(dy) * 0.1,
-                ];
-                assert!(radius(c) >= here - 1e-9, "{c:?}");
+    fn the_left_wing_is_the_right_one_mirrored_at_every_sweep() {
+        for degrees in [25f64, 46., 67.] {
+            for point in RETAIL_ROOT.into_iter().chain([RETAIL_TIP, [30., -7., 0.5]]) {
+                let ft = FEET_PER_UNIT;
+                let carry = |right: bool, q: [f64; 3]| {
+                    let p = wing_point(right, q);
+                    tore_sim::combat::swing::swept(
+                        right,
+                        [p[0] * ft, p[2] * ft, p[1] * ft],
+                        (degrees - 25.).to_radians(),
+                    )
+                };
+                // The retail left point (a unit out and mirrored) is the right one.
+                let right = carry(true, point);
+                let left = carry(false, [-point[0] - 1., point[1], point[2]]);
+                assert!((left[0] + right[0]).abs() < 1e-12, "{degrees} {point:?}");
+                assert!((left[1] - right[1]).abs() < 1e-12);
+                assert!((left[2] - right[2]).abs() < 1e-12);
             }
         }
-        // The left glove is the right one shifted one unit out and mirrored.
-        assert_eq!(PIVOT_L[0], -PIVOT_R[0] - 1.);
-        assert_eq!(PIVOT_L[1], PIVOT_R[1]);
+    }
+
+    #[test]
+    fn the_root_points_move_inboard_and_every_point_moves_with_the_panel() {
+        let ft = FEET_PER_UNIT;
+        // Tip: only the placement (1.54 in, 0.2 forward, 0.1167 up).
+        let tip = wing_point(true, RETAIL_TIP);
+        assert!((tip[0] - (33. - 1.54 / ft)).abs() < 1e-12);
+        assert!((tip[1] - (-10. + 0.2 / ft)).abs() < 1e-12);
+        assert!((tip[2] - 0.175).abs() < 1e-12);
+        // Root: 2.3483 ft further in along the span; chord and height unchanged.
+        for p in RETAIL_ROOT {
+            let q = wing_point(true, p);
+            assert!((q[0] - (p[0] - (1.54 + 2.3483) / ft)).abs() < 1e-12);
+            assert!((q[1] - (p[1] + 0.3)).abs() < 1e-12);
+            assert!((q[2] - (p[2] + 0.175)).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn the_pivots_are_johns_and_the_old_ones_are_gone() {
+        assert_eq!(PIVOT_R, [6.5, -1.351_025, 0.465]);
+        assert_eq!(PIVOT_L, [-PIVOT_R[0], PIVOT_R[1], PIVOT_R[2]]);
+        // 4.3333 ft right, 0.9007 ft aft, 0.31 ft up.
+        let r = pivot_feet(true);
+        assert!((r[0] - 4.3333).abs() < 1e-4 && (r[1] - 0.31).abs() < 1e-4);
+        assert!((r[2] + 0.9007).abs() < 1e-3);
+    }
+
+    #[test]
+    fn the_strip_hinge_follows_the_placed_wing() {
+        // Root (10, -1) midway up its z 0 and 1, outer corner (30, -7, 0).
+        let root = [
+            wing_point(true, [10., -1., 0.5]),
+            wing_point(false, [-11., -1., 0.5]),
+        ];
+        let tip = [
+            wing_point(true, [30., -7., 0.]),
+            wing_point(false, [-31., -7., 0.]),
+        ];
+        for (k, (pivot, axis)) in [(STRIP_PIVOT, STRIP_AXIS), (STRIP_PIVOT_L, STRIP_AXIS_L)]
+            .into_iter()
+            .enumerate()
+        {
+            for i in 0..3 {
+                let middle = (root[k][i] + tip[k][i]) / 2.;
+                assert!((f64::from(pivot[i]) - middle).abs() < 1e-5, "{k} {i}");
+                assert!((f64::from(axis[i]) - (tip[k][i] - root[k][i])).abs() < 1e-5);
+            }
+        }
     }
 
     #[test]
@@ -808,12 +1087,13 @@ mod tests {
         let rig = rig();
         let mut s = state();
         for (a, side) in [(0x501c, 1f32), (0x5570, -1f32)] {
-            let (root, tip) = if side > 0. { (10., 30.) } else { (-11., -31.) };
+            // The placed strip (TOR-12): root x 4.16755, outer corner x 27.69.
+            let (root, tip) = (side * 4.167_55, side * 27.69);
             let pts = [
-                [root, -4., 0.],
-                [tip, -9., 0.],
-                [tip, -7., 0.],
-                [root, -1., 0.],
+                [root, -3.7, 0.175],
+                [tip, -8.7, 0.175],
+                [tip, -6.7, 0.175],
+                [root, -0.7, 0.175],
             ];
             let source = face(a, &pts);
             knots(&mut s, 150.);
@@ -916,12 +1196,15 @@ mod tests {
             hinge_scale: 40,
             points: [[12288, 0, -8704]; 2],
         };
-        // Spread: the record's own tip, 68 CE units out and 18 aft of the origin.
-        for (side, x) in [(0usize, -68. / 3.), (1, 68. / 3.)] {
+        // Spread: the record's tip (68 CE units out, 18 aft of the origin, 2
+        // up) taken to the drawn right tip's place (33 units out, TOR-12) and
+        // placed with the panel: 20.46 ft out, 0.7833 ft up, 5.8 ft aft, the
+        // same on both sides (the left mirrors).
+        for (side, x) in [(0usize, -20.46), (1, 20.46)] {
             let spread = streamer_point(&def, side, 0.).unwrap();
-            assert!((spread[0] - x).abs() < 1e-9);
-            assert!((spread[1] - 2. / 3.).abs() < 1e-9);
-            assert!((spread[2] + 6.).abs() < 1e-9);
+            assert!((spread[0] - x).abs() < 1e-9, "{spread:?}");
+            assert!((spread[1] - 0.783_333_333).abs() < 1e-8);
+            assert!((spread[2] + 5.8).abs() < 1e-9);
             let full = streamer_point(&def, side, (SWEEP_MAX - SWEEP_MIN).to_radians()).unwrap();
             // Aft and in, at the same distance from the pivot.
             assert!(full[2] < spread[2] - 5.);
@@ -1138,137 +1421,189 @@ mod tests {
         assert!(flame(0x591e) && flame(0x59f7) && !flame(0x57ec));
     }
 
-    /// The point-in-outline test the drawing's own fan of triangles implies
-    /// (every face is cut `p[0], p[i], p[i + 1]`).
-    fn in_fan(outline: &[[f32; 2]], q: [f64; 2]) -> bool {
-        let p: Vec<[f64; 2]> = outline
-            .iter()
-            .map(|v| [f64::from(v[0]), f64::from(v[1])])
-            .collect();
-        (1..p.len() - 1).any(|i| {
-            let side = |a: [f64; 2], b: [f64; 2]| {
-                (b[0] - a[0]) * (q[1] - a[1]) - (b[1] - a[1]) * (q[0] - a[0])
-            };
-            let s = [side(p[0], p[i]), side(p[i], p[i + 1]), side(p[i + 1], p[0])];
-            s.iter().all(|v| *v <= 1e-9) || s.iter().all(|v| *v >= -1e-9)
-        })
-    }
-
-    fn glove_source() -> Shape {
-        // The two glove top triangles the plates take their look from.
-        let tri = |address, pts: [[f32; 3]; 3]| {
+    /// A synthetic shape with the faces `tailor` needs: the two wing panels
+    /// (the retail right panel's thirteen vertices as thirteen triangles, the
+    /// left one the same points a unit out and mirrored), the fillet faces,
+    /// the eight faces on the fuselage edge points and the two glove top faces
+    /// the walls take their look from.
+    fn tailor_shape() -> Shape {
+        let right: [[f32; 3]; 13] = [
+            [10., -1., 0.],
+            [9., 5., 0.],
+            [9., 1., 0.],
+            [9., 7., 0.],
+            [31., -2., 0.],
+            [31., -4., 0.],
+            [30., -7., 0.],
+            [33., -10., 0.],
+            [30., -9., 0.],
+            [10., -1., 1.],
+            [9., 1., 1.],
+            [9., 5., 1.],
+            [10., -4., 0.],
+        ];
+        let tri = |address: usize, pts: [[f32; 3]; 3]| {
             let mut f = face(address, &pts);
-            f.normal = Some([0., 0., 1.]);
+            f.normal = Some([0., 32767., 0.]);
             f
         };
+        let mut faces = Vec::new();
+        for (ids, side) in [(&WING_R, 1f32), (&WING_L, -1f32)] {
+            for (i, &address) in ids.iter().enumerate() {
+                let at = |k: usize| {
+                    let p = right[(i + k) % 13];
+                    if side > 0. {
+                        p
+                    } else {
+                        [-p[0] - 1., p[1], p[2]]
+                    }
+                };
+                faces.push(tri(address, [at(0), at(1), at(2)]));
+            }
+        }
+        for (ids, side) in [(&FILLET_R, 1f32), (&FILLET_L, -1f32)] {
+            for &address in ids {
+                let x = |v: f32| if side > 0. { v } else { -v - 1. };
+                // Each touches the glove root vertex (10, -4, 0) of its side.
+                faces.push(tri(
+                    address,
+                    [[x(10.), -4., 0.], [x(6.), -3., 0.], [x(6.), -1., 1.]],
+                ));
+            }
+        }
+        // The glove top triangles the walls take their look from, and the
+        // bottom faces that use the edge points (four a side).
+        for (look, side) in [(WALL_LOOK_R, 1f32), (WALL_LOOK_L, -1f32)] {
+            faces.push(tri(
+                look,
+                [
+                    [side * 7., 0., 2.],
+                    [side * 10., 6., 1.],
+                    [side * 10., 2., 1.],
+                ],
+            ));
+            for k in 0..4 {
+                faces.push(tri(
+                    0x4400 + look + k,
+                    [
+                        [side * 10., 6., 0.],
+                        [side * 7., 13., 1.],
+                        [side * 7., 8., 0.],
+                    ],
+                ));
+            }
+            // A bottom face holding the corners the walls need.
+            let mut f = face(
+                0x4300 + look,
+                &[
+                    [side * 7., 0., 0.],
+                    [side * 7., 0., 1.],
+                    [side * 10., 2., 0.],
+                    [side * 10., 8., 1.],
+                ],
+            );
+            f.normal = Some([0., -32767., 0.]);
+            faces.push(f);
+        }
         Shape {
             lines: Vec::new(),
-            faces: vec![
-                tri(GLOVE_LOOK_R, [[7., 13., 1.], [10., 8., 1.], [10., 6., 1.]]),
-                tri(
-                    GLOVE_LOOK_L,
-                    [[-10., 6., 1.], [-10., 8., 1.], [-7., 13., 1.]],
-                ),
-            ],
+            faces,
             billboards: Vec::new(),
             state_words: BTreeSet::new(),
         }
     }
 
     #[test]
-    fn the_glove_plates_are_four_whole_faces_above_the_wing() {
-        // TOR-5b, John 2026-11-11 (T4): per side a top face and its reversed
-        // winding, one flat polygon each, wholly above the wing (top z 1).
-        let plates = glove_plates(&glove_source()).unwrap();
-        assert_eq!(plates.len(), 4);
-        let addresses: Vec<usize> = plates.iter().map(|f| f.address).collect();
-        assert_eq!(
-            addresses,
-            [GLOVE_PLATE_R, GLOVE_PLATE_L].concat(),
-            "right pair then left pair"
-        );
-        for pair in plates.chunks(2) {
-            let (top, under) = (&pair[0], &pair[1]);
-            assert_eq!(top.positions.len(), 5);
-            let reversed: Vec<_> = top.positions.iter().rev().copied().collect();
-            assert_eq!(under.positions, reversed);
-            assert!(top.positions.iter().all(|p| p[2] == GLOVE_Z));
-            assert_eq!(under.normal.unwrap()[2], -top.normal.unwrap()[2]);
+    fn tailor_places_the_wings_drops_the_fillet_moves_the_edge_and_adds_the_walls() {
+        let mut shape = tailor_shape();
+        let before = shape.faces.len();
+        tailor(&mut shape).unwrap();
+        // Twelve fillet faces gone, four walls added.
+        assert_eq!(shape.faces.len(), before - 12 + 4);
+        let by = |a: usize| shape.faces.iter().find(|f| f.address == a);
+        for a in FILLET_R.into_iter().chain(FILLET_L) {
+            assert!(by(a).is_none(), "{a:x}");
         }
-        // Past the end of the module's code, so no source word can name them.
-        assert!(addresses.iter().all(|a| *a >= 28150));
-        // Above everything the wing panel can reach (its faces sit at z 0 and 1).
-        let mut s = state();
-        let rig = rig();
-        for turn in [0., 0.4, 0.733] {
-            s.speed = (304. + turn / 0.733 * 296.) * 1.68781;
-            for plate in &plates {
-                let out = rig.animate(plate, &s).unwrap();
-                assert_eq!(out.positions, plate.positions, "fixed to the fuselage");
-            }
-        }
-        // A shape without the glove face it takes its look from is refused.
-        assert!(
-            glove_plates(&Shape {
-                faces: Vec::new(),
-                ..glove_source()
-            })
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn the_glove_plates_fill_the_wedge_the_wing_opens_at_full_sweep() {
-        // The swept root line and the glove's outer edge bound the wedge; every
-        // point between them, from the glove's front corner back to the root's
-        // rear corner, is under a plate, at the full 42 degree turn.
-        let turn = (SWEEP_MAX - SWEEP_MIN).to_radians();
-        let swept = |right: bool, p: [f64; 2]| {
-            let pivot = if right { PIVOT_R } else { PIVOT_L };
-            let (dx, dy) = (p[0] - f64::from(pivot[0]), p[1] - f64::from(pivot[1]));
-            let a = if right { -turn } else { turn };
-            let (s, c) = a.sin_cos();
-            [
-                f64::from(pivot[0]) + dx * c - dy * s,
-                f64::from(pivot[1]) + dx * s + dy * c,
-            ]
-        };
-        for (right, outline, root, edge) in [
-            (true, &GLOVE_OUTLINE_R, 9.0, 10.0),
-            (false, &GLOVE_OUTLINE_L, -10.0, -10.0),
-        ] {
-            let mut covered = 0;
-            for k in 0..=11 {
-                // A point on the wing's root line (x 9 right, x -10 left, y 1 to 6.5).
-                let on_root = swept(right, [root, 1. + f64::from(k) * 0.5]);
-                assert!(in_fan(outline, on_root), "root line {on_root:?}");
-                // Points between the glove's outer edge and that root point, at its y.
-                if on_root[1] > 0.8 {
-                    for j in 0..=8 {
-                        let x = edge + (on_root[0] - edge) * f64::from(j) / 8.;
-                        assert!(in_fan(outline, [x, on_root[1]]), "wedge {x} {}", on_root[1]);
-                        covered += 1;
-                    }
-                }
-            }
-            assert!(covered > 50);
-            // The glove's outer front corner is a plate corner.
-            assert!(outline.iter().any(|v| v[0] == edge as f32 && v[1] == 8.));
-            // The root's leading end lands within the margin of a plate corner.
-            let end = swept(right, [root, 7.]);
-            let near = outline
+        // The right wing's tip face holds the placed tip; the left mirrors it.
+        let tip = |face: &Face, side: f32| {
+            face.positions
                 .iter()
-                .any(|v| (f64::from(v[0]) - end[0]).hypot(f64::from(v[1]) - end[1]) < 0.4);
-            assert!(near, "leading root end {end:?}");
-        }
-        // The wing's spread pose keeps every plate point over the panel or ahead
-        // of its leading edge: no plate point is behind the trailing edge.
-        for outline in [&GLOVE_OUTLINE_R, &GLOVE_OUTLINE_L] {
-            assert!(
-                outline
-                    .iter()
-                    .all(|v| v[1] >= -1.5 && v[0].abs() >= 10. - 1e-6 && v[0].abs() <= 16.)
-            );
-        }
+                .any(|p| (p[0] - side * 30.69).abs() < 1e-4 && (p[1] + 9.7).abs() < 1e-4)
+        };
+        assert!(WING_R.iter().any(|a| tip(by(*a).unwrap(), 1.)));
+        assert!(WING_L.iter().any(|a| tip(by(*a).unwrap(), -1.)));
+        // The left wing is the right one mirrored, vertex by vertex.
+        let points = |ids: &[usize], side: f32| -> BTreeSet<[i64; 3]> {
+            ids.iter()
+                .flat_map(|a| by(*a).unwrap().positions.iter())
+                .map(|p| [side * p[0], p[1], p[2]].map(|v| (v * 1e4).round() as i64))
+                .collect()
+        };
+        assert_eq!(points(&WING_R, 1.), points(&WING_L, -1.));
+        // The edge points moved forward on all eight faces that held them.
+        let moved = shape
+            .faces
+            .iter()
+            .flat_map(|f| &f.positions)
+            .filter(|p| p[0].abs() == EDGE_X && p[2] == 0. && p[1] == EDGE_Y_MOVED)
+            .count();
+        // Eight faces held it, and the two outboard walls stand on it.
+        assert_eq!(moved, 8 + 2);
+        assert!(
+            !shape
+                .faces
+                .iter()
+                .flat_map(|f| &f.positions)
+                .any(|p| p[0].abs() == EDGE_X && p[1] == EDGE_Y && p[2] == 0.)
+        );
+        // The walls: four faces, outward stored normals, past the code's end.
+        let walls: Vec<_> = shape
+            .faces
+            .iter()
+            .filter(|f| WALL_ADDRESSES.contains(&f.address))
+            .collect();
+        assert_eq!(walls.len(), 4);
+        assert!(WALL_ADDRESSES.iter().all(|a| *a >= 28150));
+        let out = |side: f32| {
+            let centre = |f: &Face| {
+                let n = f.positions.len() as f32;
+                [
+                    f.positions.iter().map(|p| p[0]).sum::<f32>() / n,
+                    f.positions.iter().map(|p| p[1]).sum::<f32>() / n,
+                ]
+            };
+            let w: Vec<_> = walls
+                .iter()
+                .filter(|f| f.positions[0][0] * side > 0.)
+                .collect();
+            assert_eq!(w.len(), 2);
+            // The outboard wall (x +-10 on every corner) faces away from the
+            // centreline; the aft wall faces aft and outboard (stored normals
+            // are right, up, forward).
+            let outboard = w
+                .iter()
+                .find(|f| f.positions.iter().all(|p| p[0].abs() == 10.))
+                .unwrap();
+            let aft = w
+                .iter()
+                .find(|f| f.positions.iter().any(|p| p[0].abs() == 7.))
+                .unwrap();
+            assert!(outboard.normal.unwrap()[0] * side > 30000.);
+            assert!(aft.normal.unwrap()[0] * side > 0. && aft.normal.unwrap()[2] < 0.);
+            // Clockwise seen from outside: the polygon's own normal points in.
+            for f in [outboard, aft] {
+                let n = crate::aircraft_animation::polygon_normal(&f.positions).unwrap();
+                let stored = f.normal.unwrap();
+                assert!(n[0] * stored[0] + n[1] * stored[2] + n[2] * stored[1] < 0.);
+                let c = centre(f);
+                assert!(c[0] * side > 7.);
+            }
+        };
+        out(1.);
+        out(-1.);
+        // A shape missing one of the fillet faces is refused.
+        let mut broken = tailor_shape();
+        broken.faces.retain(|f| f.address != 0x4e13);
+        assert!(tailor(&mut broken).is_err());
     }
 }

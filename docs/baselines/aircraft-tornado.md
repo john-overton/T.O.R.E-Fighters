@@ -211,6 +211,10 @@ follows the swept tip.
 Update (TOR-11, 2026-11-12): the wing is spread to 304 kt (350 mph, John), not 250;
 the full sweep stays 600 kt ([TOR-11](#tor-11-sweep-from-350-mph-and-the-inboard-aim-9-rail-2026-11-12)).
 
+Update (TOR-12, 2026-11-12): the pivot, the wing's place and the seam above are John's
+Blender review now ([TOR-12](#tor-12-johns-wing-review-ported-2026-11-12)); the seam table
+and the pivot sentences describe the TOR-3 measurement only.
+
 | Sweep, degrees | Speed on the schedule, kt | Wing turn, degrees | Worst seam gap, ft |
 | ---: | ---: | ---: | ---: |
 | 25 | 250 or less | 0 | 0 |
@@ -294,7 +298,7 @@ and after: right 8.8 to 3.4 at 46 degrees and 16.5 to 3.2 at 67; left 16.9 to 5.
 and 23.1 to 4.7; the spread-pose baseline is 1.8 right and 5.0 left, gaps in the
 source model). T2 stopped on clipping again and John accepted it.
 
-**Station table** (final, default load, TOR-6b; feet right / up / forward on the
+**Station table** (final, default load, TOR-6b; Update (TOR-12, 2026-11-12): rows 7 and 8 are now 7.96 and 6.71 ft out, 1.7 ft forward, and 8.77 and 7.52 ft out at 67 degrees, on both sides alike, see [TOR-12](#tor-12-johns-wing-review-ported-2026-11-12); feet right / up / forward on the
 right side; the rows in `TOR.PT` order):
 
 | Row | Station | Default | Position | Hang | Result |
@@ -645,7 +649,7 @@ this is the acceptance summary.
   and this variant); `AircraftId::ALL` stays 45.
 - **Combat** carries the BOZ-107 (right, 717 lb, 13.1 by 1.58 ft) and the Sky Shadow (left, 441 lb,
   9.8 by 1.38 ft) on fixed outer wing pylons, 16.0 ft out and 1.5 ft forward on the swinging
-  panel (fitted), swivelling with it. They are no hardpoint row: Load Ordnance (Normal and Cheat), saved
+  panel (fitted), swivelling with it (Update (TOR-12, 2026-11-12): 14.46 ft out and 1.7 ft forward after the wing moved). They are no hardpoint row: Load Ordnance (Normal and Cheat), saved
   loads, the lobby and the AI never see them. The record's `MIG31.ECM` stays (jammer, 60 chaff, 60
   flares); chaff and flares leave the BOZ-107's aft face, following the sweep. Carried mass is
   1,158 lb more than the previous Tornado, through the existing fixed-equipment mass and loaded
@@ -683,6 +687,48 @@ this is the acceptance summary.
   `by_label("Tornado IDS")` no longer names an identity (a recording made before this slice, none was
   released).
 
+## TOR-12 John's wing review ported (2026-11-12)
+
+Update (TOR-12, 2026-11-12), implementation mode, opinionated (John: nine decisions from his Blender
+review of the wing and fuselage, ported to both versions). Behaviour and numbers:
+[the wing placement](../formats/aircraft-control-surfaces.md#tornado-wing-placement-tor-12-2026-11-12) and
+[stores on pylons](../spec/stores-on-pylons.md#the-tornados-wing-placed-pylons-moved-with-it-tor-12-2026-11-12);
+this is the acceptance summary.
+
+- **What changed.** The left wing is the right one mirrored; the wing sits 1.54 ft in, 0.1167 ft up and 0.20 ft forward;
+  the root points are 2.3483 ft further inboard; the pivot is (4.3333, -0.9007, 0.31) ft, left mirrored; the glove
+  plates are gone; twelve rear fillet faces are not drawn; four closing walls are added; the fuselage points at
+  (+-6.6667, 4.0, 0) ft moved to y 4.83625 ft; the pylons (rows 7, 8, the pods 9 and 10) stay at the same place on the
+  panel. The shape is 279 faces (287, minus 12, plus 4), the probe line (it was 291).
+- **Match with the Blender poses.** The placed and swept vertices match the exported scene within 2e-5 ft at sweep 25 and
+  67 (a unit test on five vertices); the left and right wings are an exact mirror (0 ft, `wing_mirror_error_ft`, at all ten
+  sweep samples); the five root vertices stay inside the fuselage's skin at every sample.
+- **Probe.** `--aircraft tornado --animation-probe`: 279 neutral faces, 0 required and check failures; rigidity, skin gap
+  and fold unchanged; root travel at 67 degrees 2.03 ft (outboard 1.75, inboard 0.65); the flap strip seam opens 0.51 ft
+  at full droop (0.77 before); the stow check passes (left foot overshoot 0.17 ft as before).
+- **Clearances.** Pods against the wing panel 1.04 to 1.09 ft, strips 0.63 to 2.18 ft, tailerons 2.62 to 8.74 ft, fuselage
+  7.05 to 7.73 ft, the Mk 82 pack 3.61 to 5.46 ft; stores 4.88 to 5.98 ft above the gear contact for the wing rows; the Mk 82
+  pack 2.97 ft from the gear legs at 25 degrees (was 5.29). **The AIM-9M rail enters the fuselage by 0.05 to 0.11 ft at 35
+  to 45 degrees** (under the 0.3 ft line; not moved, a finding for John). Full table in stores on pylons.
+- **Retired rig numbers.** The seam table, the pivot circle and the glove plate in TOR-3 and TOR-5b above are history; their
+  tests are replaced by the placement tests.
+- **Pins moved.** The battery's release and jettison origins for rows 7 and 8 (a2g-release-origin, a2g-jettison, both
+  versions): 7.96 / 1.70 / 8.77 and 6.71 / 7.52 ft out. The audit pins did not move.
+- **Frames** (`.local/m3-aircraft/frames/TOR-12/`): Combat from below and above at 25 and 67 degrees, front quarters at 25,
+  the wing root and wall at 25 and 67, the Clean version from below. Observed: both sides now read alike; at 67 degrees a
+  sliver of sky shows beside the wing's trailing root and the taileron where the rear fillet was.
+
+- **In flight.** `.local/m3-aircraft/frames/TOR-12/inflight-*.png`: the Combat Tornado at 452 kt (46 degrees) in the
+  chase and oblique views, wings swept evenly.
+- **Checks (2026-11-12).** `cargo fmt`, `cargo clippy --workspace --all-targets -D warnings` clean;
+  `cargo test --locked --workspace --no-fail-fast` 7,705 passed, 0 failed, 108 ignored; `--validate-ordnance` and
+  `--validate-creator` passed (0 problems, 177,000 and 76,000 fuzz events; the pins did not move); the Tornado battery
+  (`*tornado*`, windows 1, jobs 1) 40 of 40; tools unittests 559 OK; `tools/check_docs.py` passed. Not rerun: the net
+  battery scenarios (no change in that code). Local: `.local/m3-aircraft/checks/TOR-12/`.
+- **Open for John.** The AIM-9M rail's 0.05 to 0.11 ft entry into the fuselage at 35 to 45 degrees (options in stores on
+  pylons); the sliver of sky beside the swept wing's trailing root; the vapor point now sits on the drawn tip on both
+  sides (was 0.67 ft outboard of the right tip), an agent decision.
+
 ## Open findings for John
 
 Nothing here was changed by this slice; each is a decision or a model question.
@@ -719,8 +765,8 @@ listed by TOR-6 and TOR-6b, item 8 is new).
    sky notch at the rear root; closing it would cut through the glove's top face).
 6. **Unsourced numbers.** The rail's flank (outboard chosen, the F-14's; the
    inboard flank was not measured and no source names the real one), the inner
-   pylon position (9.5 ft out and 1.5 ft forward is a measurement on this shape),
-   the sweep pivot (a fitted circle; the real pivot has no source), the 250 to 600
+   pylon position (9.5 ft out and 1.5 ft forward is a measurement on this shape; Update (TOR-12, 2026-11-12): 7.96 ft and 1.7 ft after John's wing review),
+   the sweep pivot (a fitted circle; the real pivot has no source; Update (TOR-12, 2026-11-12): John's measured (4.3333, -0.9007) ft), the 250 to 600
    kt schedule, the taileron pitch and roll weights and the 0.25 rad limit, the
    per-leg gear retraction (only "retracts forwards" is cited).
 7. **Wide row-7 alternatives cross the rail missile's box.** Load Ordnance only:
@@ -828,7 +874,9 @@ the gear tucks as rigid plates; the two airbrake plates and both burner plumes
 draw; the cockpit shows the Eurofighter panel with the HUD inside the glass; and
 the Quick Mission list names the exact "Tornado IDS" on page 3 of 4 with no
 Su-24. The frames are local evidence and are not committed. The final stations
-were not re-captured in TOR-10 (no presentation change).
+were not re-captured in TOR-10 (no presentation change). Update (TOR-12, 2026-11-12): the glove plates in the
+description above are gone; `TOR-12` frames (below and above at 25 and 67 degrees, front quarters, the wing root
+and wall, the Clean version) show the placed wing.
 
 ## Full checks, 2026-11-11
 

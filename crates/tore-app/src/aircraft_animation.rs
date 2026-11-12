@@ -319,7 +319,7 @@ pub(crate) fn split_surface(
     result
 }
 
-fn polygon_normal(points: &[[f32; 3]]) -> Option<[f32; 3]> {
+pub(crate) fn polygon_normal(points: &[[f32; 3]]) -> Option<[f32; 3]> {
     let mut n = [0f64; 3];
     for (a, b) in points
         .iter()

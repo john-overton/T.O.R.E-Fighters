@@ -307,13 +307,19 @@ def mf1_origin_problems(output: str) -> list[str]:
 # the pylons swivel with the panel, so the left bomb leaves from -10.53 ft and 0.81 ft aft, the
 # right from 10.36 ft and 1.26 ft aft (the left glove is a source unit further out, so the pair is
 # not an exact mirror image). Left first on a paired row.
+#
+# Update (TOR-12, 2026-11-12, John's wing review): the wing panel moved 1.54 ft in, 0.20 ft
+# forward and 0.1167 ft up and the left wing now mirrors the right, and the pylons stay at the same
+# place on the panel: the Mk 82 packs hang 7.96 ft out, 1.70 ft ahead and 1.33 ft below the
+# reference with the wing spread (25 degrees, 200 kt), 1.00 ft pylons; at 67 degrees (650 kt)
+# both leave from 8.77 ft out and 1.39 ft aft, an exact mirror pair.
 TORNADO_CASES = [
     ("Paveway shoulder row, 25 degrees",
      [(-2.00, -4.92, 12.27), (2.00, -4.92, 12.27), (-2.00, -4.55, -2.93), (2.00, -4.55, -2.93)], RAIL),
-    ("Mk 82 inner wing, 25 degrees", [(-9.50, -1.45, 1.50), (9.50, -1.45, 1.50)], WING),
+    ("Mk 82 inner wing, 25 degrees", [(-7.96, -1.33, 1.70), (7.96, -1.33, 1.70)], WING),
     ("Paveway shoulder row, 67 degrees",
      [(-2.00, -4.92, 12.27), (2.00, -4.92, 12.27), (-2.00, -4.55, -2.93), (2.00, -4.55, -2.93)], RAIL),
-    ("Mk 82 inner wing, 67 degrees", [(-10.53, -1.45, -0.81), (10.36, -1.45, -1.26)], WING),
+    ("Mk 82 inner wing, 67 degrees", [(-8.77, -1.33, -1.39), (8.77, -1.33, -1.39)], WING),
 ]
 
 
@@ -325,9 +331,13 @@ TORNADO_CASES = [
 # (200 kt, still spread: the wing starts to sweep at 304 kt), and at 67 degrees (650 kt, past the
 # 600 kt full sweep) right 9.11 ft out and 1.26 ft aft, left 9.28 ft out and 0.81 ft aft (it
 # was 10.75 and 11.61/11.78 on the outboard flank). Left first.
+#
+# Update (TOR-12, 2026-11-12): with the wing placed and mirrored the rail is 6.71 ft out and 0.62
+# ft below the reference at 25 degrees (1.70 ft ahead), and 7.52 ft out, 1.39 ft aft at 67
+# degrees on both sides.
 TORNADO_RAIL_CASES = [
-    ("AIM-9M side rail, 25 degrees", [(-8.25, -0.74, 1.50), (8.25, -0.74, 1.50)], 0.53),
-    ("AIM-9M side rail, 67 degrees", [(-9.28, -0.74, -0.81), (9.11, -0.74, -1.26)], 0.53),
+    ("AIM-9M side rail, 25 degrees", [(-6.71, -0.62, 1.70), (6.71, -0.62, 1.70)], 0.53),
+    ("AIM-9M side rail, 67 degrees", [(-7.52, -0.62, -1.39), (7.52, -0.62, -1.39)], 0.53),
 ]
 
 
@@ -463,7 +473,7 @@ def scenarios() -> list[Scenario]:
                 Step(tornado_args("650", "2", "MK82P3", "2"), timeout=300),
             ],
             check=tornado_origin_problems,
-            notes="The Tornado's default stores leave from where they hang at both sweeps: the shoulder Paveways from fixed 2 inch rails whatever the speed, the inner wing Mk 82s from 9.50 ft out at 25 degrees (200 kt) and from the swivelled pylons at 67 degrees (650 kt), left then right (TOR-6).",
+            notes="The Tornado's default stores leave from where they hang at both sweeps: the shoulder Paveways from fixed 2 inch rails whatever the speed, the inner wing Mk 82s from 9.50 ft out at 25 degrees (200 kt) and from the swivelled pylons at 67 degrees (650 kt), left then right (TOR-6). Update (TOR-12, 2026-11-12): 7.96 ft out and 1.70 ft ahead at 25 degrees, 8.77 ft out and 1.39 ft aft at 67 degrees, after John's wing review.",
         ),
         Scenario(
             name="a2g-release-origin-tornado-rail", lane="flight",
@@ -471,6 +481,6 @@ def scenarios() -> list[Scenario]:
             timeout=300,
             then=[Step(tornado_args("650", "3", "AIM9M", "2"), timeout=300)],
             check=tornado_rail_problems,
-            notes="The Tornado's AIM-9 side rails leave from where they hang at both sweeps: 8.25 ft out and 1.50 ft ahead at 25 degrees (200 kt), and beside the swivelled pylons at 67 degrees (650 kt), 1.25 ft inboard of the Mk 82 packs, left then right (TOR-6b; the inboard flank is TOR-11, John 2026-11-12).",
+            notes="The Tornado's AIM-9 side rails leave from where they hang at both sweeps: 8.25 ft out and 1.50 ft ahead at 25 degrees (200 kt), and beside the swivelled pylons at 67 degrees (650 kt), 1.25 ft inboard of the Mk 82 packs, left then right (TOR-6b; the inboard flank is TOR-11, John 2026-11-12). Update (TOR-12, 2026-11-12): 6.71 ft out and 1.70 ft ahead at 25 degrees, 7.52 ft out and 1.39 ft aft at 67 degrees, after John's wing review.",
         ),
     ]

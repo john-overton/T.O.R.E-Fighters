@@ -7,7 +7,9 @@
 //! gear's contact height. Gaps are the smallest distance between sampled
 //! surface points (a quarter foot apart) and the other surface's triangles,
 //! both ways; zero means the surfaces touch or cross. A screening aid, not a
-//! certification (docs/spec/stores-on-pylons.md, TOR-13).
+//! certification (docs/spec/stores-on-pylons.md, TOR-13). Update (TOR-12,
+//! 2026-11-12): the glove plates are gone; the fuselage part now includes the
+//! glove box's closing walls.
 use super::{AircraftId, CombatArt, StorePose};
 use crate::{aircraft::Airframe, flight, snapshot::StoreLook};
 use tore_sim::attitude::{Vector, dot};
@@ -128,7 +130,6 @@ fn airframe_parts(airframe: &Airframe, state: &flight::State) -> Vec<(&'static s
         "flap strip",
         "taileron",
         "fin",
-        "glove plate",
         "gear",
         "fuselage",
     ]
@@ -144,12 +145,10 @@ fn airframe_parts(airframe: &Airframe, state: &flight::State) -> Vec<(&'static s
             2
         } else if t::rudder(a) {
             3
-        } else if t::GLOVE_PLATE_R.contains(&a) || t::GLOVE_PLATE_L.contains(&a) {
-            4
         } else if t::GEAR.contains(&a) {
-            5
+            4
         } else {
-            6
+            5
         };
         let p: Vec<Vector> = face
             .positions
@@ -271,6 +270,37 @@ pub(super) fn report(
                 let (d, at) = gap(&body, &tris);
                 println!(
                     "Pod clearance: {short} sweep {sweep} {record} vs row {} {}: gap {d:.2} ft at [{:.2} {:.2} {:.2}]",
+                    other.hardpoint,
+                    other.shape.as_deref().unwrap_or("body"),
+                    at[0],
+                    at[1],
+                    at[2]
+                );
+            }
+        }
+    }
+    // TOR-12 (2026-11-12): the wing stores (rows 7 and 8: the Mk 82 pack and
+    // the AIM-9 rail, with their pylons, both wings) against the airframe
+    // parts as drawn at this sweep. The pylon's own contact with the wing
+    // panel reads zero by design.
+    for other in stores
+        .iter()
+        .filter(|s| matches!(s.hardpoint, 7 | 8) && s.look != StoreLook::Pod)
+    {
+        let tris = drawn(other, airframe, art);
+        if tris.is_empty() {
+            continue;
+        }
+        for (flaps, gear) in &poses {
+            state.flaps = *flaps;
+            state.gear = *gear;
+            for (name, parts) in airframe_parts(airframe, &state) {
+                if parts.is_empty() {
+                    continue;
+                }
+                let (d, at) = gap(&tris, &parts);
+                println!(
+                    "Wing store clearance: {short} sweep {sweep} flaps {flaps} gear {gear} row {} {} vs {name}: gap {d:.2} ft at [{:.2} {:.2} {:.2}]",
                     other.hardpoint,
                     other.shape.as_deref().unwrap_or("body"),
                     at[0],

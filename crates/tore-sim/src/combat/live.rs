@@ -8003,8 +8003,10 @@ mod tests {
         sides.sort_by(|a, b| a[0].total_cmp(&b[0]));
         let [left, right] = sides;
         assert!(left[0] < 0. && right[0] > 0., "{left:?} {right:?}");
-        // (The left glove sits a unit further out, so the pair is not an
-        // exact mirror image.)
+        // (The left glove sat a unit further out, so the pair was not an
+        // exact mirror image; since TOR-12, 2026-11-12, the wings mirror, so
+        // it is.)
+        assert!((left[0] + right[0]).abs() < 1e-9 && (left[2] - right[2]).abs() < 1e-9);
         assert!(
             left[2] < 3.0 && right[2] < 3.0,
             "both swept aft of the spread row"

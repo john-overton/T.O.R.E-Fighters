@@ -2641,7 +2641,9 @@ asked** and is held for John with the measurements and frames. Numbers come from
 are local only.
 
 **T1, row 7 on the swinging panel (opinionated, John 2026-11-11; the position is fitted,
-agent decision).** `station_move(Tornado, 7)` puts the inner wing pair at **9.5 ft out,
+agent decision). Update (TOR-12, 2026-11-12): the numbers in this section are for the wing as
+it was; after John's wing review the station is 7.96 ft out and 1.7 ft forward
+([TOR-12](#the-tornados-wing-placed-pylons-moved-with-it-tor-12-2026-11-12)).** `station_move(Tornado, 7)` puts the inner wing pair at **9.5 ft out,
 1.5 ft forward** (`TORNADO_WING_INNER`), a `Location::Wing` station on a standard 1 ft
 wing pylon. The sweep pivot is 6.33 ft out, so the station is 3.2 ft outboard of it on the
 movable panel, and the existing swivel (`combat::swing::swivels`, `Rack::turn`,
@@ -3064,7 +3066,7 @@ authored identifier, never a file name: `SKYSHADOW` and `BOZ107`, the same strin
 | Carried mass | 200 kg, 441 lb | 325 kg, 717 lb |
 | Sources | Wikipedia, "Sky Shadow (radar jammer)": around 3 m and 200 kg; diameter fitted from John's photo | armedconflicts.com's database: about 4 m and 325 kg (secondary, approximate); diameter fitted |
 | Model | 108 triangles, yellow triangle each side | 122 triangles, nine outlets on the aft face |
-| Station | 16.0 ft out, 1.5 ft forward of the reference (fitted), `Hang::AsRecorded` from the wing's underside | the same, mirrored |
+| Station | 16.0 ft out, 1.5 ft forward of the reference (fitted), `Hang::AsRecorded` from the wing's underside. Update (TOR-12, 2026-11-12): 14.46 ft out, 1.7 ft forward, the same place on the moved wing | the same, mirrored |
 
 Mass and drag go through the existing path: the pods' 1,158 lb are in
 `fixed_external_equipment_lbs` and so in the aircraft's carried mass (`payload_lbs`, the Loadout
@@ -3148,3 +3150,77 @@ step. **Palette (frames, `.local/m3-aircraft/frames/TOR-13/`):** the pods' Mediu
 (0.42, 0.47, 0.50) takes palette entry 76 (97, 113, 130), the BOZ-107's outlet colour (0.27, 0.29, 0.31)
 entry 56 (73, 73, 73) and the Sky Shadow's yellow (1.0, 0.82, 0.0) entry 187 (247, 194, 40), an
 orange-leaning yellow: the palette has a yellow, only slightly darker and warmer than asked.
+
+## The Tornado's wing placed, pylons moved with it (TOR-12, 2026-11-12)
+
+**Opinionated (John, 2026-11-12, from his Blender review of the wing; the stations' new numbers
+are agent arithmetic on his).** Update to the
+[TOR-5b inner wing pair](#the-tornado-ids-inner-wing-pair-on-the-wing-one-centreline-tank-a-glove-plate-tor-5b-2026-11-11),
+the [TOR-6b side rail](#the-tornado-aim-9-side-rails-on-the-inboard-swivelling-pylons-tor-6b-2026-11-11),
+the [TOR-11 inboard rail](#the-tornado-aim-9-rail-on-the-inboard-flank-shorter-and-the-sweep-from-350-mph-tor-11-2026-11-12)
+and the [TOR-13 pods](#two-tornado-ids-versions-and-the-combat-version-outer-wing-pods-tor-13-2026-11-12):
+the wing panel is 1.54 ft further in, 0.20 ft further forward and 0.1167 ft higher, its
+root is 2.3483 ft further inboard, the left wing mirrors the right exactly and the sweep
+pivot is (4.3333, -0.9007, 0.31) ft ([the wing placement](../formats/aircraft-control-surfaces.md#tornado-wing-placement-tor-12-2026-11-12)).
+The pylons stay where they were **on the panel**, so they move with it: no new fitted
+number is chosen, `TORNADO_WING_INNER` and `TORNADO_WING_OUTER` are the old values minus the
+placement (`swing::WING_IN_FT`, `WING_FORWARD_FT`).
+
+| Station | Before (spread) | Now (spread) | 67 degrees, both sides now |
+| --- | --- | --- | --- |
+| Row 7 Mk 82 pack, `station_move` | 9.50 ft out, 1.50 forward, up -1.45 | **7.96 out, 1.70 forward, up -1.33** (1.00 ft pylon, kept) | 8.77 out, 1.39 aft, up -1.33 (was right 10.36 / left -10.53, 1.26 / 0.81 aft) |
+| Row 8 AIM-9M rail, inboard flank | 8.25 out, 1.50 forward, up -0.74 | **6.71 out, 1.70 forward, up -0.62** (still 1.25 ft inboard of row 7) | 7.52 out, 1.39 aft (was right 9.11 / left 9.28) |
+| Row 9 BOZ-107 (right) | 16.0 out, 1.5 forward | **14.46 out, 1.70 forward** | 13.60 out, 5.74 aft |
+| Row 10 Sky Shadow (left) | -16.0, 1.5 forward | **-14.46, 1.70 forward** | -13.60, 5.74 aft |
+| Chaff and flare outlet (BOZ-107 aft face) | 16.00, -1.79, -5.06 | **14.46, -1.67, -4.86** (follows the pod) | 13.60, -1.67, -12.31 aft at 67 |
+
+The left side is an exact mirror at every sweep (it was 0.45 ft out of mirror fore and aft at
+67 degrees). Heights rise by the panel's 0.1167 ft: the simulation reads the retail shape for
+the surface a pylon hangs from, so `placed_on` adds `swing::WING_UP_FT` to the surface samples
+of the four swivelling rows (the drawing reads the placed shape, and the two now agree: the
+pylon is 1.00 ft deep, 0.53 ft for the rail, as before; before the fix the preview read 1.12
+and 0.65). The swivel and the sweep schedule are unchanged: the pylon turns back by the wing's
+turn about the new pivot, so each store is streamwise at every sweep.
+
+**Clearance after the move** (CPU stores preview, default load, Combat version; scripts and
+logs `.local/m3-aircraft/checks/TOR-12/`; gaps in feet, quarter-foot samples both ways, 0.00
+is the pylon's own contact with the wing).
+
+| Measure | 25 degrees | 45 degrees | 67 degrees |
+| --- | ---: | ---: | ---: |
+| Mk 82 pack and AIM-9M against the airframe (clip) | 0.00 / 0.00 | 0.00 / **0.11** | 0.00 / 0.00 |
+| Pods BOZ-107 / Sky Shadow: wing panel | 1.04 / 1.05 | 1.05 / 1.05 | 1.06 / 1.09 |
+| Pods: flap strips, flaps up | 1.19 / 1.19 | 1.19 / 1.34 | 1.49 / 2.18 |
+| Pods: flap strips, flaps down (wing held at 25) | 0.63 / 1.12 | n/a | n/a |
+| Pods: tailerons (neutral) | 7.71 / 8.74 | 5.80 / 6.83 | 2.62 / 3.65 |
+| Pods: fin | 16.9 / 17.9 | 15.5 / 16.2 | 13.5 / 13.9 |
+| Pods: fuselage (the new walls included) | 7.20 / 7.23 | 7.61 / 7.73 | 7.05 / 7.43 |
+| Pods: Mk 82 pack | 5.34 / 5.46 | 4.92 / 5.01 | 3.61 / 3.70 |
+| Pods: AIM-9 rail | 5.63 / 5.69 | 5.24 / 5.34 | 4.15 / 4.28 |
+| Pods: gear legs, gear down | 9.09 / 9.19 | n/a | n/a |
+| Pods: lowest point above the gear contact | 4.88 / 5.07 | 4.88 / 5.07 | 4.88 / 5.07 |
+| Mk 82 pack: flap strip, flaps up / down | 0.91 / 0.48 | 1.01 | 1.13 |
+| Mk 82 pack: taileron | 3.82 | 3.52 | 2.64 |
+| Mk 82 pack: fuselage | 1.15 | 1.84 | 2.29 |
+| AIM-9 rail pylon: fuselage | 0.06 | 0.01 | 0.12 |
+| Mk 82 pack: gear legs, box to leg points | 2.97 | 3.62 | 3.75 |
+| AIM-9M: gear legs | 1.85 | 2.38 | 2.49 |
+| Lowest store above the ground, gear down | tank 0.46, Paveways 0.50 / 0.86, Mk 82 5.53, AIM-9M 5.98 | same | same |
+
+(Before: the Mk 82 pack was 5.29 / 5.46 ft from the gear at 25 degrees and 5.3 to 5.5 at 67; the
+pods' wing, strip and fuselage gaps were 1.04 / 1.03, 1.19 / 1.17 and 8.73 / 8.15 at 25.) The
+pack is closer to the gear legs because it is 1.54 ft further in, but never within 1.8 ft.
+Row 6 and the tank are unchanged (0.96 ft fin tips, accepted). The Mk 82, MK 84, GBU-38, CBU-87,
+FAB-250, FAB-500, LAU-10 and B-8 on row 7 read 0.00 at 25 and 67 degrees; the AGM-88 reads 0.01 ft
+at 25 degrees (was 0.00). The GBU-30 is refused on row 7 in normal loading, as since TOR-6.
+
+**A finding for John (not guessed).** The AIM-9M rail's pylon top and its inner fin tips enter the
+fuselage by **0.05 ft at 35 degrees, 0.11 ft at 40 and 45 degrees**, and 0.00 at 25, 30 and from 50
+degrees (sweeps 25, 30, 35, 40, 45, 50, 55, 60, 65 and 67 measured). The rail is 6.71 ft out, and
+the pylon is about 0.1 ft wide, so its inner edge reaches the fuselage's new outboard glove wall
+(x 6.667 ft) while the wing sweeps the rail past the fuselage edge that item 8 moved forward
+(4.84 ft). It is under the 0.3 ft refusal line and no catalog row changes, but it is an entry, so
+nothing was moved to hide it. Options: leave it; or move the rail 0.15 ft outboard (its 1.25 ft
+inboard offset to about 1.10 ft, a one-line `SHOULDER_OUT` change that also moves it nearer the
+Mk 82 pack, whose gap is 0.06 ft now); or move the fuselage wall's forward edge back.
+

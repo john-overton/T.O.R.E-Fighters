@@ -1039,7 +1039,10 @@ failures, no fold, no fixed face moved and a largest inter-vertex distance chang
 about 1e-6 ft; the 25-pose pitch/roll grid at 25 and at 67 degrees
 (`pitch-roll-combinations-25deg.csv`, `-67deg.csv`); the sweep, flap and speed grid
 (`sweep-flap-combinations.csv`); the glove seam at each sweep angle
-(`sweep-seam.csv`, at most 1.22 ft at 67 degrees); the taileron corner swings and
+(`sweep-seam.csv`, at most 1.22 ft at 67 degrees; Update (TOR-12, 2026-11-12): the
+file now measures the five root vertices' travel about John's new pivot, at most
+2.03 ft at 67 degrees, that they stay inside the fuselage, and that the wings are exact
+mirrors, see [the wing placement](../formats/aircraft-control-surfaces.md#tornado-wing-placement-tor-12-2026-11-12)); the taileron corner swings and
 the strip and rudder seam openings (`taileron-corner-swing.csv`,
 `seam-opening.csv`, both reported, not gated); and the station witnesses
 (`pylon-poses.csv`). The probe isolates the controls at 200 knots, below the sweep

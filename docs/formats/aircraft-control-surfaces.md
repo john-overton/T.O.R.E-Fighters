@@ -1916,7 +1916,7 @@ invented.
 | Panel | Faces | Source geometry |
 | --- | --- | --- |
 | Right wing (13) | `4cf1 4d2b 4d54 4dea 4eba 4edd 4f00 4f23 4f46 4f7f 4fa8 4ff5 501c` | Flat plates at z 0 and 1, root x 9 to 10, tip (33,-10,0), trailing strip x 10 to 30 (the last two faces) |
-| Left wing (13) | `52c3 52e6 5309 5332 535b 537e 53a1 542b 5454 5483 54a6 5549 5570` | The left glove sits one unit further out (x -10 to -11), tip (-34,-10,0), strip x -11 to -31 (the last two) |
+| Left wing (13) | `52c3 52e6 5309 5332 535b 537e 53a1 542b 5454 5483 54a6 5549 5570` | The left glove sits one unit further out (x -10 to -11), tip (-34,-10,0), strip x -11 to -31 (the last two). Update (TOR-12, 2026-11-12): the rig drops that asymmetry at load, the left panel is the right one mirrored ([the wing placement](#tornado-wing-placement-tor-12-2026-11-12)) |
 | Taileron | right `446a`, `45e9`; left `4176`, `42f8` | One 5-vertex polygon per side, two windings, all at z -2: (18,-27), (6,-25), (6,-20), (7,-8), (18,-23) |
 | Rudder block | `5723`, `5750` | Fin-plane polygon (0,-31,12), (0,-25,3), (0,-21,3), (0,-21,4), (0,-26,12), both windings |
 
@@ -1984,6 +1984,12 @@ needs fitted geometry, such as a new glove, which TOR-3 does not invent).
 Update (TOR-5b, 2026-11-11): John asked for that fitted glove plate (round 3, T4); it
 is in [the Tornado glove plate](#tornado-glove-plate-tor-5b-2026-11-11) below. The
 seam numbers above stand as the TOR-3 measurement.
+
+Update (TOR-12, 2026-11-12): the pivot, the wing's place, the glove plates and the
+fillets are replaced by John's Blender review: pivot (6.5, -1.351) right and
+(-6.5, -1.351) left, see [the wing placement](#tornado-wing-placement-tor-12-2026-11-12).
+The seam table above is the TOR-3 measurement of the old pivot and no longer describes
+the shipped pose.
 
 **Fold check (rule 11).** The wing is moved whole, all 13 faces about one axis.
 The probe's `folds` count (faces that keep some vertices while others move) is 0
@@ -2123,7 +2129,7 @@ TOR-4. See the [Tornado control fit](../spec/variety-animation.md#tornado-contro
 | Face lists, vertices, state-word branches | spec-derived (retail `TOR.SH`, read at run time, refused if different) |
 | Sweep range 25 to 67 degrees | cited real figure (`TOR.INF`, Jane's), used as the endpoints of a fitted range |
 | Sweep speed schedule (250 to 600 knots, flaps hold out) | fitted, agent decision 2026-11-10, after the MiG-23's rig. Update (TOR-11, 2026-11-12): 304 to 600 knots, the start opinionated (John, 2026-11-12: "I don't think for the tornado the wings should start sweeping back until it's about 350 mph"; 350 mph is 304 knots), the full sweep still the fitted 600 |
-| Sweep pivot (9.5, -1.5) and (-10.5, -1.5) | fitted, chosen to minimize the glove seam; the real pivot position is unknown (no source found) |
+| Sweep pivot (9.5, -1.5) and (-10.5, -1.5) | fitted, chosen to minimize the glove seam; the real pivot position is unknown (no source found). Update (TOR-12, 2026-11-12): opinionated, John's Blender review: (6.5, -1.351) and (-6.5, -1.351) |
 | Rotating pylons as a design | opinionated, John 2026-11-10 (decision 19); the interface is agent-authored |
 | Taileron law and 0.25 rad limit | fitted, agent decision 2026-11-10, smaller than the fleet's 0.40 on John's request (decision 20) |
 | Flap droop 0.40, rudder travel 0.35 | fitted to the fleet's values, agent decision 2026-11-10 |
@@ -2317,3 +2323,56 @@ Provenance: the plate geometry, height, margins and addresses are fitted (agent
 decisions 2026-11-11); the request is John's (round 3, T4, opinionated); the wedge
 measurement is TOR-3's. No retail bytes committed: the outlines are numbers, the look is
 cloned from the loaded shape at run time.
+
+## Tornado wing placement (TOR-12, 2026-11-12)
+
+**Opinionated (John, 2026-11-12, from his Blender review of the wing and fuselage;
+numbers measured by John, the port and the clearances are agent work).** John reviewed
+the wing in Blender from the animation probe's OBJs and decided nine changes, all
+ported to both versions (`tornado`, `tornadoc`). They are authored geometry applied to
+the loaded shape by `tornado_animation::tailor` (no retail bytes in the repository; the
+reviewed layout is still checked first, 287 faces, and the rig refuses a shape that
+differs). The data came from the exported scene `round3b-export.json` (wing vertices in
+world feet at sweep 25 and 67, pivots, wing faces by address, moved fuselage points, the
+new faces and the dropped fillet faces); units below are shape units (2/3 ft) with feet
+in brackets, x right, y forward, z up (a Blender file in feet has the same axes).
+
+| Item | What the game does now |
+| --- | --- |
+| Left wing mirrors the right | The retail left panel sits one unit further out (x_left = -x_right - 1). `tailor` refuses a shape where that is not exactly so (every left wing vertex is a mirrored right one) and builds the left panel's positions from the right one's placed positions, mirrored: left faces keep their own addresses, windings, colours and normals. Measured mirror error 0 ft at every sweep (`wing_mirror_error_ft` in `sweep-seam.csv`) |
+| Wing placed | The whole right panel moves 2.31 in (1.54 ft), 0.3 forward (0.20 ft) and 0.175 up (0.1167 ft); the left mirrors (`tornado_animation::wing_point`, constants `swing::WING_IN_FT`, `WING_FORWARD_FT`, `WING_UP_FT`) |
+| Root extension | The five root vertices (x 9 and 10, the old glove joint) move 3.52245 (2.3483 ft) further inboard along the span axis, chord, height, tip and sweep unchanged, so the root stays inside the fuselage through the sweep. At sweep 25 each ends at x 3.168 (9) and x 4.168 (10), y 1.3, -0.7 and -3.7 |
+| New pivot | Right (6.5, -1.351025, 0.465) = (4.3333, -0.9007, 0.31) ft, left mirrored (`swing::PIVOT_R`, `PIVOT_L`). The wing turns -(sweep - 25) degrees about the vertical through it (right), mirrored left; at sweep 25 the wing is exactly as placed |
+| No glove plates | `0x7e00` to `0x7e03` (TOR-5b) are not added any more; their rig constants, tests and the pod-clearance "glove plate" part are removed |
+| Rear fillet gone | Twelve retail fuselage faces are not drawn: right `4d14 4d83 4da4 4dc7 4e13 4f67`, left `53c4 53e5 5408 54dc 54f2 5507` (each a triangle touching a glove root vertex; `tailor` checks it) |
+| Closing walls | Four new fuselage faces, `0x7e10` to `0x7e13` (past the code's 28,150 bytes): per side an outboard wall at x +-10 (6.6667 ft), corners (10,6,1), (10,8,1), (10,7.254375,0), (10,2,0), (10,2,1), and an aft wall (7,0,1), (10,2,1), (10,2,0), (7,0,0), each in the shape's own winding (clockwise seen from outside) with the stored normal pointing out at the look face's length. They take their look (colour, texture, flags, fog) from the glove's top triangle on their side (right `4505`, left `4211`), the fuselage skin. `tailor` refuses any corner that is not already a fuselage point |
+| Fuselage edge point | Every retail face point at (+-10, 6, 0) moves forward to y 7.254375 (4.83625 ft): eight faces (right `4497 44f0 4547 455c`, left `41a3 41fc 4253 4268`); their stored normals are re-derived from the moved corners |
+| Pylons follow | Rows 7, 8 and the pods 9 and 10 keep their place on the panel, so their station positions move with it: row 7 7.96 ft out and 1.7 ft forward (was 9.5 and 1.5), row 8 1.25 ft inboard of it, pods 14.46 ft out and 1.7 forward (was 16.0 and 1.5). The left side mirrors, now exactly |
+
+Shape totals: 287 retail faces, minus 12 fillet faces, plus 4 walls, 279 neutral faces
+(the probe line; it was 291 with the plates). Normals of every moved face are re-derived
+from its new corners (the sign of the old normal, its old length), so lighting follows the
+root extension's small shear.
+
+**Flap strip hinge.** It is the leading edge of the strip, root to outer corner, in the
+placed wing: pivot (15.928775, -3.7, 0.425), axis (23.52245, -6, -0.5) right, mirrored
+left (was pivot (20, -4, 0.25), axis (20, -6, -0.5) right and (-21, -4, 0.25), (-20, -6,
+-0.5) left). A test (`the_strip_hinge_follows_the_placed_wing`) pins them to the placed
+vertices; the droop law is unchanged.
+
+**Wingtip vapor (agent decision).** The streamer record's tips sit at 22.67 ft either
+side: the retail left tip and 0.67 ft beyond the retail right tip. The panels mirror now,
+so both sides take the right panel's tip place (33 units out, 1 up, 9 aft, as the record
+gives them minus the old one-unit overshoot), carried by the placement and the same rigid
+turn as the faces: 20.46 ft out, 0.78 ft up, 5.8 ft aft at sweep 25.
+
+**Probe witnesses.** The witnesses name retail vertices (tip, strip corners, root
+vertices) and follow them through `wing_point`; the placement itself is pinned against
+John's exported Blender poses in `the_placed_wing_matches_johns_blender_poses` (five
+vertices at sweep 25 and 67, within 2e-5 ft). The "glove seam" measurement is now "root
+travel": the root vertices' movement (`root_travel_ft`), its bound `2 r sin(turn / 2)`
+from the farthest root vertex's distance r to the pivot (4.26 units, 2.84 ft), and a new
+gate that the five root vertices stay inside the neutral fuselage's skin at every sweep
+(`roots_outside_fuselage`, 0 at all 10 sweep samples and both sides). Root travel at 67
+degrees is 2.03 ft (outboard 1.75, inboard 0.65).
+

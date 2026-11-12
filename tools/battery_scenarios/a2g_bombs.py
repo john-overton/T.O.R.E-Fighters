@@ -234,9 +234,12 @@ def ai_jettison_recording_problems(work: Path, output: str) -> list[str]:
 # from the fuselage whatever the sweep (x 0, 5.94 ft down, 5.67 ft ahead); the inner wing's Mk 82
 # pair leaves from where it hangs, right bomb first: 9.50 ft out and 1.50 ft ahead with the wing
 # spread (200 kt, 25 degrees) and from the swivelled pylons at 67 degrees (650 kt).
+# Update (TOR-12, 2026-11-12, John's wing review): the wing moved in, forward and up and the left
+# wing mirrors the right, so the pair leaves from 7.96 ft out, 1.33 ft down and 1.70 ft ahead at 25
+# degrees and from 8.77 ft out and 1.39 ft aft at 67 degrees, an exact mirror pair.
 TORNADO_JETTISON = [
-    ("25 degrees", [(0.0, -5.94, 5.67), (9.50, -1.45, 1.50), (-9.50, -1.45, 1.50)]),
-    ("67 degrees", [(0.0, -5.94, 5.67), (10.36, -1.45, -1.26), (-10.53, -1.45, -0.81)]),
+    ("25 degrees", [(0.0, -5.94, 5.67), (7.96, -1.33, 1.70), (-7.96, -1.33, 1.70)]),
+    ("67 degrees", [(0.0, -5.94, 5.67), (8.77, -1.33, -1.39), (-8.77, -1.33, -1.39)]),
 ]
 
 
@@ -262,10 +265,12 @@ def tornado_jettison_problems(output: str) -> list[str]:
 # The Tornado's AIM-9 side rails jettison (TOR-6b, 2026-11-11): the tank, then the two AIM-9Ms
 # from the rails beside the swivelled pylons, right then left. Update (TOR-11, 2026-11-12,
 # John): the rails are on the pylons' inboard flank, 1.25 ft inboard of the Mk 82 packs (they were
-# 10.75 and 11.61/11.78 ft out on the outboard flank).
+# 10.75 and 11.61/11.78 ft out on the outboard flank). Update (TOR-12, 2026-11-12): with the wing
+# placed and mirrored, 6.71 ft out, 0.62 ft down and 1.70 ft ahead at 25 degrees, 7.52 ft out and
+# 1.39 ft aft at 67 degrees, both sides.
 TORNADO_RAIL_JETTISON = [
-    ("25 degrees", [(0.0, -5.94, 5.67), (8.25, -0.74, 1.50), (-8.25, -0.74, 1.50)]),
-    ("67 degrees", [(0.0, -5.94, 5.67), (9.11, -0.74, -1.26), (-9.28, -0.74, -0.81)]),
+    ("25 degrees", [(0.0, -5.94, 5.67), (6.71, -0.62, 1.70), (-6.71, -0.62, 1.70)]),
+    ("67 degrees", [(0.0, -5.94, 5.67), (7.52, -0.62, -1.39), (-7.52, -0.62, -1.39)]),
 ]
 
 

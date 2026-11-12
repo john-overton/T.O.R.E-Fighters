@@ -14,6 +14,9 @@
 //! the rotating pylons); the real sweep range 25 to 67 degrees is cited from
 //! `TOR.INF` (Jane's). Update (TOR-11, 2026-11-12): the wing starts to sweep at
 //! 350 mph, 304 knots (opinionated, John 2026-11-12; was 250 knots, fitted).
+//! Update (TOR-12, 2026-11-12): the wing is placed 1.54 ft in, 0.1167 ft up and
+//! 0.20 ft forward of the retail panel, mirrored left to right, with new pivots
+//! ([`PIVOT_R`], [`WING_IN_FT`]), so the stations that ride on it move with it.
 use tore_formats::aircraft::AircraftId;
 
 /// Shape units to feet at the Tornado's header scale 2 (2/3 ft a unit).
@@ -34,11 +37,28 @@ pub const SWEEP_FROM_KNOTS: f64 = 304.;
 pub const SWEEP_TO_KNOTS: f64 = 600.;
 /// Feet per second to knots.
 pub const FPS_PER_KNOT: f64 = 1.68781;
-/// The wing sweep pivots, shape units (right, forward, up), vertical axis:
-/// the centre of the smallest circle round the fixed glove corners the wing
-/// panel shares (fitted, TOR-3). The left glove sits a unit further out.
-pub const PIVOT_R: [f32; 3] = [9.5, -1.5, 0.5];
-pub const PIVOT_L: [f32; 3] = [-10.5, -1.5, 0.5];
+/// The wing sweep pivots, shape units (right, forward, up), vertical axis.
+/// Update (TOR-12, John 2026-11-12, from his Blender review of the wing): the
+/// right pivot is (4.3333, -0.9007, 0.31) ft right, forward and up, that is
+/// (6.5, -1.351025, 0.465) shape units, and the left pivot mirrors it. The old
+/// pivots (9.5, -1.5) right and (-10.5, -1.5) left were the centre of the
+/// smallest circle round the fixed glove corners the wing panel shared (fitted,
+/// TOR-3); the glove fillets are gone, so that reason went with them.
+pub const PIVOT_R: [f32; 3] = [6.5, -1.351_025, 0.465];
+pub const PIVOT_L: [f32; 3] = [-6.5, -1.351_025, 0.465];
+
+/// How the retail right wing panel is placed in the spread pose (TOR-12, John
+/// 2026-11-12, from his Blender review): the whole panel moves 1.54 ft in
+/// (toward the fuselage), 0.1167 ft up and 0.20 ft forward, and its root points
+/// (the five vertices on the glove, x 9 and 10 units) move 2.3483 ft inboard
+/// along the wing's span axis, so the root stays inside the fuselage through
+/// the sweep. The left panel is an exact mirror of the right one: the retail
+/// left panel sat one unit further out, and the placement drops that
+/// asymmetry. Opinionated (John's measured values, not a source's).
+pub const WING_IN_FT: f64 = 1.54;
+pub const WING_UP_FT: f64 = 0.175 * FEET_PER_UNIT;
+pub const WING_FORWARD_FT: f64 = 0.2;
+pub const ROOT_SHIFT_FT: f64 = 2.3483;
 
 /// How far the wing panel has turned from its spread pose, radians (0 spread,
 /// `SWEEP_MAX - SWEEP_MIN` degrees fully swept), for an aircraft flying at
@@ -140,6 +160,18 @@ mod tests {
         assert!((wing_turn(452. * FPS_PER_KNOT, 0.) - full / 2.).abs() < 1e-12);
         // Flaps hold the wing out.
         assert_eq!(wing_turn(900. * FPS_PER_KNOT, 1.), 0.);
+    }
+
+    #[test]
+    fn the_pivots_are_johns_and_mirror_each_other() {
+        // John, 2026-11-12 (TOR-12): right pivot (4.3333, -0.9007, 0.31) ft.
+        let r = pivot_feet(true);
+        assert!((r[0] - 4.333_333).abs() < 1e-5);
+        assert!((r[2] + 0.900_683).abs() < 1e-5);
+        assert!((r[1] - 0.31).abs() < 1e-5);
+        let l = pivot_feet(false);
+        assert_eq!((l[0], l[1], l[2]), (-r[0], r[1], r[2]));
+        assert!((WING_UP_FT - 0.116_666_7).abs() < 1e-6);
     }
 
     #[test]
