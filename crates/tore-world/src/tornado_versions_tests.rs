@@ -70,12 +70,15 @@ fn the_combat_tornado_carries_its_two_pods_and_the_clean_one_none() {
     let drawn: Vec<_> = poses
         .iter()
         .filter(|pose| pose.look == crate::snapshot::StoreLook::Pod)
-        .map(|pose| (pose.equipment_pod(), pose.body))
+        .map(|pose| (pose.equipment_pod(), pose.body, pose.size().lug_aft))
         .collect();
     assert_eq!(drawn.len(), 2);
-    for (record, body) in drawn {
+    for (record, body, lug_aft) in drawn {
         let pod = stations::authored_pod(record.unwrap()).unwrap();
         assert_eq!(body, [pod.length, pod.diameter]);
+        // Hung from lugs a third of its length aft of its middle (TOR-14b).
+        assert_eq!(lug_aft, pod.lug_aft);
+        assert!((lug_aft - pod.length / 3.).abs() < 1e-9);
     }
     // Carried mass: exactly the two pods' 441 and 717 lb more than the Clean
     // version, in the fixed external equipment (and so the flight's mass).
@@ -95,7 +98,9 @@ fn the_combat_tornado_carries_its_two_pods_and_the_clean_one_none() {
     );
     assert!(combat_config.sensors.jammer.is_some());
     let exit = combat_config.dispenser_exit().expect("the BOZ-107's exit");
-    assert!(exit[0] > 10. && exit[2] < pods[0].mount[2] - 6.);
+    // The pod hangs from lugs toward its rear (TOR-14b): its aft face is a
+    // sixth of its length aft of the pylon.
+    assert!(exit[0] > 10. && (exit[2] - (pods[0].mount[2] - 13.12 / 6.)).abs() < 0.1);
     // The Clean version: no pods, no jammer, no chaff, no flares, no outlet.
     assert!(clean_config.fixed_pods.is_empty());
     assert_eq!(

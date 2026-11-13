@@ -472,6 +472,13 @@ pub struct AuthoredPod {
     pub weight_lbs: i32,
     /// Chaff and flares leave from the model's aft face centre.
     pub dispenser: bool,
+    /// How far aft of the pod's middle its lugs (the point its pylon holds it
+    /// by) are, feet. Update (TOR-14b, 2026-11-13, John: "Both pods are
+    /// technically mounted towards the rear in RL"): the middle of the pod's
+    /// rear third, a third of its length aft of its middle. Fitted (agent
+    /// decision; no source gives the lug station), so the pod hangs mostly
+    /// forward of its pylon.
+    pub lug_aft: f64,
 }
 
 /// The first station index past the Tornado's nine source rows.
@@ -492,6 +499,7 @@ pub const SKY_SHADOW: AuthoredPod = AuthoredPod {
     diameter: 0.42 / 0.3048,
     weight_lbs: 441,
     dispenser: false,
+    lug_aft: 3.0 / 0.3048 / 3.,
 };
 pub const BOZ_107: AuthoredPod = AuthoredPod {
     row: TORNADO_RIGHT_POD,
@@ -501,6 +509,7 @@ pub const BOZ_107: AuthoredPod = AuthoredPod {
     diameter: 0.48 / 0.3048,
     weight_lbs: 717,
     dispenser: true,
+    lug_aft: 4.0 / 0.3048 / 3.,
 };
 
 /// The authored fixed pods of `id`: the Combat Tornado's outer pair, the Sky

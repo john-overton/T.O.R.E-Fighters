@@ -702,7 +702,10 @@ pub fn shoulder(size: StoreSize) -> f64 {
 /// agent decision).
 pub fn slot_offset(k: u16, on: u16, size: StoreSize) -> Vector {
     if on <= 1 {
-        return [0.; 3];
+        // A lone store hangs from its pylon's point, its middle ahead of it
+        // by how far aft of the middle its lugs are (the Tornado's pods hang
+        // from lugs toward their rear; TOR-14b, 2026-11-13).
+        return [0., 0., size.lug_aft];
     }
     let per = rack_group(on);
     let groups = on.div_ceil(per);
@@ -1813,6 +1816,7 @@ mod tests {
         length: 10.,
         top: 0.5,
         width: 2.,
+        lug_aft: 0.,
     };
 
     #[test]
@@ -2045,6 +2049,7 @@ mod tests {
             length: 8.,
             top: 0.45,
             width: 1.27,
+            lug_aft: 0.,
         };
         let offsets: Vec<Vector> = (0..4).map(|k| slot_offset(k, 4, size)).collect();
         assert!(offsets[0][0] < 0. && offsets[1][0] > 0. && offsets[0][2] < 0.);
@@ -2064,6 +2069,7 @@ mod tests {
             length: 9.35,
             top: 0.21,
             width: 2.07,
+            lug_aft: 0.,
         };
         let [left, right] = [0, 1].map(|k| slot_offset(k, 2, aim9));
         assert_eq!(left[0], -right[0]);
@@ -2079,6 +2085,7 @@ mod tests {
             length: 7.3,
             top: 0.45,
             width: 1.27,
+            lug_aft: 0.,
         };
         assert!((shoulder(mk82) - (PYLON_HALF_WIDTH + BAR_CLEAR + 0.45)).abs() < 1e-9);
         // On a centreline rail their tops stay 2 inches under the belly.

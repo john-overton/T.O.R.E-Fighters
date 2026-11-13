@@ -765,6 +765,29 @@ this is the acceptance summary. Both versions (the Clean one has rows 7 and 8).
   jobs 1) 40 of 40; tools unittests 559 OK (5 skipped); `tools/check_docs.py` passed. Local:
   `.local/m3-aircraft/checks/TOR-14/` (`clear3.sh`, `clearance.sh`, `frames.py`, `final.sh`, the logs).
 
+## TOR-14b Pods on rear lugs (2026-11-13)
+
+Update (TOR-14b, 2026-11-13), implementation mode, opinionated (John: "Both pods are technically mounted towards the
+rear in RL have the agent do the same for these and avoid the taileromms"; the lug station is a fitted agent decision).
+Behaviour and numbers:
+[stores on pylons](../spec/stores-on-pylons.md#the-tornados-pods-hang-from-rear-lugs-tor-14b-2026-11-13).
+
+- **What changed.** The BOZ-107 and the Sky Shadow hang from lugs a third of their length aft of their middle
+  (4.37 and 3.28 ft; `AuthoredPod::lug_aft`, `StoreSize::lug_aft`), so the pod hangs mostly ahead of its pylon. The
+  pylon (14.46 ft out, on the mid-chord, 3.3 ft) did not move. The chaff and flare outlet is 2.19 ft aft of the pylon
+  (10.98, -1.67, -10.84 at 67 degrees; was -15.22). The Mk 82 pack and the AIM-9M are as they were.
+- **Result.** At 67 degrees both pods clear both tailerons by 1.37 / 1.75 ft or more, neutral and at full pitch and roll
+  (the BOZ-107's 0.57 ft entry in TOR-14 is gone); nothing else is nearer than 1.37 ft (the Sky Shadow's nose under the
+  panel's leading edge); at 25 degrees with the flaps down the pods are 0.69 / 0.88 ft from the drooped strips.
+- **Pins moved.** The battery's `flight-countermeasures-tornado-boz-sweep67` now pins the outlet at (10.98, -1.67,
+  -10.85) within 0.3 ft. The release and jettison origins did not move (the pods are never released).
+- **Frames** (`.local/m3-aircraft/frames/TOR-14b/`): from below at 25 and 67 degrees and above at 67; pod close-ups
+  at 25 and 67 at the TOR-14 camera offset; a side view of one pod at 25 with the pylon over its rear.
+- **Checks (2026-11-13).** `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings` clean; `cargo test
+  --locked --workspace --no-fail-fast` 7,710 passed, 0 failed, 108 ignored (the new pod test); `--validate-ordnance`
+  passed (pins unchanged); the Tornado battery 40 of 40; tools unittests 559 OK; `tools/check_docs.py` passed. Not rerun:
+  `--validate-creator` (no creator data changed). Local: `.local/m3-aircraft/checks/TOR-14b/`.
+
 ## Open findings for John
 
 Nothing here was changed by this slice; each is a decision or a model question.

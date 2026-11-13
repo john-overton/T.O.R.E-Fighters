@@ -703,10 +703,15 @@ impl Configuration {
                 .filter(|model| model.dispenser)
                 .map(|model| (pod, model))
         })?;
-        let size = super::store_sizes::StoreSize::body([model.length, model.diameter]);
+        let size = super::store_sizes::StoreSize::body_lugged(
+            [model.length, model.diameter],
+            model.lug_aft,
+        );
         let place = pod.rack.side_pylons(pod.mount, 0, 1, size).pop()?;
+        // The pod's middle hangs `lug_aft` ahead of the pylon's point, and its
+        // aft face is half its length behind that (TOR-14b, 2026-11-13).
         let [right, up, forward] = place.point;
-        Some([right, up, forward - model.length / 2.])
+        Some([right, up, forward + model.lug_aft - model.length / 2.])
     }
     /// The release of one chaff cartridge or flare by an aircraft with this
     /// configuration at `position` moving at `velocity` with `basis`
@@ -8045,10 +8050,17 @@ mod tests {
         config.fixed_pods = vec![pod("SKYSHADOW", [-mount[0], mount[1], mount[2]])];
         assert_eq!(config.dispenser_exit(), None);
         config.fixed_pods.push(pod("BOZ107", mount));
-        // Spread wing: the pod's centre is the mount, the exit half its
-        // length aft of it, on its axis.
+        // Spread wing: the pylon stands at the mount and the pod hangs from
+        // lugs a third of its length aft of its middle (TOR-14b), so the exit,
+        // half its length aft of its middle, is a sixth of its length aft of
+        // the mount, on its axis.
         let exit = config.dispenser_exit().expect("the BOZ-107's exit");
-        assert_eq!(exit, [mount[0], mount[1], mount[2] - BOZ_107.length / 2.]);
+        let lug = BOZ_107.lug_aft;
+        assert_eq!(
+            exit,
+            [mount[0], mount[1], mount[2] + lug - BOZ_107.length / 2.]
+        );
+        assert!((exit[2] - (mount[2] - BOZ_107.length / 6.)).abs() < 1e-9);
         // The release puts the device there, from the numbers a recording
         // and the wire carry.
         let release = config.countermeasure_release(position, velocity, basis);
@@ -8070,8 +8082,8 @@ mod tests {
         config.set_wing_turn(turn);
         let swept = config.dispenser_exit().expect("swept exit");
         let pivot = swing::pivot_feet(true);
-        // The pod's centre (the exit is half its length further aft).
-        let centre = |p: Vector| [p[0], p[1], p[2] + BOZ_107.length / 2.];
+        // The pylon's point (the exit is a sixth of the pod's length aft of it).
+        let centre = |p: Vector| [p[0], p[1], p[2] + BOZ_107.length / 6.];
         let radius = |p: Vector| (p[0] - pivot[0]).hypot(centre(p)[2] - pivot[2]);
         assert!((radius(swept) - radius(exit)).abs() < 1e-9);
         assert!(swept[2] < exit[2] - 2., "{swept:?} aft of {exit:?}");

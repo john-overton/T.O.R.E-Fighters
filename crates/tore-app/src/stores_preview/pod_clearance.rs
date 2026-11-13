@@ -376,9 +376,13 @@ fn taileron_entry(
                         .filter(|t| (t[0][0] + t[1][0] + t[2][0] >= 0.) == (side == "right"))
                         .copied()
                         .collect();
+                    if mine.is_empty() {
+                        continue;
+                    }
                     let (depth, at) = entry(&mine, plate);
+                    let (apart, _) = gap(&mine, plate);
                     println!(
-                        "Taileron entry: {short} sweep {sweep} {name} {side} {part} vs row {} {}: {depth:.2} ft at [{:.2} {:.2} {:.2}]",
+                        "Taileron entry: {short} sweep {sweep} {name} {side} {part} vs row {} {}: {depth:.2} ft (gap {apart:.2} ft) at [{:.2} {:.2} {:.2}]",
                         store.hardpoint,
                         store.shape.as_deref().unwrap_or("body"),
                         at[0],
@@ -469,6 +473,19 @@ pub(super) fn report(
                         "Pod clearance: {short} sweep {sweep} {label} {record} vs {name}: gap {d:.2} ft at [{:.2} {:.2} {:.2}]",
                         at[0], at[1], at[2]
                     );
+                    // The nose: the forward quarter of the pod (TOR-14b, the
+                    // pods hang mostly ahead of their pylons).
+                    let cut = high[2] - 0.25 * (high[2] - low[2]);
+                    let nose: Vec<Tri> = body
+                        .iter()
+                        .filter(|t| t.iter().all(|p| p[2] >= cut))
+                        .copied()
+                        .collect();
+                    let (d, at) = gap(&nose, &tris);
+                    println!(
+                        "Pod nose: {short} sweep {sweep} {label} {record} vs {name}: gap {d:.2} ft at [{:.2} {:.2} {:.2}]",
+                        at[0], at[1], at[2]
+                    );
                 }
             }
             // The other stores and their pylons.
@@ -522,4 +539,104 @@ pub(super) fn report(
         }
     }
     taileron_entry(short, sweep, airframe, art, stores, &mut state);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tornado_animation::{FEET_PER_UNIT as FPU, Rig};
+    use tore_formats::aircraft::stations::{BOZ_107, SKY_SHADOW};
+    use tore_formats::shape::{Face, FogMode};
+    use tore_sim::combat::hardpoints::{Location, Rack, station_move};
+    use tore_sim::combat::store_sizes::StoreSize;
+
+    /// The right taileron's outline, shape units (x right, y forward, z up).
+    const OUTLINE: [[f32; 3]; 5] = [
+        [18., -27., -2.],
+        [6., -25., -2.],
+        [6., -20., -2.],
+        [7., -8., -2.],
+        [18., -23., -2.],
+    ];
+
+    fn taileron(right: bool, state: &flight::State) -> Vec<Tri> {
+        let side = if right { 1. } else { -1. };
+        let face = Face {
+            address: if right { 0x446a } else { 0x4176 },
+            colors: vec![31; 5],
+            uv: vec![[0.2, 0.8]; 5],
+            positions: OUTLINE.iter().map(|p| [side * p[0], p[1], p[2]]).collect(),
+            texture: "SYNTHETIC".into(),
+            subtype: 0xed,
+            normal: Some([0., 0., 1.]),
+            fog: FogMode::Enabled,
+        };
+        let moved = Rig.animate(&face, state).expect("the taileron animates");
+        let feet: Vec<Vector> = moved
+            .positions
+            .iter()
+            .map(|q| [q[0], q[2], q[1]].map(|v| f64::from(v) * FPU))
+            .collect();
+        (1..feet.len() - 1)
+            .map(|k| [feet[0], feet[k], feet[k + 1]])
+            .collect()
+    }
+
+    /// TOR-14b, John 2026-11-13: "Both pods are technically mounted towards
+    /// the rear in RL ... avoid the tailerons". Each pod hangs from lugs a
+    /// third of its length aft of its middle, so its middle is that far
+    /// ahead of the pylon's centre (which stays on the wing's mid-chord), and
+    /// at full sweep its body clears both tailerons by at least a quarter
+    /// foot, neutral and at full pitch and roll deflection.
+    #[test]
+    fn the_pods_hang_from_rear_lugs_and_clear_the_tailerons_at_full_sweep() {
+        let turn = swing::wing_turn(swing::speed_for_sweep(67.), 0.);
+        let mut state = flight::State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();
+        for pod in [BOZ_107, SKY_SHADOW] {
+            assert!(
+                (pod.lug_aft - pod.length / 3.).abs() < 1e-9,
+                "{}",
+                pod.record
+            );
+            let moved = station_move(AircraftId::Tornado, pod.row).expect("the pod's station");
+            let body = [pod.length, pod.diameter];
+            let size = StoreSize::body_lugged(body, pod.lug_aft);
+            let rack = Rack {
+                location: Location::Wing.byte(),
+                turn: turn as f32,
+                ..Rack::default()
+            };
+            let mount = [moved.right, -1.6, moved.forward];
+            let point = rack.side_pylons(mount, 0, 1, size).remove(0).point;
+            let centre = rack.store_point(mount, 1, 0, 0, size);
+            // The pod hangs ahead of its pylon by the lug offset, streamwise.
+            assert!((centre[2] - point[2] - pod.lug_aft).abs() < 1e-9);
+            assert_eq!((centre[0], centre[1]), (point[0], point[1]));
+            // The pylon's point is the mid-chord, carried to 67 degrees.
+            let right = moved.right > 0.;
+            let wing = swing::unswept(right, point, f64::from(turn as f32));
+            assert!((wing[2] - swing::mid_chord(wing[0].abs())).abs() < 1e-6);
+            // The tailerons, neutral and at full pitch and roll.
+            for (elevator, aileron) in [(0., 0.), (1., 0.), (-1., 0.), (0., 1.), (0., -1.)] {
+                state.elevator = elevator;
+                state.aileron = aileron;
+                let plate = taileron(right, &state);
+                let (tail, nose) = (centre[2] - pod.length / 2., centre[2] + pod.length / 2.);
+                let mut near = f64::MAX;
+                let mut z = tail;
+                while z <= nose {
+                    let axis = [centre[0], centre[1], z];
+                    for tri in &plate {
+                        near = near.min(distance(axis, tri) - pod.diameter / 2.);
+                    }
+                    z += 0.1;
+                }
+                assert!(
+                    near >= 0.25,
+                    "{} at elevator {elevator}, aileron {aileron}: {near:.2} ft from the taileron",
+                    pod.record
+                );
+            }
+        }
+    }
 }

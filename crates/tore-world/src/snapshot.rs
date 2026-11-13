@@ -176,7 +176,13 @@ impl StorePose {
         use tore_sim::combat::store_sizes::{StoreSize, tank_body};
         match self.look {
             StoreLook::Store => StoreSize::of_shape(self.shape.as_deref()),
-            StoreLook::Pod if self.body[0] > 0. => StoreSize::body(self.body),
+            // An authored pod hangs from lugs toward its rear (TOR-14b).
+            StoreLook::Pod if self.body[0] > 0. => StoreSize::body_lugged(
+                self.body,
+                self.equipment_pod()
+                    .and_then(tore_formats::aircraft::stations::authored_pod)
+                    .map_or(0., |pod| pod.lug_aft),
+            ),
             StoreLook::Pod => StoreSize::body(POD_BODY),
             StoreLook::Tank if self.body[0] > 0. => StoreSize::body(self.body),
             StoreLook::Tank => StoreSize::body(tank_body(2_000.)),

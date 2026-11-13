@@ -172,12 +172,18 @@ pub const PLAIN: [f64; 2] = [8., 0.9];
 /// What placing a store on its pylon needs, feet: its length, how far its
 /// lugs (the top of its body) are above its origin, and its width across
 /// its fins, which spaces stores side by side on a rack. The origin is
-/// taken as the store's middle.
+/// taken as the store's middle, except where `lug_aft` says the pylon holds
+/// it elsewhere.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StoreSize {
     pub length: f64,
     pub top: f64,
     pub width: f64,
+    /// How far aft of the store's middle its lugs are, feet: the pylon holds
+    /// the store here, so the store's middle hangs this far ahead of the
+    /// pylon's point ([`super::hardpoints::slot_offset`]). Zero for every
+    /// store but the Tornado's outer pods (TOR-14b, 2026-11-13).
+    pub lug_aft: f64,
 }
 
 impl StoreSize {
@@ -187,6 +193,14 @@ impl StoreSize {
             length,
             top: diameter / 2.,
             width: diameter,
+            lug_aft: 0.,
+        }
+    }
+    /// [`Self::body`] held by lugs `lug_aft` feet aft of its middle.
+    pub fn body_lugged(body: [f64; 2], lug_aft: f64) -> Self {
+        Self {
+            lug_aft,
+            ..Self::body(body)
         }
     }
     /// A store drawn with the retail shape `shape`: its real size when the
@@ -197,6 +211,7 @@ impl StoreSize {
                 length: real.length,
                 top: real.diameter / 2.,
                 width: real.span.max(real.diameter),
+                lug_aft: 0.,
             },
             None => Self::body(PLAIN),
         }

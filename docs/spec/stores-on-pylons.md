@@ -3363,7 +3363,7 @@ Mk 82 pack 0.00; every row 0.00 at 25 and 45 degrees.
    (the Sky Shadow 0.22) but is 3.0 ft further out than the fitted span (the panel's tip is 20.5 ft
    out) with the chord down to 5.0 ft. Left for John; options: leave it; move the outer pylons to 17.5
    ft (their mid-chord there is 2.9 ft aft); or move them forward of the mid-chord, which is what
-   John asked not to do.
+   John asked not to do. Update (TOR-14b, 2026-11-13): resolved by hanging the pods from rear lugs, see [TOR-14b](#the-tornados-pods-hang-from-rear-lugs-tor-14b-2026-11-13).
 2. **The AIM-9M rail's 0.11 ft entry into the fuselage (TOR-12's open item) is now at every sweep.**
    Re-measured at 25, 30, 35, 40, 45, 50, 55, 60 and 65 degrees: **0.11 ft at each** (it was 0.00 to 0.11,
    at 35 to 45 only): with the pylon on the mid-chord the missile hangs alongside the glove box
@@ -3378,4 +3378,69 @@ Mk 82 pack 0.00; every row 0.00 at 25 and 45 degrees.
    so the aft 0.6 ft of the pack's pylon and 0.4 ft of the pods' lie under the flap strip's forward part
    and the drooped strip (0.4 rad) lowers onto them by up to about 0.2 ft (agent arithmetic from the hinge
    line: 0.6 ft aft of it times the sine of 0.4 rad), a drawn-geometry overlap under 0.3 ft.
+
+## The Tornado's pods hang from rear lugs (TOR-14b, 2026-11-13)
+
+**Opinionated (John, 2026-11-13); the lug station is fitted (agent decision, no source gives it).**
+John: "Both pods are technically mounted towards the rear in RL have the agent do the same for these
+and avoid the taileromms". Update to the TOR-14 section above: the pylon is where it was (centred on the
+wing's mid-chord, locked to the wing, streamwise, 3.3 ft long, 14.46 ft out), and the BOZ-107 and the
+Sky Shadow now hang from it by **lugs a third of their length aft of their middle**, the middle of the
+pod's rear third (`AuthoredPod::lug_aft`: 4.37 ft on the 13.12 ft BOZ-107, 3.28 ft on the 9.84 ft Sky
+Shadow). The pod's middle therefore hangs that far ahead of the pylon's centre and its nose stands well
+ahead of the wing's leading edge. No source gives the real lug station; "the rear third" is John's
+direction and the middle of that third is the fitted number. The Clean version carries no pods
+(`authored_pods` is the Combat version's), so it is unchanged.
+
+**How.** `StoreSize::lug_aft` (zero for every other store) is the new per-store attach offset;
+`slot_offset` puts a lone store's middle `lug_aft` ahead of its pylon's point, so `store_point`, the
+drawing's `hung` centre, the clearance tools and every release read it with no other change. The
+simulation's `Configuration::dispenser_exit` adds it (the BOZ-107's aft face is `lug_aft - length / 2`
+from the pylon's point: 2.19 ft aft of it), and `StorePose::size` carries it for the drawing. The drawn
+pylon is centred on the point, so it covers the pod's lug area (a 3.3 ft slab over the pod's rear third).
+The Mk 82 pack and the AIM-9M are not touched (their origins still hang at the pylon's centre).
+
+| Feet (aircraft frame right / forward) | 25 degrees | 45 degrees | 67 degrees |
+| --- | --- | --- | --- |
+| Pylon point, both pods (unchanged) | 14.46 / -2.22 | 13.40 / -5.60 | 10.98 / -8.66 |
+| BOZ-107 middle (right) | 14.46 / 2.16 | 13.40 / -1.23 | **10.98 / -4.28** |
+| BOZ-107 nose to aft face | 8.72 to -4.41 | 5.33 to -7.79 | 2.28 to -10.84 |
+| Sky Shadow middle (left) | -14.46 / 1.06 | -13.40 / -2.32 | **-10.98 / -5.38** |
+| Sky Shadow nose to aft face | 5.98 to -3.86 | 2.60 to -7.24 | -0.45 to -10.30 |
+| Chaff and flare outlet (BOZ-107 aft face), up -1.67 | 14.46 / -4.41 | 13.40 / -7.79 | **10.98 / -10.84** |
+
+(Before: the pods' middles were on the pylon points, the outlet 6.56 ft aft of them, 15.22 ft aft of the
+reference at 67 degrees.)
+
+**Clearance** (CPU stores preview, default load, Combat version; scripts and logs
+`.local/m3-aircraft/checks/TOR-14b/`; gaps in feet, quarter-foot samples both ways, BOZ-107 / Sky Shadow;
+the nose is the pod's forward quarter):
+
+| Measure | 25 degrees | 45 degrees | 67 degrees |
+| --- | ---: | ---: | ---: |
+| Taileron, neutral | 7.98 / 8.36 | 5.13 / 5.51 | **1.38 / 1.77** |
+| Taileron, full pitch up and down, roll right and left (closest of the four) | 7.98 / 8.36 | 5.13 / 5.51 | **1.37 / 1.75** |
+| Taileron entry (deepest crossing), any pose | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 (was 0.57 / 0.11) |
+| Wing panel (the pylon's own 1.0 ft) | 1.05 / 1.03 | 1.04 / 1.02 | 1.00 / 1.00 |
+| Nose against the wing panel | 5.81 / 3.82 | 4.26 / 2.71 | 1.94 / 1.37 |
+| Flap strips, flaps up | 1.19 / 1.17 | 1.19 / 1.17 | 1.19 / 1.18 |
+| Flap strips, flaps down (wing held at 25) | 0.69 / 0.88 | n/a | n/a |
+| Fuselage and glove walls (intakes included) | 7.20 / 7.27 | 6.26 / 6.47 | 4.29 / 4.92 |
+| Nose against the fuselage | 7.67 / 7.51 | 6.43 / 6.48 | 4.29 / 4.92 |
+| Gear legs, gear down (nose 10.62 / 9.89) | 9.10 / 9.18 | n/a | n/a |
+| Mk 82 pack | 5.38 / 5.45 | 4.33 / 4.44 | 2.43 / 2.52 |
+| AIM-9 rail | 5.66 / 5.69 | 4.62 / 4.67 | 2.79 / 2.86 |
+| Row 6 Paveways | 10.27 / 10.56 | 8.95 / 9.01 | 6.46 / 6.53 |
+| Lowest point above the gear contact (the ground) | 4.88 / 5.07 | 4.88 / 5.07 | 4.88 / 5.07 |
+
+Both pods clear both tailerons at 67 degrees, neutral and at full deflection, by more than five times the
+0.25 ft asked for (1.37 ft at the least), so the lug station is not at the edge of what works; the 0.57 ft
+entry of TOR-14 is gone. The wing's rows are as in TOR-14 (the Mk 82 pack 0.59 ft and the AIM-9M rail 0.00
+ft, 0.03 ft deep, from the tailerons at 67 degrees; the rail's 0.11 ft entry into the glove wall at every
+sweep): they were not moved. At 67 degrees the nose stands 1.9 and 1.4 ft under the panel's leading
+edge. Guard: `the_pods_hang_from_rear_lugs_and_clear_the_tailerons_at_full_sweep` (`pod_clearance.rs`:
+the lug offset, the mid-chord, and 0.25 ft from both tailerons' rig poses at 67 degrees), with
+`StorePose::size` and the dispenser outlet pinned in `tornado_versions_tests.rs` and `live.rs`.
+`TORE_STORES_PREVIEW_PODCLEAR=1` now also prints `Pod nose:` lines and the gap beside each `Taileron
+entry:`.
 

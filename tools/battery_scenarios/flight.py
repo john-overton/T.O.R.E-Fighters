@@ -1378,6 +1378,23 @@ def check_combat_tornado_origin(output: str) -> list[str]:
     return problems
 
 
+# Update (TOR-14b, 2026-11-13): the pods hang from lugs a third of their length aft of their middle, so
+# the BOZ-107's aft face (the outlet) is a sixth of its length (2.19 ft) aft of its pylon's centre, which
+# stands on the wing's mid-chord. At 67 degrees (650 kt) the outlet is 10.98 ft out, 1.67 ft down and
+# 10.85 ft aft; the pod clears the tailerons by 1.4 ft.
+TORNADO_BOZ_EXIT_67 = (10.98, -1.67, -10.85)
+
+
+def check_combat_tornado_origin_67(output: str) -> list[str]:
+    """The Combat Tornado's dispenser exit at full sweep is where the rear-lugged pod puts it (TOR-14b)."""
+    problems = check_combat_tornado_origin(output)
+    exit_, _ = _origins(output)
+    if exit_:
+        if any(abs(got - want) > 0.3 for got, want in zip(exit_, TORNADO_BOZ_EXIT_67)):
+            problems.append(f"dispenser exit {exit_}, want {TORNADO_BOZ_EXIT_67} (TOR-14b)")
+    return problems
+
+
 def check_clean_tornado_origin(output: str) -> list[str]:
     """The Tornado IDS (Clean) has no chaff, flares or dispenser: a release does nothing (TOR-13)."""
     problems = []
@@ -1405,7 +1422,7 @@ def tornado_countermeasure_scenarios() -> list[Scenario]:
     out = []
     for name, ac, speed, check in (
         ("flight-countermeasures-tornado-boz", "tornado", None, check_combat_tornado_origin),
-        ("flight-countermeasures-tornado-boz-sweep67", "tornado", "650", check_combat_tornado_origin),
+        ("flight-countermeasures-tornado-boz-sweep67", "tornado", "650", check_combat_tornado_origin_67),
         ("flight-countermeasures-tornadoc-none", "tornadoc", None, check_clean_tornado_origin),
     ):
         args = ["--live-fire", "--aircraft", ac]
