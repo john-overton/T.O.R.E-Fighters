@@ -298,7 +298,7 @@ and after: right 8.8 to 3.4 at 46 degrees and 16.5 to 3.2 at 67; left 16.9 to 5.
 and 23.1 to 4.7; the spread-pose baseline is 1.8 right and 5.0 left, gaps in the
 source model). T2 stopped on clipping again and John accepted it.
 
-**Station table** (final, default load, TOR-6b; Update (TOR-12, 2026-11-12): rows 7 and 8 are now 7.96 and 6.71 ft out, 1.7 ft forward, and 8.77 and 7.52 ft out at 67 degrees, on both sides alike, see [TOR-12](#tor-12-johns-wing-review-ported-2026-11-12); feet right / up / forward on the
+**Station table** (final, default load, TOR-6b; Update (TOR-12, 2026-11-12): rows 7 and 8 are now 7.96 and 6.71 ft out, 1.7 ft forward, and 8.77 and 7.52 ft out at 67 degrees, on both sides alike, see [TOR-12](#tor-12-johns-wing-review-ported-2026-11-12); Update (TOR-14, 2026-11-13): rows 7 and 8 are 0.38 ft aft at 25 degrees and 2.94 ft aft at 67 (7.38 and 6.13 ft out), see [TOR-14](#tor-14-pylons-centred-on-the-wing-one-size-2026-11-13); feet right / up / forward on the
 right side; the rows in `TOR.PT` order):
 
 | Row | Station | Default | Position | Hang | Result |
@@ -728,6 +728,42 @@ this is the acceptance summary.
 - **Open for John.** The AIM-9M rail's 0.05 to 0.11 ft entry into the fuselage at 35 to 45 degrees (options in stores on
   pylons); the sliver of sky beside the swept wing's trailing root; the vapor point now sits on the drawn tip on both
   sides (was 0.67 ft outboard of the right tip), an agent decision.
+
+## TOR-14 Pylons centred on the wing, one size (2026-11-13)
+
+Update (TOR-14, 2026-11-13), implementation mode, opinionated (John: "all pylons need to be centered on the wing
+always point forward but have center position locked on the wing as it sweeps back"; "when wings are swept forward
+the out pylons with the pods grow in size"; the mid-chord definition, the fixed 3.3 ft pylon length and the numbers are
+agent decisions, fitted). Behaviour and numbers:
+[stores on pylons](../spec/stores-on-pylons.md#the-tornados-pylons-centred-on-the-wing-one-size-at-every-sweep-tor-14-2026-11-13);
+this is the acceptance summary. Both versions (the Clean one has rows 7 and 8).
+
+- **Cause of the growth.** The drawn pylon was 0.45 of the store's length (5.9 ft under the BOZ-107), centred on the
+  store's middle and trimmed to the surface under it; the outer pylon stood 1.2 ft ahead of the spread wing's leading
+  edge, so at 25 degrees nothing was over its middle, the slab kept its full length in the open, and as the wing swept
+  under it the trim shortened it. Not the 0.117 ft the wing was raised by.
+- **What changed.** Pylon centres are the placed panel's mid-chord at their spans, which did not move (7.96 and 14.46 ft
+  out): 0.38 ft aft (rows 7, 8) and 2.22 ft aft (rows 9, 10) at 25 degrees; 7.38 / -2.94 (6.13 for the rail) and
+  10.98 / -8.66 at 67. The drawn pylon is 3.3 ft long, 0.28 ft wide and 1.0 ft deep (over the lugs) at every sweep and
+  for every store, centred on the carried point. Locking and the swivel were already right (the carried point, the
+  wing's turn undone) and are pinned by new tests.
+- **Pins moved.** The battery's release and jettison origins for rows 7 and 8 (a2g-release-origin, a2g-jettison, both
+  versions): 7.96 / -0.38 / 7.38 / -2.94 and 6.71 / 6.13 ft out. The chaff and flare outlet moved with the pod (14.46,
+  -1.67, -8.78 at 25 degrees; 10.98, -1.67, -15.22 at 67); the battery's bounds held. The audit pins did not move.
+- **Open for John.** **The BOZ-107's tail enters the right taileron by 0.57 ft at 67 degrees** (over the 0.3 ft line; the
+  Sky Shadow 0.07, the AIM-9M rail 0.03; nothing at 25 and 45): options in stores on pylons. The AIM-9M rail's entry into
+  the glove wall is 0.11 ft at every sweep from 25 to 65 degrees now (TOR-12: 0.05 to 0.11 at 35 to 45); the wall is
+  unchanged. The Mk 82 pack and the rail are nearer the tailerons at full sweep (0.72 and 0.00 ft). The stores' origins
+  are centred on the pylon, so the Mk 82's body is 0.87 ft aft and the AIM-9M's 1.21 ft ahead of the pylon's centre.
+- **Frames** (`.local/m3-aircraft/frames/TOR-14/`): from above at 25, 45 and 67 degrees, from below at 25, 45 and 67,
+  close-ups of the outer pod pylon and the inner pylon with the rail at 25 and 67 degrees at the same camera offset
+  (low and from above).
+- **Checks (2026-11-13).** `cargo fmt --check` and `cargo clippy --workspace --all-targets -D warnings` clean;
+  `cargo test --locked --workspace --no-fail-fast` 7,709 passed, 0 failed, 108 ignored (four new tests); `--validate-ordnance`
+  passed (`TOR.PT: 5 source rows, 56 compatible weapon placements, 8 tank placements`; the pins did not move);
+  `--validate-creator` passed (177,000 and 76,000 fuzz events, 0 problems); the Tornado battery (`*tornado*`, windows 1,
+  jobs 1) 40 of 40; tools unittests 559 OK (5 skipped); `tools/check_docs.py` passed. Local:
+  `.local/m3-aircraft/checks/TOR-14/` (`clear3.sh`, `clearance.sh`, `frames.py`, `final.sh`, the logs).
 
 ## Open findings for John
 

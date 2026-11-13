@@ -1260,9 +1260,15 @@ const YAK141_INNER: [f64; 2] = [7.5, -2.8];
 /// panel, so it moves with the panel's new place ([`super::swing::WING_IN_FT`]
 /// in, [`super::swing::WING_FORWARD_FT`] forward): 7.96 ft out, 1.7 ft forward.
 /// The left side mirrors it, since the left panel now mirrors the right one.
+///
+/// Update (TOR-14, John 2026-11-13: "all pylons need to be centered on the
+/// wing"): the span stays 7.96 ft out and the pylon's centre moves to the
+/// placed panel's mid-chord there ([`super::swing::mid_chord`]), 0.38 ft aft
+/// of the reference point, so the pylon stands in the middle of the chord at
+/// every sweep. It was 1.70 ft forward, 2.1 ft ahead of the middle.
 const TORNADO_WING_INNER: [f64; 2] = [
     9.5 - super::swing::WING_IN_FT,
-    1.5 + super::swing::WING_FORWARD_FT,
+    super::swing::mid_chord(9.5 - super::swing::WING_IN_FT),
 ];
 
 /// The Tornado IDS (Combat)'s outer swivelling wing pylon, feet out and
@@ -1270,9 +1276,12 @@ const TORNADO_WING_INNER: [f64; 2] = [
 /// docs/spec/stores-on-pylons.md). Update (TOR-12, 2026-11-12): the same place
 /// on the wing panel as before, so it moves with the panel's new place: 14.46
 /// ft out, 1.7 ft forward.
+/// Update (TOR-14, 2026-11-13): the span stays; the pylon's centre is the
+/// placed panel's mid-chord there, 2.22 ft aft of the reference point (it was
+/// 1.70 ft forward, 1.2 ft ahead of the leading edge when the wing is spread).
 const TORNADO_WING_OUTER: [f64; 2] = [
     16. - super::swing::WING_IN_FT,
-    1.5 + super::swing::WING_FORWARD_FT,
+    super::swing::mid_chord(16. - super::swing::WING_IN_FT),
 ];
 
 /// How far ahead of the inboard swivelling pylon's own store the Tornado's
@@ -1382,7 +1391,20 @@ pub fn placed_on(
             Hang::FromBelow { up } | Hang::PalletsFromBelow { up, .. } => up,
             _ => mount[1],
         };
-        rack.over = sample_points(pylon, forward)
+        // TOR-14 (2026-11-13): the simulation reads the retail wing, which
+        // lies 1.54 ft further out and 0.20 ft further aft than the placed
+        // panel the swivelling stations are placed on (TOR-12), so a placed
+        // point is read at its retail place.
+        let (read_right, read_forward) =
+            if id.source() == AircraftId::Tornado && super::swing::swivels(id, hardpoint) {
+                (
+                    pylon + pylon.signum() * super::swing::WING_IN_FT,
+                    forward - super::swing::WING_FORWARD_FT,
+                )
+            } else {
+                (pylon, forward)
+            };
+        rack.over = sample_points(read_right, read_forward)
             .map(|(r, f)| model.height(r, f, from, 6).map(|h| h as f32));
         if let Hang::PalletsFromBelow { drop, .. } = moved.hang {
             for over in &mut rack.over {
@@ -2544,9 +2566,13 @@ mod tests {
         assert!(left[0] < -pivot[0], "{left:?}");
         assert!((right[0] + left[0]).abs() < 1e-9, "{right:?} {left:?}");
         assert!((right[2] - left[2]).abs() < 1e-9, "{right:?} {left:?}");
-        // John's wing placement: 9.5 ft out and 1.5 ft forward on the retail
-        // panel is 7.96 ft out and 1.7 ft forward on the placed one.
-        assert!((moved.right - 7.96).abs() < 1e-9 && (moved.forward - 1.7).abs() < 1e-9);
+        // John's wing placement: 9.5 ft out on the retail panel is 7.96 ft
+        // out on the placed one. Update (TOR-14, 2026-11-13): and the pylon
+        // stands at the panel's mid-chord there, 0.38 ft aft of the reference
+        // point (it was 1.7 ft forward).
+        assert!((moved.right - 7.96).abs() < 1e-9);
+        assert_eq!(moved.forward, swing::mid_chord(7.96));
+        assert!((moved.forward + 0.381_5).abs() < 1e-3, "{}", moved.forward);
         assert_eq!(right[1], mount[1], "the height does not change");
     }
 
@@ -2682,6 +2708,121 @@ mod tests {
             station_move(AircraftId::TornadoClean, BOZ_107.row),
             station_move(AircraftId::Tornado, BOZ_107.row)
         );
+    }
+
+    /// TOR-14, John 2026-11-13: "all pylons need to be centered on the wing
+    /// always point forward but have center position locked on the wing as it
+    /// sweeps back". Every swivelling pylon's centre is the same point of the
+    /// wing panel at every sweep (carried by the wing about the pivot, so
+    /// carrying it back to the spread pose lands on the same place), that
+    /// point is the panel's mid-chord at its span, and the pylon turns back by
+    /// exactly the wing's turn (heading zero against the aircraft), the same
+    /// on both wings.
+    #[test]
+    fn the_tornado_pylon_centres_stay_on_the_wing_and_point_forward_at_every_sweep() {
+        use crate::combat::swing;
+        use tore_formats::aircraft::stations::{BOZ_107, SKY_SHADOW};
+        let wing_row = |flags| Hardpoint {
+            location: 4,
+            position: [11, -25, 9],
+            flags,
+            count: 2,
+            store: Some("MK82P3.JT".into()),
+            weight_class: 30,
+        };
+        let pod_row = Hardpoint {
+            location: Location::Wing.byte(),
+            flags: 8,
+            position: [0, -25, 0],
+            store: None,
+            count: 1,
+            weight_class: 0,
+        };
+        let size = StoreSize::of_shape(Some("MK82.SH"));
+        let pod = StoreSize::body([BOZ_107.length, BOZ_107.diameter]);
+        // Row, its record, the side it hangs from, and
+        // the span of the pylon's centre line (the rail's pylon is row 7's).
+        let cases = [
+            (7, wing_row(0x505), 0, 9.5 - swing::WING_IN_FT, size),
+            (8, wing_row(0x85), 0, 9.5 - swing::WING_IN_FT, size),
+            (7, wing_row(0x505), 1, 9.5 - swing::WING_IN_FT, size),
+            (8, wing_row(0x85), 1, 9.5 - swing::WING_IN_FT, size),
+            (
+                BOZ_107.row,
+                pod_row.clone(),
+                0,
+                16. - swing::WING_IN_FT,
+                pod,
+            ),
+            (SKY_SHADOW.row, pod_row, 0, 16. - swing::WING_IN_FT, pod),
+        ];
+        for (row, record, side, span, size) in cases {
+            let (mount, mut rack) = placed_on(AircraftId::Tornado, row, &record, None);
+            rack.paired = row <= 8;
+            // The Sky Shadow's record is already on the left; rows 7 and 8
+            // mirror to the left with the side index.
+            let right = side == 0 && mount[0] >= 0.;
+            let side_sign = if right { 1. } else { -1. };
+            let out = rack.location().rail_out();
+            let pylon_of = |rack: Rack| rack.side_pylons(mount, side, 1, size)[0].point;
+            let spread = pylon_of(rack);
+            // The pylon's own centre: the rail's store hangs `out` beside it.
+            let centre = |p: Vector| [p[0] - side_sign * out, p[1], p[2]];
+            let at_rest = centre(spread);
+            assert!(
+                (at_rest[0].abs() - span).abs() < 1e-9,
+                "row {row}: {at_rest:?} is {span} ft out"
+            );
+            // The panel's mid-chord at that span, not wherever the store is.
+            assert!(
+                (at_rest[2] - swing::mid_chord(span)).abs() < 1e-9,
+                "row {row}: {at_rest:?} is on the mid-chord {}",
+                swing::mid_chord(span)
+            );
+            for degrees in [25., 30., 35., 45., 55., 60., 67.] {
+                let turn = swing::wing_turn(swing::speed_for_sweep(degrees), 0.);
+                let mut turned = rack;
+                turned.turn = turn as f32;
+                let now = centre(pylon_of(turned));
+                // Locked to the wing: carried back to the spread pose, it is
+                // the same point of the panel (the height never changes).
+                let back = swing::unswept(right, now, f64::from(turned.turn));
+                for i in 0..3 {
+                    assert!(
+                        (back[i] - at_rest[i]).abs() < 1e-6,
+                        "row {row} at {degrees} degrees: {now:?} is {back:?} on the panel, not {at_rest:?}"
+                    );
+                }
+                // Pointing forward: the wing's turn and the pylon's swivel
+                // cancel, so the pylon's heading is the aircraft's.
+                let heading = swing::pylon_swivel(right, f64::from(turned.turn))
+                    + side_sign * f64::from(turned.turn);
+                assert!(heading.abs() < 1e-12, "row {row} at {degrees}: {heading}");
+                // The wing's turn moves the centre aft and in, about the
+                // pivot at the same radius.
+                let pivot = swing::pivot_feet(right);
+                let radius = |p: Vector| (p[0] - pivot[0]).hypot(p[2] - pivot[2]);
+                assert!((radius(now) - radius(at_rest)).abs() < 1e-6);
+            }
+        }
+        // The fixed pylon length is one number for all four rows and fits the
+        // panel's chord at the outer pylons (5.46 ft) with room to spare.
+        for row in 7..=10 {
+            assert_eq!(
+                swing::pylon_length(AircraftId::Tornado, row),
+                Some(swing::PYLON_LENGTH_FT)
+            );
+        }
+        assert_eq!(swing::pylon_length(AircraftId::Tornado, 6), None);
+        assert_eq!(swing::pylon_length(AircraftId::Mig23, 7), None);
+        let chord = |span: f64| {
+            let edge = |e: [[f64; 2]; 2]| {
+                e[0][1] + (span - e[0][0]) / (e[1][0] - e[0][0]) * (e[1][1] - e[0][1])
+            };
+            edge(swing::WING_LEADING) - edge(swing::WING_TRAILING)
+        };
+        assert!((chord(16. - swing::WING_IN_FT) - 5.46).abs() < 0.01);
+        assert!(swing::PYLON_LENGTH_FT + 1.0 < chord(16. - swing::WING_IN_FT));
     }
 
     #[test]

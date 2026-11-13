@@ -999,6 +999,33 @@ mod tests {
         }
     }
 
+    /// TOR-14: the simulation centres every swivelling pylon on the placed
+    /// panel's mid-chord, worked out from the edge corners in
+    /// `swing::{WING_LEADING, WING_TRAILING}`; those are the retail corners
+    /// (shape units) put through this module's own placement, on both sides.
+    #[test]
+    fn the_stations_mid_chord_edges_are_the_placed_panels_corners() {
+        use tore_sim::combat::swing::{FEET_PER_UNIT, WING_LEADING, WING_TRAILING, mid_chord};
+        let corners = [
+            ([9., 7.], WING_LEADING[0]),
+            ([31., -2.], WING_LEADING[1]),
+            ([10., -4.], WING_TRAILING[0]),
+            ([30., -9.], WING_TRAILING[1]),
+        ];
+        for ([x, y], [feet_x, feet_y]) in corners {
+            let right = wing_point(true, [x, y, 0.]);
+            assert!((right[0] * FEET_PER_UNIT - feet_x).abs() < 1e-9, "{x} {y}");
+            assert!((right[1] * FEET_PER_UNIT - feet_y).abs() < 1e-9, "{x} {y}");
+            // The left panel is the right one mirrored (its retail points sit
+            // a unit further out: x_left = -x_right - 1).
+            let left = wing_point(false, [-x - 1., y, 0.]);
+            assert!((left[0] + right[0]).abs() < 1e-9 && (left[1] - right[1]).abs() < 1e-9);
+        }
+        // The stations' spans: inner pylon 7.96 ft out, outer pods 14.46 ft.
+        assert!((mid_chord(7.96) + 0.3819).abs() < 1e-3);
+        assert!((mid_chord(14.46) + 2.2187).abs() < 1e-3);
+    }
+
     #[test]
     fn the_pivots_are_johns_and_the_old_ones_are_gone() {
         assert_eq!(PIVOT_R, [6.5, -1.351_025, 0.465]);

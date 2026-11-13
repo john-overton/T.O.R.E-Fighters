@@ -237,9 +237,13 @@ def ai_jettison_recording_problems(work: Path, output: str) -> list[str]:
 # Update (TOR-12, 2026-11-12, John's wing review): the wing moved in, forward and up and the left
 # wing mirrors the right, so the pair leaves from 7.96 ft out, 1.33 ft down and 1.70 ft ahead at 25
 # degrees and from 8.77 ft out and 1.39 ft aft at 67 degrees, an exact mirror pair.
+# Update (TOR-14, 2026-11-13, John: "all pylons need to be centered on the wing"): the pylon's
+# centre is the wing panel's mid-chord at its span, 0.38 ft aft of the reference point with the
+# wing spread, so the pair leaves from 7.96 ft out and 0.38 ft aft at 25 degrees and from 7.38 ft
+# out and 2.94 ft aft at 67 degrees.
 TORNADO_JETTISON = [
-    ("25 degrees", [(0.0, -5.94, 5.67), (7.96, -1.33, 1.70), (-7.96, -1.33, 1.70)]),
-    ("67 degrees", [(0.0, -5.94, 5.67), (8.77, -1.33, -1.39), (-8.77, -1.33, -1.39)]),
+    ("25 degrees", [(0.0, -5.94, 5.67), (7.96, -1.33, -0.38), (-7.96, -1.33, -0.38)]),
+    ("67 degrees", [(0.0, -5.94, 5.67), (7.38, -1.33, -2.94), (-7.38, -1.33, -2.94)]),
 ]
 
 
@@ -267,10 +271,12 @@ def tornado_jettison_problems(output: str) -> list[str]:
 # John): the rails are on the pylons' inboard flank, 1.25 ft inboard of the Mk 82 packs (they were
 # 10.75 and 11.61/11.78 ft out on the outboard flank). Update (TOR-12, 2026-11-12): with the wing
 # placed and mirrored, 6.71 ft out, 0.62 ft down and 1.70 ft ahead at 25 degrees, 7.52 ft out and
-# 1.39 ft aft at 67 degrees, both sides.
+# 1.39 ft aft at 67 degrees, both sides. Update (TOR-14, 2026-11-13): the pylon is centred on the
+# wing's mid-chord, so the rail leaves from 6.71 ft out and 0.38 ft aft at 25 degrees and from
+# 6.13 ft out and 2.94 ft aft at 67 degrees, still 1.25 ft inboard of the pack's pylon.
 TORNADO_RAIL_JETTISON = [
-    ("25 degrees", [(0.0, -5.94, 5.67), (6.71, -0.62, 1.70), (-6.71, -0.62, 1.70)]),
-    ("67 degrees", [(0.0, -5.94, 5.67), (7.52, -0.62, -1.39), (-7.52, -0.62, -1.39)]),
+    ("25 degrees", [(0.0, -5.94, 5.67), (6.71, -0.62, -0.38), (-6.71, -0.62, -0.38)]),
+    ("67 degrees", [(0.0, -5.94, 5.67), (6.13, -0.62, -2.94), (-6.13, -0.62, -2.94)]),
 ]
 
 

@@ -313,13 +313,18 @@ def mf1_origin_problems(output: str) -> list[str]:
 # place on the panel: the Mk 82 packs hang 7.96 ft out, 1.70 ft ahead and 1.33 ft below the
 # reference with the wing spread (25 degrees, 200 kt), 1.00 ft pylons; at 67 degrees (650 kt)
 # both leave from 8.77 ft out and 1.39 ft aft, an exact mirror pair.
+#
+# Update (TOR-14, 2026-11-13, John: "all pylons need to be centered on the wing"): the pylon's
+# centre is the panel's mid-chord at its span (0.38 ft aft of the reference with the wing spread),
+# so the Mk 82 packs hang 7.96 ft out and 0.38 ft aft at 25 degrees and leave from 7.38 ft out and
+# 2.94 ft aft at 67 degrees; the pylon is one fixed size at every sweep.
 TORNADO_CASES = [
     ("Paveway shoulder row, 25 degrees",
      [(-2.00, -4.92, 12.27), (2.00, -4.92, 12.27), (-2.00, -4.55, -2.93), (2.00, -4.55, -2.93)], RAIL),
-    ("Mk 82 inner wing, 25 degrees", [(-7.96, -1.33, 1.70), (7.96, -1.33, 1.70)], WING),
+    ("Mk 82 inner wing, 25 degrees", [(-7.96, -1.33, -0.38), (7.96, -1.33, -0.38)], WING),
     ("Paveway shoulder row, 67 degrees",
      [(-2.00, -4.92, 12.27), (2.00, -4.92, 12.27), (-2.00, -4.55, -2.93), (2.00, -4.55, -2.93)], RAIL),
-    ("Mk 82 inner wing, 67 degrees", [(-8.77, -1.33, -1.39), (8.77, -1.33, -1.39)], WING),
+    ("Mk 82 inner wing, 67 degrees", [(-7.38, -1.33, -2.94), (7.38, -1.33, -2.94)], WING),
 ]
 
 
@@ -335,9 +340,13 @@ TORNADO_CASES = [
 # Update (TOR-12, 2026-11-12): with the wing placed and mirrored the rail is 6.71 ft out and 0.62
 # ft below the reference at 25 degrees (1.70 ft ahead), and 7.52 ft out, 1.39 ft aft at 67
 # degrees on both sides.
+#
+# Update (TOR-14, 2026-11-13): the pylon is centred on the wing's mid-chord, so the rail is 6.71
+# ft out and 0.38 ft aft at 25 degrees and 6.13 ft out and 2.94 ft aft at 67 degrees, still 1.25
+# ft inboard of the pack's pylon.
 TORNADO_RAIL_CASES = [
-    ("AIM-9M side rail, 25 degrees", [(-6.71, -0.62, 1.70), (6.71, -0.62, 1.70)], 0.53),
-    ("AIM-9M side rail, 67 degrees", [(-7.52, -0.62, -1.39), (7.52, -0.62, -1.39)], 0.53),
+    ("AIM-9M side rail, 25 degrees", [(-6.71, -0.62, -0.38), (6.71, -0.62, -0.38)], 0.53),
+    ("AIM-9M side rail, 67 degrees", [(-6.13, -0.62, -2.94), (6.13, -0.62, -2.94)], 0.53),
 ]
 
 

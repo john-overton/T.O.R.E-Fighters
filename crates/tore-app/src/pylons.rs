@@ -334,6 +334,11 @@ pub fn vertices<'a>(
             airframe,
             turn: f64::from(store.rack.turn),
         });
+        // A swivelling pylon (the Tornado's, TOR-14) has one fixed length and
+        // depth whatever the sweep and wherever the wing's surface is.
+        let fixed = airframe.and_then(|airframe| {
+            tore_sim::combat::swing::pylon_length(airframe.profile.id, usize::from(store.hardpoint))
+        });
         // Each pylon once, with what it carries.
         let mut drawn: Vec<&PylonPlace> = Vec::new();
         for place in &places {
@@ -350,6 +355,7 @@ pub fn vertices<'a>(
                         &dims,
                         size,
                         store.rack.location(),
+                        fixed,
                     );
                 }
                 continue;
@@ -368,6 +374,7 @@ pub fn vertices<'a>(
                     &dims,
                     place.pylon.slots.len() as u16,
                     size,
+                    fixed,
                 );
             }
         }
@@ -499,10 +506,68 @@ fn hanger_attachment(
     (middle, surface)
 }
 
+/// A swivelling wing pylon (TOR-14): its slab `length` long and
+/// [`PYLON_WIDTH`] wide, centred on the pylon's point `pylon.point` (feet
+/// right, up and forward of the aircraft, where the swept wing carries it),
+/// streamwise, from the lugs (or a rack's bar) up to the wing's underside
+/// [`PYLON_DEPTH`] over the lugs, sunk [`SINK`] into it; the simulation hangs
+/// the stores exactly that far under the surface ([`PYLON_DEPTH`] below it),
+/// and the wing's underside is flat there, so the top meets it and stays
+/// below the wing's top face at every sweep. A rack's bar is the same 0.7 of
+/// that length. The pylon is the same size at every sweep and for every store.
+fn fixed_pylon(
+    out: &mut Vec<f32>,
+    at: &impl Fn(Vector) -> Vector,
+    pylon: &PylonPlace,
+    dims: &Dims,
+    on: u16,
+    size: StoreSize,
+    length: f64,
+) {
+    let p = pylon.point;
+    let lugs = p[1] + dims.top;
+    let mut bottom = lugs;
+    if on >= 2 {
+        let per = rack_group(on);
+        let groups = on.div_ceil(per);
+        let long = f64::from(groups - 1) * 1.05 * size.length + 0.7 * length;
+        let centre = p[1] + dims.top - dims.radius.min(dims.top);
+        block(
+            out,
+            at,
+            [p[0], centre, p[2]],
+            [2. * shoulder(size), RACK_DEPTH, long],
+            PYLON,
+        );
+        bottom = centre + RACK_DEPTH / 2.;
+    }
+    // The wing's underside is where the simulation hung the stores from: its
+    // lugs (the point's height and the size table's top) a depth under it.
+    let top = p[1] + size.top + tore_sim::combat::hardpoints::PYLON_DEPTH + SINK;
+    let half = PYLON_WIDTH / 2.;
+    slab(
+        out,
+        at,
+        [p[0] - half, p[0] + half],
+        [p[2] - length / 2., p[2] + length / 2.],
+        bottom,
+        [top; 4],
+    );
+}
+
 /// What holds a pylon's `on` stores of `dims` up: the pylon slab from the
 /// stores' lugs (or a rack's bar) into the model's underside, the small bar
 /// at its foot that two or more stores hang beside; or, with nothing above,
 /// a rail joining a wingtip beside it, or a short rail.
+///
+/// `fixed` is the length of a swivelling wing pylon (TOR-14,
+/// [`tore_sim::combat::swing::pylon_length`]): it is centred on its point `p`
+/// (the point the wing carries, not the store's middle), exactly that long and
+/// [`PYLON_DEPTH`] deep from the stores' lugs to a flat top that meets the
+/// wing's underside there (the simulation hangs the lugs that far under it),
+/// whatever the sweep, so it never depends on what
+/// surface the model has under it.
+#[allow(clippy::too_many_arguments)]
 fn hanger(
     out: &mut Vec<f32>,
     at: &impl Fn(Vector) -> Vector,
@@ -511,9 +576,14 @@ fn hanger(
     dims: &Dims,
     on: u16,
     size: StoreSize,
+    fixed: Option<f64>,
 ) {
     let p = pylon.point;
     let lugs = p[1] + dims.top;
+    if let Some(length) = fixed {
+        fixed_pylon(out, at, pylon, dims, on, size, length);
+        return;
+    }
     let desired_middle = p[2] + dims.middle;
     let (middle, surface) = airframe.map_or((desired_middle, None), |a| {
         hanger_attachment(a, p[0], desired_middle, p[2], lugs)
@@ -615,6 +685,7 @@ fn hanger(
 /// [`tore_sim::combat::hardpoints::INBOARD_RAIL_LENGTH`], 3 ft), the rail it
 /// hangs from: a jut off the pylon's side just above the store under the
 /// pylon (John 2026-10-14).
+#[allow(clippy::too_many_arguments)]
 fn shoulder_rail(
     out: &mut Vec<f32>,
     at: &impl Fn(Vector) -> Vector,
@@ -623,6 +694,7 @@ fn shoulder_rail(
     dims: &Dims,
     size: StoreSize,
     location: Location,
+    fixed: Option<f64>,
 ) {
     let p = pylon.point;
     if pylon.slots.len() == 2 {
@@ -639,6 +711,7 @@ fn shoulder_rail(
             dims,
             1,
             size,
+            fixed,
         );
         let spread = tore_sim::combat::hardpoints::TWIN_SHOULDER_OUT;
         block(
@@ -656,17 +729,24 @@ fn shoulder_rail(
     let flank = location.rail_out().signum();
     let pylon_x = p[0] - side * location.rail_out();
     let foot = p[1] - shoulder_rise(size);
+    // A fixed pylon (TOR-14) stands on the foot the simulation hung the rail
+    // from, whatever the missile's drawn top: its lugs are the foot.
+    let pylon_dims = Dims {
+        top: if fixed.is_some() { size.top } else { dims.top },
+        ..*dims
+    };
     hanger(
         out,
         at,
         airframe,
         &PylonPlace {
-            point: [pylon_x, foot - dims.top, p[2]],
+            point: [pylon_x, foot - pylon_dims.top, p[2]],
             slots: pylon.slots.clone(),
         },
-        dims,
+        &pylon_dims,
         1,
         size,
+        fixed,
     );
     // The arm leaves the pylon's face turned to the store.
     let face = pylon_x + side * flank * PYLON_WIDTH / 2.;
@@ -1138,6 +1218,10 @@ mod tests {
     /// reference height, 0 to 15 ft out and 8 ft either side of the
     /// reference point fore and aft.
     fn flat_wing() -> Airframe {
+        flat_wing_of(tore_formats::aircraft::AircraftId::Rafale)
+    }
+
+    fn flat_wing_of(id: tore_formats::aircraft::AircraftId) -> Airframe {
         let wing = Shape {
             lines: Vec::new(),
             faces: vec![tore_formats::shape::Face {
@@ -1159,7 +1243,7 @@ mod tests {
             state_words: Default::default(),
         };
         Airframe::synthetic(
-            tore_formats::aircraft::AircraftId::Rafale,
+            id,
             vec![wing],
             None,
             crate::combat_view::render_hash_tests::damage(),
@@ -1435,6 +1519,7 @@ mod tests {
             },
             1,
             StoreSize::body(PLAIN),
+            None,
         );
         let top = grey(&vertices)
             .iter()
@@ -1465,6 +1550,103 @@ mod tests {
                 }
                 assert_eq!(now.centre[1], was.centre[1], "the height does not change");
             }
+        }
+    }
+
+    /// TOR-14, John 2026-11-13: "when wings are swept forward the out pylons
+    /// with the pods grow in size". A swivelling Tornado pylon has one size
+    /// at every sweep (and for every store): [`PYLON_WIDTH`] wide, the
+    /// simulation's depth from the lugs to the wing plus the [`SINK`] and
+    /// [`tore_sim::combat::swing::PYLON_LENGTH_FT`] long, centred on the point
+    /// the swept wing carries it to, streamwise, whatever surface the model has
+    /// under it (the wing here is one flat face, far from the Tornado's, and
+    /// ends well short of the pylon at some sweeps).
+    #[test]
+    fn a_swivelling_pylon_is_the_same_size_at_every_sweep() {
+        use tore_formats::aircraft::AircraftId;
+        use tore_sim::combat::hardpoints::{INBOARD_RAIL_BYTE, PYLON_DEPTH};
+        use tore_sim::combat::swing;
+        let airframe = flat_wing_of(AircraftId::Tornado);
+        // Row 7 (the Mk 82 pack's pylon), row 8 (the AIM-9 rail's, the same
+        // pylon) and row 9 (the outer pod's): every swivelling row.
+        let cases = [
+            (7, 4, [7.96, -1.33, swing::mid_chord(7.96)]),
+            (8, INBOARD_RAIL_BYTE, [6.71, -0.62, swing::mid_chord(7.96)]),
+            (9, 4, [14.46, -1.67, swing::mid_chord(14.46)]),
+        ];
+        for (row, location, mount) in cases {
+            let mut store = plain(mount, location, 2);
+            store.hardpoint = row;
+            let extents = |turn: f64| {
+                let mut posed = store.clone();
+                posed.rack.turn = turn as f32;
+                let out = draw(std::slice::from_ref(&posed), &airframe);
+                // The pylon's own slab: the grey the rack bar does not draw
+                // (a lone store a side has no bar).
+                let pylon = grey(&out);
+                let low = pylon.iter().fold([f32::MAX; 3], |m, v| {
+                    [m[0].min(v[0]), m[1].min(v[1]), m[2].min(v[2])]
+                });
+                let high = pylon.iter().fold([f32::MIN; 3], |m, v| {
+                    [m[0].max(v[0]), m[1].max(v[1]), m[2].max(v[2])]
+                });
+                (low, high)
+            };
+            let (low, high) = extents(0.);
+            let size =
+                |low: [f32; 3], high: [f32; 3]| [0, 1, 2].map(|i| f64::from(high[i] - low[i]));
+            let spread = size(low, high);
+            for degrees in [25., 30., 40., 50., 60., 67.] {
+                let turn = swing::wing_turn(swing::speed_for_sweep(degrees), 0.);
+                let (low, high) = extents(turn);
+                let now = size(low, high);
+                for i in 0..3 {
+                    // A paired row draws both wings' pylons, the lateral
+                    // extent spans both; compare vertical and fore-aft sizes
+                    // exactly, and the lateral size per pylon below.
+                    if i != 0 {
+                        assert!(
+                            (now[i] - spread[i]).abs() < 1e-4,
+                            "row {row} at {degrees} degrees: size {now:?} against {spread:?}"
+                        );
+                    }
+                }
+                assert!(
+                    (now[2] - swing::PYLON_LENGTH_FT).abs() < 1e-4,
+                    "row {row}: {now:?}"
+                );
+                // The rail's arm (row 8) stands a little over the pylon's top
+                // on this plain body; the slab itself is a depth and a sink.
+                let allowed = if row == 8 { 0.1 } else { 1e-4 };
+                assert!(
+                    (now[1] - (PYLON_DEPTH + SINK)).abs() < allowed + 1e-4,
+                    "row {row} at {degrees}: depth {}",
+                    now[1]
+                );
+                // Centred on the swept point: the middle of its fore-aft
+                // extent is where the wing carries the station.
+                let carried = swing::swept(true, mount_pylon(row, mount), f64::from(turn as f32));
+                let middle = f64::from(low[2] + high[2]) / 2.;
+                assert!(
+                    (middle - carried[2]).abs() < 1e-4,
+                    "row {row} at {degrees}: pylon centre {middle} against {}",
+                    carried[2]
+                );
+            }
+        }
+    }
+
+    /// The pylon's own point for `row`: row 8's rail pylon is row 7's, so the
+    /// rail's sideways offset is taken off its mount.
+    fn mount_pylon(row: u8, mount: Vector) -> Vector {
+        if row == 8 {
+            [
+                mount[0] + tore_sim::combat::hardpoints::SHOULDER_OUT,
+                mount[1],
+                mount[2],
+            ]
+        } else {
+            mount
         }
     }
 

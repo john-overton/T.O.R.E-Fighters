@@ -3118,7 +3118,7 @@ peer needs the sweep to place it. Numbers, aircraft frame (right, up, forward, f
 (spread) 16.00, -1.79, -5.06; 45 degrees 16.27, -1.79, -8.52; 67 degrees 15.19, -1.79, -12.17. The
 standard point (0, -2, -15) still serves every other aircraft and the Clean version (which has
 nothing to release). `--countermeasure-preview` prints each device's offset two ticks after a
-release; the battery scenarios `flight-countermeasures-tornado-boz` and `...-sweep67` check it.
+release; the battery scenarios `flight-countermeasures-tornado-boz` and `...-sweep67` check it. Update (TOR-14, 2026-11-13): the pod is centred on the wing's mid-chord, so the outlet is at 14.46, -1.67, -8.78 at 25 degrees, 13.34, -1.67, -12.28 at 450 kt (45.7 degrees) and 10.98, -1.67, -15.22 at 67 ([TOR-14](#the-tornados-pylons-centred-on-the-wing-one-size-at-every-sweep-tor-14-2026-11-13)).
 
 ### The Clean version, and what the record ties together
 
@@ -3182,6 +3182,8 @@ pylon is 1.00 ft deep, 0.53 ft for the rail, as before; before the fix the previ
 and 0.65). The swivel and the sweep schedule are unchanged: the pylon turns back by the wing's
 turn about the new pivot, so each store is streamwise at every sweep.
 
+Update (TOR-14, 2026-11-13): the forward places and 67 degree places in this table are superseded: the pylons are centred on the panel's mid-chord, 7.96 ft out and 0.38 ft aft (rows 7 and 8, 6.71 ft out), 14.46 ft out and 2.22 ft aft (rows 9 and 10), see [TOR-14](#the-tornados-pylons-centred-on-the-wing-one-size-at-every-sweep-tor-14-2026-11-13).
+
 **Clearance after the move** (CPU stores preview, default load, Combat version; scripts and
 logs `.local/m3-aircraft/checks/TOR-12/`; gaps in feet, quarter-foot samples both ways, 0.00
 is the pylon's own contact with the wing).
@@ -3223,4 +3225,157 @@ the pylon is about 0.1 ft wide, so its inner edge reaches the fuselage's new out
 nothing was moved to hide it. Options: leave it; or move the rail 0.15 ft outboard (its 1.25 ft
 inboard offset to about 1.10 ft, a one-line `SHOULDER_OUT` change that also moves it nearer the
 Mk 82 pack, whose gap is 0.06 ft now); or move the fuselage wall's forward edge back.
+
+## The Tornado's pylons centred on the wing, one size at every sweep (TOR-14, 2026-11-13)
+
+**Opinionated (John, 2026-11-13); the mid-chord definition, the fixed pylon size and the numbers
+that follow from them are agent decisions, fitted.** John: "lets fix the pylons on the tornado, all
+pylons need to be centered on the wing always point forward but have center position locked on the
+wing as it sweeps back. We also need to fix pylon sizes because when wings are swept forward the out
+pylons with the pods grow in size." Update to the
+[TOR-5b inner wing pair](#the-tornado-ids-inner-wing-pair-on-the-wing-one-centreline-tank-a-glove-plate-tor-5b-2026-11-11),
+the [TOR-6b side rail](#the-tornado-aim-9-side-rails-on-the-inboard-swivelling-pylons-tor-6b-2026-11-11),
+the [TOR-13 pods](#two-tornado-ids-versions-and-the-combat-version-outer-wing-pods-tor-13-2026-11-12)
+and [TOR-12](#the-tornados-wing-placed-pylons-moved-with-it-tor-12-2026-11-12): the numbers those
+sections give for the stations' forward places, the 67 degree places, the pylon lengths and the
+outlet are superseded here (their text is history). Both versions (the Clean one has rows 7 and 8).
+
+### Why the pods' pylons grew
+
+Not the wing's new height (`WING_UP_FT` is 0.117 ft). The drawn pylon was built from the wing under
+it: 0.45 of the store's length (5.9 ft under the 13.1 ft BOZ-107, 3.3 ft under a Mk 82 pack, at least
+twice its depth), centred on the store's *middle* rather than on the station, and trimmed fore and
+aft to wherever the model's surface reached (`along_surface`), with its top found by searching up to
+12 ft for a surface and, failing that, reaching aft toward the station for one
+(`hanger_attachment`). The outer pylon stood 1.7 ft forward of the reference point, but with the wing
+spread (25 degrees) the panel's leading edge there is only 0.51 ft forward: the pylon was 1.2 ft
+**ahead of the wing**, so the middle had no surface over it, the slab kept its whole 5.9 ft at a flat
+height and stood in the open ahead of the leading edge, a large grey slab with its top face showing
+from above (John's 08-40 screenshot). As the wing swept, the panel moved under the pylon, the
+trim cut the slab down to the surface over it and the pylon looked smaller (08-39). The inner pylons
+sat on the wing at every sweep (the chord there is 6.4 ft), so they only changed by the trim.
+
+### What changed
+
+1. **Mid-chord.** `swing::mid_chord(span)` is the forward coordinate, wing spread, halfway between
+   the placed right panel's leading edge and its trailing edge (the flap strip's outer edge, flaps up)
+   along the streamwise line at `span` feet out. The edges are the drawn panel's own corners
+   (`swing::WING_LEADING`, `WING_TRAILING`: retail corners (9, 7) to (31, -2) and (10, -4) to (30, -9)
+   shape units through TOR-12's placement; `tornado_animation` has a test that its `wing_point`
+   reproduces them, and the preview's `Pylon centre:` line reads the drawn panel's chord back at
+   every sweep). The left panel mirrors. `TORNADO_WING_INNER` and `TORNADO_WING_OUTER` keep their
+   spans (7.96 and 14.46 ft out, no span moved) and take `mid_chord` of them as their forward place.
+2. **Locked to the wing.** Unchanged in kind: `Rack::side_pylons` carries the pylon's centre with
+   `swing::swept` about the wing's pivot, the height unchanged, so it is the same point of the panel
+   at every sweep and through the flaps' hold (the flaps hold the wing at 25 degrees; the strips
+   droop about their own hinge, never moving the pylon). Row 8's rail keeps its place relative to
+   row 7's pylon: the pylon is row 7's, the rail's store hangs 1.25 ft inboard of its centre line
+   and that offset is not turned with the wing.
+3. **Always forward.** Unchanged: the pylon is never turned, the wing's turn is undone by
+   `pylon_swivel`, and the store and the pylon rotate about their own centre (the carried point),
+   not about any other point. The drawn pylon is now centred on that point (it was centred on the
+   store's middle, 1.2 ft away for an AIM-9M and -0.9 ft for a Mk 82).
+4. **Constant size.** The drawn pylon of every swivelling row is `swing::PYLON_LENGTH_FT` long
+   (3.3 ft, fitted: the Mk 82 pack's old length, 0.6 of the 5.45 ft chord at the pods), `PYLON_WIDTH`
+   (0.28 ft) wide and from the stores' lugs up to the wing's underside, `PYLON_DEPTH` (1.0 ft) over
+   the simulation's lugs, plus the 0.02 ft sink. It is no longer measured against the model, so it is
+   the same at every sweep, for every store, and never reaches the wing's top face (the panel is
+   0.67 ft thick). Rows 7 and 8 draw the same pylon. The sampling of the retail wing for the
+   stations' height now reads the retail wing at the placed point's retail place (1.54 ft outboard and
+   0.20 ft aft, TOR-12's placement); the wing is flat there, so the heights did not change.
+
+| Station (feet, aircraft frame right / forward) | Before (TOR-12) 25 | Now 25 | Before 67 | Now 45 degrees | Now 67 |
+| --- | --- | --- | --- | --- | --- |
+| Row 7 Mk 82 pack's pylon centre | 7.96 / 1.70 | **7.96 / -0.38** | 8.77 / -1.39 | 7.92 / -1.65 | **7.38 / -2.94** |
+| Row 8 AIM-9M rail (1.25 ft inboard) | 6.71 / 1.70 | **6.71 / -0.38** | 7.52 / -1.39 | 6.67 / -1.65 | **6.13 / -2.94** |
+| Row 9 BOZ-107 pylon centre (right) | 14.46 / 1.70 | **14.46 / -2.22** | 13.60 / -5.74 | 13.40 / -5.60 | **10.98 / -8.66** |
+| Row 10 Sky Shadow (left) | -14.46 / 1.70 | **-14.46 / -2.22** | -13.60 / -5.74 | -13.40 / -5.60 | **-10.98 / -8.66** |
+| Chaff and flare outlet (BOZ-107 aft face), up -1.67 | 14.46 / -4.86 | **14.46 / -8.78** | 13.60 / -12.31 | 13.34 / -12.28 (450 kt, 45.7 degrees) | **10.98 / -15.22** |
+
+Heights (up) are unchanged: row 7 -1.33, row 8 -0.62, the BOZ-107 -1.67, the Sky Shadow -1.57. In the
+wing's own frame the centres are 7.96 ft out, 0.382 ft aft of the reference point and 14.46 ft out,
+2.219 ft aft; the drawn chord there is 6.36 ft (2.80 forward to 3.56 aft) and 5.45 ft (0.51 forward
+to 4.94 aft), and `Pylon centre:` reads the centres 0.002 and 0.004 ft off the middle at 25, 45 and
+67 degrees. The old stations were 2.08 ft (inner) and 3.92 ft (outer) ahead of the middle. Release
+and jettison origins, the AI's, and the chaff and flare outlet (`Configuration::dispenser_exit`,
+`Release::from_outlet`) follow with no change of code, because they read the pylon's point.
+
+**The store's own origin.** The pylon is centred on the station's point and the store's origin hangs
+there too (the simulation takes a store's origin as its middle). A retail shape's origin is not always
+its body's middle: the Mk 82's body is 0.87 ft aft of its origin and the AIM-9M's 1.21 ft ahead, so
+those two hang off their pylon's centre by that much (before, the pylon followed the body). The pods
+are centred exactly (their model's origin is the middle). An agent decision: the alternative, moving
+each store by its own offset, needs the offset in the simulation, which the size table does not carry.
+
+### Guards
+
+`the_tornado_pylon_centres_stay_on_the_wing_and_point_forward_at_every_sweep` (`hardpoints.rs`: the
+four rows, both sides, 25 to 67 degrees: the centre carried back to the spread pose is the same point,
+that point is the mid-chord at its span, the heading is zero, the radius about the pivot is kept),
+`the_mid_chord_is_halfway_between_the_placed_panels_edges` (`swing.rs`),
+`the_stations_mid_chord_edges_are_the_placed_panels_corners` (`tornado_animation.rs`),
+`a_swivelling_pylon_is_the_same_size_at_every_sweep` (`pylons.rs`: length, depth, centre, at six
+sweeps, on a flat wing that ends well short of the pylon), and the preview's `Pylon centre:` lines on
+the real wing.
+
+### Clearance after the change
+
+CPU stores preview, default load, Combat version (the Clean version's rows 7 and 8 read the same);
+scripts and logs `.local/m3-aircraft/checks/TOR-14/` (`clear3.sh`, `default/`, `clean/`); gaps in feet,
+quarter-foot samples both ways; 0.00 is a touch or a crossing (the gap tool cannot tell which; the
+`Taileron entry:` lines say how deep a crossing goes). `TORE_STORES_PREVIEW_PODCLEAR=1` now also
+prints the `Pylon centre:` and `Taileron entry:` lines, and its `Wing store clearance:` lines cover
+the pods' pylons (rows 9 and 10).
+
+| Measure | 25 degrees | 45 degrees | 67 degrees |
+| --- | ---: | ---: | ---: |
+| Mk 82 pack / AIM-9M against the airframe (clip) | 0.00 / 0.11 | 0.00 / 0.11 | 0.00 / 0.11 (the tool prints 1.44: see below) |
+| Pods BOZ-107 / Sky Shadow: wing panel (the pylon's own depth) | 1.00 / 1.00 | 1.00 / 1.00 | 1.00 / 1.00 |
+| Pods: flap strips, flaps up | 1.05 / 1.05 | 1.05 / 1.05 | 1.06 / 1.08 |
+| Pods: flap strips, flaps down (wing held at 25) | 0.52 / 0.56 | n/a | n/a |
+| Pods: tailerons (neutral) | 5.40 / 6.43 | 2.55 / 3.57 | **0.00 / 0.01** |
+| Pods: fuselage (the new walls included) | 7.36 / 7.49 | 6.83 / 7.20 | 5.76 / 6.02 |
+| Pods: Mk 82 pack | 5.32 / 5.42 | 4.26 / 4.36 | 2.36 / 2.48 |
+| Pods: AIM-9 rail | 5.63 / 5.71 | 4.69 / 4.81 | 3.00 / 3.17 |
+| Pods: gear legs, gear down | 9.22 / 9.38 | n/a | n/a |
+| Pods: lowest point above the gear contact | 4.88 / 5.07 | 4.88 / 5.07 | 4.88 / 5.07 |
+| Mk 82 pack: wing panel, flap strip (flaps up) | 0.00, 0.00 | 0.00, 0.02 | 0.00, 0.33 |
+| Mk 82 pack: taileron, neutral | 2.59 | 1.82 | 0.72 |
+| Mk 82 pack: fuselage | 1.16 | 1.71 | 2.11 |
+| Mk 82 pack: gear legs | 3.14 | n/a | n/a |
+| AIM-9 rail: taileron, neutral | 1.98 | 1.15 | 0.00 (0.03 ft deep) |
+| AIM-9 rail: fuselage | 0.01 | 0.01 | 0.01 |
+| AIM-9M: gear legs | 2.68 | n/a | n/a |
+
+Taileron entry (the deepest a crossing goes inside the taileron's outline, neutral and at full
+pitch up, pitch down, roll right and roll left; both sides): **BOZ-107 0.57 ft at 67 degrees** (0.56
+to 0.58 in every pose), the Sky Shadow 0.07 ft (up to 0.11 deflected), the AIM-9M rail 0.03 ft, the
+Mk 82 pack 0.00; every row 0.00 at 25 and 45 degrees.
+
+**Findings, nothing moved to hide them (not guessed).**
+
+1. **The BOZ-107's tail enters the right taileron by 0.57 ft at full sweep** (over the 0.3 ft line):
+   with the pylon on the mid-chord, the pod's aft 4 ft (the pod is 13.1 ft long, its tail 6.56 ft
+   aft of the pylon) is over the taileron's forward outer corner at 67 degrees (the pod spans 10.19
+   to 11.76 ft out, the taileron's leading edge there is 13.3 ft aft). Before TOR-14 the pod was 3.9 ft
+   further forward and cleared it by 2.62 ft. Moving the outer pylon outboard does not cure it
+   within the panel: 15.5 ft out, 0.54 ft; 16.5 ft out, 0.35 ft; 17.5 ft out clears it by 0.17 ft
+   (the Sky Shadow 0.22) but is 3.0 ft further out than the fitted span (the panel's tip is 20.5 ft
+   out) with the chord down to 5.0 ft. Left for John; options: leave it; move the outer pylons to 17.5
+   ft (their mid-chord there is 2.9 ft aft); or move them forward of the mid-chord, which is what
+   John asked not to do.
+2. **The AIM-9M rail's 0.11 ft entry into the fuselage (TOR-12's open item) is now at every sweep.**
+   Re-measured at 25, 30, 35, 40, 45, 50, 55, 60 and 65 degrees: **0.11 ft at each** (it was 0.00 to 0.11,
+   at 35 to 45 only): with the pylon on the mid-chord the missile hangs alongside the glove box
+   wall at every sweep, where before only part of it lay beside the wall at 25 degrees. The fuselage
+   gap reads 0.01 ft throughout. The wall is unchanged, as asked. At 67 degrees the clip tool prints
+   1.44 ft at the missile's fin tip: that is the tool's own limit, it takes the lowest face over the
+   point and finds the taileron plate 1.4 ft *under* the missile (taileron entry 0.03 ft); the glove
+   wall's entry there is the same 0.11 ft.
+3. **The Mk 82 pack and the AIM-9M rail are closer to the tailerons at full sweep** (0.72 and 0.00 ft,
+   neutral; the rail's fin grazes the plate by 0.03 ft; were 2.64 ft for the pack).
+4. **Flaps down, wing held at 25 degrees:** the pylons are now 3.3 ft long, centred on the mid-chord,
+   so the aft 0.6 ft of the pack's pylon and 0.4 ft of the pods' lie under the flap strip's forward part
+   and the drooped strip (0.4 rad) lowers onto them by up to about 0.2 ft (agent arithmetic from the hinge
+   line: 0.6 ft aft of it times the sine of 0.4 rad), a drawn-geometry overlap under 0.3 ft.
 

@@ -17,6 +17,9 @@
 //! Update (TOR-12, 2026-11-12): the wing is placed 1.54 ft in, 0.1167 ft up and
 //! 0.20 ft forward of the retail panel, mirrored left to right, with new pivots
 //! ([`PIVOT_R`], [`WING_IN_FT`]), so the stations that ride on it move with it.
+//! Update (TOR-14, 2026-11-13): every swivelling pylon is centred on the wing
+//! panel's mid-chord at its span ([`mid_chord`]) and has one fixed length
+//! ([`PYLON_LENGTH_FT`]) and depth, whatever the sweep.
 use tore_formats::aircraft::AircraftId;
 
 /// Shape units to feet at the Tornado's header scale 2 (2/3 ft a unit).
@@ -59,6 +62,73 @@ pub const WING_IN_FT: f64 = 1.54;
 pub const WING_UP_FT: f64 = 0.175 * FEET_PER_UNIT;
 pub const WING_FORWARD_FT: f64 = 0.2;
 pub const ROOT_SHIFT_FT: f64 = 2.3483;
+
+/// The placed right wing panel's leading and trailing edges in the spread
+/// pose, each as its inboard and outboard corner [right, forward] in feet
+/// (TOR-14, 2026-11-13). They are the panel's outline corners (retail's shape
+/// units, 2/3 ft each: leading edge (9, 7) to (31, -2), trailing edge, the
+/// flap strip's outer edge, (10, -4) to (30, -9)) with John's placement
+/// ([`WING_IN_FT`], [`WING_FORWARD_FT`] and, for the two root corners,
+/// [`ROOT_SHIFT_FT`]) applied, exactly as `tornado_animation::wing_point`
+/// places them; a test there pins the two against each other. The left panel
+/// mirrors them.
+pub const WING_LEADING: [[f64; 2]; 2] = [
+    [
+        9. * FEET_PER_UNIT - ROOT_SHIFT_FT - WING_IN_FT,
+        7. * FEET_PER_UNIT + WING_FORWARD_FT,
+    ],
+    [
+        31. * FEET_PER_UNIT - WING_IN_FT,
+        -2. * FEET_PER_UNIT + WING_FORWARD_FT,
+    ],
+];
+pub const WING_TRAILING: [[f64; 2]; 2] = [
+    [
+        10. * FEET_PER_UNIT - ROOT_SHIFT_FT - WING_IN_FT,
+        -4. * FEET_PER_UNIT + WING_FORWARD_FT,
+    ],
+    [
+        30. * FEET_PER_UNIT - WING_IN_FT,
+        -9. * FEET_PER_UNIT + WING_FORWARD_FT,
+    ],
+];
+
+/// Where along an edge of the placed panel (`edge`, two [right, forward]
+/// corners) the span station `right` feet out is: its forward coordinate.
+const fn edge_forward(edge: [[f64; 2]; 2], right: f64) -> f64 {
+    let share = (right - edge[0][0]) / (edge[1][0] - edge[0][0]);
+    edge[0][1] + share * (edge[1][1] - edge[0][1])
+}
+
+/// The forward coordinate (feet, aircraft frame, wing spread) of the middle
+/// of the placed panel's chord at the span station `right` feet out of the
+/// reference point: halfway between the leading edge and the trailing edge
+/// (the flap strip's trailing edge, flaps up) along the streamwise line at
+/// that span. The chord is the panel's own local section, so a pylon centred
+/// there stays on the wing's middle through the sweep (TOR-14, 2026-11-13,
+/// John: "all pylons need to be centered on the wing"; the definition of
+/// mid-chord is the agent's). Right-hand wing; the left mirrors it.
+pub const fn mid_chord(right: f64) -> f64 {
+    (edge_forward(WING_LEADING, right) + edge_forward(WING_TRAILING, right)) / 2.
+}
+
+/// How long every swivelling wing pylon is drawn, feet, whatever the sweep or
+/// the store (TOR-14, 2026-11-13; fitted, agent decision): 3.3 ft, the length
+/// the Mk 82 pack's pylon had (0.45 of the 7.3 ft bomb), which is a little over
+/// half the 6.4 ft panel chord at the inner pylon and 60 percent of the 5.46 ft
+/// chord at the outer pods, so the pylon stays inside the panel's outline with
+/// the wing spread, and its aft end stays within 0.4 ft of the flap strip's
+/// hinge line (the strip droops onto at most 0.17 ft of it with the flaps
+/// down). It was a share of the store's length (0.45 of it, at least twice its
+/// depth) trimmed to wherever the wing's surface was under it, which was 5.9 ft
+/// for the 13 ft pod and grew with the spread wing.
+pub const PYLON_LENGTH_FT: f64 = 3.3;
+
+/// The fixed length of the swivelling pylon of source hardpoint `hardpoint`
+/// of aircraft `id`, when it has one ([`swivels`]).
+pub fn pylon_length(id: AircraftId, hardpoint: usize) -> Option<f64> {
+    swivels(id, hardpoint).then_some(PYLON_LENGTH_FT)
+}
 
 /// How far the wing panel has turned from its spread pose, radians (0 spread,
 /// `SWEEP_MAX - SWEEP_MIN` degrees fully swept), for an aircraft flying at
@@ -172,6 +242,34 @@ mod tests {
         let l = pivot_feet(false);
         assert_eq!((l[0], l[1], l[2]), (-r[0], r[1], r[2]));
         assert!((WING_UP_FT - 0.116_666_7).abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_mid_chord_is_halfway_between_the_placed_panels_edges() {
+        // TOR-14: the placed right panel's leading edge runs from (2.1117,
+        // 4.8667) to (19.1267, -1.1333) ft and its trailing edge from (2.7784,
+        // -2.4667) to (18.46, -5.8), read off the drawn panel's corners.
+        assert!((WING_LEADING[0][0] - 2.1117).abs() < 1e-4);
+        assert!((WING_LEADING[0][1] - 4.8667).abs() < 1e-4);
+        assert!((WING_LEADING[1][0] - 19.1267).abs() < 1e-4);
+        assert!((WING_LEADING[1][1] + 1.1333).abs() < 1e-4);
+        assert!((WING_TRAILING[0][0] - 2.7784).abs() < 1e-4);
+        assert!((WING_TRAILING[0][1] + 2.4667).abs() < 1e-4);
+        assert!((WING_TRAILING[1][0] - 18.46).abs() < 1e-4);
+        assert!((WING_TRAILING[1][1] + 5.8).abs() < 1e-4);
+        // The inner pylon's span (7.96 ft out) and the outer pods' (14.46).
+        assert!(
+            (mid_chord(7.96) + 0.3815).abs() < 1e-3,
+            "{}",
+            mid_chord(7.96)
+        );
+        assert!(
+            (mid_chord(14.46) + 2.2187).abs() < 1e-3,
+            "{}",
+            mid_chord(14.46)
+        );
+        // Aft with the span, as the panel's chord runs.
+        assert!(mid_chord(14.46) < mid_chord(7.96));
     }
 
     #[test]

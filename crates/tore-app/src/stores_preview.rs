@@ -429,6 +429,7 @@ pub fn run() -> AppResult<()> {
         ];
         clip_report(short, &airframe, &art, &loads[1].1, turn);
         if std::env::var_os("TORE_STORES_PREVIEW_PODCLEAR").is_some() {
+            pod_clearance::pylon_centres(short, &airframe, &loads[1].1, sweep.unwrap_or(25.));
             pod_clearance::report(
                 short,
                 &airframe,
