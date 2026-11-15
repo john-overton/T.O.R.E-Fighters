@@ -8049,3 +8049,109 @@ F404-F1D2 value found), the B-2 and B-52 top speeds and sea-level edges, the B-2
 49,000 ft ceiling (real 50,000), and the engine count: `Configuration::from_source`
 clamps `engines` to 1 to 4 (`live.rs`), so the B-52's eight engines read as four
 (an existing behaviour, not touched here; B52-8's call).
+
+## B-52 shape, size and looks (B52-2, 2026-11-15)
+
+Implementation, slice B52-2, Claude Sonnet. John's accepted decision 6 (2026-11-15:
+draw at 2/3 ft per unit, lengthen the gear only if the frames show the belly or
+pods too low) is confirmed in code and frames. BMB-A1 had already put the
+B-52 at 2/3 ft a unit (`debris::scale`, the rig spec and the gear low point);
+this slice measured every consumer and changed no production code. A retail-reading
+test (`crates/tore-import/tests/b52_shape.rs`, skips without media) pins the numbers
+and the `render-b52-skin` battery scenario draws the top and under views with the gear
+down. Frames: `.local/m3-aircraft/frames/B52-2/` (local only).
+
+**Size (spec-derived measurements, shape units at 2/3 ft).** `B52.SH` of `FA_2.LIB`
+(CODE 27,204; the base archive is the only source). Neutral state: x -139 to 139, y
+-138 to 107, z -9 to 42; gear word `7a26` adds 32 faces and the low point -14.
+
+| Axis | Units | Feet at 2/3 | Real | Difference |
+| --- | ---: | ---: | ---: | ---: |
+| Span | 278 | 185.3 | 185 ft | +0.2% |
+| Length | 245 | 163.3 | 159 ft 4 in (Jane's 160.9 ft) | +2.5% (+1.5%) |
+| Height, gear down to fin tip | 56 | 37.3 | 40 ft 8 in | -8.2% |
+
+**Gear and the decision (fitted measurements, agent decision, nothing lengthened).**
+
+| Assembly | Faces | Measured (units, feet) |
+| --- | ---: | --- |
+| Four tandem trucks | 6 each | centres y +39.5 and -31.5 (wheelbase 71 units, 47.3 ft); plates x 5 to 13 and -14 to -5 (about 12.3 ft between truck centres); z -14 to -6 |
+| Two outriggers | 4 each | x +/-108 to 113 (74 ft out), y -38 to -32 (23 ft aft of the origin), z -14 to 3 (11.3 ft long) |
+
+- Contact line: every truck and both outriggers reach z -14, which is 9.33 ft below
+  the reference point; `models/variety.rs` uses the same 14 units at 2/3 ft. The
+  outriggers touch the ground line with the wings at rest (the wing tip is at z 3,
+  11.3 ft up, and the leg is 17 units). In the ground frames the truck wheels and an
+  outrigger wheel sit on the runway.
+- Clearance with the gear down: belly 3.3 ft (z -9), inboard pods 5.3 ft (z -6, x 45
+  to 61), outboard pods 4.7 ft (z -7, x 79 to 96), drawn tank pods 7.3 ft, wing tip
+  11.3 ft, fin tip 37.3 ft.
+- **Decision: the gear stays as drawn.** The frames show a low, long-legged-looking
+  bomber with the pods clear of the pavement; nothing reads as sunk or clipped. No
+  published pod or belly clearance figure was found (a web search returned the layout
+  only), so a lengthening of about 3.4 ft (5 units) to reach the real 40 ft 8 in
+  would be a guess. It remains an option for John: lengthen all six assemblies by the
+  same 5 units (fitted), which raises the belly to 6.7 ft and the pods to 8.0 and 8.6
+  ft, and moves the variety gear low point to 19 units (12.7 ft). Not applied.
+
+**Consumers at 2/3 ft.** The drawn aircraft, the stores preview and station
+underside, the damage looks and their section extents, the damage bodies and pieces,
+breakup offsets, the gear low point (9.33 ft) and the wingtip vapor point all use
+2/3. The vapor record's points are +/-278 CE units, 92.67 ft out, exactly the drawn
+tip (139 units), 2 ft up (the wing tip is at z 3) and 43.3 ft aft (inside the tip
+chord); no fix needed. The generic rig scale equals `debris::scale` for the B-52 (a
+test line was added beside the Tornado's). No consumer is still at 1/3.
+
+**Not shape-derived (shared, unchanged, flagged).**
+
+- *Hit volume.* One 28 ft sphere for every aircraft (`AIRCRAFT_RADIUS_FT`); the gun
+  contact boxes are fractions of it (wings to 0.92, nose to 0.92, tail to -0.92). For
+  the B-52 that is a hit box about 26 ft each side of the origin on a 92.7 ft
+  half-span, 26 ft forward of the origin on a nose 71 ft out and 26 ft aft on a tail
+  92 ft out: gunfire and fuzed weapons only touch the middle of the aircraft (the wing boxes reach 28 percent of the half-span). The transports
+  (C-130, E-3) share this. A per-aircraft radius would change every aircraft, so it
+  is John's call (flagged, not changed).
+- *Eye point.* `mirrors::pilot_eye` is a fixed 10 ft forward and 7 ft up of the
+  origin for every aircraft, and the front cockpit view sits at the origin. The B-52
+  flight deck is drawn at y 88 to 100 (the windscreen, roof z 11), 59 to 67 ft
+  forward and about 5 ft up: the rear view's seat is about 50 ft behind it. B52-7
+  (cockpit) owns this.
+- *Debris.* `debris::attachment` reads the shapes per axis at 2/3 with the identity
+  per-axis factor; covered by the existing scale test.
+
+**Skin.** 271 runtime faces (273 on the export path), one texture `_B52.PIC`. Twelve
+exact-vertex twin groups, all with opposite stored normals (no MiG-21 exception, no
+same-side sliver as the Tornado has); the smooth path pairs them and the top frame
+shows no show-through. The wing tanks (x +/-113 to 117, at the wing tip) are drawn
+airframe, no station (decision 10).
+
+**Decals.** Two `E0` runtime decal slots on the export path, both 10 by 10 unit
+plates one unit above the outer upper wing: slot 3 at `33b4` (left, x -126 to -136, y
+-48 to -58, z 4) and slot 4 at `4676` (right). The runtime projector omits both and
+the wing draws plain camouflage with no blank or skin-filled patch, as for the
+Mirage 2000 and the Tornado. The nose art, fuselage codes and tail codes are textured
+faces and draw whole; the fin carries no decal. No clipping and no fix needed.
+
+**Damage looks.** `B52_A.SH` 372 faces, `B52_B.SH` 116, `B52_C.SH` 387, `B52_D.SH` 84
+load at the intact shape's header scale (2). A is the body with the left wing cut at
+x -43 (piece B is the cut-off section, authored about its own origin, x -71 to 62),
+C the body with the right wing cut at x 82 (piece D, x -56 to 54, likewise); A and C lie inside the intact extents. No
+whole-body variant is registered for the B-52 (`debris::damage_variant`), so a
+destroyed B-52 draws the intact skin with regional cuts, as the Mirage 2000, the
+Tornado and the MiG-25 do (open decision for John: registering `LeftWing` as variant
+0 and `RightWing` as variant 1 would use the reviewed A to D pair, as the F-22 does
+for the left wing). Frames at 0.6 and 1.0 (left-wing section, view 2 look 0,60, 120
+ticks) show the wing cut at 1.0 with the fitted tear and fragment; the tail and core
+sections at 1.0 also draw.
+
+**A defect found on the way (not fixed, outside this slice).** With the B-52H the
+game does not start in free flight or from a runway ground start: it stops with
+"payload outside aircraft mass limits". BMB-A2 made the loadout cap the default tank
+at 303,000 lb, but the flight state keeps the full 312,197 lb and
+`flight::State::set_payload` rejects any payload on top of empty 185,000 plus that
+tank (over 488,000 lb). Headless level flight does not call it, which is why BMB-A2's
+checks passed. The frames and the battery scenario were captured with a temporary
+local patch (`.local/m3-aircraft/checks/B52-2/set-payload-fuel-cap.diff`: when the
+tank does not fit under the maximum, `set_payload` lowers it to what fits), reverted
+afterwards. The patch is a proposal for the coordinator; without it
+`render-b52-skin` fails at startup.

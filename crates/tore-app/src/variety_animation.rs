@@ -1083,6 +1083,8 @@ mod tests {
             }
         }
         assert_eq!(specification(Id::Tornado).unwrap().scale, 2. / 3.);
+        // B52-2: the B-52 draws at its header scale too (true size).
+        assert_eq!(specification(Id::B52).unwrap().scale, 2. / 3.);
     }
     fn spread(a: &[[f32; 3]], b: &[[f32; 3]]) -> f32 {
         let d =
