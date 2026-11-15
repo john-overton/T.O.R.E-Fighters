@@ -56,6 +56,26 @@ impl Volume {
         volume.validate()?;
         Ok(volume)
     }
+    /// A surface radar's volume from a record zone: all-round (a ground
+    /// antenna turns; the mount arcs and the record's angles stay with the
+    /// weapon's own gates) over the zone's ranges and relative altitudes.
+    pub fn all_round(z: &Zone) -> Self {
+        let bound = |v: i32, sentinel: i32, infinite: f64| {
+            if v == sentinel {
+                infinite
+            } else {
+                f64::from(v)
+            }
+        };
+        Self {
+            azimuth_rad: std::f64::consts::PI,
+            elevation_rad: std::f64::consts::PI,
+            minimum_ft: f64::from(z.minimum_range.max(0)),
+            maximum_ft: f64::from(z.maximum_range.max(0)),
+            minimum_relative_ft: bound(z.minimum_altitude, i32::MIN, f64::NEG_INFINITY),
+            maximum_relative_ft: bound(z.maximum_altitude, i32::MAX, f64::INFINITY),
+        }
+    }
     fn validate(&self) -> Result<()> {
         if !self.azimuth_rad.is_finite()
             || !self.elevation_rad.is_finite()
@@ -106,6 +126,14 @@ pub enum Preset {
     /// switch it on, but it is never enabled in flight.
     Unreviewed,
 }
+/// The receiver class every surface air-defence radar gets (agent decision,
+/// fitted, 2026-11-15): [`Preset::Basic`]. No surface radar record has a
+/// reviewed preset, so one class stands for them all: no Doppler notch (the
+/// notch also needs ground clutter, which a radar below its target never
+/// meets) and the weakest jamming resistance, burn-through 5 nmi against a
+/// same-generation jammer. One knob; a per-record table can replace it.
+pub const SURFACE_PRESET: Preset = Preset::Basic;
+
 impl Preset {
     /// Assignment by installed radar record, from docs/radar.md. A record with
     /// no assignment decodes as [`Preset::Unreviewed`] rather than borrowing
@@ -287,6 +315,28 @@ impl RadarProfile {
             preset,
             notch: preset.notch(),
             resistance: preset.resistance(),
+            band: 0,
+            source_flags: seeker.flags,
+            source_doppler: [
+                seeker.doppler_above,
+                seeker.doppler_below,
+                seeker.doppler_minimum_range,
+            ],
+        })
+    }
+    /// The profile a surface air-defence radar detects with (a SAM battery's
+    /// or radar gun's record, `docs/radar.md`, "Surface radars"): its record's
+    /// zones as all-round volumes, its look-down coefficient, and the
+    /// [`SURFACE_PRESET`] receiver. `None` for a record that is not a radar.
+    pub fn for_surface(record: &str, seeker: &Seeker) -> Option<Self> {
+        (seeker.signature == 3).then(|| Self {
+            record: record.to_ascii_uppercase(),
+            search: Volume::all_round(&seeker.zones[0]),
+            track: Volume::all_round(&seeker.zones[1]),
+            look_down: f64::from(seeker.look_down).clamp(0., 100.),
+            preset: SURFACE_PRESET,
+            notch: SURFACE_PRESET.notch(),
+            resistance: SURFACE_PRESET.resistance(),
             band: 0,
             source_flags: seeker.flags,
             source_doppler: [

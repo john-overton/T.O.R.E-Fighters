@@ -773,6 +773,7 @@ fn arm_the_boat(world: &mut World) -> u32 {
             },
         },
         detection: wide,
+        radar: None,
         launch: wide,
         magazine: 0,
         battery: false,

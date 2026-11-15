@@ -2235,8 +2235,9 @@ fn observable_of(t: &Target) -> Observable {
 fn view<'a>(state: &'a State, own: &'a Ownship) -> OwnshipView<'a> {
     OwnshipView { state, own }
 }
-/// An ownship as a hit-test target, from its launcher.
-fn ownship_target(own: &Ownship, launcher: Launcher) -> Target {
+/// An ownship as a hit-test target, from its launcher: the row every other
+/// aircraft's sensors read of it.
+pub fn ownship_target(own: &Ownship, launcher: Launcher) -> Target {
     Target {
         aircraft: Some(own.config.aircraft),
         role: TargetRole::Aircraft,

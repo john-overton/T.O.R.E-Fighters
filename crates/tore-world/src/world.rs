@@ -1279,7 +1279,7 @@ impl World {
     /// mission without armed surface units.
     fn step_surface(&mut self) {
         use crate::surface::{
-            fire::{self, Aircraft},
+            fire::{self, Aircraft, Echo},
             movement, supply,
         };
         if self.terrain.surface.arsenal.is_empty() {
@@ -1298,6 +1298,8 @@ impl World {
                 category: t.category,
                 airborne: t.airborne && !t.on_ground && t.wreck.is_none(),
                 jammer: t.jammer_active && t.jammer.as_ref().is_some_and(|j| j.radio_frequency),
+                // What the aircraft radars read of the same row.
+                echo: Echo::of_row(t),
             })
             .collect();
         for cockpit in &self.cockpits {
@@ -1317,6 +1319,11 @@ impl World {
                 category: own.configuration().target_category,
                 airborne: !flight.supported_at(self.terrain.surface_height(x, z)),
                 jammer: combat::launcher(flight).jammer,
+                // The row every other aircraft's radar reads of this seat.
+                echo: Echo::of_row(&tore_sim::combat::live::ownship_target(
+                    own,
+                    combat::launcher(flight),
+                )),
             });
         }
         aircraft.sort_by_key(|a| a.id);

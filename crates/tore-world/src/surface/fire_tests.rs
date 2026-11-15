@@ -522,6 +522,7 @@ impl Fixture {
                 category: 0x8000,
                 airborne: true,
                 jammer: false,
+                echo: Echo::default(),
             },
             others: Vec::new(),
             tick: 0,
@@ -928,6 +929,145 @@ fn terrain_masks_a_site_and_mount_arcs_gate_ship_guns() {
     assert!(mounts.iter().all(|m| *m == 1));
     // Ships never run out: unlimited reserve.
     assert_eq!(f.unit_state(0x4000_0002).mounts[1].reserve, None);
+}
+
+const SA2_ID: u32 = 0x4000_0030;
+
+fn sa2_site() -> Placed {
+    placed(SA2_ID, "SA2.NT", 0x1000, 0., 0., 1)
+        .with_missile(sa2(), &[(arc(0, FREE, [0., 70.]), 3)])
+        .radar(false, None)
+}
+
+/// The jet, facing the site (the radar sees its nose), with PT radar
+/// signature `radar`.
+fn faint(f: &mut Fixture, radar: f64) {
+    f.jet.echo = Echo {
+        signature: SignatureProfile {
+            radar,
+            ..SignatureProfile::default()
+        },
+        basis: Basis::new(std::f64::consts::PI, 0., 0.),
+        ..Echo::default()
+    };
+}
+
+/// SAM-1 (2026-11-15): a radar-guided site engages only an aircraft its radar
+/// returns an echo from, by the aircraft radars' model: the record's band is
+/// the range against a signature-100 aircraft.
+#[test]
+fn a_site_does_not_launch_at_an_aircraft_its_radar_cannot_see() {
+    // An ordinary aircraft 40,000 ft out and 6,000 ft up is engaged.
+    let mut f = Fixture::new(vec![sa2_site()], Vec::new());
+    f.jet.position = [0., 6_000., 40_000.];
+    f.run(90 * TPS);
+    assert!(f.rounds() > 0);
+    // A signature-1 aircraft nose-on there returns an echo to about 15,000 ft:
+    // it is never locked, painted or fired at.
+    let mut f = Fixture::new(vec![sa2_site()], Vec::new());
+    faint(&mut f, 1.);
+    f.jet.position = [0., 6_000., 40_000.];
+    f.run(120 * TPS);
+    assert_eq!(f.rounds(), 0);
+    assert_eq!(f.phase(SA2_ID), Phase::Search);
+    assert!(f.state.locks_on(JET).is_empty() && f.state.painting(JET).is_empty());
+    // Inside its echo range it is engaged.
+    f.jet.position = [0., 6_000., 12_000.];
+    f.run(60 * TPS);
+    assert!(f.rounds() > 0);
+    assert_eq!(f.state.locks_on(JET), vec![3]);
+}
+
+#[test]
+fn terrain_still_hides_an_aircraft_inside_its_echo_range() {
+    let mut f = Fixture::new(vec![sa2_site()], Vec::new());
+    faint(&mut f, 1.);
+    f.jet.position = [0., 6_000., 12_000.];
+    f.ridge = Some(Ridge {
+        x: (-1e9, 1e9),
+        z: (5_000., 6_000.),
+        height: 20_000.,
+    });
+    f.run(90 * TPS);
+    assert_eq!(f.rounds(), 0, "a ridge between hides it");
+    f.ridge = None;
+    f.run(90 * TPS);
+    assert!(f.rounds() > 0);
+}
+
+#[test]
+fn aspect_and_an_open_bay_bring_a_faint_aircraft_into_the_sites_view() {
+    // Signature 0.5, 15,200 ft from the site: nose-on its echo reaches
+    // 12,800 ft and the site never sees it.
+    let run = |tweak: &dyn Fn(&mut Echo)| {
+        let mut f = Fixture::new(vec![sa2_site()], Vec::new());
+        faint(&mut f, 0.5);
+        tweak(&mut f.jet.echo);
+        f.jet.position = [0., 6_000., 14_000.];
+        f.run(90 * TPS);
+        f.rounds()
+    };
+    assert_eq!(run(&|_| {}), 0);
+    // Broadside the echo is twice the size (16,100 ft): seen and engaged.
+    assert!(run(&|e| e.basis = Basis::new(std::f64::consts::FRAC_PI_2, 0., 0.)) > 0);
+    // Nose-on with the bay open (a 1.5 times larger echo, 15,700 ft).
+    assert!(
+        run(&|e| e.configuration = Configuration {
+            bay: 1.,
+            ..Configuration::CLEAN
+        }) > 0
+    );
+}
+
+#[test]
+fn a_jammer_shortens_the_sites_view_until_the_aircraft_burns_through() {
+    let jam = Jam {
+        generation: Generation::Transitional,
+        strength: 0.30,
+        band: 0,
+    };
+    let engaged = |jammer: Option<Jam>, z: f64| {
+        let mut f = Fixture::new(vec![sa2_site()], Vec::new());
+        f.jet.echo.jammer = jammer;
+        f.jet.position = [0., 20_000., z];
+        f.run(90 * TPS);
+        f.rounds() > 0
+    };
+    // Quiet, 72,800 ft out is well inside the 150,000 ft band.
+    assert!(engaged(None, 70_000.));
+    // Jammed, the site sees 40 percent of it: 60,000 ft.
+    assert!(!engaged(Some(jam), 70_000.));
+    assert!(engaged(Some(jam), 50_000.));
+}
+
+#[test]
+fn a_flak_teams_radar_picture_reads_the_echo_too() {
+    let mut f = flak_pair();
+    strung_flight(&mut f, 1, 1, [760., 0., 0.]);
+    f.run(60 * TPS);
+    assert!(f.rounds() > 0, "an ordinary aircraft is engaged");
+    let mut f = flak_pair();
+    strung_flight(&mut f, 1, 1, [760., 0., 0.]);
+    faint(&mut f, 0.1);
+    f.run(60 * TPS);
+    assert_eq!(f.rounds(), 0);
+    assert!(flak_group(&f).is_empty());
+}
+
+#[test]
+fn a_battery_radar_sees_by_the_same_model() {
+    let mut f = battery(BatterySystem::Sa6);
+    f.jet.position = [0., 15_000., 40_000.];
+    faint(&mut f, 5.);
+    f.run(90 * TPS);
+    assert_eq!(f.rounds(), 0, "a 21,000 ft echo does not reach 40,000 ft");
+    // The radar still comes on for a hostile inside its nominal range, as
+    // an RWR shows: emission is not detection.
+    assert!(f.emitting(RADAR));
+    assert!(f.state.locks_on(JET).is_empty());
+    f.jet.position = [0., 3_000., 12_000.];
+    f.run(90 * TPS);
+    assert!(f.rounds() > 0);
 }
 
 const ZSU_ID: u32 = 0x4000_0003;

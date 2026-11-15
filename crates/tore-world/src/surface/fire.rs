@@ -90,6 +90,10 @@ use tore_sim::{
         missiles::{self, seeker},
         surface_guns::{self, GunTuning},
     },
+    sensors::{
+        Configuration, Environment, Generation, JammerProfile, Observable, RadarProfile,
+        SignatureProfile, surface::Receiver,
+    },
 };
 
 /// Height above a unit's reference point its radar or sight looks from,
@@ -220,6 +224,12 @@ pub struct WeaponArms {
     pub profile: Profile,
     /// Where it can see a target: the record's `zone0`.
     pub detection: Band,
+    /// The radar that sees for it, when it is radar-directed (a radar
+    /// missile record, or a gun with flag 0x4000 and a radar seeker): the
+    /// aircraft radar model ([`tore_sim::sensors::surface`]) reads the band
+    /// as its range against a signature-100 aircraft. `None` for the infrared
+    /// and visual weapons, which see by the band alone.
+    pub radar: Option<RadarProfile>,
     /// Where it may fire: `zone1`, a missile's range scaled by experience, a
     /// gun's capped by its shells' reach.
     pub launch: Band,
@@ -711,6 +721,12 @@ impl WeaponArms {
         };
         let burst = u32::from(record.burst.game_rounds_in_burst.max(1))
             * u32::from(record.burst.actual_rounds_per_game.max(1));
+        let radar = match kind {
+            Kind::Gun { radar: true, .. } => {
+                RadarProfile::for_surface(&record.source, &record.seeker)
+            }
+            _ => None,
+        };
         Some((
             Self {
                 profile: Profile {
@@ -725,6 +741,7 @@ impl WeaponArms {
                     },
                 },
                 detection: Band::of(&record.seeker.zones[0]),
+                radar,
                 launch: launch_band(&record, kind, skill),
                 kind,
                 tuning: Some(row),
@@ -772,6 +789,7 @@ impl WeaponArms {
                 },
             },
             detection: Band::of(&record.seeker.zones[0]),
+            radar: RadarProfile::for_surface(&record.source, &record.seeker),
             launch: launch_band(&record, Kind::Missile, skill),
             kind: Kind::Missile,
             tuning: None,
@@ -894,6 +912,64 @@ pub struct Aircraft {
     pub airborne: bool,
     /// A radio-frequency jammer is on.
     pub jammer: bool,
+    /// What a radar returns from it ([`Echo`]).
+    pub echo: Echo,
+}
+
+/// The radio-frequency jammer an aircraft has on, as a radar hears it: the
+/// fields of its ECM record the jamming rule reads (the same
+/// [`JammerProfile`] the aircraft radars compare, without the record's name,
+/// so it stays `Copy`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Jam {
+    pub generation: Generation,
+    pub strength: f64,
+    pub band: u8,
+}
+
+/// What a radar sees of an aircraft: the combat row's signature, attitude,
+/// configuration (stores, and the deployment the row carries) and the
+/// jammer it has on, the very values the aircraft radars read. The default
+/// is a clean signature-100 aircraft, level.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Echo {
+    pub signature: SignatureProfile,
+    pub basis: Basis,
+    pub configuration: Configuration,
+    /// The radio-frequency jammer, only while it is on.
+    pub jammer: Option<Jam>,
+}
+
+impl Default for Echo {
+    fn default() -> Self {
+        Self {
+            signature: SignatureProfile::default(),
+            basis: Basis::new(0., 0., 0.),
+            configuration: Configuration::CLEAN,
+            jammer: None,
+        }
+    }
+}
+
+impl Echo {
+    /// The echo of an aircraft's combat row: what every other aircraft's
+    /// radar reads of it.
+    pub fn of_row(t: &live::Target) -> Self {
+        Self {
+            signature: t.signature,
+            basis: t.basis,
+            configuration: t.configuration,
+            jammer: t
+                .jammer
+                .as_ref()
+                .filter(|j| t.jammer_active && j.radio_frequency)
+                .map(|j| Jam {
+                    generation: j.generation,
+                    strength: j.strength,
+                    band: j.band,
+                }),
+        }
+    }
 }
 
 /// What a surface controller may engage this tick: an aircraft, or a
@@ -914,6 +990,33 @@ pub struct Contact {
     pub jammer: bool,
     /// A surface unit, not an aircraft.
     pub surface: bool,
+    /// What a radar returns from an aircraft; unused for a surface unit.
+    pub echo: Echo,
+}
+
+impl Contact {
+    /// The aircraft as the radar model reads it ([`Receiver`]).
+    fn observable(&self) -> Observable {
+        Observable {
+            id: self.id,
+            position: self.position,
+            velocity: self.velocity,
+            basis: self.echo.basis,
+            configuration: self.echo.configuration,
+            signature: self.echo.signature,
+            jammer: self.echo.jammer.map(|j| JammerProfile {
+                record: String::new(),
+                generation: j.generation,
+                strength: j.strength,
+                band: j.band,
+                radio_frequency: true,
+            }),
+            jammer_active: self.echo.jammer.is_some(),
+            radar_emitting: false,
+            airborne: self.airborne,
+            destroyed: false,
+        }
+    }
 }
 
 impl From<&Aircraft> for Contact {
@@ -927,6 +1030,7 @@ impl From<&Aircraft> for Contact {
             airborne: a.airborne,
             jammer: a.jammer,
             surface: false,
+            echo: a.echo,
         }
     }
 }
@@ -954,6 +1058,7 @@ pub fn surface_contacts(surface: &Surface, live: &live::State) -> Vec<Contact> {
                 airborne: false,
                 jammer: false,
                 surface: true,
+                echo: Echo::default(),
             })
         })
         .collect();
@@ -989,6 +1094,28 @@ pub struct Scene<'a> {
 }
 
 impl Scene<'_> {
+    /// The receiver of a radar-directed weapon's `profile` at its antenna
+    /// `from`: it hears every jammer on in the scene that the terrain does
+    /// not mask, as an aircraft radar does.
+    fn receiver<'p>(&self, profile: &'p RadarProfile, from: Vector) -> Receiver<'p> {
+        let jammers: Vec<Observable> = self
+            .aircraft
+            .iter()
+            .filter(|a| a.echo.jammer.is_some())
+            .map(|a| Contact::from(a).observable())
+            .collect();
+        let obscured = |a: Vector, b: Vector| !self.line_of_sight(a, b);
+        Receiver::new(
+            profile,
+            from,
+            &jammers,
+            &Environment {
+                ground: self.ground,
+                obscured: &obscured,
+            },
+        )
+    }
+
     /// [`line_of_sight`] over the scene's ground, answered from the ground
     /// ceiling when the whole line is above it (the samples could only
     /// agree).
@@ -1198,6 +1325,11 @@ struct Look<'a> {
     /// It engages ground units and ships before aircraft.
     prefer_surface: bool,
     line_of_sight_needed: bool,
+    /// The radar that sees for a radar-directed weapon: an aircraft is
+    /// eligible only while it returns an echo at its distance
+    /// ([`Receiver::detects`]: signature, aspect, configuration, clutter and
+    /// jamming scale the band's range). Surface units are not its business.
+    radar: Option<&'a Receiver<'a>>,
     /// A tank gun's hull and elevation ceiling: an aircraft higher above
     /// the hull's horizontal plane is not eligible
     /// ([`WeaponArms::air_ceiling_deg`]).
@@ -1238,6 +1370,10 @@ impl Look<'_> {
                     && self
                         .ceiling
                         .is_some_and(|(basis, ceiling)| hull_elevation_deg(&basis, d) > ceiling))
+                || (!contact.surface
+                    && self.radar.is_some_and(|radar| {
+                        !radar.detects(&contact.observable(), 1., scene.ground)
+                    }))
                 || (self.line_of_sight_needed && !scene.line_of_sight(self.from, contact.position))
             {
                 continue;
@@ -1461,6 +1597,13 @@ pub fn step(
                 if optical {
                     band.max_range = launch.max_range;
                 }
+                // The battery's radar sees as an aircraft radar does; its
+                // optical backup sees by the band alone.
+                let receiver = weapon
+                    .radar
+                    .as_ref()
+                    .filter(|_| radar_ok)
+                    .map(|profile| scene.receiver(profile, from));
                 Look {
                     from,
                     side: battery.side,
@@ -1471,6 +1614,7 @@ pub fn step(
                     search_limit: None,
                     prefer_surface: false,
                     line_of_sight_needed: true,
+                    radar: receiver.as_ref(),
                     ceiling: None,
                 }
                 .sees(contacts, scene)
@@ -1567,6 +1711,12 @@ pub fn step(
         // alive, on and sees the target. With the optical backup the launcher
         // guides without an emitter.
         let lock = slot_lock(&state.batteries[battery.index].controller);
+        // The radar's picture for the support: the same echo test that
+        // chose the target ([`Look::sees`]).
+        let radar_receiver = radar
+            .filter(|_| radar_on)
+            .zip(weapon.radar.as_ref())
+            .map(|(r, profile)| scene.receiver(profile, state.place(r).eye));
         for arms in &launchers {
             let targets: Vec<u32> = in_flight
                 .range((arms.unit.0, 0)..=(arms.unit.0, u32::MAX))
@@ -1578,8 +1728,11 @@ pub fn step(
                 let (radar_position, emitting, supported) = if radar_on {
                     let position = radar.map_or(own, |r| state.place(r).eye);
                     let sees = aircraft_by_id.get(&target).is_some_and(|a| {
-                        length(sub(a.position, position)) <= weapon.detection.max_range
-                            && scene.line_of_sight(position, a.position)
+                        let in_view = match &radar_receiver {
+                            Some(receiver) => receiver.detects(&a.observable(), 1., scene.ground),
+                            None => length(sub(a.position, position)) <= weapon.detection.max_range,
+                        };
+                        in_view && scene.line_of_sight(position, a.position)
                     });
                     (position, true, sees)
                 } else if optical {
@@ -1701,6 +1854,12 @@ fn step_weapon(
     let aircraft_by_id = seen.by_id;
     let place = state.place(arms);
     let muzzle = place.eye;
+    // A radar-directed weapon sees with the aircraft radar model from its
+    // antenna ([`Look::radar`]).
+    let receiver = weapon
+        .radar
+        .as_ref()
+        .map(|profile| scene.receiver(profile, muzzle));
     let barrage = match weapon.kind {
         Kind::Barrage { activation_ft, .. } => Some(activation_ft),
         _ => None,
@@ -1723,6 +1882,7 @@ fn step_weapon(
             search_limit: None,
             prefer_surface: false,
             line_of_sight_needed: false,
+            radar: None,
             ceiling: None,
         }
         .sees(seen.contacts, scene),
@@ -1743,6 +1903,7 @@ fn step_weapon(
                 search_limit: arms.search_limit,
                 prefer_surface: seen.prefer_surface,
                 line_of_sight_needed: true,
+                radar: receiver.as_ref(),
                 ceiling: weapon.air_ceiling_deg().map(|c| (place.basis, c)),
             }
             .sees(seen.contacts, scene),
@@ -1934,8 +2095,11 @@ fn step_weapon(
             let Some(aircraft) = aircraft_by_id.get(&target) else {
                 continue;
             };
-            let sees = length(sub(aircraft.position, muzzle)) <= weapon.detection.max_range
-                && scene.line_of_sight(muzzle, aircraft.position);
+            let in_view = match &receiver {
+                Some(receiver) => receiver.detects(&aircraft.observable(), 1., scene.ground),
+                None => length(sub(aircraft.position, muzzle)) <= weapon.detection.max_range,
+            };
+            let sees = in_view && scene.line_of_sight(muzzle, aircraft.position);
             supports.push(ActorSupport {
                 owner: arms.unit.0,
                 observation: Some(seeker::Observation {

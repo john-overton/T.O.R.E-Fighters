@@ -606,10 +606,10 @@ aircraft rows (refreshed with their pose each tick), human seats both as rows
 other players' radars and missiles see and as the AI's world objects, radar
 search and track for players and AI, the jammer interference comparison, radar
 and active missile seekers (air-to-air and surface-launched), the air-to-ground
-page's object signature and the RCS page contour. Surface air-defence radars
-detect by their records' range bands and read no signature at all, so neither a
-clean F-22 nor a loaded one changes what a SAM site sees. IR signature is out of
-scope (deferred to the damage-model pass).
+page's object signature, the RCS page contour and, since SAM-1 (2026-11-15), the
+surface air-defence radars ([surface radars](#update-sam-1-2026-11-15-surface-air-defence-radars)),
+so a clean F-22 and a loaded one are seen by a SAM site at different distances.
+IR signature is out of scope (deferred to the damage-model pass).
 
 At clean configuration, nose/tail is 1x, side is 2x, top/bottom is 4x the PT base.
 A radar abeam sees the factor rise from 2x to 4x as the aircraft banks from level
@@ -918,3 +918,101 @@ kept by John, decision 22), read as Late with strength 0.30 (TOR-7 sensor
 summary), so it is one more aircraft on the Late-Cold-War jammer row above; its
 radar is `F18R.SEE` and its Pave Spike row is fixed with no pod body
 ([Tornado radar rows](baselines/radar.md#tornado-radar-jammer-and-pave-spike-row-2026-11-11-tor-7)).
+
+## Update (SAM-1, 2026-11-15): surface air-defence radars
+
+John asked on 2026-11-15 that SAM radars "work like air to air radars that have
+stealth, line of sights, etc affect it". A radar-guided surface weapon now
+detects an aircraft with the aircraft radars' own functions
+(`tore_sim::sensors::track::radar_ranges_ft`, called through
+`tore_sim::sensors::surface::Receiver`), not a copy of them. Agent decision
+unless marked.
+
+**Who it covers.** Every surface weapon whose record is a radar seeker (source
+signature 3): a SAM battery's radar and the missile it guides (SA-2, SA-3,
+SA-6, HAWK, the shipboard systems), a self-contained radar missile unit
+(SA-15, Roland, 2S6, Crotale), and a radar-directed gun (flag 0x4000 with a
+radar seeker: ZSU-23, the KS-19 class and the ship close-in guns), including a
+flak team's shared picture. Infrared SAMs (SA-7, SA-9, SA-13, SA-14, SA-16,
+FIM-92), the visual guns, tank guns, small arms, the barrage zone and a blind
+battery's optical backup keep seeing by their records' bands and the terrain
+line of sight, as before.
+
+**The model.** The record's search range (`zone0`) is the nominal range
+against a signature-100 aircraft. For each aircraft in that range the radar
+takes:
+
+| Term | Surface radar | Air-to-air equivalent |
+| --- | --- | --- |
+| Effective signature | `(PT sigs[3] + stores) x aspect x configuration`, from the antenna's direction through `SignatureProfile::effective_radar` (nose 1x, side 2x, top and bottom 4x with bank; gear, flaps and open bay; external stores) | Same function |
+| Range law | `nominal x sqrt(effective / 100)`, never above nominal | Same function |
+| Terrain line of sight | The surface controllers' existing terrain test from the antenna (500 ft samples) | The aircraft radars' terrain query (8 samples with bisection). Both are pure terrain queries; the surface's was kept so no other surface weapon changes |
+| Look-down clutter | The same `clutter_exposure` and `look_down_factor` with the weapon record's look-down coefficient. A radar below its target meets none (clutter is zero for a target at or above the radar), so an ordinary site sees no change; a radar on a ridge looking down at a low flier loses range exactly as a fighter would | Same functions |
+| Doppler notch | The same `notch_factor`, with the receiver class below, which has no notch. It would also need ground clutter, which a radar below the target never meets | Per radar-record preset |
+| Jamming | The same received-interference, coupling and burn-through functions, from every hostile or friendly jammer that is on, in the radar's terrain line of sight and radio-frequency compatible. The target's own jammer is fully coupled: the 40 percent range floor is reached at twice its burn-through distance | Same functions |
+| Radar horizon | Not applied | The aircraft radars have none either; the terrain is the only mask |
+| Chaff | Not applied to detection | Chaff acts on missile seekers only, not on detection; the surface missiles' decoy rolls are unchanged |
+| Search and track volumes | All-round, with the record's range band and relative altitude band as before; the mount arcs and launch gates are unchanged | Per sensor |
+| Weather attenuation | Not applied | Listed as unmodelled for the aircraft radars too |
+
+The receiver class of every surface radar is `Preset::Basic`
+(`SURFACE_PRESET`, fitted): no surface radar record has a reviewed preset, so
+one class stands for them all, with no Doppler notch and the weakest jamming
+resistance (burn-through 5 nmi against a same-generation jammer at signature
+100, 3.95 nmi against a Late jammer, and nearer for a smaller signature). A
+per-record table can replace the one knob.
+
+**What the chain does with it.** Detection feeds the existing engagement
+controller through its eligible list, so the phases are unchanged: an aircraft
+the radar does not see is never chosen, prepared against, locked or fired at,
+and an aircraft the radar loses while tracking drops the lock the same tick
+(back to Search, as a lost line of sight does). A missile in flight keeps its
+battery's support only while the radar still sees the aircraft; otherwise it
+falls back to its own seeker's memory rule. The lock tone and painting follow
+the controller, so a warning sounds only for a radar that can see you. Radar
+emission is not detection: a site's radar still comes on for a hostile inside
+its nominal range, so the RWR shows the emitter and gives no lock tone while
+the site cannot see the aircraft.
+
+**Ranges against an SA-6 radar** (80,000 ft, 13.2 nmi, clean, in clear air, no
+jammer; nose-on, abeam and from above):
+
+| Aircraft (PT radar signature) | Before | After: nose | side | top |
+| --- | ---: | ---: | ---: | ---: |
+| B-2 or F-117 (1) | 13.2 nmi | 1.32 nmi | 1.86 nmi | 2.63 nmi |
+| F-22A (10) | 13.2 nmi | 4.16 nmi | 5.89 nmi | 8.33 nmi |
+| Rafale C (50) | 13.2 nmi | 9.31 nmi | 13.2 nmi | 13.2 nmi |
+| B-52 (100) | 13.2 nmi | 13.2 nmi | 13.2 nmi | 13.2 nmi |
+
+An open bay multiplies the signature by 1.5, down gear by 1.25 and flaps by 1.15,
+and each external store adds 3 plus 2 per 1,000 lb to the PT value first, so a
+signature-1 aircraft with an open bay is seen by an SA-6 at 1.61 nmi nose-on,
+and one hung with two 600 gallon tanks (worth 23.5) at 6.5 nmi. The other radars scale alike: at signature 1 nose-on an SA-2
+(150,000 ft) sees 2.47 nmi, an SA-3 (100,000 ft) 1.65 nmi, an SA-19
+(60,000 ft) 0.99 nmi. Every signature-100 aircraft is unchanged: it is at the
+nominal cap at every aspect.
+
+**Gear, flaps and bay.** The surface radar reads the same combat row every
+other radar reads. That row carries the external stores today; the gear, flap
+and bay deployment reaches the RCS page only, as the table above says, so a
+SAM site does not yet see an open bay on a flying aircraft. When a row carries
+the deployment (the bomber batch's open-bay decision), the surface radars read
+it with no further change.
+
+**Determinism.** Pure functions of the tick's positions and the aircraft rows:
+no new state, no new random draw, the aircraft are read in ascending id and
+the radars in ascending unit id, as before. The surface step runs on the host;
+clients read its result. It changes what a host simulates, so the
+simulation version needs raising together with the protocol (see the
+[surface spec update](spec/surface-defenses.md#update-sam-1-2026-11-15-surface-radar-detection)).
+
+Covered by tests: `sensors::surface` (a signature-1 aircraft is seen at a
+tenth of the range nose-on; aspect raises it; open bay, gear, flaps and
+stores raise it; a jammer shortens it to 40 percent until burn-through; a
+radar on a ridge pays the look-down term, a radar below its target does not)
+and the surface controller tests (a site does not launch at an aircraft it
+cannot see and does at one it can; terrain hides an aircraft inside its echo
+range; aspect and the open bay bring a faint aircraft into view; a jammer
+shortens a site's view; a flak team's picture and a battery radar read the
+echo too).
+
