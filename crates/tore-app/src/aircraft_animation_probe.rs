@@ -10,6 +10,7 @@ mod a4e;
 mod ac130;
 mod av8;
 mod awacs;
+mod b52;
 mod b747;
 mod c130;
 mod e2;
@@ -184,6 +185,12 @@ impl Control {
             // trailing-edge panel per wing is the aileron), so the flap lever
             // moves nothing and the probe requires that it stays that way.
             Self::Flaps if id == Id::Mf1 => Expectation::Unsupported,
+            // B52-3 (decision 11, John 2026-11-15): no drawn roll surface (the
+            // real jet rolls with spoilerons the shape does not draw), so the
+            // aileron moves nothing and the probe requires that it stays that
+            // way. The stabilizer is the elevator, the rudder and the two inboard
+            // flap wedges are `Required` below.
+            Self::Aileron if id == Id::B52 => Expectation::Unsupported,
             Self::Elevator | Self::Rudder | Self::Aileron | Self::Flaps => Expectation::Required,
             Self::Gear if matches!(id, Id::Ah64 | Id::Ch47) => Expectation::Unsupported,
             Self::Gear => Expectation::Required,
@@ -192,6 +199,10 @@ impl Control {
             Self::Hook if id == Id::Ac130 => Expectation::Unknown,
             Self::Hook if state.hook_available() => Expectation::Required,
             Self::Hook => Expectation::Unsupported,
+            // B52-4: the B-52 draws no airbrake (the real jet brakes with its
+            // spoilers, which the shape does not draw), no afterburner and no
+            // flame word, so brake and exhaust move nothing and must stay so.
+            Self::Brake | Self::Exhaust if id == Id::B52 => Expectation::Unsupported,
             Self::Brake | Self::Exhaust
                 if matches!(
                     id,
@@ -240,7 +251,11 @@ impl Control {
                 Expectation::Required
             }
             Self::Brake => Expectation::Unknown,
-            Self::Bay if matches!(id, Id::F22 | Id::F22n | Id::Faxx) => Expectation::Required,
+            // B52-3: the interim open-bay plates (word 7a20) are drawn at the bay
+            // fraction (B52-5 replaces them with the fitted bay and doors).
+            Self::Bay if matches!(id, Id::F22 | Id::F22n | Id::Faxx | Id::B52) => {
+                Expectation::Required
+            }
             Self::Bay => Expectation::Unknown,
             Self::VectorPitch if matches!(id, Id::Av8 | Id::Yak141) => Expectation::Required,
             Self::VectorPitch | Self::VectorYaw if id == Id::X31 => Expectation::Required,
@@ -639,6 +654,7 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
             | AircraftId::Mf1
             | AircraftId::Tornado
             | AircraftId::TornadoClean
+            | AircraftId::B52
     ) {
         "reviewed-controls-and-attachments"
     } else {
@@ -1142,6 +1158,17 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
                 );
             }
         }
+        if id == AircraftId::B52 {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                b52::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
         if id == AircraftId::Mig31 {
             for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
                 mig31::check(
@@ -1297,6 +1324,9 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     }
     if id == AircraftId::Mig25 {
         failures.extend(mig25::combinations(&airframe, &neutral, out)?);
+    }
+    if id == AircraftId::B52 {
+        failures.extend(b52::combinations(&airframe, &neutral, out)?);
     }
     if id == AircraftId::Mig31 {
         failures.extend(mig31::combinations(&airframe, &neutral, out)?);
