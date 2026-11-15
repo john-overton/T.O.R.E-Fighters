@@ -6307,3 +6307,550 @@ Update (TOR-11, 2026-11-12): the side rail is on the swivelling pylon's **inboar
 state), and its drawn arm is 3.0 ft (was 5.6, fitted). The Tornado's wing also starts to sweep at 304 kt
 (350 mph, John), not 250. Row 8's location byte in the source record, the mask, the placements
 (4,581 on the merged tree) and the Cheat-only 222 do not move. Details: [stores on pylons](../spec/stores-on-pylons.md#the-tornado-aim-9-rail-on-the-inboard-flank-shorter-and-the-sweep-from-350-mph-tor-11-2026-11-12).
+
+## B-52 source review (2026-11-15)
+
+Research mode, slice B52-0 (bomber batch A, the first of three source reviews run
+side by side). This reviews `B52.PT` (B-52 Stratofortress) and its dependency
+closure before `AircraftId::B52` exists. `B52.PT` is not a parked target
+(no `parked_aircraft.rs` entry). No original module was executed. PT, SEE, ECM,
+JT and HUD are read as bounded BRF data with the shared field order in
+`aircraft_schema.rs`; SH is inspected as data (`shape_inspect`, `parked_inspect`).
+Slice done by Claude Sonnet (sonnet-medium). Nothing here changes code or
+behaviour. Real-aircraft figures are cited and never establish game behaviour.
+
+Questions open for John, **not decided here**: the variant
+([below](#b-52-variant-b-52h-or-b-52g-for-john)), the record template values
+([below](#b-52-the-template-copy-list-for-john)), the HUD and cockpit
+([below](#b-52-hud-and-cockpit-for-john)), the surfaces that fail or strain the
+whole-surface gate ([below](#b-52-surfaces-for-john)), the gear and outriggers
+([below](#b-52-gear-and-outriggers-for-john)), the size
+([below](#b-52-real-size-for-john)), the gun
+([below](#b-52-sensors-jammer-and-gun-for-john)) and the bay and pylon stations
+([below](#b-52-bay-and-station-survey-for-john)).
+
+### B-52 build and extraction
+
+`FA_1.LIB` and `FA_2.LIB` are the same pair as the MiG-31 review (see the
+[MiG-31 build section](#build-and-extraction)). The closure was extracted locally
+to `.local/m3-imports/scratch/b52` with `tore-extract --include 'B52*'
+--include '_B52*' --include 'BMBROH.HUD' --include 'B.BI' ...` plus the SEE, ECM,
+JT files the record names and sixteen comparison records (`AC130`, `C130`,
+`KC135`, `E3`, `AF1`, `B747`, `B707`, `C5`, `C17`, `B1`, `TU95`, `TU26`, `TU160`,
+`ATL`, `IL76`, `A310`). Name sweeps found no B-52 cockpit art (`~BMB*`, `~B52*`,
+`*B52*`, `~B5*`, `*STRAT*`, `*BMB*`): only the shapes, skins, the `^ACB52.5K`
+callout, `B52_0` to `B52_4.PIC` and `B52.INF` (encyclopedia, `disc2/FA_3.LIB`) and
+`CUB52.PIC` (one of 66 numbered `CUB0` to `CUB65` pictures, not a B-52 file). The
+`SETUP.ESA` installer copy of `FA_2.LIB` holds byte-identical `B52.PT`, `B52*.SH`,
+`_B52*.PIC`, `B52.ECM`, `B52R.SEE`, `VIS300.SEE`, `AGM84E.JT`, `M61.JT`, `B.BI` and
+`^ACB52.5K`; only `BMBROH.HUD` differs (1 stored byte, a build difference). The usual
+five unrelated archive errors appear.
+
+### B-52 identity and record
+
+| Field | Decoded value |
+| --- | --- |
+| PT | `B52.PT`, 9,123 bytes, SHA-256 `45948ce46e0aebc7f3c68df47658e593d9ed4c0cfb79860bd6591477714709f4` |
+| Displayed names | `B-52`, `B-52 Stratofortress`, `B52.PT` |
+| Schema | OBJECT + NPC + PLANE; `structType` 5; **`typeSize` 612**; `instanceSize` 592 |
+| Object class / year / hit points | `0x4000` (attack) / 1961 / 370; `expType` 30 |
+| PLANE flags | `0x15`: base `0x01`, multi-crew `0x04`, seat `0x10`; hook, no-lift and carrier clear |
+| Engines | **8** (real: eight TF33), thrust 120,000 lbf total, **no afterburner** (0) |
+| Shape | `b52.SH` (33,280 bytes, header scale 2), shadow `b52_s.SH` (16 faces) |
+| Damage looks | `B52_A.SH` 372 faces, `B52_B.SH` 116, `B52_C.SH` 387, `B52_D.SH` 84 |
+| Skins | `_B52.PIC` 120,964 bytes; `_B52_A/B/C/D.PIC` 139,684 / 60,644 / 131,364 / 86,904 |
+| Sounds | `&jet09.11k` loop and second sound, `&powerup.5k`, `&powerdn.5k` (all present) |
+| HUD | `bmbroh.HUD` (the AC-130 panel set, see below) |
+| AI script | `b.BI` (4,608 bytes, shared with the Tu-95, Tu-26, Tu-160 and the B-2 row) |
+| Sensors / jammer / gun | `VIS300.SEE`, `B52R.SEE`, `B52.ECM`, `M61.JT`; stores `AGM84E.JT` |
+| PTS | none: no `B52.PTS` exists |
+| Radio callout | `^ACB52.5K` exists (5,777 bytes) |
+| Encyclopedia | `B52.INF` (titled "B-52G Stratofortress", data lines for the B-52H), `B52_0` to `B52_4.PIC` in `disc2/FA_3.LIB` (Jane's text, reference media) |
+| Checkpoint code / CLI key | assigned by BMB-A1 |
+
+The decoded record equals the catalog row in [`fa-aircraft.csv`](fa-aircraft.csv)
+field for field (1961, `0x4000`, 8 engines, 235,220 / 199,000 / 488,000 lb,
+120,000 lbf, 515 kt top, 385 kt sea-level maximum, 55,000 ft, G -2/+3, 370 hit
+points, 7 hardpoints, the default-store list, `bmbroh.HUD`). **BMB-A1 must add a
+type-size entry:** `AircraftId::B52 => 612` in the `typeSize` match in
+`crates/tore-formats/src/aircraft.rs` (the AC-130, A-4E, MiG-21, F-4B and A-7 use
+612); the fall-through 660 would refuse to load. `strike_class.rs` already tests
+`B52.PT` as `Heavy` and `sensors/profile.rs` already lists `B52.ECM` as a
+transitional jammer label (no identity needed for either).
+
+Hashes of the files later slices depend on:
+
+| Resource | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `B52.PT` | 9,123 | `45948ce46e0aebc7f3c68df47658e593d9ed4c0cfb79860bd6591477714709f4` |
+| `B52.SH` | 33,280 | `5d5816166e529b932382f98741711fb450667225a1ece723eec2ea96dd20eaa2` |
+| `B52_S.SH` | 4,608 | `9c34bafc97a42ebd40eef854629e8c225e995872a61273c44a1cc2a37e801509` |
+| `B52_A.SH` | 25,088 | `44a9b53b436666482644b7c5b9913a5fb531f6fd85322e2f1a3bc7c218933158` |
+| `B52_B.SH` | 12,800 | `48872699f2b3e939f821535f0963d513ff2e456c20d27df7a4be0e5e41108d33` |
+| `B52_C.SH` | 29,184 | `c004de4a731f60c94e6e7a913bde03efb0418d68356f8bb640fb317d837576b8` |
+| `B52_D.SH` | 8,704 | `14d84b339e2951cabb589116a20caa0add5d4fb180275c4f3bafaa3ab0de3a61` |
+| `_B52.PIC` | 120,964 | `a1ca126a5fa1ba7d694333000628f22d1bcba774a4630af574e3154757f863c8` |
+| `BMBROH.HUD` | 4,608 | `3eb15857d970c2f3f48f3f9482cbfaa8c1463aef4275a2198d6065d55ef7bbf9` |
+| `B52R.SEE` | 469 | `f8ca6916a255625c29a3125b569e363b8ebee5bb9c5412b9d8022ac8dae3899b` |
+| `B52.ECM` | 352 | `98816f38e7f9a9540135459dccc4926a072e97c0102110a815679635ca11234d` |
+| `VIS300.SEE` | 471 | `2369a8be84e01882666a6d275f82edd02e631fdf0871f7ea66bc8c81f3b71cfb` |
+| `AGM84E.JT` | 2,779 | `2f350f561011568d7440c3c3dd11a208ec7103b76d232484164ab2340a7562bf` |
+| `M61.JT` | 2,703 | `0b79689a728911d1097569f6e6612050e414ba9703c9f131a51fe1ce9a7eb33d` |
+| `B.BI` | 4,608 | `781f27cddf73075f36659fe0910dda009a457cdd3f2386de6c9b8bb78946e7ae` |
+
+### B-52 the template copy list (for John)
+
+`B52.PT` has no single template. Of its 207 non-pointer statements (the 45
+system-damage bytes included) it is identical to `AC130.PT` in 169, `TU95.PT`
+167, `E3.PT` 167, `C130.PT` 167, `KC135.PT` 166, `IL76.PT` 166, `C5.PT` and
+`ATL.PT` 165, `TU26.PT` 162, `TU160.PT` and `C17.PT` 159, `B707.PT` 158, `AF1.PT`
+147, `B747.PT` 144, `B1.PT` 139 and `A310.PT` 136. All 45 system-damage bytes
+equal every one of the sixteen records. So the **flight-tuning block** (stall,
+spin, turn-rate acceleration words, drag and crash words: most of the 169 shared
+statements) is the shared large-aircraft family template, closest to the AC-130 (38
+differences, listed below). The values below are the B-52's **own** and match no
+candidate (none of the sixteen holds them), which is the opposite of the
+Tornado/Su-24 case.
+
+Authored for the B-52 (no candidate shares the value): year 1961, view distance
+1,451, `sigs[0]`/`sigs[1]` 277, hit points 370, empty weight 235,220, structure
+651 / 904, engines 8, thrust 120,000, fuel flow 18, internal fuel 199,000,
+`_gpullDrag` 17, wheel-brake drag 76, flaps drag 51, flaps lift 30, loaded
+elevator/aileron/rudder 39, maximum takeoff 488,000, view offset z 75, search
+frequency 4, the hardpoint rows and all six G rows. Shared with some candidates
+(coincidence or family): `bayDrag` 25 (Tu-95, Tu-26, Tu-160), `throttleAcc` 10 (AC-130,
+C-130, Tu-95), `dmgDebrisPos.x` -180 (E-3, Tu-160), `sigs[3]` 100 (Tu-26, Tu-160),
+`sigs[2]` 200 (C-5), `maxAlt` 55,000 and PLANE flags `0x15` (B-1B), `typeSize` 612,
+`instanceSize` 592 and `numHards` 7 (AC-130), sounds `&jet09.11k` (KC-135, E-3,
+IL-76, Tu-26), and the sensor/ECM rows (below).
+
+Each authored value against cited real B-52H figures (Wikipedia "Boeing B-52
+Stratofortress", Specifications (B-52H), accessed 2026-11-15; Jane's text in
+`B52.INF`; aircraftinformation.info B-52H page, accessed 2026-11-15):
+
+| Field | Record | Real | Difference | Verdict |
+| --- | ---: | ---: | ---: | --- |
+| Empty weight, lb | 235,220 | 185,000 | +27.1% | Not a copy and not real; authored high |
+| Maximum takeoff, lb | 488,000 | 488,000 (Jane's and Wikipedia) | 0% | Agrees exactly |
+| Internal fuel, lb | 199,000 | 312,197 (47,975 US gal, Wikipedia); Jane's 174,130 L (46,000 US gal, about 308,000 lb) | -36% | Low |
+| Engines | 8 | 8 TF33-P-3 | none | Agrees; shape draws four twin pods |
+| Military thrust, lbf (total) | 120,000 (15,000 each) | 136,000 (8 x 17,000; Jane's 75.6 kN, Wikipedia 17,000) | -11.8% | Low; no afterburner (correct) |
+| Top speed, kt | 515 (1 G row 870 ft/s at 36,000 ft) | 516 (Mach 0.90, Jane's) | -0.2% | Agrees |
+| Sea-level maximum, kt | 385 | none cited | | Authored |
+| Ceiling, ft | 55,000 | 55,000 (Jane's), 50,000 (Wikipedia, official) | 0% / +10% | Agrees with Jane's |
+| G limit | -2 / +3 | no cited limit found | | Authored, not checked |
+| Hit points | 370 | none | | Authored |
+| Year | 1961 | B-52H service entry 1961 (not examined) | | Agrees with the H |
+
+Options for John (none chosen, the Mirage 2000 and Tornado precedents were real
+thrust, real weights where a cited figure exists, labelled opinionated):
+
+1. Keep every value as retail (documented, audit only).
+2. Correct thrust to the real eight engines (136,000 lbf total) and leave weights.
+3. Also correct empty weight (185,000) and internal fuel (312,197). Fuel changes
+   range and endurance, so B52-8 would recheck the flight envelope rows.
+
+Agent note: the 235,220 lb empty weight plus 199,000 lb of fuel is 434,220 lb, so
+a clean retail B-52 is only 11% under its 488,000 lb maximum; the bay and pylons
+can load about 50,000 lb at the proposed row classes, so the maximum is not the
+binding number. At the real 185,000 + 312,197 = 497,197 lb, a full-fuel aircraft
+already exceeds the 488,000 lb maximum; corrections 3 would need the host's
+overweight rule checked in B52-8.
+
+### B-52 variant (B-52H or B-52G, for John)
+
+Evidence that the record means the **B-52H**: (1) `M61.JT` (the 20 mm Vulcan) is
+the tail gun and the record year is 1961 (the H entered service 1961; the G's tail
+gun was four .50 calibre machine guns); Wikipedia: "1 x 20 mm M61 Vulcan cannon
+originally mounted in a remote-controlled tail turret on the H-model, removed in
+1991"; (2) the encyclopedia page titled "B-52G Stratofortress" gives the power
+plant as "(B-52H): Eight 75.6 kN (17,000 lb st) Pratt & Whitney TF33-P-3
+turbofans" and the armament as "(B-52H): Single 20 mm Vulcan multi-barrel cannon
+in tail turret instead of four machineguns", and Jane's lists the H's power
+loading beside the G's; (3) the record's eight engines have no afterburner and its
+ceiling and top speed are Jane's B-52 numbers (55,000 ft, Mach 0.90). The shape
+cannot settle it: both the G and H have the short fin (40 ft 8 in; the drawn fin
+tip is 34.0 ft above the belly), the same wing and four twin-engine pods, and the
+same underwing tanks. Options (none chosen):
+
+1. **B-52H** (the record's gun, year and power plant); name stays `B-52`
+   (standing decision 7).
+2. B-52G (four .50 calibre guns, J57 engines): contradicts the record's gun and
+   thrust; no retail record or shape feature supports it.
+3. Leave the variant unstated, as retail does.
+
+### B-52 G envelope rows
+
+Points are speed in ft/s at altitude in ft. Six rows, `envMin` -2 to `envMax`
++3; the record has `negGLimit` 0.
+
+| G | Points |
+| ---: | --- |
+| -2 | 350@0, 420@22,000, 505@34,000, 590@37,000, 660@36,500, 680@27,000, 640@0 |
+| -1 | 260@0, 325@24,500, 387@38,250, 490@46,250, 600@49,250, 730@49,000, 790@42,500, 810@34,000, 680@0 |
+| 0 | 160@0, 220@27,500, 310@44,250, 445@54,250, 600@59,250, 790@59,000, 890@47,000, 900@36,000, 680@0 |
+| 1 | 210@0, 265@25,500, 347@41,250, 470@51,250, 590@55,000, 770@55,000, 860@45,500, 870@36,000, 650@0 |
+| 2 | same as -1 |
+| 3 | 310@0, 380@23,000, 430@35,000, 515@41,000, 600@43,000, 700@42,500, 740@31,000, 610@0 |
+
+The 1 G row tops out at 870 ft/s (515 kt) at 36,000 ft and 650 ft/s (385 kt) at
+sea level, the catalog's two speeds, and reaches 55,000 ft (the record ceiling).
+The 0 G row goes to 59,250 ft, above `maxAlt`; the host caps altitude at the
+record field.
+
+### B-52 resources
+
+| Resource | Role | Note |
+| --- | --- | --- |
+| `B52.SH` | Shape | 271 runtime faces (single texture `_B52.PIC`), 0 lines, 0 billboards, five state words (`7a20`, `7a26`, `7a2c`, `7a32`, `7a38`); no usable streamer record (the decoded points are noise: 71,168, 1,536, -33,280) |
+| `B52_S.SH` | Shadow | 16 faces |
+| `B52_A.SH` / `B52_C.SH` | Damage bodies | 372 / 387 faces |
+| `B52_B.SH` / `B52_D.SH` | Damage pieces | 116 / 84 faces |
+| `VIS300.SEE`, `B52R.SEE`, `B52.ECM`, `M61.JT` | Sensors, jammer, gun | see below |
+| `AGM84E.JT` | Default store (row 3) | AGM-84E SLAM, 1,380 lb, in the TORE roster |
+| `b.BI` | AI script | shared bomber script |
+| `^ACB52.5K` | Radio callout | present |
+
+The header scale of `b52.SH` is **2** (like the MiG-23 and the Tornado; the
+B-1B is 4, most aircraft 1), so the aircraft is authored at 2/3 ft per unit.
+
+### B-52 HUD and cockpit (for John)
+
+**Fact.** `B52.PT` names `bmbroh.HUD`, which exists (`BMBROH.HUD`, 4,608 bytes).
+It is the **AC-130 HUD module with 7 bytes changed**: the module's panel names
+are still `~ac130`, `~ac130h`, `~ac130s`, `~ac130_p`, `~ac130_w` and its
+annunciators are GEAR, FLAP, BRAKE and BAY. Of the seven bytes, one is a flag
+byte at offset 137, two are at 1082 to 1083 and four rename the fourth
+annunciator (the AC-130's `HOOK` becomes `BAY`). The Tu-95 and Tu-26 rows name
+the same module; `BMBRCC.HUD` (the B-1B's module) names the `~b2*` panels. The
+bomb-sight rule in [the weapons format](weapons.md) says `BMBROH` sets only
+HUD byte `+0x23a`, which gives the HAB (high-altitude bombing) sight mode that
+draws no HUD sight, so a bomb-flag store shows no CCIP pipper. **No B-52
+cockpit art exists** (sweeps above). So retail flies the B-52 with the AC-130
+panel family (`~AC130*.PIC`, 4 pictures in `FA_1.LIB`).
+
+Options (none chosen):
+
+1. **Follow the record: `bmbroh.HUD`, the AC-130 stem and panels**, with the BAY
+   annunciator driven by the bay word (below). What retail does; no new art; the
+   TORE `Hud` mapping already has an AC-130 arm. Bind by name, never alias
+   `AC130.PT`.
+2. Substitute the B-2 module (`BMBRCC.HUD`, `~b2*`) or another reviewed family;
+   opinionated, no retail evidence for the B-52.
+3. Author a B-52 panel; invented art, a later decision.
+
+Agent note: the BAY annunciator and the record's `bayDrag` 25 both point at the
+bay word, which supports the bay reading of `7a20` below.
+
+### B-52 surfaces (for John)
+
+State words (neutral 271 faces; counts from `Shape::with_state`, geometry in raw
+units, x right, y forward, z up; the header scale 2 makes one unit 2/3 ft):
+
+| Word | Faces | Low point | Geometry | Reading | Status |
+| --- | ---: | ---: | --- | --- | --- |
+| `7a20` | +4 | -13 | Two plates (each in both windings) at x = -7 and x = +7, y -13 to 26, z -13 to -8: they hang 5 units below the belly edge | **Bay doors open** (the HUD module's BAY annunciator and `bayDrag`; slot order not recovered) | Confirmed by position |
+| `7a26` | +32 | -14 | Four trucks and two outriggers (next section) | Landing gear down | Confirmed |
+| `7a2c` | -2 | none | Removes the left inboard trailing strip (`4f3b`, `4f5a`): x -53 to -9, y -20 to 7 | Left flap word | Slot order |
+| `7a32` | -2 | none | Removes the right inboard trailing strip (`4e54`, `4e73`): x 9 to 53, y -20 to 7 | Right flap word | Slot order |
+| `7a38` | +2 / -2 | +11 | Swaps the full-height rudder strip (`50f0`, `5117`) for a skewed copy (`5016`, `503d`) | Rudder (positive direction only) | Confirmed by geometry |
+
+There is **no burner word** (jets, no afterburner), **no airbrake word** (the B-52
+has none; Jane's lists a 44 ft ribbon braking parachute, not drawn), no hook, no
+slat, no spoiler, no aileron, no canopy and no thrust-reverser word, and no
+separate geometry for any of them.
+
+Moving-surface map for the rig:
+
+| Surface | Source panel | Rig note |
+| --- | --- | --- |
+| Stabilizer (all-moving) | One 4-vertex polygon per side at z 5 (`334e`/`3361` right, `3167`/`317a` left; two windings each): (42,-123), (42,-115), (6,-81), (3,-120) | Only the polygon; no word. Turn whole about a lateral spindle through the root chord midpoint (about (4.5, -100.5, 5)). No vertex is shared with any other face. Real: trimmable +9 / -4 degrees (13 degrees, Wikipedia); no separate elevator face |
+| Flaps | One strip per side, 2 faces: x 9 to 53 (inner 32% of the 139 semi-span), chord 8.2 units | Source deletes them with the flap words; the rig keeps them drawn and turns them |
+| Rudder | Full fin height (z 11 to 42), chord about 8 units | The word swaps in a copy skewed 4 units (top) and 8 units (bottom); see below |
+| Bay doors | Two plates | Appear only when open |
+| Spoilerons / ailerons / slats | none | Not in the source |
+| Gear | Four trucks (6 faces each), two outriggers (4 faces each) | Rigid assemblies |
+
+**Rule 11 face table** (counted from the face dumps; "hinge" is the flap's forward
+edge or the rudder's front edge):
+
+| Surface | Face | Vertices | Moved | On hinge/spindle | Fixed |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Stabilizer right | `334e`, `3361` | 4 each | 4 | 0 | 0 |
+| Stabilizer left | `3167`, `317a` | 4 each | 4 | 0 | 0 |
+| Flap right (hinge (15,7) to (53,-14)) | `4e54`, `4e73` | 4 each | 2 | 2 | 0 |
+| Flap left (hinge (-15,7) to (-53,-14)) | `4f3b`, `4f5a` | 4 each | 2 | 2 | 0 |
+| Rudder (hinge (0,-114,42) to (0,-101,11)) | `50f0`, `5117` | 4 each | 2 | 2 | 0 |
+| Bay door plates (4 faces) | `4dfb`, `4e12`, `4d5e`, `4d75` | 4 each | 4 | 0 | 0 (appear whole) |
+| Outrigger plates (8 faces) | `482c` to `486a`, `4779` to `47d6` | 4 each | whole assembly | | 0 |
+| Truck faces (24) | five and four vertex plates | | whole assembly | | 0 |
+
+Verdicts:
+
+- **Stabilizer.** One quad per side that touches no other face, so a whole-panel
+  turn folds nothing and opens no seam. The leading root corner (6,-81,5) is
+  19.5 units ahead of the spindle, so +9 degrees lifts it 3.0 units (2.0 ft) and
+  -4 degrees drops it 1.4 units (0.9 ft); the polygon floats beside the tail cone
+  (fuselage half-width 2 to 6 units there), no visible gap needs closing. Options
+  (none chosen): (a) whole-panel pitch about the spindle with the real limits
+  (+9 / -4 degrees); (b) a smaller fitted pitch term plus the same panel as trim
+  only; (c) leave fixed. Roll: none (the B-52 stabilizer does not roll).
+- **Flaps.** Whole-strip faces; two vertices sit on the forward edge and two on the
+  trailing edge. The trailing corners (9,1) and (47,-20) are shared with fixed faces
+  (`2651`, `2664` at the root; `3d8b`, `3e29` at the outer end), so a turn about the
+  forward edge opens those two seams by the full chord (8.2 units, 5.5 ft) times
+  the sine of the angle (2.7 ft at 30 degrees). The same seam arises with the
+  Tornado trailing strips; no face folds. They span only the inner third of the
+  wing; the real flaps are large and the source has no outer flap. Options: rig
+  the strips only (what the source holds), or leave them as source deletions.
+- **Rudder.** Hinge edge shared with the fixed fin faces `3396`, `3434` (both
+  hinge vertices on the edge), so nothing folds. Measured: the skewed copy is a
+  **rotation about the hinge edge of about 33 degrees** (the top rear vertex
+  moves 4 units where it is 7.4 units from the hinge line, the bottom rear 8
+  units where it is 14.8 units away: both give a sine of 0.54), one-sided only.
+  So, unlike the Mirage, the retail swap is a clean rotation and the rig can be
+  exact; the negative direction is a mirror (fitted).
+- **Roll.** The source has **no roll surface**: no aileron (the G and H have none;
+  Wikipedia "Flight controls"), no spoileron panel (six or seven per wing in
+  reality). The wing top is built from a few large polygons (`3c8b`, `3cbb`,
+  `3cf3`, `3e4b`), so any spoileron would be a **partial surface** cut from them
+  and fails the whole-surface gate. Options: (a) no drawn roll surface (the
+  flight model rolls from the record, nothing moves; recommended by the gate);
+  (b) fitted whole spoileron plates added above the wing as new geometry (John's
+  call, not source geometry); (c) differential flaps for roll (not the real
+  control).
+- **Elevator.** Not a separate face; real elevator is a narrow-chord surface.
+  Leave to the stabilizer.
+- **Bay doors.** Only the open pose exists (see the survey).
+- **Thrust reversers, airbrakes, burner, hook, slats, canopy, drag chute:** none
+  in the source and none invented here.
+
+The whole-surface gate (John, 2026-11-07/08) is met by every face above, with the
+flap seam and the missing roll surface the only strains; no diagonal or partial
+surface is in the source, so no probe sheet is needed.
+
+### B-52 gear and outriggers (for John)
+
+The gear word `7a26` adds 32 faces, low point -14 (contact offset -28 in the
+parked inspector after the header scale). All are flat rigid plates:
+
+| Assembly | Faces | Position (raw) | Note |
+| --- | ---: | --- | --- |
+| Forward right truck | 6 | x 5 to 13, y 34 to 45, z -14 to -6; pentagon at y 39; side plate x 12; slanted plate x 7 to 10 | Strut and wheel pair stand-ins |
+| Forward left truck | 6 | mirror, x -5 to -14 | |
+| Aft right truck | 6 | same shape at y -26 to -37, pentagon at y -32 | |
+| Aft left truck | 6 | mirror | |
+| Right outrigger | 4 | x 108 to 113, y -38 to -32, z -14 to 3: two crossed plates | At wingtip side of the outer engine pod (x 87 to 96) |
+| Left outrigger | 4 | mirror | |
+
+At 2/3 ft per unit: four trucks in tandem pairs 47.3 ft apart (fore/aft centres
+y +39.5 and -31.5), truck centres 12 ft apart across, outriggers 74 ft either
+side. This matches the real layout ("Four individually retracted twin-wheel
+main units in tandem pairs ... Small outrigger units retract inward into wings
+outboard of outer engine positions", Jane's, `B52.INF`). The retail shape thus
+**does draw the outriggers** (as crossed plates reaching the same -14 contact
+line as the trucks) and four bicycle-style trucks. There is no nose gear, no
+wheel or door geometry and **no crosswind-gear yaw**: the real trucks pivot 20
+degrees either way (Wikipedia, "Flight controls"; Jane's: "set at a selected
+degree of castor"). The generic rig already supports rigid assemblies, tandem
+bogies and outrigger wheels for other identities (see the variety animation
+spec), so the shape and the gear model support all six assemblies. The belly
+clears the ground by 5 units (3.3 ft) with the gear down, which looks low next
+to the real B-52; no cited clearance was found, so that is an observation only.
+Options (none chosen):
+
+1. Rig the six assemblies with the retail gear word only (retract each as one
+   rigid piece; the outriggers retract inward, as Jane's says).
+2. As 1, plus a fitted crosswind crab (rotate each truck about a vertical axis
+   through its centre, up to 20 degrees, driven by crosswind or rudder). Fitted,
+   not in the source.
+3. Leave the outriggers fixed (not retracting). Not recommended; the source has
+   them in the gear word.
+
+### B-52 real size (for John)
+
+Measured on the neutral state of `b52.SH` (clean, gear up, bay closed): x -139 to
+139, y -138 to 107, z -9 to 42; gear down low -14. The airframe is drawn at the
+header scale (2/3 ft per unit):
+
+| Axis | Units | At 1/3 ft | At 2/3 ft (header scale 2) | Real | Verdict at 2/3 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Span | 278 | 92.7 ft | 185.3 ft | 185 ft (56.39 m) | +0.2% |
+| Length (nose to tail cone) | 245 | 81.7 ft | 163.3 ft | 159 ft 4 in (Wikipedia, 48.5 m); 160.9 ft (Jane's, 49.05 m) | +2.5% / +1.5% |
+| Height (fin tip 42 to gear low -14) | 56 | 18.7 ft | 37.3 ft | 40 ft 8 in | -8.2% |
+
+**Verdict.** The shape is true size at the header scale of 2/3 ft per unit: span
+within 0.3%, length within 2.5%. If TORE drew it at the default 1/3 ft per unit it
+would be half size (a 93 ft B-52), so BMB-A1 or B52-2 needs the entry `B52 => 2/3`
+in `tore_sim::combat::debris::scale` beside `Mig23` and the Tornado. The height is
+the one short axis; the airframe from belly (z -9) to fin tip (z 42) is 51 units =
+34.0 ft, and the gear legs are short by roughly 3 ft against a real aircraft
+standing 40.7 ft tall. No per-axis fit is needed. Options (none chosen):
+
+1. **Draw at 2/3 ft per unit** (header scale; MiG-23 and Tornado precedent).
+2. Draw at 1/3 ft per unit (half size; not recommended).
+3. Draw at 2/3 and lengthen the gear (fitted, about 3 ft) to reach the real
+   height; needs a cited real belly clearance first.
+
+Other measured proportions at 2/3: four engine pods in two rows (inboard pods
+x 45 to 60, centre 35.3 ft out; outboard pods x 79 to 96, centre 58.3 ft out),
+each pod 10 to 11 ft wide (two engines), 18 ft long; two drawn underwing tanks at x =
++/-115 (76.7 ft out, y -55 to -16, 26 ft long); wing leading edge swept 37 to 38
+degrees (Jane's: 35 degrees), anhedral (root z 8 to 11, tip z 3). The wing, tail
+and pods are all part of the neutral shape.
+
+### B-52 sensors, jammer and gun (for John)
+
+Seven rows. Rows 0 to 2 are fixed internal rows (flag `0x1008`); the rest are in
+the station table below.
+
+- **`VIS300.SEE`**: the large-aircraft visual sensor (the same file the transports use).
+- **`B52R.SEE`** (469 bytes): the **Tu-160's radar data renamed** (17 bytes differ
+  from `TU160R.SEE`, all names; 41 bytes from `TU95R.SEE`). It is a long-range
+  radar class (911,400 range, 10,920 search arcs). The real aircraft has the
+  Norden strategic radar and an EVS with FLIR and low-light TV (Jane's); keep as
+  retail. `AF1.PT` also names `B52R.SEE` and `B52.ECM`.
+- **`B52.ECM`** (352 bytes): identical to `AC130.ECM` and `TU160.ECM` apart from 16
+  name bytes (the same jammer block).
+  Keep as retail; the real defensive suite is large (ALQ-155, ALQ-172, ALE-20/24
+  dispensers) and none of it has a record.
+- **The gun (row 4): `M61.JT` in a slewed rear mount.** Yes, it is the B-52H's M61
+  tail gun: `M61.JT` is the shared M61 Vulcan record (20 mm, the fighters' and gunships' gun), flag `0x180a`
+  gun row with slew heading 32,760 (180 degrees, aft) and arcs 5,460 (30 degrees)
+  each way in heading and pitch, 2,000 rounds (the Tu-95 and Tu-26 tail-gun rows carry the
+  same `0x180a` flags). Real figures: the H's magazine held 1,242 rounds
+  (aircraftinformation.info), fed by the gunner's AN/ASG-21; the gunner position
+  went in October 1991 and the gun was removed 1991 to 1994 (same page; Wikipedia
+  "removed in 1991 from all operational aircraft"). **Position:** the row sits at
+  (0, 20, -220) record units = 0 ft right, 6.7 ft up, 73.3 ft aft; the drawn tail
+  cone ends at y -138 = 92 ft aft, centre z 3 (2 ft up), so the mount is 19 ft
+  forward of and 4.7 ft above the real tail turret position. Options (none
+  chosen): (1) keep the retail row (position and 2,000 rounds); (2) move the mount
+  to the drawn tail cone (authored, fitted to the shape) and/or set the rounds to
+  1,242 (real); (3) delete the gun for a 1991 and later B-52H (the real aircraft
+  has none now). The record is the pre-1991 H.
+
+### B-52 hardpoints (record rows)
+
+All seven rows, in original order, decoded with the standard field order.
+Location byte: 0 Centerline, 1 Fuselage, 2 Internal Gun, 3 Internal Bay, 4 Wing,
+5 Wingtip. Feet divide the record units by three; position is right / up /
+forward.
+
+| Row | Location | Flags | x / y / z | Feet right / up / fwd | Max items | Weight class | Default | Role |
+| ---: | --- | ---: | --- | --- | ---: | ---: | --- | --- |
+| 0 | Fuselage | `0x1008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `VIS300.SEE` | Fixed visual sensor |
+| 1 | Fuselage | `0x1008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `B52R.SEE` | Fixed radar |
+| 2 | Fuselage | `0x1008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `B52.ECM` | Fixed jammer |
+| 3 | Internal Bay | `0x1100` | 0 / -40 / 39 | 0 / -13.3 / 13 | 12 | 166 | `AGM84E.JT` | Forward bay row, default 12 AGM-84E |
+| 4 | Fuselage | `0x180a` | 0 / 20 / -220 | 0 / 6.7 / -73.3 | 2,000 | 0 | `M61.JT` | Tail gun, slewed aft |
+| 5 | Internal Bay | `0x1120` | 0 / -40 / 13 | 0 / -13.3 / 4.3 | 12 | 166 | none | Middle bay row |
+| 6 | Internal Bay | `0x1120` | 0 / -40 / -13 | 0 / -13.3 / -4.3 | 12 | 166 | none | Aft bay row |
+
+The three bay rows are one-sided (no pair flag), on the centreline, 8.7 ft apart.
+Weight class 166 is 16,600 lb per row (12 AGM-84E at 1,380 lb is 16,560 lb), so
+the retail bays hold up to 49,800 lb across the three rows. Flag `0x100` admits
+bomb-flag stores, rows 5 and 6 also carry `0x20` (active-radar missiles). The
+retail catalog default is one `AGM84E.JT` store per default row (row 3 only).
+There are **no external rows**: no wing, centreline or tank row exists.
+
+### B-52 bay and station survey (for John)
+
+**1. Shape measurement (2/3 ft per unit).**
+
+- *Bay.* The neutral belly is closed: the underside is plain skin (`22dc`,
+  `326b`, x 5 to 7, y -46 to 88, z -9 to -8), no recess, no door seam and no bay
+  interior. The only bay evidence is word `7a20`: two plates at x = +/-7 (9.3 ft
+  apart; the fuselage is x +/-8), y -13 to 26 (26.0 ft long, from 8.7 ft aft to
+  17.3 ft forward of the reference point), hanging 5 units (3.3 ft) below the
+  belly edge. Real bay: 28 ft long, 6 ft wide (aircraftinformation.info). The
+  drawn opening is 93% of the real length. The three record bay rows sit at 13,
+  4.3 and -4.3 ft forward = shape y 19.5, 6.5 and -6.5: all **inside the drawn
+  opening, centred on it**, so the rows are fitted to this shape's bay. Their
+  height (-13.3 ft) is not: the belly line is at -5.7 ft, the gear contact at
+  -9.3 ft, so the retail rows hang 7.6 ft below the belly and 4.0 ft below the
+  ground contact (the same record convention that the F-22 bay rows had before
+  the fitted magazines of [the F-22 stores](../spec/stores-on-pylons.md)).
+- *Underwing pylons.* The shape has **no pylon geometry** between the fuselage and
+  the inboard pods (the only pylon-like plates are the engine struts at x 53 and
+  87 and the tank pylon at x 115). The free underwing span runs from the fuselage
+  side (x 8, 5.3 ft) to the inboard pod (x 45, 30 ft): 37 units = 24.7 ft. At
+  x = 26 (17.3 ft out, the middle of the gap) the wing underside is at z 5.7
+  (3.8 ft above the reference point) and the chord runs y -8 to 39 (31 ft; middle
+  y 15.5 = 10.3 ft forward). The inboard pod's lower edge is z -6 (-4 ft), so a
+  store axis 1 ft below the wing underside is level with the pod crown. The two
+  underwing tanks the real aircraft carries are **drawn in the shape** at
+  x = +/-115 (76.7 ft out), always present.
+
+**2. Real loads from public sources** (aircraftinformation.info, Boeing B-52H
+page, and Wikipedia "Boeing B-52 Stratofortress" Armament, both accessed
+2026-11-15; Wikipedia "Operation Arc Light" for the Vietnam-era figure):
+
+| Place | Load | Source |
+| --- | --- | --- |
+| Internal bay | 28 ft x 6 ft; three interconnected door sections each side | aircraftinformation.info |
+| Internal, conventional | 27 each of Mk 82 or Snakeye, M117 (750 lb), CBU-52/58/71, Mk 36 or Mk 59/62 mines (three nine-bomb clips, or two four-bomb clips); 18 MJU-1B or M129 leaflet dispensers; 12 Mk 52 2,000 lb mines; 6 CBU-87 or CBU-89; or a clip of 8 Mk 84, Mk 41, Mk 55, Mk 56, Mk 60, Mk 64/65 or AGM-86C | aircraftinformation.info |
+| Internal, nuclear | Two B53, or the rotary launcher (CSRL, about 5,000 lb) with 8 AGM-86B/C, 4 B28, or 8 B61/B83 (82 B-52Hs had it) | aircraftinformation.info; Wikipedia |
+| Internal, 1760 upgrade | 8 JDAM 2,000 lb, or 24 GBU-38 (500 lb) or 20 GBU-31 (first phase) | Wikipedia "Upgrades" |
+| Underwing pylons | One pylon per wing "between the inboard engines and the fuselage"; a long pylon (Hound Dog, AGM-86) and a shorter stub pylon (conventional, with a heavy stores adapter beam) | aircraftinformation.info |
+| Pylons, ALCM | 12 AGM-86B/C or AGM-129 (6 per pylon); with the rotary launcher 20 in all | Wikipedia; aircraftinformation.info |
+| Pylons, conventional | 12 weapons per stub pylon; heavy stores adapter beam up to 9; table: Mk 82, M117, CBU-52/58/71/89 each 18 (CEM B-52H) or 24 (non-CEM), CBU-87 22 (CEM) or 18, GBU-15 10 (CEM); Harpoon 8 to 12 | aircraftinformation.info |
+| Totals | 51 Mk 82 (27 bay + 24 pylon) on the Vietnam B-52F; 12 AGM-84 Harpoon on 30 B-52Gs; about 70,000 lb of mixed ordnance, 62,660 lb for a full AGM-86B load | Wikipedia ("Operation Arc Light", "Armament") |
+| Drop tanks | Two 2,650 L (700 US gal) underwing tanks | Jane's, `B52.INF` |
+
+The retail media have **no** AGM-86, AGM-69, AGM-142, JSOW, JASSM or JDAM record
+(sweeps of the archives), so the rotary launcher and every cruise-missile load
+cannot be offered without a new weapon record. The roster does hold Mk 82
+(`MK82.JT`, `MK82AIR.JT`, `MK82P.JT`, `MK82HD.JT`), `MK84.JT`, `CBU87.JT`,
+`CBU89.JT`, the GBU family and `AGM84E.JT`; the existing ordnance masks decide
+which each row admits.
+
+**3. Proposed authored stations (standing decision 2; not decided; each labelled).**
+All distances in feet (record units are three times these).
+
+| Station | Position right / up / fwd | Capacity | Label |
+| --- | --- | --- | --- |
+| **Bay rows 3, 5, 6** (the three retail rows) | x 0; fwd +13.0 / +4.3 / -4.3 (retail, unchanged); up: store bottoms rest at the belly line (-5.7 ft), axis at floor plus half the larger of fin span and diameter plus 0.08 ft (the F-22 magazine rule), instead of the retail -13.3 | Retail 12 per row, class 166 (16,600 lb); proposed real-bay caps below | Fore/aft **fitted** (retail rows centred in the measured opening); height **fitted** (belly line measured); drawn inside, no pylon |
+| Bay capacity caps | Retail is 36 slots (3 x 12) and 49,800 lb, against a real bay of 27 bombs or 8 heavy stores (27 Mk 82 = 13,500 lb; 8 Mk 84 = 16,000 lb) | 9 stores per row (27 in all) and class 70 (7,000 lb per row, 21,000 lb internal): 9 Mk 82 or 9 M117 (6,750 lb) or 3 Mk 84 per row (9 in all, one over the real 8) | **Opinionated** (public loads cited above) |
+| **Underwing pylon pair** (new row, pair flag; flags per the roster rules) | +/-17.3 (x = 26 units), up +1.0 (store axis 1 ft below the wing underside, TORE's standard 1 ft pylon depth), fwd +10.3 (mid chord at that station) | 18 stores (9 per pylon, the heavy stores adapter beam limit) at class 200 (20,000 lb) per row; the conventional-table row of 18 (CEM B-52H) | Lateral and fore/aft **fitted** (measured free span and chord); capacity and class **opinionated** |
+| Bay doors | open pose = the retail plates, or (fitted) the belly cut and door panels as the F-22 | n/a | Opinionated if cut |
+| Drop tanks | stay drawn airframe at +/-76.7 ft; no station | n/a | Fitted (shape draws them) |
+
+Not proposed (no source or no weapon record): ALCM and CSRL loads, a wingtip or
+centreline row, pods (there is no pod station on the real aircraft, B7).
+
+**4. Options for John (none chosen).**
+
+1. **Retail rows only** (rows 3, 5, 6 as decoded; no pylons). Lowest risk; the
+   stores hang 7.6 ft below the belly (and under the ground contact line, which
+   makes them unusable as drawn).
+2. **Fitted bay rows (recommended by the evidence) and no pylons**: the three rows
+   lifted into the belly as above.
+3. **Fitted bay rows plus the authored underwing pair** (the full standing
+   decision 2 reading: "an internal bay and external wing pylons").
+4. Option 3 with the real-bay caps (27 bombs, 8 heavy) set as opinionated.
+5. The default load: the retail default is 12 AGM-84E in the forward bay row, a
+   Harpoon load the real aircraft carries on its wing pylons (30 B-52Gs, Wikipedia);
+   keep it in the bay, move it to the pylon pair (with option 3) or replace it
+   with a Mk 82 default (27 bombs). John chooses.
+
+### B-52 roster note
+
+`B52.PT` is the first aircraft of bomber batch A (before `B2.PT` and `F117.PT`);
+identity and checkpoint code are assigned by BMB-A1. `AircraftId` stays
+append-only in batch order (from 47 on).
+
+### B-52 unknowns and next steps
+
+| Unknown | Why it matters | Next step |
+| --- | --- | --- |
+| Record template (weights, fuel, thrust, G) | Flies as authored, not the real H | John, options above |
+| Variant (H or G) | Gun, power plant, naming | John |
+| Draw scale (1/3 against header 2/3 ft per unit) | Half size if no table entry | BMB-A1 or B52-2 adds `B52 => 2/3` |
+| Bay and pylon stations | Retail bay rows are 7.6 ft below the belly; no pylons | John, survey options |
+| Roll surface | None in the source | John, options above |
+| Crosswind gear and outrigger rig | Not in the source | John, options above |
+| Gun mount 19 ft ahead of the tail cone; 2,000 rounds against 1,242 | Position and count | John |
+| HUD and cockpit | AC-130 family, HAB sight | John, three options |
+| Real pylon wing station and belly clearance | Only the span between fuselage and inboard pod is cited; no station or clearance was found | A dimensioned drawing, if John wants the exact figure |
+| Streamer record | Decoded points are noise | Fit from the drawn tip (139, -48 to -69) |
