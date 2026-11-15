@@ -7412,3 +7412,451 @@ wire identity is 9 bits, so there is no capacity constraint.
   question.
 - Real main gear track and wheelbase, the real bay dimensions and a G limit
   were not found in public sources.
+
+## F-117 source review (2026-11-15)
+
+Research mode, slice F117-0 (bomber batch A, plan `.local/m3-aircraft/PLAN-F117.md`).
+This reviews `F117.PT` (F-117A Nighthawk) and its dependency closure before
+`AircraftId::F117` exists. No original module was executed. PT, SEE, ECM and JT
+are read as bounded BRF data with the shared field order in
+`aircraft_schema.rs`; SH and HUD are inspected as data (`shape_inspect`). Slice
+done by Claude Sonnet (sonnet-medium). Nothing here changes code or behaviour.
+Real-aircraft figures are cited and never establish game behaviour. Questions
+for John are **not decided here**: they are marked "(for John)" and collected in
+the plan's "Questions for John".
+
+### F-117 build and extraction
+
+The closure was extracted locally to `.local/m3-imports/scratch/f117` with
+`tore-extract --include 'F117*' --include '*F117*' --include 'VIS340*' ...` (and
+`'*.PT'` for the diffs). `FA_2.LIB` holds the whole closure; the installer copy
+inside `SETUP.ESA` is byte-identical for the PT and shapes. The usual five
+unrelated archive errors appear. Unlike the Tornado, the F-117 has a
+**cockpit and encyclopedia of its own**: `~F117.PIC`, `~F117H.PIC`,
+`~F117S.PIC`, `~F117_P.PIC` and `ICO2F117.PIC` in `FA_1.LIB`, `F117.HUD`,
+`F117.PTS`, `F117.AI` and `F117.BI` in `FA_2.LIB`, `F117.INF` and `F117_0..7`,
+`_C`, `_E`, `_F`, `_P` `.PIC` in `disc2/FA_3.LIB`, `^ACF117.5K` (the radio
+callout) and `~AF117.M` (a mission file).
+
+### F-117 identity and record
+
+| Field | Decoded value |
+| --- | --- |
+| PT | `F117.PT`, 11,390 bytes (decoded), SHA-256 `a2774215720dede83601695ca44c319500919c4e7d92afb5f043b78abf64608d` |
+| Displayed names | `F-117`, `F-117A Nighthawk`, `F117.PT` |
+| Schema | OBJECT + NPC + PLANE, 219 statements; `structType` 5; `typeSize` 588; `instanceSize` 575 |
+| Object class / year / hit points | `0x4000` (attack) / 1983 / 131; `expType` 30 |
+| PLANE flags | `0x11` (base `0x01`, seat `0x10`; no hook, no multi-crew, no no-lift) |
+| Shape | `f117.SH` (20,992 bytes; header exponent 8, so the **aircraft convention of 1/3 ft per unit**), shadow `f117_s.SH` (3 faces) |
+| Damage looks | `F117_A.SH` 233 faces, `F117_B.SH` 48, `F117_C.SH` 199, `F117_D.SH` 55 |
+| Skins | `_F117.PIC` 117,584 bytes, `_F117_A/B/C/D.PIC` 85,864 / 31,264 / 60,904 / 32,044 |
+| Sounds | `&JET2N.11K` loop and second sound, `&powerup.5k`, `&powerdn.5k` (all present) |
+| HUD | **empty** in the record (`hudName` is `dword 0`); `F117.HUD` exists |
+| AI script | `f117.BI` (12,800 bytes); `F117.AI` (18,823 bytes) is also present |
+| Sensors / jammer / weapon | `VIS340.SEE`, `PAVESPK.SEE`, `F18.ECM`, `AV8IR.SEE` (fixed rows 0 to 3) and `PAVEWA3.JT` in two bay rows |
+| Engines / thrust | 2 / 21,600 lbf military, **afterburner 0** (non-afterburning); fuel flow 2, afterburner flow 0 |
+| Weights / fuel / ceiling | empty 29,500 lb, maximum takeoff 54,000, internal fuel 18,500, ceiling 42,000 ft, minimum altitude 300 ft |
+| G / speeds | -3 / +6; 1 G row top 604 kt at 36,000 ft; sea level 592 kt (the catalog) |
+| Signatures | `sigs` 162 / 162 / **20 (infrared)** / **1 (radar)** / 0; `maxVisDist` 249 |
+| Checkpoint code / CLI key | assigned by BMB-A1 |
+
+The decoded record equals the catalog row in [`fa-aircraft.csv`](fa-aircraft.csv)
+field for field. Hashes of the files later slices depend on:
+
+| Resource | SHA-256 |
+| --- | --- |
+| `F117.PT` | `a2774215720dede83601695ca44c319500919c4e7d92afb5f043b78abf64608d` |
+| `F117.SH` | `b936e4c57adbce43d5da600a0016a25cd44c7e46d1c0da5a2f1fba0b56c9ebaf` |
+| `F117_S.SH` | `23fd10e7afa464137c85880c6491a8cece639db8f7b02e030fe603185c77b11b` |
+| `F117_A.SH` | `db985c2930ca458eb481cbe6066f7cbc62fdf90bc75c9e2981868ec5c765715d` |
+| `F117_B.SH` | `66d6d75f18a869fe844c9ab869d91b81e2a893b07a13d294f580b79eaa13ab66` |
+| `F117_C.SH` | `5bf8b08b9683a1ba0b2781dac543f568789e08cdf6ef73ca11a9432ec7943692` |
+| `F117.HUD` | `b2736a93d9785869b7f418d58fffb83657df53a39275a1a7f50386adbdcc9a02` |
+| `F117.BI` | `a350e28c55a53a35939172996319e0c6264c2283166004232a10653a9e060fdc` |
+| `F117.AI` | `7d2a9845fbde298597cc5cf5691d3ff6422e6dab3b2508de2557ba29c132cf80` |
+| `F117.PTS` | `1d06c52216c77e8cfd2704f236eb57d9816f72d0fceb4aea25040778158cf9ee` |
+| `VIS340.SEE` | `445c35d1cc778513b0d38b73d36e10b47b7a4f210ffef87f54a53b17e6cd9efe` |
+| `PAVESPK.SEE` | `7fd9c6d3e909015e8715056e5c0f13ce472cdb7fb70ac10bdcd4a54cb6e53b91` |
+| `AV8IR.SEE` | `d4791bcb3faf93799cb49472757801834c49c9d0566da6ceb59ef40847ad0f60` |
+| `F18.ECM` | `0fb851d57d7f88f51a017d9663101b52c681c6a6d5ac55823588f25a942d31a9` |
+| `PAVEWA3.JT` | `1bd851487c84f6af4a40a92da279cbd63dc75f49d7297ee1b163ded4454b3537` |
+
+(`PAVESPK.SEE` is byte-identical to the Tornado's.)
+
+### F-117 dependency closure
+
+| Dependency | State | What TORE does |
+| --- | --- | --- |
+| Shape `f117.SH`, shadow, four damage looks, `_F117*.PIC` | all present | Normal shape path; two state words only (below) |
+| AI script `f117.BI` | present, and `F117.AI` beside it | TORE does not run retail scripts. `BehaviorFamily::F117` already exists (`crates/tore-sim/src/ai/controller.rs`, checkpoint value 1); [spec/ai.md](../spec/ai.md) says the F-117 "shares fighter air combat; ground pass requests a 5000 vertical offset and speed operand 300". `strike_class.rs` names the F-117 as the likely first `OVERRIDES` entry (empty today, "retail flies it at 5,000 ft level") |
+| Sensors `VIS340.SEE`, `AV8IR.SEE`, `PAVESPK.SEE`, ECM `F18.ECM` | present | Reviewed records (see the sensor section); **no radar row** (no `F18R.SEE`) |
+| Store `PAVEWA3.JT` | present | GBU-27 Paveway III, 2,000 lb, shape `gb27.SH`; already in the TORE roster and flown from the F-16C and Su-25 ([air-to-ground baseline](../baselines/air-to-ground.md)) |
+| HUD | record field empty | see below |
+| Cockpit art `~F117*.PIC`, `F117.HUD` | present | A cockpit family of its own (`F117` stem); needs a measured glass polygon like the batch-5 aircraft |
+| `F117.PTS`, `ICO2F117.PIC` | present | PTS is inert (aircraft.md); the icon is a list-screen picture |
+| Sounds | present | Shared with other records |
+
+**An empty HUD field.** `hudName` is `dword 0`, not a pointer, so the record
+names no HUD. Other aircraft are in the same case (the F/A-18D, AV-8B, B-2, X-29, X-31, Rafale,
+Su-35, Yak-141, AC-130 and the ASTOVL records); the catalog's `hud_resource` column is blank for them.
+TORE does not read the field to choose a HUD: `Aircraft::hud()`
+(`crates/tore-formats/src/aircraft.rs`) is a per-aircraft table (`F18` gives
+`F18.HUD`, `Rafale` gives `RAFALE.HUD`), and
+[spec/air-to-ground.md](../spec/air-to-ground.md) records that "several PTs carry
+an empty HUD name and were matched by file name". For the F-117 the file-name
+match is clean: `F117.HUD` exists (4,608 bytes) and names `~f117`, `~f117h`,
+`~f117s`, `~f117_p` and `~f117_w` (strings read from the module), exactly the
+`~F117*.PIC` set in `FA_1.LIB`. Nothing is a substitute, unlike the Tornado
+(Eurofighter HUD). `hud_aperture.rs` has no F-117 arm, so the glass mask fails
+closed (empty) until a slice measures `~F117H.PIC` (the Gripen, F-5E and Tornado
+precedent). The bomb sight type of `F117.HUD` is not read here.
+
+### F-117 record against the other records
+
+Of the 219 statements the closest records agree on 182 (`A7`), 180 (`EA6`),
+178 (`F4E`), 177 (`A4E`, `A6V`): those overlaps are the generic block shared by
+144 of the 145 records (stall, spin, AI timers, crash speeds, damage tables), so
+no single record is the template. The F-117 record has these values **shared
+with no other record**: empty weight, military thrust, internal fuel, hit points,
+`structure[0]` and `[1]`, `turbulencePercent` 135, `wheelBrakesDrag` 48,
+`sigs[2]` 20, `maxVisDist` 249, the whole ten-row G envelope (no other record
+shares even two rows) and the hardpoint block. It is an authored record, not a
+reskin. `bayDrag` 25 is shared only with the other bay aircraft (`B2`, `B52`,
+`F22`, `TU26`, `TU95`, `TU160`, `AN74`), so the record knows about its bay.
+
+### F-117: the template copy list (for John)
+
+Real figures: Wikipedia "Lockheed F-117 Nighthawk" (accessed 2026-11-15:
+length 65 ft 11 in, span 43 ft 4 in, height 12 ft 5 in, empty 29,500 lb,
+maximum takeoff 52,500 lb, two F404-F1D2 at 9,040 lbf each non-afterburning,
+maximum speed 594 kn / Mach 0.92 with "541 kn at high altitude" in the text,
+ceiling 45,000 ft, two internal bays with one hardpoint each, 5,000 lb internal);
+MILAVIA F-117 specifications (accessed 2026-11-15: two F404-GE-F1D2 at 10,800 lb
+each, 52,200 lb maximum takeoff, Mach 0.98 / 1,040 km/h, ceiling 50,000 ft
+estimated, 5,000 lb in the internal bay); aerospaceweb F-117 data (accessed
+2026-11-15: +6 G, 646 mph, 52,500 lb).
+
+| Field | Record | Real | Difference | Verdict |
+| --- | ---: | ---: | ---: | --- |
+| Empty weight, lb | 29,500 | 29,500 | 0 | **Real**, and unique to this record |
+| Military thrust, lbf (both) | 21,600 | 18,080 (Wikipedia, 2 x 9,040) to 21,600 (MILAVIA, 2 x 10,800) | +19.5% / 0 | **Agrees with MILAVIA**; unique to this record. Sources disagree on the rating |
+| Afterburner thrust | 0 | none (F404-F1D2 has no afterburner) | 0 | Correct (68 records have 0, so it is also the generic value) |
+| Engines | 2 | 2 | | Correct; the shape has two exhaust slots |
+| Max takeoff, lb | 54,000 | 52,500 (Wikipedia, aerospaceweb), 52,200 (MILAVIA) | +2.9% / +3.4% | **Copy** of `F105.PT`'s 54,000 (the only record sharing it); close to real |
+| Internal fuel, lb | 18,500 | not found in any fetched source | unknown | Unique to this record; unverified |
+| Ceiling, ft | 42,000 | 45,000 (Wikipedia), 50,000 estimated (MILAVIA) | -6.7% / -16% | **Copy**: the same 42,000 sits on 15 records (the F-4 family, `A6`, `A7`, `F105`, `F5E`...) |
+| G limit | -3 / +6 | +6 (aerospaceweb); negative limit not found | 0 | -3 / +6 is also the value of 12 other records (A-7, EA-6B, Su-24...); **+6 matches real** |
+| Top speed (1 G row top), kt | 604 at 36,000 ft | Mach 0.92 is 527 kt at 36,000 ft; Wikipedia text 541 kt; MILAVIA Mach 0.98 is 562 kt; Wikipedia infobox 594 kn | **+11.6% over 541, +14.6% over 527; Mach 1.05** | **Too fast at altitude** (the record is supersonic; the real aircraft is subsonic) |
+| Sea-level maximum, kt | 592 | Mach 0.92 at sea level is about 608 kt (Wikipedia 594 kn) | -2.6% to -0.3% | Agrees |
+| Hit points | 131 | none | | Unique to this record |
+| Year | 1983 | first flight 1981, operational 1983 | 0 | Real (3 other records share 1983) |
+| Radar / IR signature | 1 / 20 | stealth airframe | | Unique to the F-117 (the B-2 shares the radar value 1) |
+
+The record's top speed is the fast edge of its 1 G polygon: 1,020 ft/s (604 kt)
+at 36,000 ft and 1,000 ft/s (592 kt) at sea level. The speed of sound is 573.6
+kt at 36,089 ft, so 604 kt is Mach 1.05 there. With loaded drag 0 and no
+afterburner, the level top speed in flight is that edge (see the F-5E trim
+section: top speed is the edge over sqrt(1 plus the loaded-drag fraction)).
+Options for John (none chosen):
+
+1. Keep the record as retail (documented, audit only).
+2. Trim only the high-altitude fast edge to the real Mach (0.92 gives 527 kt at
+   36,000 ft; 541 kt keeps the text figure), leaving sea level (592 kt) and
+   every lower row as decoded. The 604 / 592 shape of the polygon means a single
+   scale (as B5-5's 0.92 for the F-5E, here 0.87 to 0.90) would pull sea level
+   to 517 to 530 kt, **below** the cited sea-level maximum, so a scale on the
+   altitude vertices only is the closer match. Fitted, agent.
+3. Correct maximum takeoff to 52,500 lb and the ceiling to 45,000 ft as well
+   (the B5-2 precedent for Tornado values).
+
+Agent note: nothing in the thrust or weights needs correcting; the record is
+closer to the real aircraft than the Tornado's was. The G envelope rows are the
+F-117's own (not copies).
+
+### F-117 shape: state words and the rule 11 fold table
+
+`f117.SH`: 207 runtime faces in the neutral state, 0 lines, 0 billboards, a
+streamer record whose pivot is zero, **two state words only** (`4c56`, `4c5c`).
+Measured with `shape_inspect` and a word sweep of values 1 to 8 and -1:
+
+| Word | Value | Effect | Reading | Status |
+| --- | ---: | --- | --- | --- |
+| `4c56` | 1 | +5 / -1 faces (net +4): the one belly triangle `34e6` is replaced by its reverse winding `351d`, and four faces appear: two vertical walls | **Weapons bay open** | Confirmed by geometry (walls sit on the belly between y -27 and 22) |
+| `4c5c` | 1 | +31 faces | **Landing gear down** (nose 9, left main 12, right main 10, counting door skins and wheel plates) | Confirmed by geometry (lowest point z -21) |
+| `4c5c` | 4 | +3 degenerate faces (two equal vertices, zero area) | Line-like marks at x +/-28 (y 11 to -25, z -5) and x -1 (y 60 to 37) | **Unmapped**; invisible as faces, possibly wheel-well edges |
+
+There is **no flame, airbrake, flap, rudder, elevon, ruddervator, canopy or
+hook word**, and no separate geometry for any of them. The retail F-117 has no
+afterburner and no brake, so the first two are expected; the control surfaces
+are simply not in the source.
+
+Both words together give 242 faces (207 + 31 + 4); `--branches` gives 212 / 247.
+
+**Rule 11 face table** (counted from the word dumps; the hinge is the top edge
+of each piece):
+
+| Piece | Faces | Vertices | Moved | On hinge | Fixed |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Bay wall x -3 (`319c`, `31b1`, the same polygon in two windings) | 2 | 6 each | 3 | 3 (z -4/-5 top edge, one vertex 1 unit off) | 0 |
+| Bay wall x +1 (`31ff`, `3214`) | 2 | 6 each | 3 | 3 | 0 |
+| Belly triangle swap (`34e6` to `351d`) | 1 | 3 | 0 | 0 | 3 (a replacement, not a hinge) |
+| Nose gear (`3765`, `3784` strut; `37e8`, `3807`, `3826`, `3845` crossed leg plates; `3897`, `38b0` side plate; `3657` door skin) | 9 | 4 to 5 | | top edge z -4 | 0 |
+| Right main (`3286`..`3305` six leg faces; `3351`, `3366` wheel hexagons; `3676`, `36fa` door skins) | 10 | 4 to 6 | | top edge z -4 | 0 |
+| Left main (`33d8`..`3457` six; `34a3`, `34b8`; `36a1`, `36c0`, `36df`, `3719` door skins) | 12 | 4 to 7 | | top edge z -4 | 0 |
+
+The gear is rigid plates like the Tornado's (nose leg planes at x 0 and y 40,
+main legs at x +/-28 and y -15, tyre plates at y -20). It reuses the shared
+gear rig family (rigid pieces fold about the top edge). Fold verdict: no face of
+a gear piece has a fixed vertex off its hinge; the bay walls are two planes
+two windings each, so they are doors turning about their top edges, not a
+folding surface. **The shape has no door faces for the bay**: the closed belly
+is one triangle, and the open pose is the two walls (see the bay section).
+
+### F-117 surfaces against the whole-surface gate (for John)
+
+**V-tail (ruddervators).** Each side is one assembly of 10 faces (right:
+`22c5`, `22d9`, `231a`, `232e`, `2383`, `244b`, `2460`, `2475`, `24b3`, `2e40`;
+left: `23ab`..`255e`): a wedge from the root (1, -55, 3) to the tip (24, -96, 21),
+canted about 39 degrees from horizontal. **No vertex of either tail is shared
+with any other face of the shape** (the tail is a separate solid), so turning
+the whole assembly folds nothing and leaves nothing stretched; the cost is a
+seam between the tail root and the fuselage skin that a turn opens by up to
+the root offset. This is the whole-panel case the standing decision describes:
+all-moving, turning whole about a lateral spindle through the root chord
+midpoint tilted by its own cant. The real aircraft's ruddervators are
+described as the control surfaces of the V tail (the sources fetched do not say
+whether they are all-moving; the lead's plan states all-moving, not re-verified
+here). Pitch and yaw are mixed on a V tail (rudder from differential,
+elevator from common deflection); rule 12's elevon-mix precedent covers the
+sign convention. Options (none chosen): (a) whole assemblies about the cant
+axis, pitch plus yaw mix, fitted limit; (b) as (a) with a small fitted limit so
+the root seam stays closed; (c) leave the tails fixed.
+
+**Elevons.** The wing has **no separate elevon faces**. The trailing edge is the
+aft edge of the same large flat facets as the rest of the wing (`1e69`, `1e91`,
+`1ea4`, `1eb6` outboard; `1e0a`, `1e42`, `1ff6`, `2725`, `2ddc` inboard; the
+inboard trailing edge runs (0, -77) to (30, -52) and the outboard (35, -48) to
+(85, -81)). Turning any one facet would be a diagonal or partial surface and
+fails the gate; the facets are chord-wise, not hinge-line strips. Real: elevons,
+inboard and outboard, on each wing (the lead's plan; not re-verified). Options
+(none chosen): (a) leave the elevons unrigged (the sources have none; the
+Tornado left slats and spoilers the same way); (b) author split panels by
+cutting the trailing facets along a hinge line (fitted new geometry, John's
+call, the Mirage and Tornado precedent for adding geometry); (c) pitch and roll
+through the tails only (a V tail can roll with differential ruddervators only
+in a small amount). **Real layout and chord ratios were not found in a public
+source in this pass.**
+
+**Bay doors.** Covered below (open pose only; no door panel in the source).
+
+### F-117 gear
+
+At 1/3 ft per unit: nose leg at y 36 to 43 (centre y 40), main legs at x
++/-28 to 29, y -8 to -19, axle y -15 to -20. Wheelbase 55 units = 18.3 ft; track
+57 units = 19.0 ft (raw). With the per-axis scale below, wheelbase 19.2 ft and
+track 14.5 ft. The lowest point with the gear down is z -21 units (7.0 ft raw,
+6.2 ft after the height factor). No public source for the real wheelbase or
+track was found in this pass. The nose and main legs have no door panels that
+open; the `z -6` plates added with the gear are skins 1 unit under the belly.
+Retraction direction is not in the source; none was cited. The record holds
+`gearDrag` 23 (the 105-record common value).
+
+### F-117 real size (for John)
+
+Measured on the neutral state (gear up) and the gear word: x -85 to 85, y -96 to
+93 (the thin nose probe from 89 to 93), z -6 to 21; gear down low -21. Header
+scale exponent 8, so 1/3 ft per unit.
+
+| Axis | Units | At 1/3 ft (current default) | Real | Verdict |
+| --- | ---: | ---: | ---: | --- |
+| Span (wingtips x +/-85) | 170 | 56.7 ft | 43.33 ft | **+30.8%** |
+| Length (tail to probe tip) | 189 (185 to the nose) | 63.0 ft (61.7) | 65.92 ft | -4.4% (-6.4% to the nose) |
+| Height (gear low to fin tip) | 42 | 14.0 ft | 12.42 ft | +12.7% |
+
+The shape is **too wide**, as the Mirage 2000 was (and unlike the Tornado, whose
+header scale of 2 made it true size). A leading-edge sweep check supports a per-axis fit:
+the edge runs from (13, 62) to (85, -71); at identity that is 61.6 degrees
+from the lateral axis, the real aircraft's commonly quoted sweep is 67.5
+degrees (not fetched here), and with the per-axis factors below it is 68.4
+degrees. Per-axis factors by the `aircraft_scale.rs` formula
+(`real_ft * 3 / extent_units`): **x 0.7647, y 1.0463 (length measured to the
+probe tip, as the Mirage F1 was; 1.069 to the nose), z 0.8869** (the gear low
+point 21 units becomes 18.6, 6.2 ft). Options for John (none chosen):
+
+1. Keep at identity (a 57-ft wide, 14-ft tall F-117).
+2. Per axis to the real span, length and height (the Mirage 2000 and F1
+   precedent, "per axis to real"), factors above.
+3. Uniform scale only (one factor cannot fit all three: 0.78 for the span, 0.96
+   for the length and 0.89 for the height).
+
+Whatever is chosen is a `shape_axis_scale` row and moves stations, the gear low
+point, the damage looks (same header), the tail rig and the bay with it.
+
+### F-117 hardpoints and the bay (for John)
+
+Location byte of each row is the last record field (labelled `name` in the
+schema): 1 Fuselage, 3 Internal Bay. All six rows in order:
+
+| Row | Location | Flags | x / y / z | Feet right / up / fwd (raw) | Max items | Weight class | Default | Role |
+| ---: | --- | ---: | --- | --- | ---: | ---: | --- | --- |
+| 0 | Fuselage | `0x1008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `VIS340.SEE` | Fixed visual sensor |
+| 1 | Fuselage | `0x1008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `PAVESPK.SEE` | Fixed designator row |
+| 2 | Fuselage | `0x1008` | 0 / 0 / -50 | 0 / 0 / -16.7 | 1 | 0 | `F18.ECM` | Fixed jammer |
+| 3 | Fuselage | `0x1008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `AV8IR.SEE` | Fixed infrared row |
+| 4 | **Internal Bay** | `0x1100` | -10 / -22 / -2 | **-3.3** / -7.3 / -0.7 | 1 | 20 | `PAVEWA3.JT` | Left bay station |
+| 5 | **Internal Bay** | `0x1100` | 10 / -22 / -2 | **+3.3** / -7.3 / -0.7 | 1 | 20 | `PAVEWA3.JT` | Right bay station |
+
+The 6 hardpoints are four fixed equipment rows (no stores) and **two bay rows**,
+one per side, each one-sided (no pair flag `0x4`, like the F-22's bay rows),
+each holding one store of weight class 20 (2,000 lb), the GBU-27. So the record
+already says "two 2,000 lb weapons in two bays". Row 4 and 5 map to the two real
+trapezes of the lead's description; the sources fetched (Wikipedia, aerospaceweb)
+say "two internal weapons bays with one hardpoint each", up to two GBU-10/12/27
+laser-guided bombs, two BLU-109, or two GBU-31 JDAM, 5,000 lb in all (MILAVIA:
+"one internal weapons bay", Wikipedia text "split internal bay"). Flags `0x1100`
+equal the B-52 bay rows' mask; which weapons that mask admits is a TORE
+compatibility result for F117-5 or F117-6 (it was not computed here, the F-117
+being unimported). The retail row positions are the "where retail releases"
+points: the 7.3 ft depth is below the belly; the stores sit inside the airframe.
+
+**The shape's bay (measured).** Open pose (word `4c56` = 1): two vertical walls
+(x -3 and x +1, 4 units apart, the six-vertex outline from (-3, 22, -5) to
+(-3, -27, -12)) spanning y -27 to 22 and z -4/-5 down to -12. That is a slot
+**49 units long, 4 wide and 8 deep: 16.3 by 1.3 by 2.7 ft at identity, 17.1 by
+1.0 by 2.4 ft after the per-axis factors**, centred x -1. The closed belly is
+one triangle. The record rows sit at x +/-10 units, outside this slot: the slot
+is a central gap or keel, not two bays, and cannot hold a 1.2 ft body with a
+5.4 ft fin span (GBU-27: 13.9 by 1.2 ft body, 5.4 ft fins, `store_sizes.rs`).
+The length fits (a 13.9 ft bomb in 16 to 17 ft); the width does not.
+**No door panels exist** and the real door count is unknown here.
+
+**Proposal (none decided): authored bay stations, labelled fitted or opinionated**,
+under standing decision 2, reusing the F-22 internal-bay mechanism. What that
+mechanism is (read from the code and [stores on
+pylons](../spec/stores-on-pylons.md#f-22-naval-stores)): the source's
+`Location::InternalBay` rows are re-placed by hand into `Location::Magazine`
+(byte `0x83`, `placed_on` in `crates/tore-sim/src/combat/hardpoints.rs`, keyed by
+aircraft and row), with a hand-set mount (centre x, floor height, release origin
+forward); stores are drawn inside on fitted tandem rails (forward leaves first,
+a length plus 0.25 ft apart), not counted as external stores by the radar
+signature, and released through doors that the animation opens (fitted 1 s
+hold, `OPENING BAY`, `O` key). The belly is clipped over fitted rectangles and
+the doors are fitted.
+
+1. **Stations.** Keep the two source rows as the stations (row 4 left, row 5
+   right, one 2,000 lb store each: source-derived count and weight class). New
+   `F117` arm in `placed_on` with fitted mounts: centre x +/-2.55 ft (the
+   record's +/-10 units at the per-axis x factor; +/-3.3 ft at identity), floor
+   about 1.5 ft under the reference (belly at z -5 units is -1.5 ft at the z
+   factor), release origin about -0.7 ft forward. **Fitted, agent, opinionated
+   for John.**
+2. **Bay opening.** The shape's slot (1.0 ft wide) is too narrow for the stores:
+   cut two fitted rectangles in the belly face `34e6` (the F-22's "source bounds
+   extended" approach), each about 2.6 ft wide (a 1.2 ft body with clearance)
+   and 17 ft long, centred x +/-2.55 ft, y -27 to 22 units, depth 2.4 ft from
+   the walls, with one door per bay hinged at the outboard edge (the F-22 has two
+   doors a bay; the F-117's door count is not in any source fetched). The
+   `4c56` walls become the recess's inboard sides. **Opinionated, the numbers
+   fitted.** Alternative: keep the single central slot and draw one store pair
+   straddling it, which clips.
+3. **Loads.** Default two `PAVEWA3.JT` (the record). Candidate rows from the real
+   load, all within the weapons data (listed, none chosen): GBU-27 (`PAVEWA3`),
+   GBU-10 (`GBU10`/`PAVEWAY`), GBU-12, BLU-109 (a 2,000 lb penetrator; no BLU-109
+   record exists in the roster, only the GBU-27 which carries one), GBU-31 JDAM
+   (if a JDAM record exists), and the Mk 84 (only if a source or John says so).
+   The B61 is out of scope. Stores greater than weight class 20 stay refused by
+   the row.
+4. **Signature.** Under `docs/radar.md` an open bay adds 50 percent to the
+   effective signature (`bay_open`) and bay stores add nothing; the bay doors
+   would make the F-117's `Configuration.bay` deployed fraction non-zero. No
+   new rule.
+5. **No external stations.** The real F-117 has none (the sources and the record
+   agree); nothing is added, and no pylons or pods (B7). A NASA external-store
+   test (Test 461, The Aviationist, 2019) shows the aircraft could be given
+   external stores, but it was a test, not a service configuration.
+
+### F-117 sensors, jammer and pods (B7) (for John)
+
+The record has four fixed rows and no radar row. Real: no radar, no external
+pods; a turreted forward-looking infrared and a downward-looking infrared with a
+laser designator (IRADS, built by Texas Instruments, in a recess beside the
+nose gear well, FAS "IRADS"; Wikipedia: "thermal imaging infrared system with a
+laser rangefinder/laser designator"), GPS and inertial navigation; whether any
+radar warning equipment is fitted "remained classified as of 2008" (Wikipedia).
+
+| Row | Retail record | Real | Options (none chosen) |
+| --- | --- | --- | --- |
+| `VIS340.SEE` | Visual, 10 / 5 nmi, 170 x 140 degrees (the common fighter eye) | The pilot's eye | Keep |
+| `PAVESPK.SEE` | AN/ASQ-153 Pave Spike, fixed row, flag `0x1` at (0, 0, 0), ranges at the maximum (32767) | The real designator is IRADS' laser | (1) **Keep as retail**: it is the aircraft's own laser, and TORE's laser bombs home only on the aircraft's own (or a buddy's) laser spot, so the GBU-27s need it; no pod drawn, nothing on a station (B7 satisfied). (2) Keep and relabel it IRADS in the display text only. (3) Drop it (the bombs would then need a buddy's laser): breaks the real mission |
+| `AV8IR.SEE` | Infrared, flag `0x2`, ranges 10,920 / 8,190 units (the table lists AV8IR at 15 / 15 nmi for the X-31 and F-22A) | The FLIR (forward-looking) | (1) Keep as retail (IR channel, ground scan scope; no pod). (2) Relabel as the FLIR/DLIR in text only. (3) Drop (no IR channel; loses the infrared view the F-117 is flown with) |
+| `F18.ECM` | `ALQ-161`, mode flags `0x1F0`, radar deception 30 percent, fixed internal | No jammer or deception system is documented (RWR "classified") | (1) Keep as retail (the F-18's ALQ-161 on a stealth aircraft is a template). (2) Drop the row: the J key does nothing, the aircraft relies on its signature (the closest to real; changes the record row). (3) Keep it but it is a John call on whether a deception suite fits the F-117 character |
+| Radar | none | none | **Retail already correct**; do not add `F18R.SEE` |
+
+No pod body is ever drawn for these rows: they name no shape. The fixed-pod
+body path in `crates/tore-app/src/pylons.rs` draws a fitted body only on
+a station; rows 0 to 3 are not stations, so nothing hangs anywhere.
+
+### F-117 stealth finding (standing decision 4)
+
+**The code already has a radar and an infrared signature concept, and the record
+carries a stealth signature.**
+
+- `crates/tore-formats/src/parked_aircraft.rs` and
+  `crates/tore-sim/src/sensors/signature.rs`: `SignatureProfile::from_source`
+  reads `sigs[3]` (radar) and `sigs[2]` (infrared) from every aircraft record
+  as relative game statistics, "not square metres". Detection range follows
+  `min(nominal, nominal * sqrt(signature / 100) * L * N * J)`
+  ([docs/radar.md](../radar.md)). Infrared uses `sqrt(PT_IR_signature / 100)`
+  (`docs/radar.md`, IR section).
+- The F-117 record: **radar 1, infrared 20** (and `sigs[0]`/`[1]` 162, which
+  `tore-sim/src/turbulence.rs` reads as the turbulence input, not a signature).
+  The B-2 record: radar 1, infrared 15, visual 220. The F-22: radar 10, infrared
+  60. The ordinary fighter value is 100.
+- Effect, against a 90 nmi radar nose-on in clear air (the table values): the
+  F-117 clean is seen at **9.0 nmi** (the F-22 28.5), 18.0 nmi seen from above
+  (the aspect weights 1/2/4), 11.0 nmi with the bay fully open (the `bay` term,
+  +50 percent). Bay stores add nothing; external stores would add `3 per store`
+  plus `2 per 1,000 lb`, a large effect on a signature of 1 (none on the real
+  aircraft). Infrared range is `sqrt(0.2)` = 45 percent of nominal.
+- The same function serves radar search and track, the jammer comparison, radar
+  and active missile seekers and the RCS contour page.
+- **Limits.** Surface air-defence radars "detect by their records' range bands
+  and read no signature at all" (`docs/radar.md`), so SAM sites see an F-117 at
+  full range. Visual detection ignores signatures. The only retail stealth
+  mechanic outside the record is the **night rule**: at night with an F-117 or a
+  B-2 in a friendly Quick Mission wing, every AAA site is a ZSU-23 with a
+  novice crew (`NIGHT_STEALTH_AIRCRAFT`, `crates/tore-formats/src/quick_template/tables.rs`;
+  [surface-defenses.md](../spec/surface-defenses.md), dormant until the aircraft
+  is imported; `docs/formats/quick-mission.md`).
+
+So decision 4 resolves without a new fitted value: the **real signature is
+already the record's own** (radar 1, retail data; not an invented value). The
+B-2 shares it and the review of the two agrees. Remaining questions for John
+(no sensor change made): whether surface radars should read the signature
+(retail does not), and whether the signature 1 (a tenth of range) is the
+wanted strength (the F-22 at 10 is the stealthy baseline).
+
+### F-117 unknowns and next steps
+
+| Unknown | Why it matters | Next step |
+| --- | --- | --- |
+| Top speed 604 kt at 36,000 ft (Mach 1.05) | A subsonic aircraft flies supersonic | John, options above |
+| Draw scale: span +30.8 percent | A wide F-117 | John, per-axis options |
+| Bay width (shape slot 1 ft against a 5.4 ft fin span) | Bay stores clip | John, bay proposal; F117-3 and F117-5 |
+| Elevons not in the source | No whole surface to turn | John, options above |
+| V-tail seam (no shared vertices) | Opens a seam when turned | F117-3 probe |
+| Real wheelbase, track, bay size, door count | Not found in public sources fetched | A cited drawing, or fitted |
+| `4c5c` = 4 degenerate faces | Unmapped | None needed |
+| Mask `0x1100` compatible weapons | Which GBU/BLU the bay offers | F117-5 compatibility probe |
+| `F117.HUD` glass polygon and sight type | No aperture entry | F117-7 |
+| Internal fuel 18,500 lb | Unverified | F117-8 |
+| Strike class override (5,000 ft level pass) | AI strike altitude | F117-9, John's call |
+| Surface radars ignore signatures | The F-117 is seen by SAM radars at range | John |
+
+Sources (accessed 2026-11-15): Wikipedia "Lockheed F-117 Nighthawk"; MILAVIA
+F-117 specifications (milavia.net/aircraft/f-117/f-117_specs.htm); aerospaceweb
+F-117 (aerospaceweb.org/aircraft/bomber/f117/); FAS IRADS
+(man.fas.org/dod-101/sys/smart/irads.htm) and FAS GBU-27
+(man.fas.org/dod-101/sys/smart/gbu-27.htm), as summarised by the search
+results; the real leading-edge sweep and elevon layout are not from a fetched
+source.
