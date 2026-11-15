@@ -56,6 +56,21 @@ pub const B2_BAY_ROWS: std::ops::Range<usize> = 5..9;
 /// The designator bit of a station's flags (a targeting or laser pod may sit
 /// there, and a multi-store pod: `loading.rs`).
 pub const DESIGNATOR_BIT: i32 = 0x400;
+/// The F-117's two internal bay rows (`F117.PT` rows 4 and 5, flags `0x1100`,
+/// one store each): [`weapon_allowed`] refuses the stores that cannot clear
+/// the fitted bays and [`extra_weapon`] admits the Paveway II laser bombs.
+pub const F117_BAY_ROWS: std::ops::RangeInclusive<usize> = 4..=5;
+/// The one Paveway II the F-117's bay rows refuse by name: the 1,000 lb GBU-16
+/// shares its donor with the GBU-12, so the audit's donor rule needs the refusal
+/// stated, though the real jet's laser bombs are the GBU-10, 12 and 27
+/// ([`weapon_allowed`]).
+pub const F117_BAY_REFUSED: [&str; 1] = ["GBU16.JT"];
+/// The laser-guided bombs the F-117's bay rows take beyond the retail mask
+/// `0x1100` (bomb signature only, which refuses every seeker-guided bomb and
+/// leaves the GBU-27 only as the row's own default): the GBU-10 class
+/// (`GBU10.JT`, `GBU10A.JT`, `PAVEWAY.JT`) and the GBU-12 (`GBU12.JT`), the
+/// real F-117's other laser bombs (F117-0 sources, F117-5, 2026-11-15).
+pub const F117_EXTRA_BOMBS: [&str; 4] = ["GBU10.JT", "GBU10A.JT", "PAVEWAY.JT", "GBU12.JT"];
 /// The F-117's jammer row (`F117.PT` row 2, `F18.ECM`), whose default
 /// [`adjust_defaults`] clears.
 pub const F117_JAMMER: usize = 2;
@@ -175,7 +190,9 @@ pub fn tank_allowed(id: AircraftId, row: usize, name: &str) -> bool {
 /// [`TORNADO_SHOULDER_REFUSED`]), the inner wing pair (row 7,
 /// [`TORNADO_INNER_WING_REFUSED`]) and the AIM-9 side rails (row 8,
 /// [`TORNADO_SIDE_RAIL_REFUSED`], which otherwise take what their infrared
-/// mask (0x85) admits, as the F-14's glove-pylon rail does).
+/// mask (0x85) admits, as the F-14's glove-pylon rail does). The F-117's two bay
+/// rows refuse only [`F117_BAY_REFUSED`] (F117-5: the measured bay clearances
+/// leave every store the mask and [`extra_weapon`] admit clear of the doors).
 pub fn weapon_allowed(id: AircraftId, row: usize, source: &str) -> bool {
     match id.source() {
         AircraftId::F15E => match row {
@@ -188,6 +205,7 @@ pub fn weapon_allowed(id: AircraftId, row: usize, source: &str) -> bool {
             MF1_WING => !MF1_WING_REFUSED.contains(&source),
             _ => true,
         },
+        AircraftId::F117 => !(F117_BAY_ROWS.contains(&row) && F117_BAY_REFUSED.contains(&source)),
         AircraftId::Tornado => match row {
             TORNADO_SHOULDER => !TORNADO_SHOULDER_REFUSED.contains(&source),
             TORNADO_INNER_WING => !TORNADO_INNER_WING_REFUSED.contains(&source),
@@ -724,8 +742,15 @@ pub fn default_counts(id: AircraftId, rows: &mut [Hardpoint]) {
 /// class (4, sized for two AIM-9s) cannot admit a 345 lb radar missile, and
 /// raising either would also change the Archer and other infrared counts.
 /// The count is the row's own, one a tip. Cheat loading already allows it.
+///
+/// The F-117's two bay rows (`F117.PT` rows 4 and 5) also take the Paveway II
+/// laser bombs, [`F117_EXTRA_BOMBS`]: the retail bomb-only mask `0x1100`
+/// leaves them out, and a laser bomb is what the real jet carries.
 pub fn extra_weapon(id: AircraftId, rows: usize, row: usize, source: &str) -> bool {
-    id == AircraftId::F16C && rows > F16_WET && row == F16_TIP && source == "AIM120.JT"
+    (id == AircraftId::F16C && rows > F16_WET && row == F16_TIP && source == "AIM120.JT")
+        || (id == AircraftId::F117
+            && F117_BAY_ROWS.contains(&row)
+            && F117_EXTRA_BOMBS.contains(&source))
 }
 
 type Signature = (u8, i32, [i32; 3], &'static str, i32, i32);
@@ -1611,5 +1636,25 @@ mod tests {
         let before = key(&edited);
         adjust_defaults(AircraftId::B2, &mut edited);
         assert_eq!(key(&edited), before);
+    }
+    /// F117-5 (2026-11-15): the F-117's two bay rows take the Paveway II laser
+    /// bombs beyond the retail bomb-only mask, and nothing else of the row,
+    /// the aircraft or any other aircraft changes.
+    #[test]
+    fn the_f117_bay_rows_take_the_paveway_ii_bombs_and_nothing_else_moves() {
+        for name in F117_EXTRA_BOMBS {
+            for row in F117_BAY_ROWS {
+                assert!(extra_weapon(AircraftId::F117, 6, row, name), "{name}");
+            }
+            assert!(!extra_weapon(AircraftId::F117, 6, 3, name));
+            assert!(!extra_weapon(AircraftId::F117, 6, 6, name));
+            assert!(!extra_weapon(AircraftId::B2, 9, 4, name));
+            assert!(!extra_weapon(AircraftId::F16C, 10, 4, name));
+        }
+        assert!(!extra_weapon(AircraftId::F117, 6, 4, "AGM88.JT"));
+        assert!(extra_weapon(AircraftId::F16C, 10, F16_TIP, "AIM120.JT"));
+        assert!(weapon_allowed(AircraftId::F117, 4, "MK84.JT"));
+        assert!(!weapon_allowed(AircraftId::F117, 5, "GBU16.JT"));
+        assert!(weapon_allowed(AircraftId::F117, 3, "GBU16.JT"));
     }
 }

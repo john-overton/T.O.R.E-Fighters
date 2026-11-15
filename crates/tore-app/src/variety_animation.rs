@@ -918,6 +918,7 @@ impl Rig {
         match &self.specific {
             Some(SpecificRig::F22(rig)) => rig.faces(source, state),
             Some(SpecificRig::F14(rig)) => rig.faces(source, state),
+            Some(SpecificRig::F117(rig)) => rig.faces(source, state),
             _ => vec![source.clone()],
         }
     }

@@ -50,6 +50,25 @@ def stub_wing_problems(output: str) -> list[str]:
     return problems
 
 
+def f117_bay_problems(output: str) -> list[str]:
+    """The default GBU-27s clear the F-117's open doors and the bay's ends and trapeze rail (F117-5)."""
+    problems = []
+    for side in ("left", "right"):
+        m = re.search(
+            rf"Bay clearance: row\d GB27\.SH {side}: inner door (-?[\d.]+), outer door (-?[\d.]+), "
+            r"aft end (-?[\d.]+), fore end (-?[\d.]+), roof (-?[\d.]+), hangs (-?[\d.]+) below the belly plane, "
+            r"top skin (-?[\d.]+) at .*?, rail (-?[\d.]+)", output)
+        if not m:
+            problems.append(f"no bay clearance line for the {side} GBU-27")
+            continue
+        inner, outer, aft, fore, _roof, _hang, _skin, rail = map(float, m.groups())
+        for label, value in (("inner door", inner), ("outer door", outer), ("aft end", aft),
+                             ("fore end", fore), ("trapeze rail", rail)):
+            if value < 0.05:
+                problems.append(f"{side} GBU-27 clears the {label} by only {value:.2f} ft")
+    return problems
+
+
 def skin_capture_problems(output: str) -> list[str]:
     """Every aircraft skin capture drew a non-blank frame."""
     captures = [line for line in output.splitlines() if line.startswith("Scene capture:")]
@@ -79,6 +98,14 @@ def scenarios() -> list[Scenario]:
             notes="Bare captures hold the prepared state, independent of startup and GPU initialization time.",
         ))
     return stable + [
+        Scenario(
+            name="render-f117-bay-clearance", lane="flight",
+            args=["--stores-preview", "{work}/stores"],
+            env={"TORE_STORES_PREVIEW_CPU": "1", "TORE_STORES_PREVIEW_BAYCLEAR": "1",
+                 "TORE_STORES_PREVIEW_AIRCRAFT": "f117"},
+            expect=["Bay clearance: f117 opening"], check=f117_bay_problems,
+            notes="Headless F-117 bay clearances in feet with the doors open (F117-5): door planes, ends, roof, top skin and trapeze rail.",
+        ),
         Scenario(
             name="render-ah64-stub-wing-pylons", lane="flight",
             args=["--stores-preview", "{work}/stores"],

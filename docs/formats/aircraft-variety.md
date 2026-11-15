@@ -7388,6 +7388,10 @@ Limits of the present model, for John's decision (none acted on):
    is `matches!(model, AircraftModel::F22(_))`, so a B-2's `bay` fraction is
    always 0 until that is extended (a code change; with signature 1 the
    opening bay would raise it to 1.5).
+   Update (F117-5, 2026-11-15): `bay_available()` is now true for every aircraft with a row
+   in `combat::bays::STATIONS` (the F-22 family and the F-117 so far); the B-2's slice adds
+   its rows and the term reaches it with no further code change. See
+   [F-117 weapon bays](#f-117-weapon-bays-f117-5-2026-11-15).
 3. Bay stores add nothing and a store on a (nonexistent) external station would
    add 3, which is three times a clean B-2's whole signature: keep every B-2
    store internal.
@@ -7781,6 +7785,11 @@ the doors are fitted.
    agree); nothing is added, and no pylons or pods (B7). A NASA external-store
    test (Test 461, The Aviationist, 2019) shows the aircraft could be given
    external stores, but it was a test, not a service configuration.
+
+Update (F117-5, 2026-11-15) to the proposal above: John's decision 25 cut the two fitted bays
+with two doors each (the door count is fitted), at +/-3.0 ft instead of +/-2.55 ft (a GBU-27's
+5.4 ft fin span), default two GBU-27, extra loads the Paveway II bombs; see
+[F-117 weapon bays](#f-117-weapon-bays-f117-5-2026-11-15).
 
 ### F-117 sensors, jammer and pods (B7) (for John)
 
@@ -8250,6 +8259,9 @@ two fitted belly bays with doors and the F-22 magazine mechanism, and this rig i
 replaced then. `Flight::bay_available()` is true only for the F-22 family, so the
 bay does not open in play yet (the probe and the stores preview set `state.bay`
 directly); making it available belongs to F117-5 with the stations.
+Update (F117-5, 2026-11-15): this interim pose is replaced by the fitted belly bays and
+doors, and `bay_available()` is true for the F-117 ([F-117 weapon
+bays](#f-117-weapon-bays-f117-5-2026-11-15)).
 
 ### Probe and checks
 
@@ -8350,3 +8362,98 @@ F404-F1D2 value found), the B-2 and B-52 top speeds and sea-level edges, the B-2
 49,000 ft ceiling (real 50,000), and the engine count: `Configuration::from_source`
 clamps `engines` to 1 to 4 (`live.rs`), so the B-52's eight engines read as four
 (an existing behaviour, not touched here; B52-8's call).
+
+## F-117 weapon bays (F117-5, 2026-11-15)
+
+Opinionated (John, 2026-11-15, decision 25: "cut two fitted belly bays, two doors
+each"); every number below is **fitted**, agent-authored, from the measurements in
+the [stores specification](../spec/stores-on-pylons.md#f-117-weapon-bays-f117-5-2026-11-15).
+**The door count is fitted** (two a bay, four in all): the real count was not found in
+any public source. Earlier sections stay as written. This replaces the interim open pose
+of [F-117 rig (F117-3)](#f-117-rig-f117-3-2026-11-15) and settles the proposal in
+[F-117 hardpoints and the bay](#f-117-hardpoints-and-the-bay-for-john).
+
+**Stations.** Rows 4 and 5 (location 3, flags `0x1100`, one store of weight class 20)
+are re-placed by `placed_on` as fitted `Location::Magazine` stations, through the new
+table `tore_sim::combat::bays::STATIONS` (the F-22's three rows moved into it with their
+values unchanged). Mounts, feet right / floor / forward: left -3.0 / -2.78 / 0.0, right
++3.0 / -2.78 / 0.0. F117-2 had scaled the rows to +/-2.55 ft; a GBU-27's fins span 5.4 ft,
+so two stores 5.1 ft apart would cross fin tips, and the mounts move out to 3.0 ft. The
+"floor" is the height of the lowest fin tip (the magazine rule hangs the axis half the fin
+span above it): the axis is 1.0 ft above the belly plane, and the fins hang 1.7 ft below
+it, between the open doors.
+
+**Geometry (feet right / forward / up from the reference point).**
+
+| Part | Value |
+| --- | --- |
+| Belly plane | -1.478 (the shape's z -5 units after the height factor) |
+| Openings | right x 0.2 to 5.8, left x -5.8 to -0.2; 5.6 ft wide, 18.0 ft long (-9.0 to +9.0 forward); a 0.4 ft keel between them |
+| Doors | two a bay, 2.8 ft wide, hinged at the inner and outer edges, 90 degrees down; open they hang to -4.28 |
+| Recess | roof at +0.822 (2.3 ft deep), four lined walls and a ceiling in the shape's own wall grey, drawn only while the doors are off their seat |
+| Trapeze rail | 0.4 ft wide, 0.6 ft deep under the ceiling on each bay's centre line, -5.5 to +3.5 forward |
+| Belly skins cut | `34e6`, `2f0a`, `2f1d`, `2f5d`, `2f8e`, `3076` (together they cover both openings exactly; nothing else overlaps them) |
+
+The shape's own open pose (word `4c56`: two wall plates and the swapped belly triangle) is
+no longer drawn; one of its wall plates is the material of the lining, and its painted
+trapeze art did not line up with the bay centres (it sits about 0.8 ft off the keel), so it
+is not used. The cut-out is closed on every side: the lining is a box (ceiling and four
+walls) under an intact top skin, the recess is 2.3 ft under a skin at least 2.4 ft above
+the belly everywhere over the openings (the forward outer corner is the limit), so nothing
+opens to the sky (frames below).
+
+**Drawing.** The shared helper `crates/tore-app/src/bay_doors.rs` (belly doors from
+`roster_animation::cut_doors`, the lined recess and the rail) is driven by one row of
+`bays::OPENINGS`; `f117_animation.rs` names the six belly skins and the lining's addresses
+(`0x7000` and up). `variety_animation` routes `faces()` to the F-117 rig. The B-2 and B-52
+add a row to `STATIONS`, a row to `OPENINGS` and their own face lists.
+
+**What each bay admits.** The two rows admit the same 23 stores, one a bay (the audit's F-117
+line is 46 placements, was 38): the retail mask `0x1100` takes 19 (`PAVEWA3` as the row's
+default, `GBU29`, `GBU29P`, `GBU30`, `GBU38`, `MK82`, `MK82HD`, `MK82P3`, `MK84`, `CBU87`,
+`CBU89`, `MK20`, `RBK250`, `RBK500`, `FAB250`, `FAB500`, `AGM88`, `AGM45`, `AT2`), and
+`aircraft_stations::extra_weapon` adds four Paveway II laser bombs the mask leaves out:
+`GBU10`, `GBU10A`, `PAVEWAY` (GBU-10 class) and `GBU12`. `GBU16` is refused by name (the
+audit's donor rule needs it stated; the real jet's laser bombs are GBU-10, 12 and 27).
+`GBU28` (4,500 lb), the multi-store packs and the stores heavier than weight class 20 stay
+out by the row. No BLU-109 or GBU-31 record exists (the `GBU29` and `GBU30` records are the
+JDAM class). The default is two `PAVEWA3` (GBU-27), 4,000 lb of the real 5,000 lb load
+class. The retail mask admits the AGM-88, AGM-45 and AT-2, which the real jet does not
+carry; they stay because they are retail data and fit (listed for John).
+
+**Clearances in feet, doors open** (`TORE_STORES_PREVIEW_BAYCLEAR=1`; positive is clear,
+negative is how far the drawn store reaches into the part). Default GBU-27, both bays:
+
+| Part | Gap |
+| --- | ---: |
+| Inner and outer door planes (fin tips at x 0.3 and 5.7 against planes 0.2 and 5.8) | 0.10 |
+| Bay aft end / forward end | 1.06 / 3.04 |
+| Trapeze rail (body top under the rail) | 0.10 |
+| The other bay's store (nearest vertices) | 0.60 |
+| Recess roof (upper tail fin tips) | -1.40 |
+| Fuselage top skin (upper tail fin tips, 0.62 ft through it at x +/-5.7, 7.9 ft aft) | -0.62 |
+| Below the belly plane (lower fin tips, inside the 2.8 ft doors) | 1.70 |
+
+The GBU-27 clears both doors, both ends, the rail and its neighbour. **It does not fit
+inside the fuselage**: its tail fins are 5.4 ft across in a fuselage 3.3 to 4.1 ft thick, so
+the four upper tail fin tips stand 1.4 ft above the recess roof and 0.62 ft above the
+top skin at their aft ends (about 0.6 ft of fin tip through the dorsal skin, seen only from
+above while the doors are open). The retail fins are drawn larger than real
+(`store_sizes.rs`); this is the one clip left, for John (options in the stores
+specification). During the 1 s door swing the leaves also pass the lower fin tips.
+Alternatives (the two rows' other stores, minimum of the two door planes, the ends and the
+skin): GBU-27 family and GBU-10 family clear the doors (0.10 and 0.89 ft) and the ends (GBU-10
+0.16 ft forward); the GBU-10 reaches 0.57 ft above the roof and clears the skin; the GBU-12
+clears the doors by 1.25 ft and the roof by 0.28 ft; the AGM-88 and AGM-45 stand 0.13 ft
+past the forward end (inside the 0.3 ft rule); every other store clears all parts, by at
+least 1.85 ft at the doors and 2.10 ft at the roof. Full table:
+`.local/m3-aircraft/checks/F117-5/matrix.txt`.
+
+**Bay door timing.** The F-22's: `State::bay` travels in 1.00 s (reversible); a bay
+release asks for the doors, the weapon leaves once they are at 0.95 (tick 116 after the
+press, 0.958 in the actual one-press probe), the doors stay 1 s after the release and close
+1 s later. `bay_available()` is now true for every aircraft with a row in `bays::STATIONS`
+(the F-22 family and the F-117; the B-2 and B-52 on their rows); the open-bay signature term
+reads `State::bay` on the RCS page only (no change to a row a radar reads), so it now applies
+to the F-117 at 1.5 times with the doors fully open, and the F-22's values are unchanged.
+Update to [F117-3 bay (interim)](#bay-interim-f117-4-f117-5-replaces-it): replaced.

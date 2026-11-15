@@ -1227,6 +1227,19 @@ def slot_scenarios() -> list[Scenario]:
                 timeout=300,
                 notes="Actual one-press release, bay-only gate, hold and closing; main bay, side bay and wing, with rendered projectile frames.",
             ))
+    # F117-5 (2026-11-15): the F-117's two fitted bays, one GBU-27 each, through the same
+    # actual one-press release: doors open to 0.95 before the weapon leaves, then close.
+    for row in (4, 5):
+        out.append(Scenario(
+            name=f"flight-bay-fire-f117-row{row}", lane="flight",
+            args=["--stores-preview", "{work}/frames"], window=True,
+            env={"TORE_STORES_PREVIEW_AIRCRAFT": "f117",
+                 "TORE_STORES_PREVIEW_FIRE": str(row)},
+            expect=[f"Stores firing: f117 row={row} PASS"],
+            outputs=[f"frames/f117-fire-row{row}-t000.png", f"frames/f117-fire-row{row}-t400.png"],
+            timeout=300,
+            notes="F-117 bay release: the doors open before the GBU-27 leaves and close after it, as the F-22's do.",
+        ))
     return out
 
 
@@ -1957,7 +1970,7 @@ def capture_scenarios() -> list[Scenario]:
     # AL1 and refuses a ground start ("an enemy airfield").
     for ac in AIRCRAFT:
         add(f"groundstart-{ac}", ["--free-flight", "--aircraft", ac, "--theater", "UKR", "--ground-start", "9", "--flight-view", "1", "--flight-look", "150,-15", "--flight-zoom", "1.5"])
-    for ac in ("f22", "f22n"):
+    for ac in ("f22", "f22n", "f117"):
         for bay in ("0", "0.5", "1"):
             add(f"bay-{ac}-{bay}", ["--free-flight", "--aircraft", ac, "--flight-view", "1", "--flight-look", "150,-30", "--flight-bay", bay])
     return out

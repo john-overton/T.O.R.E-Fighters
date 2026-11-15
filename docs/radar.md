@@ -554,6 +554,13 @@ hardcoded rules for named aircraft. The deployment term is applied on the RCS pa
 only so far: aircraft rows seen by other radars carry no gear, flap or bay
 deployment yet, while they do carry the store term below.
 
+Update (F117-5, 2026-11-15): the open-bay term applies to every aircraft with reviewed bays
+(`State::bay_available()`, the rows of `combat::bays::STATIONS`: the F-22 family and the F-117),
+no longer the F-22 alone; the F-22's values are unchanged. The path is the same one the F-22's
+term reaches: `State::bay` read into `sensors::Configuration` for the RCS page (`scope.rs`).
+No bay, gear or flap state was put on the combat rows other radars read (a decision John has
+not made).
+
 ### External stores
 
 John asked on 2026-10-16 that ordnance raise detectability, noting that an F-22

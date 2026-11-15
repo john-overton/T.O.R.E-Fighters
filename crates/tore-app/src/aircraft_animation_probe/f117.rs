@@ -1,6 +1,6 @@
 //! Independent F-117A whole-panel witnesses: the two ruddervator assemblies
 //! (mixed pitch and yaw, 10 faces a side), the rigid gear (three legs, three
-//! doors, the door skins) and the interim open-bay pose. The elevons, flaps,
+//! doors, the door skins) and the fitted weapon bays (doors cut from the belly, lined recess). The elevons, flaps,
 //! airbrake and plume are not in the source, so the probe requires that those
 //! controls move nothing. Measures the shared Airframe output and never repeats
 //! the rig's algorithm. Witness points are named in shape units and scaled with
@@ -27,11 +27,12 @@ const GEAR: [usize; 31] = [
     0x3765, 0x3784, 0x37e8, 0x3807, 0x3826, 0x3845, 0x3351, 0x3366, 0x34a3, 0x34b8, 0x3897, 0x38b0,
     0x3676, 0x36fa, 0x36a1, 0x36c0, 0x36df, 0x3719, 0x3657,
 ];
-const WALL_L: [usize; 2] = [0x319c, 0x31b1];
-const WALL_R: [usize; 2] = [0x31ff, 0x3214];
-const WALLS: [usize; 4] = [0x319c, 0x31b1, 0x31ff, 0x3214];
-const BELLY: usize = 0x34e6;
-const BELLY_OPEN: usize = 0x351d;
+/// The six belly skins the two openings are cut from, and where the
+/// fitted lining's addresses start.
+const BELLY: [usize; 6] = [0x34e6, 0x2f0a, 0x2f1d, 0x2f5d, 0x2f8e, 0x3076];
+const LINING_BASE: usize = 0x7000;
+/// Lining faces: per bay a ceiling, four walls and a five-face rail.
+const LINING: usize = 20;
 
 fn sp(p: [f32; 3]) -> [f32; 3] {
     scale_point(ID, p)
@@ -275,44 +276,39 @@ fn gear(value: f64, reference: &[Face], pose: &[Face], scale: f32, m: &mut Metri
     }
 }
 
-/// The interim bay pose: closed (0) draws the belly triangle and no wall; open
-/// (above 0) draws the swapped triangle and the two walls, each a rigid plate
-/// hinged on its top edge.
-fn bay(value: f64, reference: &[Face], pose: &[Face], scale: f32, m: &mut Metrics) {
-    let has = |id: usize| pose.iter().any(|f| f.address == id);
+/// The fitted bays: shut (0) the six belly skins are whole, nothing hangs
+/// below the belly plane and no lining draws; open (above 0) the lining draws
+/// and the four doors hang on their hinge lines (the inner and outer edges of
+/// each bay at the belly plane) with their free edges `leaf * sin(90 degrees *
+/// value)` below it.
+fn bay(value: f64, _reference: &[Face], pose: &[Face], scale: f32, m: &mut Metrics) {
+    let o = tore_sim::combat::bays::opening(ID).expect("F-117 opening");
+    let belly = sp([0., 0., -5.])[2];
+    let lining = pose.iter().filter(|f| f.address >= LINING_BASE).count();
+    let skins: Vec<&Face> = pose.iter().filter(|f| BELLY.contains(&f.address)).collect();
+    let lowest = skins
+        .iter()
+        .flat_map(|f| f.positions.iter())
+        .map(|p| p[2])
+        .fold(f32::MAX, f32::min);
     if value == 0. {
-        m.reviewed_direction_failures += usize::from(
-            pose.iter()
-                .any(|f| WALLS.contains(&f.address) || f.address == BELLY_OPEN)
-                || !has(BELLY),
-        );
+        m.reviewed_direction_failures +=
+            usize::from(lining != 0 || skins.len() != BELLY.len() || lowest < belly - 1e-4);
         return;
     }
-    m.reviewed_direction_failures += usize::from(has(BELLY) || !has(BELLY_OPEN));
-    for ids in [&WALL_L[..], &WALL_R[..]] {
-        assembly(ids, reference, pose, scale, m);
+    m.reviewed_direction_failures += usize::from(lining != LINING);
+    // A vertex stays on each hinge line at the belly plane.
+    for feet in [o.inner, o.outer, -o.inner, -o.outer] {
+        let hinge = feet as f32 / scale;
+        let held = skins
+            .iter()
+            .flat_map(|f| f.positions.iter())
+            .any(|p| (p[0] - hinge).abs() < 1e-3 && (p[2] - belly).abs() < 1e-3);
+        m.reviewed_anchor_missing |= !held;
     }
-    for (ids, points) in [
-        (&WALL_L[..], [sp([-3., -27., -4.]), sp([-3., 20., -4.])]),
-        (&WALL_R[..], [sp([1., -27., -4.]), sp([1., 20., -4.])]),
-    ] {
-        for point in points {
-            anchor(reference, pose, ids, point, scale, m);
-        }
-    }
-    if value < 1. {
-        // The wall foot swings outward as the bay closes.
-        for (witness, ids, outward) in [
-            (sp([-3., -27., -12.]), &WALL_L[..], -1f32),
-            (sp([1., -27., -12.]), &WALL_R[..], 1.),
-        ] {
-            let qs = f4::witness_positions(&group(reference, ids), &keyed(pose), witness);
-            m.reviewed_direction_failures += usize::from(qs.is_empty());
-            for q in qs {
-                m.reviewed_direction_failures += usize::from((q[0] - witness[0]) * outward <= 0.);
-            }
-        }
-    }
+    let leaf = ((o.outer - o.inner) / 2.) as f32 / scale;
+    let hang = leaf * (value as f32 * std::f32::consts::FRAC_PI_2).sin();
+    m.reviewed_direction_failures += usize::from((belly - lowest - hang).abs() > 2e-3);
 }
 
 pub(super) fn check(
@@ -586,8 +582,8 @@ fn dense_gear(
     Ok(failures)
 }
 
-/// Bay sweep: the walls swing between flat (a near-zero sample) and the source
-/// pose, rigid and on their hinges at every value.
+/// Bay sweep: the doors swing between shut (a near-zero sample) and hanging,
+/// on their hinges and at the sine of the travel at every value.
 fn dense_bay(
     airframe: &Airframe,
     neutral: &State,

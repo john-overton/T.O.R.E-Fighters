@@ -446,6 +446,10 @@ pub fn run() -> AppResult<()> {
         if std::env::var_os("TORE_STORES_PREVIEW_CLEARANCE").is_some() {
             clearance_report(short, &airframe, &art, &loads[1].1);
         }
+        if std::env::var_os("TORE_STORES_PREVIEW_BAYCLEAR").is_some() {
+            bay_clearance(short, id, &airframe, &art, &loads[1].1);
+            continue;
+        }
         if std::env::var_os("TORE_STORES_PREVIEW_AUDIT").is_some() {
             audit(short, &profile, &config, &airframe, &art, &loads[1].1);
             continue;
@@ -834,6 +838,21 @@ fn firing_frames(
         return Err("firing preview row is empty".into());
     }
     let bay = load.configuration.stations[slot].rack.location().bay();
+    let fire_camera = match std::env::var("TORE_STORES_PREVIEW_FIRE_CAMERA") {
+        Ok(text) => {
+            let parts: Vec<&str> = text.split(':').collect();
+            let [eye, look, fov] = parts.as_slice() else {
+                return Err("expected EX,EY,EZ:LX,LY,LZ:FOV".into());
+            };
+            let point = |text: &str| -> AppResult<[f64; 3]> {
+                let v: Vec<f64> = text.split(',').map(str::parse).collect::<Result<_, _>>()?;
+                v.try_into()
+                    .map_err(|_| "expected three coordinates".into())
+            };
+            Some((point(eye)?, point(look)?, fov.parse::<f64>()?))
+        }
+        Err(_) => None,
+    };
     let mut combat = crate::combat::Combat::with_loadout(airframe, load)?;
     combat.reset(&mut state)?;
     state.bay = 0.;
@@ -875,9 +894,15 @@ fn firing_frames(
                 }
             }
         }
+        // `TORE_STORES_PREVIEW_FIRE_CAMERA=EX,EY,EZ:LX,LY,LZ:FOV` (feet right, up
+        // and forward of the aircraft) draws the release from that camera
+        // every 12 ticks through the doors' opening, the release and the
+        // doors' closing (F117-5); without it the frames are the fixed few.
+        let sequence = fire_camera.is_some() && tick % 12 == 0 && tick <= 300;
         if tick == 0
             || tick == 60
             || tick == 400
+            || sequence
             || fired.is_some_and(|first| [first, first + 3, first + 12].contains(&tick))
         {
             let own = combat.state.own();
@@ -897,7 +922,7 @@ fn firing_frames(
                 &state,
                 &stores,
                 &snapshot.projectiles,
-                (eye, look, fov),
+                fire_camera.unwrap_or((eye, look, fov)),
                 &out.join(format!("{short}-fire-row{row}-t{tick:03}.png")),
             )?;
         }
@@ -1348,6 +1373,156 @@ fn store_points(store: &StorePose, art: &CombatArt) -> Vec<[f64; 3]> {
                     [-0.5, -0.25, 0., 0.25, 0.5].map(|a| [c * radius, s * radius, a * size.length])
                 })
                 .collect()
+        }
+    }
+}
+
+/// F117-5 bay clearances in feet with the doors open
+/// (`TORE_STORES_PREVIEW_BAYCLEAR`): for each bay store, the room between its
+/// drawn shape and the two door planes (the recess walls above them), the
+/// bay's ends, the recess roof and belly plane, the fuselage's top skin, the
+/// trapeze rail and the other bay's store. Positive is clear; negative is
+/// the depth by which the store reaches into the part.
+fn bay_clearance(
+    short: &str,
+    id: AircraftId,
+    airframe: &crate::aircraft::Airframe,
+    art: &CombatArt,
+    stores: &[StorePose],
+) {
+    use tore_sim::combat::bays::{RAIL_DROP, RAIL_HALF, opening};
+    let Some(o) = opening(id) else {
+        println!("Bay clearance: {short} has no fitted opening");
+        return;
+    };
+    let Some(shape) = airframe.poses.first() else {
+        return;
+    };
+    // The top skin height at a point of the plan, feet: the highest upward
+    // face over it.
+    let top = |x: f64, y: f64| -> Option<f64> {
+        let mut best: Option<f64> = None;
+        for face in shape
+            .faces
+            .iter()
+            .filter(|f| f.normal.is_some_and(|n| n[1] > 0.))
+        {
+            let p: Vec<[f64; 3]> = face
+                .positions
+                .iter()
+                .map(|q| q.map(|v| f64::from(v) / 3.))
+                .collect();
+            for i in 1..p.len().saturating_sub(1) {
+                let (a, b, c) = (p[0], p[i], p[i + 1]);
+                let d = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+                if d.abs() < 1e-12 {
+                    continue;
+                }
+                let u = ((x - a[0]) * (c[1] - a[1]) - (y - a[1]) * (c[0] - a[0])) / d;
+                let v = ((b[0] - a[0]) * (y - a[1]) - (b[1] - a[1]) * (x - a[0])) / d;
+                if u >= -1e-9 && v >= -1e-9 && u + v <= 1. + 1e-9 {
+                    let z = a[2] + u * (b[2] - a[2]) + v * (c[2] - a[2]);
+                    best = Some(best.map_or(z, |h: f64| h.max(z)));
+                }
+            }
+        }
+        best
+    };
+    let roof = o.belly + o.depth;
+    let leaf = (o.outer - o.inner) / 2.;
+    println!(
+        "Bay clearance: {short} opening x {:.2} to {:.2} ft each side, {:.2} to {:.2} ft forward, belly {:.3} ft, roof {:.3} ft (depth {:.2}), leaf {:.2} ft, hangs to {:.2} ft with the doors open",
+        o.inner,
+        o.outer,
+        o.aft,
+        o.fore,
+        o.belly,
+        roof,
+        o.depth,
+        leaf,
+        o.belly - leaf
+    );
+    let mut placed: Vec<(String, Vec<[f64; 3]>)> = Vec::new();
+    for store in stores.iter().filter(|s| s.rack.location().bay()) {
+        let points = store_points(store, art);
+        for place in crate::pylons::hung(store).iter().filter(|p| p.held) {
+            // Vertices and the midpoints of every drawn edge would be exact;
+            // the shape's own vertices are the fin tips, wing tips, nose and
+            // tail, which is where the extremes are.
+            let moved: Vec<[f64; 3]> = points
+                .iter()
+                .map(|q| std::array::from_fn(|i| place.centre[i] + q[i]))
+                .collect();
+            let sign = if place.centre[0] < 0. { -1. } else { 1. };
+            let name = format!(
+                "row{} {} {}",
+                store.hardpoint,
+                store.shape.as_deref().unwrap_or("body"),
+                if sign < 0. { "left" } else { "right" }
+            );
+            let fold = |f: fn(f64, f64) -> f64, start: f64, k: &dyn Fn(&[f64; 3]) -> f64| {
+                moved.iter().map(k).fold(start, f)
+            };
+            let inner = fold(f64::min, f64::MAX, &|p| sign * p[0] - o.inner);
+            let outer = fold(f64::min, f64::MAX, &|p| o.outer - sign * p[0]);
+            let aft = fold(f64::min, f64::MAX, &|p| p[2] - o.aft);
+            let fore = fold(f64::min, f64::MAX, &|p| o.fore - p[2]);
+            let ceiling = fold(f64::min, f64::MAX, &|p| roof - p[1]);
+            let below = fold(f64::max, f64::MIN, &|p| o.belly - p[1]);
+            let mut skin = (f64::MIN, [0.; 3]);
+            for p in &moved {
+                if let Some(h) = top(p[0], p[2])
+                    && p[1] - h > skin.0
+                {
+                    skin = (p[1] - h, *p);
+                }
+            }
+            // The rail box and the store's nearest vertex to it.
+            let rail = |p: &[f64; 3]| {
+                let centre = sign * (o.inner + o.outer) / 2.;
+                let d = [
+                    (p[0] - centre).abs() - RAIL_HALF,
+                    p[1] - roof,
+                    (p[2] - (o.rail[0] + o.rail[1]) / 2.).abs() - (o.rail[1] - o.rail[0]) / 2.,
+                ];
+                let low = (roof - RAIL_DROP) - p[1];
+                // Distance to the box: roof - drop <= up <= roof.
+                let dy = if p[1] > roof {
+                    d[1]
+                } else if low > 0. {
+                    low
+                } else {
+                    0.
+                };
+                [d[0].max(0.), dy.max(0.), d[2].max(0.)]
+                    .iter()
+                    .map(|v| v * v)
+                    .sum::<f64>()
+                    .sqrt()
+            };
+            let rail_gap = fold(f64::min, f64::MAX, &rail);
+            println!(
+                "Bay clearance: {name}: inner door {inner:.2}, outer door {outer:.2}, aft end {aft:.2}, fore end {fore:.2}, roof {ceiling:.2}, hangs {below:.2} below the belly plane, top skin {:.2} at [{:.2} {:.2} {:.2}], rail {rail_gap:.2}",
+                -skin.0, skin.1[0], skin.1[1], skin.1[2]
+            );
+            placed.push((name, moved));
+        }
+    }
+    for (a, one) in placed.iter().enumerate() {
+        for two in &placed[a + 1..] {
+            let gap = one
+                .1
+                .iter()
+                .flat_map(|p| {
+                    two.1
+                        .iter()
+                        .map(move |q| (0..3).map(|i| (p[i] - q[i]).powi(2)).sum::<f64>().sqrt())
+                })
+                .fold(f64::MAX, f64::min);
+            println!(
+                "Bay clearance: {short} {} / {}: nearest vertices {gap:.2} ft apart",
+                one.0, two.0
+            );
         }
     }
 }

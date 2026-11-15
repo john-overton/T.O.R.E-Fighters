@@ -1309,26 +1309,14 @@ pub fn placed_on(
     h: &Hardpoint,
     model: Option<&Underside>,
 ) -> (Vector, Rack) {
-    if matches!(id.source(), AircraftId::F22 | AircraftId::F22n)
-        && h.location == Location::InternalBay.byte()
-        && (5..=7).contains(&hardpoint)
+    if h.location == Location::InternalBay.byte()
+        && let Some(mount) = super::bays::station(id, hardpoint)
     {
-        // Both own shapes have the reviewed central belly at -3 ft. The
-        // side magazines sit inside their sloping intake skins. Coordinates
-        // and tandem fit: docs/spec/stores-on-pylons.md, F-22 naval stores.
-        let mount = match hardpoint {
-            5 => [-5. / 3., -3., 1.4],
-            6 => [1.5, -3., 1.4],
-            _ => [
-                3.9,
-                if id.source() == AircraftId::F22n {
-                    -1.05
-                } else {
-                    -1.2
-                },
-                1.7,
-            ],
-        };
+        // A reviewed bay station (`bays::STATIONS`): the F-22's three bays,
+        // fitted inside the Raptor's belly and intake skins, and the F-117's
+        // two, fitted under its belly. Coordinates and tandem fit:
+        // docs/spec/stores-on-pylons.md, "F-22 naval stores" and "F-117
+        // weapon bays".
         return (
             mount,
             Rack {
@@ -1859,6 +1847,36 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_f117_bays_hang_a_gbu27_each_inside_their_openings_and_release_from_there() {
+        let o = super::super::bays::opening(AircraftId::F117).unwrap();
+        let size = StoreSize::of_shape(Some("GB27.SH"));
+        let mut h = hardpoint(3, 0x1100);
+        h.count = 1;
+        for (row, sign) in [(4, -1.), (5, 1.)] {
+            let (mount, rack) = placed_on(AircraftId::F117, row, &h, None);
+            assert_eq!(rack.location(), Location::Magazine);
+            assert!(rack.location().drawn() && rack.location().bay());
+            assert_eq!(mount[0], sign * 3.0);
+            // The one store leaves from where it hangs, its axis between the
+            // belly plane and the recess roof, its 5.4 ft fin span between
+            // the door planes and its length between the bay's ends.
+            let at = rack.release_point(mount, 1, 0, 0, size);
+            assert_eq!(at, rack.store_point(mount, 1, 0, 0, size));
+            assert!(at[1] > o.belly && at[1] < o.belly + o.depth);
+            let reach = size.width / 2.;
+            assert!(sign * at[0] - reach > o.inner && o.outer > sign * at[0] + reach);
+            assert!(at[2] - 7.94 > o.aft && at[2] + 5.96 < o.fore);
+        }
+        // A row that is not a bay station stays where the record puts it.
+        assert_ne!(
+            placed_on(AircraftId::F117, 3, &hardpoint(1, 0x1008), None)
+                .1
+                .location(),
+            Location::Magazine
+        );
     }
 
     #[test]

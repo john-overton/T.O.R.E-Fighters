@@ -1,13 +1,15 @@
 //! F-117A (`F117.SH`) own-source rig: the two whole ruddervator assemblies (10
 //! faces a side, mixed pitch and yaw), the rigid gear (three legs, three door
-//! plates and the door skins, with a door and leg schedule) and the interim
-//! open-bay pose.
+//! plates and the door skins, with a door and leg schedule) and the two fitted
+//! weapon bays (F117-5: six belly skins cut into two doors a bay, a lined
+//! recess and a trapeze rail, drawn through [`crate::bay_doors`]).
 //! See docs/spec/variety-animation.md "F-117 rig fit" and
 //! docs/formats/aircraft-variety.md "F-117 rig (F117-3, 2026-11-15)".
 //!
 //! F117.SH ships two state words: 0x4c56 the weapons bay (replaces the belly
 //! triangle 0x34e6 with its other winding 0x351d and adds two wall plates, both
-//! windings each) and 0x4c5c the gear (adds 31 faces). There is no flame,
+//! windings each; the shape's own open pose is no longer drawn, its wall plate
+//! is the material of the fitted lining) and 0x4c5c the gear (adds 31 faces). There is no flame,
 //! airbrake, flap, rudder, elevon, ruddervator, canopy or hook word, and no
 //! separate elevon faces: the trailing edge is the aft edge of whole wing
 //! facets, so the elevons stay unrigged (decision 27, John 2026-11-15). The jet
@@ -115,15 +117,27 @@ const SKIN_LIFT: f32 = 1.5;
 /// are stowed by gear 0.30 and the doors close from 0.30 to 0.
 pub(crate) const DOOR_TIME: f64 = 0.30;
 
-/// Bay word 0x4c56 (interim, F117-5 replaces it): two wall plates (x -3 and
-/// x +1, both windings) swing out about their top edges (z -4) to lie flat
-/// when closed; the belly triangle swaps for its other winding.
+/// Bay word 0x4c56 (the shape's own open pose, no longer drawn): two wall
+/// plates (x -3 and x +1, both windings) and the belly triangle's other
+/// winding. They are only reviewed here; one wall plate is the material of the
+/// fitted lining.
 pub(crate) const BAY_WALL_L: [usize; 2] = [0x319c, 0x31b1];
 pub(crate) const BAY_WALL_R: [usize; 2] = [0x31ff, 0x3214];
 pub(crate) const BAY_BELLY: usize = 0x34e6;
 pub(crate) const BAY_BELLY_OPEN: usize = 0x351d;
-const BAY_WALL_L_X: f32 = -3.;
-const BAY_WALL_R_X: f32 = 1.;
+/// The six belly skins (all at z -5 units, normal down) the two fitted bay
+/// openings are cut from: the main triangle, the right outer triangle, panel
+/// and leading-edge strip and the left outer panel and strip (measured,
+/// F117-5: together they cover both openings, and nothing else overlaps them).
+pub(crate) const BELLY: [usize; 6] = [BAY_BELLY, 0x2f0a, 0x2f1d, 0x2f5d, 0x2f8e, 0x3076];
+/// The fitted lining faces get addresses from here (no face of the shape is
+/// near it).
+pub(crate) const LINING_BASE: usize = 0x7000;
+
+/// Whether `address` is one of the fitted lining faces.
+pub(crate) fn lining(address: usize) -> bool {
+    address >= LINING_BASE
+}
 
 pub(crate) fn tail_right(address: usize) -> bool {
     TAIL_R.contains(&address)
@@ -200,28 +214,6 @@ pub(crate) fn gear_positions(f: &mut Face, gear: f64, steering: f64) {
     }
 }
 
-/// Interim bay-open pose: the wall plates stand in the source pose at bay 1
-/// and swing out about their top edges to lie flat inside the belly at 0.
-pub(crate) fn bay_wall(f: &mut Face, bay: f64) {
-    let angle = FRAC_PI_2 * (1. - bay.clamp(0., 1.));
-    let along_y = scale_point(ID, [0., 1., 0.]);
-    if BAY_WALL_L.contains(&f.address) {
-        turn(
-            f,
-            scale_point(ID, [BAY_WALL_L_X, 0., HINGE_Z]),
-            along_y,
-            angle,
-        );
-    } else {
-        turn(
-            f,
-            scale_point(ID, [BAY_WALL_R_X, 0., HINGE_Z]),
-            along_y,
-            -angle,
-        );
-    }
-}
-
 fn one(shape: &Shape, address: usize) -> AppResult<&Face> {
     let mut found = shape.faces.iter().filter(|f| f.address == address);
     let result = found
@@ -273,7 +265,9 @@ fn extent(shape: &Shape, ids: &[usize], min: [f32; 3], max: [f32; 3]) -> AppResu
     Ok(())
 }
 
-pub struct Rig;
+pub struct Rig {
+    opening: tore_sim::combat::bays::Opening,
+}
 impl Rig {
     pub fn load(bytes: &[u8], mut shape: Shape) -> AppResult<(Self, Shape)> {
         if tore_formats::module::code(bytes)?.0.len() != 15470
@@ -336,18 +330,54 @@ impl Rig {
         }
         extent(&bay, &BAY_WALL_L, [-3., -27., -12.], [-3., 22., -4.])?;
         extent(&bay, &BAY_WALL_R, [1., -27., -12.], [1., 22., -4.])?;
+        // The six belly skins the openings are cut from lie on the belly plane
+        // (z -5 units) and face down; the fitted opening's belly height is that
+        // plane.
+        let opening = tore_sim::combat::bays::opening(ID).ok_or("F117 bay opening missing")?;
+        for &address in &BELLY {
+            let face = one(&shape, address)?;
+            if !face.normal.is_some_and(|n| n[1] < -32000.)
+                || !face.positions.iter().all(|p| {
+                    (f64::from(p[2]) - f64::from(crate::bay_doors::units(opening.belly))).abs()
+                        < 1e-3
+                })
+            {
+                return Err(format!("unreviewed F117.SH belly skin {address:x}").into());
+            }
+        }
+        // The recess, drawn only while the doors are open, takes the material
+        // of the shape's own bay wall.
+        let template = one(&bay, BAY_WALL_L[1])?.clone();
+        let lining: Vec<Face> = crate::bay_doors::lining(&template, &opening)
+            .into_iter()
+            .enumerate()
+            .map(|(k, mut f)| {
+                f.address = LINING_BASE + k;
+                f
+            })
+            .collect();
         let drawn: Vec<Face> = gear
             .faces
             .into_iter()
             .filter(|f| GEAR.contains(&f.address))
-            .chain(
-                bay.faces
-                    .into_iter()
-                    .filter(|f| bay_added.contains(&f.address)),
-            )
+            .chain(lining)
             .collect();
         shape.faces.extend(drawn);
-        Ok((Self, shape))
+        Ok((Self { opening }, shape))
+    }
+    /// The faces a source face becomes: with the bay doors off their seat the
+    /// six belly skins are cut into the two doors of each bay, turned down
+    /// about their hinges by `state.bay` (the doors' 1 second travel is the
+    /// flight's); the lining draws only then.
+    pub fn faces(&self, source: &Face, state: &State) -> Vec<Face> {
+        let a = source.address;
+        if BELLY.contains(&a) && state.bay > 0. {
+            return crate::bay_doors::belly_doors(source, state.bay, &self.opening);
+        }
+        if lining(a) && state.bay <= 0. {
+            return Vec::new();
+        }
+        vec![source.clone()]
     }
     pub fn animate(&self, source: &Face, state: &State) -> Option<Face> {
         let a = source.address;
@@ -372,17 +402,7 @@ impl Rig {
                 return None;
             }
             gear_positions(&mut result, state.gear, state.nosewheel_angle());
-        } else if BAY_WALL_L.contains(&a) || BAY_WALL_R.contains(&a) {
-            if state.bay <= 0. {
-                return None;
-            }
-            bay_wall(&mut result, state.bay);
-        } else if a == BAY_BELLY {
-            // The source swaps the belly triangle the moment the bay opens.
-            if state.bay > 0. {
-                return None;
-            }
-        } else if a == BAY_BELLY_OPEN && state.bay <= 0. {
+        } else if lining(a) && state.bay <= 0. {
             return None;
         }
         Some(result)
@@ -427,7 +447,9 @@ mod tests {
     }
     #[test]
     fn the_v_tail_mixes_pitch_and_yaw_and_every_piece_turns_whole() {
-        let rig = Rig;
+        let rig = Rig {
+            opening: tore_sim::combat::bays::opening(ID).unwrap(),
+        };
         let mut s = state();
         // The right and left trailing-edge root corners (shape units).
         let right = face(0x22d9, &[[3., -79., -1.], [7., -69., 5.], [24., -96., 21.]]);
@@ -490,19 +512,28 @@ mod tests {
         assert!(same(&rig.animate(&skin, &s).unwrap(), &skin));
         s.gear = 0.05;
         assert!(rig.animate(&skin, &s).unwrap().positions[0][2] > skin.positions[0][2]);
-        // The bay swaps its belly triangle and shows its walls only when open.
+        // The bay cuts the six belly skins into door leaves while it is off its
+        // seat and draws its lining then; shut, the belly is whole and the
+        // lining is gone.
         let belly = face(
             BAY_BELLY,
             &[[-39., -37., -5.], [39., -37., -5.], [0., 55., -5.]],
         );
-        let wall = face(
-            0x319c,
-            &[[-3., 22., -5.], [-3., -27., -12.], [-3., -27., -4.]],
+        let ceiling = face(
+            LINING_BASE,
+            &[[1., -27., 4.], [17., -27., 4.], [17., 21., 4.]],
         );
         s.bay = 0.;
-        assert!(rig.animate(&belly, &s).is_some() && rig.animate(&wall, &s).is_none());
+        assert_eq!(rig.faces(&belly, &s).len(), 1);
+        assert!(rig.faces(&ceiling, &s).is_empty() && rig.animate(&ceiling, &s).is_none());
         s.bay = 1.;
-        assert!(rig.animate(&belly, &s).is_none());
-        assert!(same(&rig.animate(&wall, &s).unwrap(), &wall));
+        let open = rig.faces(&belly, &s);
+        assert!(open.len() > 1);
+        assert!(open.iter().any(|f| {
+            f.positions
+                .iter()
+                .any(|p| p[2] < belly.positions[0][2] - 7.)
+        }));
+        assert_eq!(rig.faces(&ceiling, &s).len(), 1);
     }
 }

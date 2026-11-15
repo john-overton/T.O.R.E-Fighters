@@ -89,7 +89,12 @@ const TANK_RECORDS: usize = 9;
 /// (flags 0x1504 to 0x1104, BMB-A2, 2026-11-15, fitted: no pod on a bomb
 /// bay), so the stores that bit admitted (the multi-store pods, `pod_count`
 /// above 1) are no longer placements there; `B2.PT` 102 to 86.
-const WEAPON_PLACEMENTS: usize = 4776;
+/// 4,784 from 4,776: the F-117's two bay rows take the Paveway II laser bombs
+/// beyond the retail bomb-only mask (F117-5, 2026-11-15: `GBU10.JT`,
+/// `GBU10A.JT`, `PAVEWAY.JT` and `GBU12.JT`, one a row; `GBU16.JT` refused by
+/// name), so `F117.PT` goes from 38 to 46 placements (the normal catalog from
+/// 19 to 23 stores).
+const WEAPON_PLACEMENTS: usize = 4784;
 /// 188 from 182: the F-16A's centreline tank row (F150.GAS or F250.GAS) plus
 /// the tank selection its two 0x07e5 wing rows accept, 6 tank placements.
 /// 192 from 188: the MiG-31 (M31-1). 201 from 192: the Mirage 2000 (M2K-1).
@@ -400,8 +405,19 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                 let tip_amraam = id == AircraftId::F16C
                     && hardpoint == tore_formats::aircraft::stations::F16_TIP
                     && weapon.source == "AIM120.JT";
+                // The F-117's bay rows also take the Paveway II bombs (F117-5),
+                // the row's own one.
+                let bay_paveway = id == AircraftId::F117
+                    && tore_formats::aircraft::stations::extra_weapon(
+                        id,
+                        aircraft.hardpoints.len(),
+                        hardpoint,
+                        &weapon.source,
+                    );
                 let expected = if tip_amraam {
                     2
+                } else if bay_paveway {
+                    source.count
                 } else if r27
                     || matches!(
                         (id, hardpoint),

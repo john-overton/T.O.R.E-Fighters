@@ -261,4 +261,40 @@ mod tests {
             (0, true, Some(StrikeTarget::Object(TANK)))
         );
     }
+    /// F117-5: an AI bomb leaves a fitted bay magazine (the F-117's left bay
+    /// station) from the bay's own mount, through the shared release the
+    /// human's trigger takes; the AI's release does not wait for doors (the
+    /// same as the F-22's: its drawn doors stay shut, docs/spec/stores-on-pylons.md).
+    #[test]
+    fn an_ai_bomb_leaves_a_fitted_bay_magazine_from_its_mount() {
+        use tore_formats::aircraft::AircraftId;
+        use tore_sim::combat::{bays, hardpoints};
+        let (mut wings, _) = build(None);
+        let mut state = combat_fixture(false);
+        state.projectiles.clear();
+        let id = wings.mission().actors()[1].id();
+        let mut config = state.own().configuration().clone();
+        config.stations[0].weapon = mk82_pack(config.stations[0].weapon.clone());
+        config.stations[0].mount = bays::station(AircraftId::F117, 4).unwrap();
+        config.stations[0].rack = hardpoints::Rack {
+            location: hardpoints::MAGAZINE_BYTE,
+            ..Default::default()
+        };
+        wings.configs.insert(id, config.clone());
+        let weapon = config.stations[0].weapon.clone();
+        let ground = |_: f64, _: f64| 0.;
+        let emitted = wings.release(&launch(id, 0x5000_0001), &mut state, &weapon, &[], &ground);
+        assert_eq!(emitted, 6);
+        let launcher = crate::combat::launcher(wings.mission().actor(id).unwrap().flight());
+        // Each round leaves from the bay's own side of the aircraft, within
+        // the opening's length (a six-pack's rounds spread along the magazine).
+        let opening = bays::opening(AircraftId::F117).unwrap();
+        let mount = config.stations[0].mount;
+        let first = &state.projectiles[0];
+        assert!((first.position[0] - launcher.position[0] - mount[0]).abs() < 1e-6);
+        for p in &state.projectiles {
+            let forward = p.position[2] - launcher.position[2];
+            assert!(forward > opening.aft && forward < opening.fore, "{forward}");
+        }
+    }
 }

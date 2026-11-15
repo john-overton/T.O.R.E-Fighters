@@ -441,7 +441,7 @@ fn bay_doors(f: &Face, fraction: f64) -> Vec<Face> {
     cut_doors(f, fraction, doors, BAY_AFT, BAY_FORE, BELLY)
 }
 
-fn cut_doors(
+pub(crate) fn cut_doors(
     f: &Face,
     fraction: f64,
     doors: impl IntoIterator<Item = (f32, f32, f32, f64)>,

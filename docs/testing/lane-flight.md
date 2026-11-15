@@ -923,6 +923,8 @@ The Tornado (TOR-4, 2026-11-10) adds the same 202-value dense gear sweep (ground
 
 The F-117 (F117-3 and F117-4, 2026-11-15) registers `flight-animation-f117`: its two ruddervator assemblies follow pitch (collective) and yaw (differential) in the 25-combination pitch/yaw grid, while aileron, flaps, brake and exhaust must move nothing (the shape has no elevon, flap, airbrake or plume faces, so the probe records them as not applicable); the 202-value dense gear sweep (grounded at gear 1, three legs and three doors, stow checked against the neutral skin) and the 8-value interim bay sweep (`bay-sweep.csv`) must pass every row, and `flight-variety-f117` flies 1,200 headless ticks.
 
+Update (F117-5, 2026-11-15): the bay sweep now checks the fitted bays (six belly skins whole at 0, no lining; open, 20 lining faces, a vertex on each of the four hinge lines, door free edges `leaf * sin(90 degrees * value)` below the belly), still 8 values. New scenarios: `flight-bay-fire-f117-row4` and `-row5` (windowed, the F-22 one-press release on the F-117's two bays: doors open before the GBU-27 leaves, closed after), `bay-f117-0`, `-0.5` and `-1` (the `--flight-bay` frames, as for the F-22), and `render-f117-bay-clearance` (headless: the default GBU-27s clear the doors, both ends and the trapeze rail by at least 0.05 ft with the doors open).
+
 Run one repaired aircraft before expanding the audit:
 
 ```sh

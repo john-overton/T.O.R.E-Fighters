@@ -3444,3 +3444,77 @@ the lug offset, the mid-chord, and 0.25 ft from both tailerons' rig poses at 67 
 `TORE_STORES_PREVIEW_PODCLEAR=1` now also prints `Pod nose:` lines and the gap beside each `Taileron
 entry:`.
 
+## F-117 weapon bays (F117-5, 2026-11-15)
+
+Implementation specification, **opinionated** (John, 2026-11-15, decision 25: two fitted
+belly bays with two doors each, default two GBU-27; extra loads only where the weapons data
+has them). Every number is **fitted**, agent-authored, F117-5. The door count is fitted: the
+real count was not found. This is a game configuration, not a claim of original behaviour.
+The research and the shape measurements are in
+[F-117 weapon bays](../formats/aircraft-variety.md#f-117-weapon-bays-f117-5-2026-11-15).
+
+**Stations and the machinery.** `F117.PT` rows 4 and 5 (the retail internal bay rows,
+`0x1100`, one store each) are `Location::Magazine` stations like the F-22's
+([F-22 naval stores](#f-22-naval-stores)): drawn inside, no pylons, released from where they
+hang through doors that open for the shot. The per-aircraft data is a table,
+`combat::bays::STATIONS` (aircraft, row, mount), read by `placed_on`; `OPENINGS` holds the
+belly cut-out of the aircraft whose doors `bay_doors.rs` draws. `State::bay_available()` is
+true for every aircraft with a row in `STATIONS`. The B-2 and B-52 slices add rows and their
+own belly face lists; no other code changes.
+
+| Carrier | Magazine centre x / floor up / release origin forward, feet |
+| --- | --- |
+| F-117 left bay, row 4 | -3.0 / -2.78 / 0.0 |
+| F-117 right bay, row 5 | +3.0 / -2.78 / 0.0 |
+
+The floor is the lowest fin tip (the magazine hangs the axis half the fin span above it,
+plus 0.08 ft), so the GBU-27's axis is 1.0 ft above the belly plane and its fins hang 1.7 ft
+below it. The F117-0 estimate of +/-2.55 ft is replaced by 3.0: two GBU-27 fin spans (5.4 ft)
+need 5.4 ft of centre spacing less the keel.
+
+**Bays and doors (feet).** Belly plane -1.478. Openings: x 0.2 to 5.8 each side, 18.0 long
+(-9.0 to +9.0 forward). Two doors a bay, 2.8 ft wide, hinged at the inner and outer edges,
+swinging 90 degrees down in the flight's 1.00 s bay travel (open they hang to -4.28). The
+recess roof is 2.3 ft above the belly plane (+0.822), under a top skin that is at least
+2.4 ft above it over the openings. A lined box (ceiling and four walls) closes the recess,
+and a trapeze rail (0.4 ft wide, 0.6 ft deep, -5.5 to +3.5 forward) hangs from each
+ceiling. Drawn only while the doors are off their seat.
+
+**Release.** The doors open before the weapon leaves and close after, as the F-22's
+([bay trigger timing](aircraft-animation.md#f-22-main-weapon-bays)): the press asks for
+the doors, the weapon leaves once they are at 0.95 (116 ticks, 0.958 in the actual one-press
+probe `flight-bay-fire-f117-row4` and `-row5`), the doors stay open 1 s after the release and
+close 1 s later; a pilot-opened bay releases at once. Weapons leave from the bay's mount,
+the same point they hang from. **The AI** releases through the shared strike release, which
+does not wait for doors (`strike_readiness` reads no bay state, as for the F-22): an AI
+F-117's bay doors stay drawn shut while its bombs leave the bay, as an AI F-22's do. A fix
+(the AI holding its doors open for a release) is listed for John.
+
+**What each bay admits.** One store a bay. Retail mask `0x1100` and weight class 20: 19
+stores (`PAVEWA3`, the row's default, and `GBU29`, `GBU29P`, `GBU30`, `GBU38`, `MK82`,
+`MK82HD`, `MK82P3`, `MK84`, `CBU87`, `CBU89`, `MK20`, `RBK250`, `RBK500`, `FAB250`, `FAB500`,
+`AGM88`, `AGM45`, `AT2`); plus the four Paveway II bombs `GBU10`, `GBU10A`, `PAVEWAY` and
+`GBU12` through `extra_weapon` (the row's own count, no weight cap); `GBU16` refused by
+name. The default is two `PAVEWA3`. Real load: two 2,000 lb class bombs, 5,000 lb in all.
+
+**Clearance, feet, doors open.** The default GBU-27 against the door planes (0.10), the
+bay's aft and forward ends (1.06 and 3.04), the trapeze rail (0.10), the other store (0.60),
+the roof (-1.40, upper tail fin tips) and the fuselage's top skin (-0.62, upper tail fin
+tips); lowest fin tips 1.70 ft below the belly plane, inside the doors. The measured
+alternatives clear the doors and the ends by 0.1 ft or more (HARM 0.13 ft past the forward
+end), so no store is refused for fit. The GBU-27's 5.4 ft fin span is wider than the
+fuselage is thick: the one remaining clip is the upper tail fin tips through the dorsal
+skin by 0.62 ft. Options for John: accept; carry the GBU-27 with its tail fins at a
+smaller span in a bay (a fitted pose); or a deeper bay roof under a lowered store (more
+fin below the belly, more door sweep through the fins). The doors also pass the lower fin
+tips during the 1 s swing.
+
+**Signature.** The open-bay term (1.5 times at full travel) applies to every bay aircraft,
+the F-22's values unchanged; it reaches only the path the F-22's term reaches today, the RCS
+page (`scope.rs` `rcs()` reads `State::bay`), not the combat rows radars read: no gear,
+flap or bay state was put on them (John has not answered that). Bay stores add nothing to
+the external-store signature.
+
+Provenance: stations, bays, doors, rail, timing and the 3.0 ft mount fitted (agent
+2026-11-15); the 1 s bay travel, the 0.95 gate and the hold are the F-22's; the refusal of
+`GBU16` and the Paveway II admission applied from John's decision 25.

@@ -164,6 +164,11 @@ contract](stores-on-pylons.md#f-22-naval-stores) adds drawn main-bay magazines
 and fitted side bays on both own models. Wing missiles bypass the doors.
 `--flight-bay 0..1` provides an explicit inspection pose, rejected on other planes.
 
+Update (F117-5, 2026-11-15): the same bay travel, release timing and `O` key now serve every
+aircraft with a row in `combat::bays::STATIONS` (the F-117 has two fitted bays with two doors
+each, [F-117 weapon bays](stores-on-pylons.md#f-117-weapon-bays-f117-5-2026-11-15)); the
+F-22 rig and its numbers are unchanged, and `--flight-bay` is accepted on them.
+
 ## F-22 canopy
 
 Opinionated appearance requested by John: apply an amber/orange grade only to

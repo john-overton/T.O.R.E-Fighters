@@ -650,9 +650,16 @@ impl State {
             None
         }
     }
-    /// Only F-22 has a reviewed main-bay presentation.
+    /// Whether the aircraft has reviewed internal bays: the F-22 family and
+    /// every aircraft with a row in [`crate::combat::bays::STATIONS`] (the
+    /// F-117 so far). The bay travel, the release doors and the open-bay
+    /// signature term all follow it.
     pub fn bay_available(&self) -> bool {
-        matches!(self.model, crate::models::AircraftModel::F22(_))
+        match &self.model {
+            crate::models::AircraftModel::F22(_) => true,
+            crate::models::AircraftModel::Variety(v) => crate::combat::bays::reviewed(v.id),
+            _ => false,
+        }
     }
     /// Hook capability includes explicitly authored concept equipment.
     pub fn hook_available(&self) -> bool {
@@ -3556,6 +3563,36 @@ mod tests {
             s.step(&PilotInput::default(), |_, _| 0.);
         }
         assert!(s.bay < 1e-9);
+    }
+    #[test]
+    fn every_aircraft_with_reviewed_bays_has_bay_travel() {
+        use tore_formats::aircraft::AircraftId;
+        let mut a = profile();
+        a.id = AircraftId::F117;
+        a.name = "F-117".into();
+        a.shape = "F117.SH".into();
+        let mut s = State::new(&a, [0., 15000., 0.]).unwrap();
+        assert!(s.bay_available());
+        s.command(PilotCommand::Toggle(Switch::Bay));
+        assert!(s.bay_open);
+        for _ in 0..120 {
+            s.step(&PilotInput::default(), |_, _| 0.);
+        }
+        assert!((s.bay - 1.).abs() < 1e-9);
+        // The open-bay signature term reads the same deployed fraction (the
+        // RCS page, `docs/radar.md`): 1.5 times with the doors fully open.
+        let open = crate::sensors::Configuration {
+            bay: s.bay,
+            ..crate::sensors::Configuration::CLEAN
+        };
+        let factor = crate::sensors::SignatureProfile::default().configuration_factor(open);
+        assert!((factor - 1.5).abs() < 1e-9);
+        // An exact identity with no bay rows has none.
+        a.id = AircraftId::B2;
+        a.name = "B-2".into();
+        a.shape = "B2.SH".into();
+        let s = State::new(&a, [0., 15000., 0.]).unwrap();
+        assert!(!s.bay_available());
     }
     fn response_models() -> [crate::models::AircraftModel; 2] {
         use crate::models::{AircraftModel, f18::F18FlightModel, rafale_c::RafaleCFlightModel};

@@ -888,3 +888,34 @@ The `menus-ordnance-availability` battery expected line now reads 4,776 weapon
 placements. The `a2g-catalog` line and `tools/test_battery_a2g.py` match any weapon
 and pod count, so they are unchanged. Earlier sections that quote 4,792 weapon
 placements and 84 pods stay as written for their own states.
+
+## F-117 weapon bays take the Paveway II bombs (F117-5, 2026-11-15)
+
+Opinionated (John, 2026-11-15, decision 25: "extra loads only where the weapons data
+already has them"). The F-117's two bay rows (`F117.PT` rows 4 and 5, flags `0x1100`, one
+store each) are now fitted magazine stations
+([F-117 weapon bays](../spec/stores-on-pylons.md#f-117-weapon-bays-f117-5-2026-11-15));
+the retail mask admits 19 stores and the bomb-only bit leaves out the laser bombs, whose
+seeker signature needs the infrared bit. `aircraft_stations::extra_weapon` now admits the
+Paveway II bombs on those two rows (`GBU10.JT`, `GBU10A.JT`, `PAVEWAY.JT`, `GBU12.JT`, the
+row's own count of one, no weight cap), and `weapon_allowed` refuses `GBU16.JT` by name (the
+audit's donor rule: `GBU12.JT` and `GBU16.JT` share the `PAVEWAY.JT` donor, so a variant
+that is not offered must be stated). The measured bay clearances leave every store the mask
+and the extras admit clear of the doors, so no store is refused for fit. One pin moved on
+purpose:
+
+| Pin | From | To | Why |
+| --- | ---: | ---: | --- |
+| Weapon placements | 4,776 | 4,784 | `F117.PT` 38 to 46 (four stores on each of two rows; its normal catalog 19 to 23) |
+| Aircraft, recovered stations, tank placements, pods, Cheat-only, records | 48, 20, 233, 80, 240, 82 / 9 | unchanged | |
+
+```text
+ordnance F117.PT: 2 source rows, 0 optional weapon rows, 46 compatible weapon placements, 0 tank placements; defaults and restart passed; catalog 23 normal, 83 Cheat
+ordnance audit: 48 aircraft, 20 recovered weapon stations, 4784 weapon placements, 233 tank placements, 82 weapon and 9 tank records; passed
+ordnance audit: 1 designator pods, 80 pod placements, one to an aircraft, loaded and restored through the saved mission; passed
+ordnance audit: 2 novelty records, 240 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
+```
+
+The `menus-ordnance-availability` expected line reads 4,784. Earlier sections stay as
+written for their own states.
+

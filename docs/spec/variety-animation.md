@@ -1083,7 +1083,7 @@ directions were not found.
 | Rudder | the same panels differentially: a right pedal lowers the right panel's trailing edge and raises the left's, 0.08 rad at full pedal; the sum on one panel is clamped to the 0.15 rad limit |
 | Aileron, flaps | not rigged (the shape has no elevon or flap faces); the lever moves nothing |
 | Gear | three rigid legs (mains inward, nose forward), three door plates and the door skins; legs stow by gear 0.30, doors close from 0.30 to 0; hidden at 0, the source pose at 1 |
-| Bay (interim) | `state.bay` above 0 draws the shape's open pose: the swapped belly triangle and two wall plates that swing from flat to the source pose about their top edges; F117-5 replaces it |
+| Bay (interim) | `state.bay` above 0 draws the shape's open pose: the swapped belly triangle and two wall plates that swing from flat to the source pose about their top edges; F117-5 replaces it. Update (F117-5, 2026-11-15): replaced by the fitted belly bays, [F-117 weapon bays](stores-on-pylons.md#f-117-weapon-bays-f117-5-2026-11-15) |
 | Brake, burner | none (no airbrake or plume word; the jet has no afterburner) |
 
 Acceptance: `--animation-probe` reports `reviewed-controls-and-attachments`,
