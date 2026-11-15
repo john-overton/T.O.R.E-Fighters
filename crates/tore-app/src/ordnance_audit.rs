@@ -85,7 +85,11 @@ const TANK_RECORDS: usize = 9;
 /// 4,792 from 4,581: the bomber batch A records join the same way (BMB-A1,
 /// 2026-11-15): B-52 71, B-2 102, F-117 38. First measurements of the retail
 /// rows; each aircraft's station slice owns its count.
-const WEAPON_PLACEMENTS: usize = 4792;
+/// 4,776 from 4,792: the B-2's four bay rows lose the designator bit 0x400
+/// (flags 0x1504 to 0x1104, BMB-A2, 2026-11-15, fitted: no pod on a bomb
+/// bay), so the stores that bit admitted (the multi-store pods, `pod_count`
+/// above 1) are no longer placements there; `B2.PT` 102 to 86.
+const WEAPON_PLACEMENTS: usize = 4776;
 /// 188 from 182: the F-16A's centreline tank row (F150.GAS or F250.GAS) plus
 /// the tank selection its two 0x07e5 wing rows accept, 6 tank placements.
 /// 192 from 188: the MiG-31 (M31-1). 201 from 192: the Mirage 2000 (M2K-1).
@@ -116,7 +120,10 @@ const NOVELTY_PLACEMENTS: usize = 240;
 /// 84 from 80: the B-2's four bay rows carry the decoded designator bit 0x400
 /// (flags 0x1504), one pod each (BMB-A1, 2026-11-15; retail row flags, kept
 /// until the B-2's station slice).
-const POD_PLACEMENTS: usize = 84;
+/// 80 from 84: the B-2's four bay rows lose the designator bit (flags 0x1504 to
+/// 0x1104, BMB-A2, 2026-11-15, fitted; B7: the real jet has no pod station), so
+/// the four pod placements are gone again.
+const POD_PLACEMENTS: usize = 80;
 
 pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
     if AircraftId::ALL.len() != AIRCRAFT {

@@ -210,6 +210,33 @@ fn a_migrated_single_is_kept_for_editing_but_noninteractive_combat_refuses_overw
 }
 
 #[test]
+fn a_full_tank_over_the_maximum_starts_at_what_the_maximum_allows() {
+    // BMB-A2: the B-52H's real fuel and empty weight pass its maximum takeoff
+    // weight. The default load starts with the tank the maximum allows; the
+    // editor can still fill it, and a takeoff over the maximum is refused.
+    use tore_sim::combat::loadout::Loadout;
+    let map = resources();
+    let mut player = aircraft_type::AircraftType::load(&map, AircraftId::F18).unwrap();
+    let full = Loadout::new(&player.profile, |name| Ok(map[name].clone())).unwrap();
+    assert_eq!(full.fuel_lbs, full.internal_capacity_lbs);
+    let maximum = (full.total_lbs() - 500.).ceil();
+    player
+        .profile
+        .fields
+        .get_mut("maxTakeoffWeight")
+        .unwrap()
+        .value = format!("{}", maximum as i64);
+    let mut capped = Loadout::new(&player.profile, |name| Ok(map[name].clone())).unwrap();
+    // The cap is a whole pound, so the load sits at most a pound under it.
+    assert!(capped.fuel_lbs < full.fuel_lbs && capped.fuel_lbs.fract() == 0.);
+    assert!(capped.total_lbs() <= capped.maximum_lbs);
+    assert!(capped.total_lbs() > capped.maximum_lbs - 1.);
+    capped.validate().unwrap();
+    capped.fuel(true);
+    assert!(capped.validate().is_err());
+}
+
+#[test]
 fn a_lobby_request_names_pairing_only_when_an_odd_paired_count_is_the_cause() {
     let map = resources();
     let mut player = aircraft_type::AircraftType::load(&map, AircraftId::F18).unwrap();
