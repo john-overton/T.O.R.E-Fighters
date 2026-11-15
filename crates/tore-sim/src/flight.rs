@@ -1065,6 +1065,23 @@ impl State {
     }
     /// Mass-only payload API until loadout/weapon release is integrated.
     pub fn set_payload(&mut self, pounds: f64) -> tore_formats::Result<()> {
+        // A record may carry more fuel than its maximum takeoff weight allows
+        // with stores aboard (the real B-52H, BMB-A2 2026-11-15). The tank
+        // then starts at what the maximum leaves room for, as
+        // `Loadout::cap_default_fuel` does for the loadout (coordinator fix,
+        // 2026-11-15, after B52-2 found the B-52H could not start).
+        // Only such a record is touched: any other still refuses a payload
+        // over its maximum.
+        let mass = self.model.configuration().mass;
+        if pounds.is_finite()
+            && pounds >= 0.
+            && mass.empty_lbs + mass.internal_fuel_lbs > mass.max_takeoff_lbs
+        {
+            let room = (mass.max_takeoff_lbs - mass.empty_lbs - pounds).floor();
+            if self.fuel > room {
+                self.fuel = room.max(0.);
+            }
+        }
         if !pounds.is_finite()
             || pounds < 0.
             || pounds + self.fuel + self.model.configuration().mass.empty_lbs
