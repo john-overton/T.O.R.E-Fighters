@@ -135,6 +135,14 @@ fuel against the F-16A and the Mirage 2000, are in the
 [variety flight baseline](../baselines/variety-flight.md#saab-gripen-validation-2026-11-10);
 `gripen` joins the liftoff, approach and internal-fuel tables of `flight.py`.
 
+Update (B52-8, 2026-11-15): `b52` joins `VARIETY_AIRCRAFT`, `LIFTOFF_AIRCRAFT` (liftoff,
+retail-stall and approach scenarios) and `HEAVY_AIRCRAFT` (`flight-variety-gcurve-b52`) in
+`flight.py`, with fitted windows (liftoff 150 to 175 kt, approach 150 to 170 kt), a
+9,000 tick takeoff limit (`TAKEOFF_TICKS_MAX`) and a 12,000 ft runway (`THEATER_FOR`,
+Greece airport 1). `--flight-fuel` takes up to 400,000 lb and the `land` probe applies it
+before it works out the approach speed. Results: the
+[variety flight baseline](../baselines/variety-flight.md#boeing-b-52h-validation-2026-11-15).
+
 Update (MF1-8, 2026-11-11): the Mirage F1 results, clean and with the default load,
 with the full-stick pull by fuel against the Mirage 2000, the Gripen, the F-5E and
 the F-16A, are in the

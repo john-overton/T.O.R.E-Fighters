@@ -6,6 +6,21 @@
 //! `PROBE_PAYLOAD=pounds` adds carried store mass, `PROBE_FUEL=pounds` sets the
 //! internal fuel, `PROBE_ALTS=a,b,c` picks the altitudes, `PROBE_ONLY` runs one
 //! section (`accel`, `climb`, `turn`, `fuel`).
+//!
+//! Bomber options (B52-8, 2026-11-15): `PROBE_CLIMB=bomber` climbs on a
+//! 300 KCAS then Mach 0.77 schedule from 250 kt instead of the fighter's
+//! 450 kt, and `PROBE_SPEEDS_KT=a,b,c` runs the turn section at those true
+//! airspeeds (banks from 10 degrees) instead of Mach 0.7, 0.9 and 1.1, and
+//! `PROBE_HOLD_SPEED=1` holds that speed with the throttle in the sustained
+//! turn (a pilot's turn) instead of full power with the speed free.
+//! `PROBE_CRUISE=altitude_ft:knots` adds a trimmed cruise point to the fuel
+//! section.
+//!
+//! B-2 options (B2-8): `PROBE_CLIMB=KEAS,MACH` climbs at full thrust on that
+//! equivalent airspeed then Mach schedule (the word `bomber` above selects the
+//! B-52 schedule instead), `PROBE_TURN_MACH=a,b,c` replaces the sustained turn's
+//! Mach list when `PROBE_SPEEDS_KT` is not given, and `PROBE_ONLY=brake` runs the
+//! speed brake section.
 use std::{env, fs::File, io::Read};
 use tore_formats::aircraft::Aircraft;
 use tore_sim::{
@@ -21,6 +36,14 @@ const TICKS: usize = 120;
 
 fn ground(_: f64, _: f64) -> Surface {
     Surface::runway(-60_000.)
+}
+
+/// Density ratio against sea level (standard atmosphere), for the
+/// calibrated-to-true airspeed conversion of the bomber climb schedule.
+fn sigma(altitude: f64) -> f64 {
+    Atmosphere::standard(altitude).map_or(1., |a| {
+        (a.static_pressure_pa / 101_325.) / (a.temperature_k / 288.15)
+    })
 }
 
 fn sound_kt(altitude: f64) -> f64 {
@@ -189,25 +212,43 @@ fn climb_section(a: &Aircraft, set: &Setup) -> Result<(), Box<dyn std::error::Er
     if let Some((keas, mach)) = set.climb {
         return bomber_climb_section(a, set, keas, mach);
     }
-    println!("-- afterburner climb from sea level, speed schedule max(450 kt, Mach 0.9)");
-    for schedule in [0.8_f64, 0.9] {
-        let mut s = start(a, set, 0., 450., true)?;
-        s.pitch = 12_f64.to_radians();
+    let bomber = env::var("PROBE_CLIMB").is_ok_and(|v| v == "bomber");
+    if bomber {
+        println!(
+            "-- military power climb from sea level, schedule 300 KCAS then Mach 0.77 (bomber)"
+        );
+    } else {
+        println!("-- afterburner climb from sea level, speed schedule max(450 kt, Mach 0.9)");
+    }
+    let schedules: &[f64] = if bomber { &[0.77] } else { &[0.8, 0.9] };
+    for &schedule in schedules {
+        let mut s = start(a, set, 0., if bomber { 250. } else { 450. }, true)?;
+        s.pitch = if bomber { 8_f64 } else { 12_f64 }.to_radians();
         s.velocity = Basis::new(0., s.pitch, 0.).forward.map(|v| v * s.speed);
         let marks = [
             5_000., 10_000., 20_000., 30_000., 36_000., 40_000., 45_000., 50_000., 55_000., 59_000.,
         ];
+        let seconds = if bomber { 3_000 } else { 1_500 };
         let mut hits: Vec<Option<(f64, f64)>> = vec![None; marks.len()];
         let mut best_roc = 0_f64;
         let mut roc_at = (0., 0.);
         let mut previous = (s.position[1], 0.);
         let mut top = 0_f64;
-        for second in 0..1500_usize {
+        for second in 0..seconds {
             for _ in 0..TICKS {
-                let sound = sound_kt(s.position[1].clamp(0., 90_000.));
-                let target = (schedule * sound).max(450.);
+                let altitude = s.position[1].clamp(0., 90_000.);
+                let sound = sound_kt(altitude);
+                let target = if bomber {
+                    (300. / sigma(altitude).sqrt()).min(schedule * sound)
+                } else {
+                    (schedule * sound).max(450.)
+                };
                 let speed_kt = s.speed / KT;
-                let want_pitch = (15. + (speed_kt - target) * 0.15).clamp(-5., 60.);
+                let want_pitch = if bomber {
+                    (6. + (speed_kt - target) * 0.1).clamp(-5., 25.)
+                } else {
+                    (15. + (speed_kt - target) * 0.15).clamp(-5., 60.)
+                };
                 let error = want_pitch - s.pitch.to_degrees();
                 let input = PilotInput {
                     pitch: (0.06 * error - 0.03 * s.pitch_rate.to_degrees()).clamp(-1., 1.),
@@ -387,6 +428,7 @@ fn level_turn(
     let bank = bank_deg.to_radians();
     s.bank = bank;
     let feed = (1. / bank.cos() - 1.) / 6.5;
+    let hold = env::var("PROBE_HOLD_SPEED").is_ok();
     let mut worst = 0_f64;
     let mut g_end = 1_f64;
     let mut turned = 0_f64;
@@ -397,7 +439,13 @@ fn level_turn(
             let input = PilotInput {
                 pitch: (feed + 0.003 * error - 0.05 * s.velocity[1]).clamp(-1., 1.),
                 roll: (2. * (bank - s.bank)).clamp(-1., 1.),
-                throttle: Some(1.),
+                throttle: Some(if hold {
+                    // Bomber probe: hold the start speed with the throttle,
+                    // as a pilot turning at a set speed does.
+                    (s.throttle + (speed_kt * KT - s.speed) * 0.01 / 120.).clamp(0.05, 1.)
+                } else {
+                    1.
+                }),
                 ..Default::default()
             };
             s.step_surface(&input, ground);
@@ -450,13 +498,24 @@ fn turn_section(
     set: &Setup,
     altitudes: &[f64],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("-- sustained level turn, afterburner (bank held, speed free for 40 s)");
+    // `PROBE_SPEEDS_KT` runs bomber speeds (true airspeed, banks from 10
+    // degrees); without it the fighter Mach list and banks from 30.
+    let speeds_kt: Option<Vec<f64>> = env::var("PROBE_SPEEDS_KT")
+        .ok()
+        .map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect());
+    let first_bank = if speeds_kt.is_some() { 10 } else { 30 };
+    println!(
+        "-- sustained level turn (bank held, 40 s; full power with the speed free, or the speed held with PROBE_HOLD_SPEED)"
+    );
     for &alt in altitudes {
         let sound = sound_kt(alt);
-        for mach in turn_machs() {
-            let v = mach * sound;
+        let list: Vec<f64> = speeds_kt
+            .clone()
+            .unwrap_or_else(|| turn_machs().iter().map(|m| m * sound).collect());
+        for v in list {
+            let mach = v / sound;
             let mut best: Option<(f64, f64, f64, f64)> = None;
-            for bank in (30..=86).step_by(2) {
+            for bank in (first_bank..=86).step_by(2) {
                 let run = level_turn(a, set, alt, v, f64::from(bank), 45)?;
                 let (end, g, drift, rate, ok) =
                     (run.speed_kt, run.g, run.drift_ft, run.rate_dps, run.flew);
@@ -468,10 +527,11 @@ fn turn_section(
             }
             match best {
                 Some((bank, g, end, rate)) => println!(
-                    "  alt {alt:6.0} Mach {mach:.1} ({v:4.0} kt): sustained bank {bank:.0} deg, {g:.2} G, {rate:4.1} deg/s, speed {end:.0} kt"
+                    "  alt {alt:6.0} Mach {mach:.2} ({v:4.0} kt): sustained bank {bank:.0} deg, {g:.2} G, {rate:4.1} deg/s, speed {end:.0} kt"
                 ),
                 None => println!(
-                    "  alt {alt:6.0} Mach {mach:.1} ({v:4.0} kt): no sustained turn above 20 deg bank"
+                    "  alt {alt:6.0} Mach {mach:.2} ({v:4.0} kt): no sustained turn above {} deg bank",
+                    first_bank - 2
                 ),
             }
         }
@@ -479,8 +539,11 @@ fn turn_section(
     println!("-- instantaneous turn (full aft stick, three seconds, afterburner)");
     for &alt in altitudes {
         let sound = sound_kt(alt);
-        for mach in [0.5_f64, 0.7, 0.9, 1.1] {
-            let v = mach * sound;
+        let list: Vec<f64> = speeds_kt
+            .clone()
+            .unwrap_or_else(|| [0.5_f64, 0.7, 0.9, 1.1].iter().map(|m| m * sound).collect());
+        for v in list {
+            let mach = v / sound;
             let mut s = start(a, set, alt, v, true)?;
             let (mut max_g, mut max_rate) = (0_f64, 0_f64);
             let mut min_speed = s.speed;
@@ -515,7 +578,7 @@ fn turn_section(
                 min_g = min_g.min(p.g);
             }
             println!(
-                "  alt {alt:6.0} Mach {mach:.1} ({v:4.0} kt): peak {max_g:.2} G, {max_rate:4.1} deg/s, speed after 3 s {:.0} kt; push {min_g:.2} G",
+                "  alt {alt:6.0} Mach {mach:.2} ({v:4.0} kt): peak {max_g:.2} G, {max_rate:4.1} deg/s, speed after 3 s {:.0} kt; push {min_g:.2} G",
                 min_speed / KT
             );
         }
@@ -593,7 +656,13 @@ fn fuel_section(a: &Aircraft, set: &Setup) -> Result<(), Box<dyn std::error::Err
     );
     // Burn a real tank at several throttles in level flight and report the
     // time to flameout and the distance flown.
-    for (label, throttle, burner) in [
+    // `PROBE_CRUISE=altitude_ft:knots` adds a trimmed cruise at that point
+    // (the bomber's Mach 0.77 at 36,000 ft, B52-8).
+    let cruise_at: Option<(f64, f64)> = env::var("PROBE_CRUISE").ok().and_then(|v| {
+        let (alt, kt) = v.split_once(':')?;
+        Some((alt.parse().ok()?, kt.parse().ok()?))
+    });
+    let mut cases = vec![
         (
             "cruise 65 percent of top speed, throttle trimmed",
             f64::NAN,
@@ -601,15 +670,28 @@ fn fuel_section(a: &Aircraft, set: &Setup) -> Result<(), Box<dyn std::error::Err
         ),
         ("military power", 1., false),
         ("afterburner", 1., true),
-    ] {
-        let altitude = 20_000.;
+    ];
+    if cruise_at.is_some() {
+        cases.insert(
+            1,
+            ("cruise at PROBE_CRUISE, throttle trimmed", f64::NAN, false),
+        );
+    }
+    for (label, throttle, burner) in cases {
+        let (altitude, fixed_kt) = if label.contains("PROBE_CRUISE") {
+            cruise_at.unwrap_or((20_000., 0.))
+        } else {
+            (20_000., 0.)
+        };
         let (_, top) = state_top(a, altitude)?;
         let mut s = State::new(a, [0., altitude, 0.])?;
         s.enable_research(1)?;
         s.cheats.unlimited_fuel = false;
         s.fuel = tank;
         s.payload_lbs = set.payload;
-        let speed = if throttle.is_nan() {
+        let speed = if fixed_kt > 0. {
+            fixed_kt * KT
+        } else if throttle.is_nan() {
             0.65 * top
         } else {
             0.6 * top
@@ -621,15 +703,16 @@ fn fuel_section(a: &Aircraft, set: &Setup) -> Result<(), Box<dyn std::error::Err
         let mut distance = 0_f64;
         let mut ticks = 0_u64;
         let fuel_start = s.fuel;
-        // Burn for five minutes (or until empty) and extrapolate: the flow is
+        let mut fuel_at_240 = fuel_start;
+        // Burn for ten minutes (or until empty) and extrapolate: the flow is
         // constant per throttle setting.
-        while s.fuel > 0.5 && ticks < 120 * 300 {
+        while s.fuel > 0.5 && ticks < 120 * 600 {
             let input = PilotInput {
                 pitch: hold_altitude(&s, altitude),
                 roll: (-2. * s.bank).clamp(-1., 1.),
                 throttle: if throttle.is_nan() {
                     // Hold the start speed with the throttle.
-                    Some((s.throttle + (speed - s.speed) * 0.0004 / 120.).clamp(0.05, 1.))
+                    Some((s.throttle + (speed - s.speed) * 0.002 / 120.).clamp(0.05, 1.))
                 } else {
                     Some(throttle)
                 },
@@ -638,12 +721,23 @@ fn fuel_section(a: &Aircraft, set: &Setup) -> Result<(), Box<dyn std::error::Err
             s.step_surface(&input, ground);
             distance += s.speed / 120.;
             ticks += 1;
+            if ticks == 120 * 480 {
+                fuel_at_240 = s.fuel;
+            }
             if s.crashed {
                 break;
             }
         }
         let seconds = ticks.max(1) as f64 / 120.;
         let flow = (fuel_start - s.fuel) / seconds;
+        if ticks >= 120 * 600 {
+            println!(
+                "    last 120 s: {:.2} lb/s, throttle {:.2}, speed {:.0} kt",
+                (fuel_at_240 - s.fuel) / 120.,
+                s.throttle,
+                s.speed / KT
+            );
+        }
         let mean_kt = distance / seconds / KT;
         println!(
             "  {label}: {flow:.2} lb/s over {seconds:.0} s at {mean_kt:.0} kt, so {:.1} min and {:.0} nm from the {tank:.0} lb tank (extrapolated), crashed {}",

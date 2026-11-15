@@ -263,7 +263,7 @@ impl State {
         let drag = slip_drag
             + max_thrust
                 * lapse
-                * (self.speed / drag_speed).powi(2)
+                * c.aerodynamics.drag_ratio(self.speed / drag_speed)
                 * (1. + loading * c.aerodynamics.loaded_drag_percent / 100.)
             + weight
                 * (c.aerodynamics.g_pull_drag_f8 * (load_factor.abs() - 1.).max(0.)
@@ -284,7 +284,7 @@ impl State {
         let drag = drag_cap.map_or(drag, |cap| drag.min(cap));
         let gear_on_wheels = self.research.is_some() && wheel_contact;
         // Display breakdown of the drag above, from the same inputs.
-        let airframe_drag = max_thrust * lapse * (self.speed / drag_speed).powi(2);
+        let airframe_drag = max_thrust * lapse * c.aerodynamics.drag_ratio(self.speed / drag_speed);
         let breakdown = trace::DragTrace {
             total_lbf: drag,
             undamaged_lbf: undamaged_drag,

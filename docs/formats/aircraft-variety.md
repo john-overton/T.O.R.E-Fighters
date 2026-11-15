@@ -8872,6 +8872,179 @@ the plates never appear in play; B52-5 owns that). The frames batch scripts are
   half-spans, past the wing tips (the engine count the aircraft record carries is 8;
   `live.rs` clamps to 4 elsewhere). Not changed here.
 
+## B-52 flight review (B52-8, 2026-11-15)
+
+Implementation mode. The B-52H flies the hybrid adapter's `variety` configuration built
+from `B52.PT` with BMB-A2's real thrust (136,000 lbf), empty weight (185,000 lb), tank
+(312,197 lb), flow (20 lb/s) and the record's own 488,000 lb maximum takeoff, G rows
+(-2 to +3) and envelopes. None of those changed, nor did the top-speed edges. What
+changed is the shared large-aircraft flight tuning, for this aircraft only, the way the
+transports' 0.96 level-speed fraction and 0.4 nose alignment are per-aircraft (see
+[variety flight](../spec/variety-flight.md#boeing-b-52h-b52-8-2026-11-15) and the
+[variety flight baseline](../baselines/variety-flight.md#boeing-b-52h-validation-2026-11-15)).
+Every term below is **fitted**, an agent decision of 2026-11-15; none is retail behaviour.
+
+### Causes
+
+1. **The drag law, not the thrust.** The hybrid drag equals the full thrust at the 1 G
+   top-speed edge and falls with the square of the speed below it. That suits an
+   aircraft whose edge is the thrust-limited top speed. The B-52's low-altitude edge
+   (385 kt at sea level, 440 kt at 15,000 ft) is a placard, so at 300 kt the law gave
+   about 0.6 of the full thrust as drag (about 80,000 lbf for a 400,000 lb aircraft whose
+   real clean drag is about 28,000). Climbing, accelerating and range all suffered:
+   2,100 ft/min up to 5,000 ft, 2,600 nautical miles at Mach 0.77.
+2. **The turn "failure" is a probe point on the top-speed edge.** Mach 0.7 at 15,000 ft is
+   439 kt and the record's 1 G edge there is 440 kt, so the probe's full-power turn had
+   no thrust left by construction. A turn at a held speed is limited by the G rows, not
+   by thrust: 42 degrees (1.35 G) at the edge and 54 to 60 degrees (1.7 to 2.0 G) at
+   250 to 400 kt, before and after. The 1,000 ft instantaneous 1.22 G was at 461 kt, 20
+   percent over the record's 385 kt sea-level edge (the fast-side hold gives the 2 G row
+   divided by the 1.64 loading divisor); that is the record's, not changed.
+3. **The probe's 450 kt climb start** was above the 385 kt sea-level edge: nothing
+   climbed. The probe now takes `PROBE_CLIMB=bomber` (300 KCAS, then Mach 0.77, from
+   250 kt, military power).
+4. **Thrust at altitude.** The shared lapse (`exp(-h/70,000)`) keeps 0.6 of the sea-level
+   thrust at 36,000 ft, where a TF33 keeps about 0.3.
+5. **No takeoff drag and a stale approach weight.** The shared takeoff has no flap, gear
+   or induced drag and no loss of thrust with speed, so the 488,000 lb run was 5,807 ft.
+   And the scripted approach was built before `--flight-fuel` was applied (a general
+   probe defect, fixed below), so every approach flew the weight of the full ground-start
+   load.
+
+### The fitted terms
+
+| Term | Shared value | B-52H | Fitted against |
+| --- | --- | --- | --- |
+| Clean-drag shape (`DragShape`: 0.15 of the reference drag on the square law, the rest on the 12th power of speed over the edge) | square law | 0.15 / 12 | Published 6,270 ft/min climb and 442 kt cruise at about 7,600 nautical miles. 1 at the edge, so the top speed does not move. At 0.78 of the edge 0.13 of the thrust (about 18,000 lbf at sea level; a real clean 400,000 lb aircraft has about 28,000 there, the missing induced drag at low speed is not modelled), at 0.857 (Mach 0.77 at 36,000 ft) 0.24 |
+| Thrust lapse height | 70,000 ft | 32,000 ft | TF33-P-3 keeps about 0.3 of its sea-level thrust at 36,000 ft and Mach 0.8 (0.32 here). The cruise burn is the throttle fraction, so this does not move it |
+| Rolling and takeoff-run deceleration | 0.8 ft/s squared | 4.8 | A pilot forum estimate of about 8,000 ft ground run at 488,000 lb; carries flap, gear and induced drag and the thrust lost with speed, which the shared takeoff lacks. A hands-off unbraked rollout is therefore short; braked landings use the next row |
+| Wheel brake deceleration | 18 ft/s squared | 2.6 | The same forum's 4,900 ft landing ground run from a 135 kt flare at 270,000 lb with brakes alone. 18 stopped a heavy from 140 kt in about 1,500 ft |
+| Stall reference fraction | 1 | 1.09 | The reference weight of the weight-scaled stall is the empty weight times it. 135 kt flare at 270,000 lb is a flapped stall near 108 kt at 1.25 times; 1.09 puts the model there (it was 113 kt, and 152 kt at 488,000 lb, now 145) |
+| Ground alignment rate | 0.7 | 0.4 | The transports' value (C-130, AC-130, E-3, IL-76, E-2); the precedent for a heavy. Was the fighters' default (BMB-A1 open item) |
+
+Code: `crates/tore-sim/src/models/variety/b52.rs` (the terms and their notes),
+`models/config.rs` (the optional `DragShape` on `Aerodynamics`, validated),
+`flight/airframe.rs` (the one drag expression, `None` is the old square law),
+`models/variety.rs` and `models/mod.rs` (the per-aircraft hooks). Every other aircraft
+has `drag_shape` `None`, the shared lapse, rolling, brake, stall and alignment values;
+one test checks that for every variety identity.
+
+### Before, after and real
+
+Weights: full tank is the free-flight and `--headless-flight` start (185,000 + 312,197 =
+497,197 lb, over the 488,000 lb maximum), max is the Load Ordnance default (488,000 lb),
+typical is 400,000 lb (fuel 215,000). Ground figures are the ground-start load at the
+named weight on a 12,000 ft runway (Greece, airport 1) unless a column says otherwise.
+Logs: `.local/m3-aircraft/checks/B52-8/{before,after}/`.
+
+| Figure | Before | After | Real (source) |
+| --- | --- | --- | --- |
+| Takeoff ground run to liftoff, 488,000 lb | 5,807 ft (UKR 1) | 7,674 ft (UKR 1), 7,324 ft (GRE 1) | about 8,000 ft at 488,000 lb, 500 ft, 60 F, no wind (pilot forum estimate, unofficial); 9,843 ft takeoff distance (UltimateSpecs) |
+| Liftoff speed, 488,000 lb | 162.5 kt | 158.6 kt | no primary figure; battery window 150 to 175 kt |
+| Takeoff, 416,600 lb / 301,600 lb | not measured | 4,843 ft, 147.8 kt / 2,081 ft, 125.4 kt | none found |
+| Climb, time to 5,000 / 36,000 / 50,000 ft (full / max / typical) | 143 / 1,151 / 1,712 s, 141 / 1,136 / 1,688 s, 127 / 987 / 1,355 s | 82 / 638 / 978 s, 81 / 630 / 964 s, 73 / 556 / 834 s | none found for times |
+| Climb rate, 0 to 5,000 ft average (full / max / typical) | 2,100 / 2,130 / 2,360 ft/min | 3,660 / 3,700 / 4,110 ft/min (best 5 s: 5,075 / 5,120 / 5,590) | 6,270 ft/min (Wikipedia and UltimateSpecs, weight and altitude not stated) |
+| Cruise, Mach 0.77 at 36,000 ft (441 kt), steady burn and range from 312,197 lb | 14.7 lb/s, 2,600 nautical miles | 4.7 lb/s, 8,200 nautical miles | cruise 442 kt; combat range about 7,600 nautical miles (8,800 miles), Wikipedia and the Air Force fact sheet |
+| Level top speed at 36,000 ft | 514.9 kt | 515.3 kt | 560 kt (UltimateSpecs), 565 kt (Wikipedia, Mach 0.86); Jane's 516 kt (Mach 0.90) is the record's edge. Reported, not changed |
+| Level top speed at sea level / 15,000 ft | 385 / 439 kt | 385 / 439 kt | none found (the record's edges are placards) |
+| Ceiling | envelope top 55,000 ft; zoom to 50,600 to 53,200 ft | the same | 50,000 ft (Air Force, Wikipedia); Jane's 55,000 ft. The record's 55,000 is Jane's; reported, not changed |
+| Approach, 270,000 lb | 166.2 kt (the 0.85 times landing-limit cap, flown at the full ground-start weight) | 140.3 kt, touchdown 131.6 kt, rollout 4,131 ft | 135 kt flare speed at 270,000 lb; 4,900 ft ground run without a chute (pilot forum) |
+| Approach, 404,000 lb (the battery's 65 percent fuel) | 166.2 kt | 166.2 kt (the cap again), touchdown 153.7 kt, rollout 5,056 ft | the 135 kt flare scales to about 165 kt at that weight |
+| Sustained turn, held speed, 400,000 lb: 250 kt at 15,000 ft | 34 degrees, 1.22 G | 60 degrees, 2.04 G | no figure; the real structural limit is 2.5 G at moderate weights |
+| Sustained turn, held speed, full tank: 250 kt at 1,000 ft / 250 kt at 15,000 ft | 28 degrees (1.15 G) / none above 8 degrees | 54 degrees (1.72 G) / 24 degrees (1.07 G) | none found |
+| Sustained turn, the same, at 300 to 400 kt and at 439 kt (the edge) | 54 to 60 degrees; 28 to 42 degrees | the same | none found |
+| Instantaneous pull, 400,000 lb, 300 kt at 1,000 ft | 2.07 G | 2.07 G (G rows and loading unchanged) | structural limit 2.5 G (not cited here) |
+| Roll rate (full stick) | 23.6 deg/s | unchanged | none found |
+
+The Mach 0.7 probe's "no sustained turn above 20 degrees" at 15,000 ft is the edge:
+439 kt is the record's top speed there. With the speed held it is 28 degrees at the full
+tank and 42 at 400,000 lb, before and after.
+
+Sources (all read 2026-11-15): Wikipedia, "Boeing B-52 Stratofortress", Specifications
+(B-52H), through the migflug.com page that quotes them (max 565 kn at altitude, Mach
+0.86; cruise 442 kn; ceiling 50,000 ft; rate of climb 6,270 ft/min; range 8,800 miles)
+and the article text (service ceiling officially 50,000 ft, difficult to reach with a bomb
+load; range 8,800 miles); ultimatespecs.com B-52H page (560 kt, cruise 442 kt, 6,270
+ft/min, 50,000 ft, takeoff 9,843 ft, landing 6,562 ft); the Air Force B-52 fact sheet
+(maximum takeoff 488,000 lb); the Jane's text in `B52.INF` (516 kt, 55,000 ft). The
+ground-run and landing figures (8,000 ft at 488,000 lb, 4,900 ft from a 135 kt flare at
+270,000 lb) are one post in the B-52 Stratofortress Association forum, which the fetch
+tool could not open (HTTP 403); they were read from the search result's summary of it, so
+they are the weakest figures here and are used only as a plausibility target, not as a
+value to hit. No takeoff or approach speed was found in any primary source.
+
+### Engine count (not changed)
+
+`Configuration::from_source` clamps the record's `engines` to 1 to 4 and
+`LiveConfiguration::validate` rejects more (`combat/live.rs`). What reads the clamped
+count:
+
+- `Engine::new` (`aircraft_systems/engine.rs`) clamps again and keeps a `shutdown` array
+  of four and `thrust_shares` of four. The two engine-shutdown damage results (systems 9
+  and 10, "Engine shutdown") each take 1 over the count of the power, so the B-52 loses
+  25 percent a hit where the real jet would lose 12.5.
+- `wreck::Power` (`wreck.rs`) keeps four per-engine accelerations; the yaw torque of a
+  falling wreck spreads over the count.
+- Checkpoints and replay: the live configuration record carries `engines`
+  (`checkpoint_records.rs`), the wreck power array is in the live checkpoint and the
+  golden fingerprint (`golden_tests.rs`).
+
+What does not read it: fuel flow (the record's flow is the aircraft's total, scaled by
+the throttle), sound (loops are per aircraft identity), the HUD and systems pages (they
+show temperature, oil, hydraulics and total power, no per-engine rows) and the
+contrails (the app reads the record's own 8, which is how the fallback spread past the
+wing tips, below).
+
+Honouring eight would mean widening the three four-element arrays to eight, allowing
+1 to 8 in `live.rs`, and then re-pinning every aircraft's golden fingerprints and
+checkpoint records, because the fingerprints walk the whole array (four entries become
+eight for every aircraft) and the wreck power travels in the checkpoint. A guard that
+leaves the other aircraft unchanged would need a variable-length array in a type that is
+`Copy` and compared exactly. That is not a small, safe change, so it was not made. Option
+for John: keep four (the cost is the 25 percent engine-out step), or schedule the
+widening as its own slice with a simulation version bump.
+
+### Ground alignment and contrails
+
+Ground alignment: 0.4 a second, the transports' value (the fighters' 0.7 was the
+BMB-A1 default). Fitted, as the transports' is.
+
+Contrails: `contrail_offsets` (`tore-app/src/aircraft.rs`) now returns a fitted set for
+the B-52's eight engines, in feet (lateral, up, aft): two at each of four pods, the
+pods' centre lines 35.0 ft (inner) and 58.2 ft (outer) either side, from the drawn pods
+(`B52.SH` at 2/3 ft a unit: inlet faces 15 units wide, aft faces 11 units, centres 52.5
+and 87.4 units out; aft faces at y 18 and -8 units, so the points start 2 ft behind them:
+10.0 and -7.3 ft; heights -0.7 and -1.7 ft). The engines sit 1.8 ft either side of the
+pod centre. The real pods are about 35 ft and 58 ft out (B52-3). The old fallback gave
+lateral points to +/-1.05 half-spans (97 ft against the 92.7 ft half-span). One test
+(`the_b52_draws_eight_contrails_two_behind_each_pod_inside_the_wing_tips`) pins the set.
+
+### Battery
+
+`flight.py`: `b52` joins `VARIETY_AIRCRAFT`, `LIFTOFF_AIRCRAFT` (liftoff, retail-stall
+and approach scenarios) and `HEAVY_AIRCRAFT` (the `gcurve` scenario, with a 1.15 G floor for the B-52 because its 2 G row over the 1.64 loading divisor is 1.22 G, `HEAVY_GCURVE_FLOOR`), with fitted windows
+(liftoff 150 to 175 kt, approach 150 to 170 kt, recorded 158.6 and 166.2), the internal
+fuel table (312,197 lb), a takeoff tick limit of 9,000 (the run takes 7,300 ticks; the
+rest lift off inside 4,500) and a 12,000 ft runway for the liftoff and approach scenarios
+(UKR airport 1 is 5,532 ft, shorter than the takeoff run). `main.rs`: `--flight-fuel`
+accepts up to 400,000 lb (was 100,000, which the 65 percent landing weight exceeds) and
+the scripted landing is now built after the fuel is set, so every aircraft's approach
+flies the weight the scenario names (the fighters' differences are a few knots; their
+recorded windows still pass, see the results in the baseline).
+
+### Open for John
+
+- The drag shape is a per-aircraft model change (`DragShape`), small and guarded, but a
+  new shared concept. The alternative was to leave the 2,600 nautical mile range and the
+  2,100 ft/min climb and report them, as M2K-8 did for the Mirage 2000 climb.
+- The top speed (560 kt real, 515 kt record) and ceiling (50,000 real, 55,000 record) are
+  reported only, as asked.
+- The takeoff and landing run fits rest on one unofficial forum post. Say if the 4.8 and
+  2.6 ft/s squared terms should wait for a better source.
+- Engine count: four or eight (above).
+- The record's 30 degree a second roll limit (the AC-130 family block) gives 23.6 degrees
+  a second; no real figure was found.
+
 ## B-2 rig (B2-3, 2026-11-15)
 
 Implementation, slices B2-3 and B2-4 run together (bomber batch A), Claude Sonnet

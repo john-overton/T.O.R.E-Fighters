@@ -19,7 +19,7 @@ from battery_scenarios._strips import ground_airport
 
 # Original roster covered by the established fixed-wing maneuver battery.
 AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su25", "mig23", "su35", "f22", "f22n", "faxx"]
-VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310", "mig25", "f16a", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc", "b2", "f117"]
+VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310", "mig25", "f16a", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc", "b52", "b2", "f117"]
 # Aircraft whose PT disables spins (X-31 flag, F-22 family): they never enter one.
 SPIN_IMMUNE = {"x31", "f22", "f22n", "faxx"}
 
@@ -228,9 +228,10 @@ def tank_problems(output: str) -> list[str]:
 # aircraft is listed: the B-2 at its 373,000 lb default gross takes 8,012 ticks
 # (67 s: liftoff at 7,018 ticks after 7,987 ft, the real takeoff run is about
 # 6,700 ft), so its scenarios run 12,000 ticks and allow 10,000 (B2-8,
-# 2026-11-15, agent decision).
-TAKEOFF_TICKS_MAX = {"b2": 10000}
-TAKEOFF_RUN_TICKS = {"b2": "12000"}
+# 2026-11-15, agent decision). The B-52H's 7,674 ft run takes 7,326 ticks at
+# 488,000 lb, so its scenarios run 18,000 ticks and allow 9,000 (B52-8, 2026-11-15).
+TAKEOFF_TICKS_MAX = {"b2": 10000, "b52": 9000}
+TAKEOFF_RUN_TICKS = {"b2": "12000", "b52": "18000"}
 
 
 def check_takeoff(output: str, ac: str | None = None) -> list[str]:
@@ -383,6 +384,21 @@ KNOWN_APPROACH["b2"] = 166.2
 # lb of external fuel, not two): liftoff 146.4 kt (was 150.6), approach 155.1 kt (was 160.1), both inside the
 # windows and the plus or minus 6 percent regression band, so no window was refitted and the known values above
 # stay as TOR-8 recorded them.
+# The B-52H (B52-8, 2026-11-15; agent decisions, fitted windows). No primary liftoff
+# or approach speed was found. Liftoff (150 to 175 kt) brackets the measured 158.6 kt at
+# the 488,000 lb ground-start load, after 7,674 ft (real: about 8,000 ft ground run, a
+# pilot forum estimate, unofficial; 9,843 ft takeoff distance in a spec sheet). The
+# approach window (150 to 170 kt) is for the scenario's 65 percent fuel (202,928 lb,
+# about 404,000 lb gross), where the model's cap is 0.85 times the record's landing
+# limit, 166.2 kt; a pilot forum figure of a 135 kt flare speed at 270,000 lb scales to
+# about 165 kt at that weight. At 270,000 lb the model approaches at 140.3 kt.
+LIFTOFF_TARGET["b52"] = (150, 175)
+APPROACH_TARGET["b52"] = (150, 170)
+KNOWN_LIFTOFF["b52"] = 158.6
+KNOWN_APPROACH["b52"] = 166.2
+# The B-52H's liftoff and approach scenarios start from a 12,000 ft runway (Greece, airport 1):
+# UKR airport 1 is 5,532 ft, shorter than its 7,674 ft takeoff run and its 5,000 ft rollout.
+THEATER_FOR = {"b52": "GRE"}
 # Internal fuel of each aircraft's default load, pounds.
 INTERNAL_FUEL_LB = {
     "f18": 11220, "rafale": 9900, "f14": 15741, "a4e": 4434, "x31": 9975, "mig29": 13000, "su27": 19000,
@@ -411,12 +427,24 @@ INTERNAL_FUEL_LB["f15e"] = 13662
 # MF1.PT internal fuel, 6,120 lb (MF1-0; the real F1 holds about 7,385 lb).
 INTERNAL_FUEL_LB["mf1"] = 6120
 
+# B52.PT internal fuel, 312,197 lb (BMB-A2: the real B-52H tank, 47,975 US gal).
+INTERNAL_FUEL_LB["b52"] = 312197
 # B2.PT internal fuel, 167,000 lb (BMB-A2). The approach scenario flies 65
 # percent of it, 108,550 lb, but `--flight-fuel` takes at most 100,000 lb, so the
 # B-2's approach scenario uses that cap (60 percent); the scripted approach speed
 # does not depend on the fuel in any case (B2-8).
 INTERNAL_FUEL_LB["b2"] = 167000
 APPROACH_FUEL_CAP_LB = 100000
+
+
+def approach_fuel(ac: str) -> int:
+    """The approach scenario's `--flight-fuel`: 65 percent of the internal fuel.
+
+    The B-2 keeps its 100,000 lb cap (B2-8); every other aircraft, the B-52H
+    included (B52-8 raised the option's maximum to 400,000 lb), flies the full
+    65 percent."""
+    fuel = round(0.65 * INTERNAL_FUEL_LB[ac])
+    return min(fuel, APPROACH_FUEL_CAP_LB) if ac == "b2" else fuel
 
 
 def _in_target(value: float, target: tuple, known: float | None) -> str | None:
@@ -515,6 +543,8 @@ LIFTOFF_AIRCRAFT += ["tornado"]
 # flares or outer pods, so its default gross, liftoff and approach are the figures the Tornado had
 # before the Combat version took on 1,158 lb of pods.
 LIFTOFF_AIRCRAFT += ["tornadoc"]
+# The B-52H joins the liftoff, retail-stall and approach scenarios (B52-8, 2026-11-15).
+LIFTOFF_AIRCRAFT += ["b52"]
 # The B-2 joins them (B2-8, 2026-11-15).
 LIFTOFF_AIRCRAFT += ["b2"]
 
@@ -526,7 +556,7 @@ def liftoff_scenarios() -> list[Scenario]:
             Scenario(
                 name=f"flight-liftoff-{ac}",
                 lane="flight",
-                args=["--theater", "UKR", "--ground-start", "1", "--headless-flight", TAKEOFF_RUN_TICKS.get(ac, "9000"), "--maneuver", "takeoff", "--aircraft", ac, "--no-audio"],
+                args=["--theater", THEATER_FOR.get(ac, "UKR"), "--ground-start", "1", "--headless-flight", TAKEOFF_RUN_TICKS.get(ac, "9000"), "--maneuver", "takeoff", "--aircraft", ac, "--no-audio"],
                 check=lambda output, ac=ac: check_liftoff_speed(output, ac),
             )
         )
@@ -534,7 +564,7 @@ def liftoff_scenarios() -> list[Scenario]:
             Scenario(
                 name=f"flight-liftoff-retail-{ac}",
                 lane="flight",
-                args=["--theater", "UKR", "--ground-start", "1", "--headless-flight", TAKEOFF_RUN_TICKS.get(ac, "9000"), "--maneuver", "takeoff", "--retail-stall-speeds", "--aircraft", ac, "--no-audio"],
+                args=["--theater", THEATER_FOR.get(ac, "UKR"), "--ground-start", "1", "--headless-flight", TAKEOFF_RUN_TICKS.get(ac, "9000"), "--maneuver", "takeoff", "--retail-stall-speeds", "--aircraft", ac, "--no-audio"],
                 check=lambda output, ac=ac: check_retail_liftoff(output, ac),
             )
         )
@@ -543,8 +573,8 @@ def liftoff_scenarios() -> list[Scenario]:
                 name=f"flight-approach-{ac}",
                 lane="flight",
                 args=[
-                    "--theater", "UKR", "--ground-start", "1", "--headless-flight", "60000", "--maneuver", "land",
-                    "--flight-fuel", str(min(round(0.65 * INTERNAL_FUEL_LB[ac]), APPROACH_FUEL_CAP_LB)), "--aircraft", ac, "--no-audio",
+                    "--theater", THEATER_FOR.get(ac, "UKR"), "--ground-start", "1", "--headless-flight", "60000", "--maneuver", "land",
+                    "--flight-fuel", str(approach_fuel(ac)), "--aircraft", ac, "--no-audio",
                 ],
                 check=lambda output, ac=ac: check_approach_speed(output, ac),
                 timeout=300,
@@ -2601,10 +2631,15 @@ def variety_scenarios() -> list[Scenario]:
 
 # Transports and airliners: their higher G rows end well short of the 1 G row's
 # top speed, the band where they once could not pull at all (John, 2026-10-08).
-HEAVY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "b747", "a310"]
+HEAVY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "b747", "a310", "b52"]
 
 
-def check_heavy_gcurve(output: str) -> list[str]:
+# The B-52H's record has only +3 and +2 G rows, and its tank divides the 2 G row by the
+# loading divisor 1.64 (2 / 1.64 = 1.22 G, B52-8, 2026-11-15), so its floor is lower than 1.3.
+HEAVY_GCURVE_FLOOR = {"b52": 1.15}
+
+
+def check_heavy_gcurve(output: str, floor: float = 1.3) -> list[str]:
     """Once the full-stick limit has passed 1.4 G it never falls back near 1 G.
 
     The probe's `gcurve:` lines sweep 100 to 750 kt at 5,000 ft, so the sweep
@@ -2618,7 +2653,7 @@ def check_heavy_gcurve(output: str) -> list[str]:
     pulled = False
     for kt, g in limits:
         pulled = pulled or g > 1.4
-        if pulled and g < 1.3:
+        if pulled and g < floor:
             problems.append(f"full-stick limit fell to {g:.2f} G at {kt} kt")
     if not pulled:
         problems.append("never reached 1.4 G")
@@ -2630,7 +2665,7 @@ def heavy_gcurve_scenarios() -> list[Scenario]:
         name=f"flight-variety-gcurve-{aircraft}", lane="flight",
         args=["--headless-flight", "10", "--maneuver", "gcurve", "--aircraft", aircraft,
               "--researched-flight", "--no-audio", "--no-controllers"],
-        check=check_heavy_gcurve, timeout=120,
+        check=lambda output, aircraft=aircraft: check_heavy_gcurve(output, HEAVY_GCURVE_FLOOR.get(aircraft, 1.3)), timeout=120,
     ) for aircraft in HEAVY_AIRCRAFT]
 
 

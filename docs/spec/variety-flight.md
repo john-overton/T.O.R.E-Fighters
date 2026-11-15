@@ -908,6 +908,31 @@ lighter default load of TOR-5b and TOR-6b change the figures above; the re-measu
 numbers are in the [Tornado acceptance record](../baselines/aircraft-tornado.md#flight-envelope).
 The record's 60,000 ft ceiling and the level flight to 837 kt there no longer hold.
 
+## Boeing B-52H (B52-8, 2026-11-15)
+
+The B-52H flies the `variety` configuration built from `B52.PT` with the BMB-A2 values
+(136,000 lbf, empty 185,000 lb, tank 312,197 lb, 20 lb/s, 488,000 lb maximum takeoff) and
+the record's own envelopes and G rows. Six fitted terms are the aircraft's own; every
+other aircraft keeps the shared value ([review and table](../formats/aircraft-variety.md#b-52-flight-review-b52-8-2026-11-15)):
+
+- **Clean-drag shape.** The shared drag is the full thrust at the 1 G top-speed edge
+  times the square of speed over the edge. The B-52's low-altitude edge is a placard
+  (385 kt at sea level), so that law gave about three times the real drag at 300 kt.
+  Its clean drag is instead 0.15 of that on the square law plus 0.85 on the twelfth power
+  of speed over the edge: 1 at the edge (the top speed does not move), 0.13 of the thrust
+  at 0.78 of the edge, 0.24 at 0.857 of it. Mach 0.77 at 36,000 ft burns 4.7 lb/s
+  (about 8,000 nautical miles from the tank, published combat range 7,600) and the climb
+  from sea level at 300 KCAS reaches 5,000 ft in 73 to 82 s (published 6,270 ft/min).
+- **Thrust lapse** 32,000 ft (shared 70,000). **Rolling deceleration** 4.8 ft/s squared
+  (shared 0.8): the 488,000 lb takeoff run is 7,300 to 7,700 ft, lifting off at 158.6 kt.
+  **Brake deceleration** 2.6 (shared 18): a 270,000 lb landing rolls 4,100 ft.
+  **Stall reference fraction** 1.09 (shared 1): approach 140 kt at 270,000 lb.
+- **Nose alignment** 0.4, the transports'.
+
+Not changed: the top-speed edges (515 kt at 36,000 ft against a published 560 to 565),
+the 55,000 ft ceiling (published 50,000), the G rows and the roll limit. Engines stay
+clamped to four in the live configuration (see the review).
+
 ## Unknown evidence
 
 Retail hover power, altitude ceiling, nozzle travel/rate, rotor torque, lift
