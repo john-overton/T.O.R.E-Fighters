@@ -7988,3 +7988,183 @@ First measurements of the retail rows; each aircraft's station slice owns its
 count. The `menus-ordnance-availability` and `a2g-catalog` battery expected
 lines and `tools/test_battery_a2g.py` follow
 ([ordnance availability](../baselines/ordnance-availability.md)).
+
+## B-2 shape, size and looks (B2-2, 2026-11-15)
+
+Implementation and measurement, slice B2-2, Claude Sonnet (sonnet-high). John's
+decisions of 2026-11-15 ("accept all" of the bomber batch A decisions): 19, the B-2
+stays at 1:1, and 22, the reader fix (done in BMB-A1, checked here). No
+production code changed: the B-2 already draws at the shape's header scale
+through BMB-A1's entries, so this slice is measurement, a retail-reading test
+(`crates/tore-import/tests/b2_shape.rs`, skips without media), one battery
+scenario (`render-b2-skin`) and this record. Frames are local only, in
+`.local/m3-aircraft/frames/B2-2/`.
+
+### Size at 1:1 (decision 19), measured again
+
+`B2.SH` from `FA_2.LIB` (CODE 21,668 bytes, header exponent 8, so `object_scale`
+is 1 and a unit is 1/3 ft). The reader now returns the same extents the B2-0
+review took from its private patched copy (neutral state, gear down, raw units):
+
+| Axis | Units | Feet at 1/3 | Real | Difference |
+| --- | --- | ---: | ---: | ---: |
+| Span, x -258 to 258 | 516 | 172.0 | 172 | exact |
+| Length, y -87 to 107 | 194 | 64.7 | 69 | -6.3% |
+| Height, z -33 (gear) to 24 | 57 | 19.0 | 17 | +11.8% |
+| Height gear up, z -12 to 24 | 36 | 12.0 | | |
+
+The leading edge from the nose (0, 107) to the tip (258, -59) is 32.76 degrees
+from the lateral axis (Jane's 33). **No scale entry is needed**:
+`aircraft::scale::shape_axis_scale(B2)` is the identity `[1, 1, 1]` (pinned by
+the walk over `ALL` and by the retail test), `debris::scale(B2)` is 1/3 (a
+BMB-A1 test), and the interim rig spec says 1/3. Every consumer of the scale
+reads one of those:
+
+| Consumer | At 1/3 ft a unit? |
+| --- | --- |
+| Drawn aircraft | Yes: `Rig::load` takes `debris::scale`; the generic rig spec says 1/3 (the existing unit test that the generic rig scales equal the simulation scale covers it) |
+| Stores preview (`b2` key), station underside, damage looks, damage bodies and pieces | Yes: the same header scale (all four damage shapes have exponent 8, retail test) |
+| Breakup piece offsets | Yes: `debris::attachment` multiplies by `scale(B2)`. Variant 0 (nose, cockpit, core hits: `B2_A`, `B2_B`) offsets the right-wing piece 42.8 ft right, 4.0 ft aft and 0.5 ft up; variant 1 (wing and tail hits: `B2_C`, `B2_D`) puts the 31 ft piece 26.8 ft aft and 3.2 ft right (geometric fit, not an original transform). The wing hits use the tail-end piece, as the shared rule does for every aircraft |
+| Gear low point | Yes: 33 units, 11.0 ft (BMB-A1 test) |
+| Wingtip vapor | Yes, **and the record is valid** (see the update below): the points are the drawn wing tips |
+| Parked placement | None: `B2.PT` is not a parked target |
+| Contrail and nozzle offsets | Come off the rig scale, 1/3; the nozzle faces are unmapped and the B-2 has no flame word, so B2-4 owns them |
+| Hit size, cockpit eye point | Not shape-derived: one 28 ft sphere and one fixed seat offset for every aircraft. Measured at the B-2's size below; unchanged |
+
+Update to the B2-0 review ("B-2 dependency closure" table, 2026-11-15): that
+review called the streamer record meaningless and said to treat it as absent.
+The reader returns a valid record: zero pivot and both points (right, up, forward
+in third-of-a-foot units) 258, -3, -59, which is exactly the drawn wing tip
+(x 258, y -59, so 86 ft out and 19.7 ft aft). The B-2 therefore already has wingtip
+vapor points on its tips, a retail test pins it, and nothing needs a fix.
+
+### Gear contact and low points
+
+Measured on the plates the gear word adds (14 faces, two windings each, raw
+units, z is height):
+
+| Plate group | x | y | Low z | Feet below the origin |
+| --- | --- | --- | ---: | ---: |
+| Nose pair (two plates) | -6 to 7 | 71 and 97 | -24 and -14 | 8.0 and 4.7 |
+| Nose strut and wheel | 0 | 88 to 96 | **-31** | 10.3 |
+| Inner main plates | -65 and 62 | -2 to 20 | **-33** | 11.0 |
+| Outer main plates | -71 and 69 | -7 to 41 | -27 | 9.0 |
+
+The simulation's gear low point (`ground_clearance_ft`) is the inner mains, 33
+units, 11.0 ft. The nose wheel therefore sits 2 units (0.67 ft) above the main
+wheels when the aircraft is level, about 1.4 degrees of pitch over the 27.7 ft
+wheelbase (nose strut y about 92, mains y about 9); the outer main plates hang
+2 ft higher than the inner ones. The ground-start frames (`b2-ground-side`,
+`b2-ground-side-zoom`, `b2-ground-front`, `crop3x-ground-gear`) show the mains on
+the pavement and the nose wheel at or just above it, with no sinking or floating
+that the eye can pick out. The belly clearance at the closed wells is 22 units
+(7.3 ft).
+
+### Drag-rudder poses (decision 22, checked)
+
+The BMB-A1 reader fix is complete: word 6498 loads at every value, and the retail
+test pins it.
+
+| Value | Faces | Removed (closed pair) | Added | Look |
+| ---: | ---: | --- | --- | --- |
+| 0 | 268 | none | none | both closed (neutral) |
+| +1 | 272 | `465f`, `4679` (right) | six: upper plates `47db` and `47f5`, lower plates `47a7` and `47c1`, front plate `480f`, inboard cap `4829` | right rudder open |
+| -1 | 272 | `4600`, `461a` (left) | six: `46d0`, `46ea`, `4704`, `471e`, `4738`, `4752` | left rudder open |
+| 2 (and any larger) | 266 | `465f`, `4679` (right) | none | right pair removed, hole |
+| -2 (and any smaller) | 266 | `4600`, `461a` (left) | none | left pair removed, hole |
+
+Added geometry, raw units: right x 167 to 215, y -77 to -46, z -14 to 7; left x
+-218 to -169, y -78 to -46, z -14 to 8. The two sides mirror about the mesh axis
+(x = -1) within 1.5 units. Every added face is a whole quad, except the inboard
+triangle cap. The `+2` and `-2` poses extend the B2-0 table (it recorded the
+value 2 only): the second is the left-hand counterpart. The bay word 6486 adds
+eight faces (four plates, two windings) and composes with the gear and rudder
+words (`6486`+`648c`+`6498`=+1 gives 268 + 8 + 14 + 4).
+
+The interim rig does not map the word (that is B2-3), so the poses were drawn
+with a temporary, uncommitted, env-gated patch to `variety_animation.rs` that
+replaced the loaded shape with `Shape::with_state` at each value (gear word set
+too); it was reverted before the checks and is not in the tree. Frames
+`rudder-{0,1,m1,2}-top`, `-rear` and `-rear-left` and the 4x crops
+`crop4x-rudder-1-right` and `crop4x-rudder-m1-left`: in the open poses a dark upper
+plate and a lighter lower plate hang off the trailing edge outboard of the engine
+bays, the right in +1 and the left in -1; pose 2 leaves an empty notch where the
+right closed wedge was. No wrong winding, no missing faces and no show-through
+anywhere in the four poses (the plates are drawn in both windings). The sign
+convention (positive rudder opens the right, as the reader reads it) is B2-3's to
+tie to the rudder input.
+
+### Skin and decals
+
+- **Twins.** 11 exact-vertex twin groups, all double-sided panels with opposite
+  stored normals, so the smooth path pairs and hides the rear members and no
+  MiG-21 exception is needed (retail test).
+- **Decal slot.** The export path finds one `E0` slot the runtime path omits (269
+  against 268 faces): address `2a73`, texture `@indexed:2`, a 7 by 5 unit plate
+  (x 21 to 28, y 60 to 65, z 4 to 5) on the top skin right of the cockpit.
+  It stays omitted, as on the Mirage 2000, the F-5E and the Tornado: the top view
+  (`crop3x-nose-cockpit-top`) shows no blank or skin-filled patch, and the
+  cockpit-side markings, the serial `USAF 21066` and the star-and-bar on the right
+  wing are textured faces that draw whole. The top and under frames (gear down,
+  `b2-top-view`, `b2-under-view`, and `render-b2-skin`) show no underside through
+  the top skin and no z-fighting; the under view is the dark underside
+  texture with the two gear-well panels and the bay panels.
+- **Clipping.** None found: the open-bay plates, gear plates and drag rudders are
+  separate whole faces, and the aircraft is a thin wedge with no part that crosses
+  another.
+
+### Damage looks
+
+`B2_A.SH` 248, `B2_B.SH` 114, `B2_C.SH` 254 and `B2_D.SH` 74 faces load at the intact
+header scale; `DamageArt::load` takes them with no error. Extents (raw units):
+A x -237 to 95 (the right outer wing is gone), C x -259 to 257 with the nose 7 units
+(2.3 ft) longer than the intact one (y 114 against 107), B x -62 to 158 and D x
+-56 to 37 (pieces, smaller than the aircraft). No whole-body variant is registered
+(`damage_variant`) for the B-2, so a destroyed aircraft draws the intact skin with
+the regional cuts, as the other aircraft (damage 1.0 left-wing section: the left wing
+cut, `b2-damage-1.0`). The two body variants
+(`b2-damage-1.0-nose-variant` the A body; `b2-damage-1.0-tail-variant` the C body)
+and 0.6 (`b2-damage-0.6`) all draw whole; the C body shows the interior, as the
+other aircraft's C bodies do. The regional cuts follow the drawn extents (the wing
+sections start at 30 percent of the half span), so on the B-2 they act on the whole
+visible wing, not on the 26 ft the contact volume covers.
+
+### Hit and damage volumes at true size (finding, nothing changed)
+
+The sim's aircraft contact volume is not derived from the shape: the damage
+sections are boxes in units of one 28 ft radius about the model origin
+(`aircraft_contact`, `AIRCRAFT_RADIUS_FT`). In feet at 28 ft: core x +-7.8 and
+10.6 aft to 5.0 forward; cockpit x +-6.2; nose x +-9.0, 11.8 to 25.8 forward; each
+wing x 7.0 to 25.8 out, 7.8 aft to 10.6 forward; tail 25.8 to 9.5 aft. The B-2 is 86 ft to a
+wing tip, 35.7 ft to the nose and 29 ft aft to the trailing edge, so **gun and
+fragment contact covers only the inner 30 percent of each wing** (to 25.8 ft of 86)
+and none of the outer wings, and the nose tip beyond 25.8 ft is outside. A round
+that strikes the outer 60 ft of a wing misses; the same is true of a missile fuze,
+which reads the same sphere. The regional damage looks and sections (above) are
+shape-relative and so cover the whole wing. The same
+fixed sphere applies to the B-52 (192 ft span) and the transports, so it is the
+shared rule, not a B-2 error; making it per-aircraft (a radius or a box table keyed
+by `AircraftId`) changes the simulation for the aircraft it touches (determinism,
+`SIMULATION_VERSION`) and is John's decision, not made here.
+
+### Eye point (finding, nothing changed)
+
+The fixed seat is 7 ft up and 10 ft ahead of the model origin, that is shape y 30
+and z 21. The B-2's own geometry there: the dorsal spine reaches z 24 (8.0 ft) at
+y 40 (13.3 ft ahead), and the glasshouse is further forward (canopy top z 22, 7.3
+ft up, y 60 to 70 and falling to z 14 by y 80: 20 to 27 ft ahead). The fixed eye
+therefore sits 10 to 17 ft behind the glass and just under the spine skin. As on
+the Mirage 2000, the F-15E and the Gripen the cockpit view draws the 2D cockpit
+picture and takes no per-aircraft eye, so this does not show; B2-7 owns the cockpit.
+
+Animation probe: `source_units_to_feet` 0.33333334 for the B-2; the four
+required failures are the unmapped elevator, rudder, aileron and flaps (B2-3).
+
+Frames (`.local/m3-aircraft/frames/B2-2/`, `.png` with `.ppm`; `cap.sh` and
+`capg.sh` record the command: view 1 chase, 200 kt, `--instrument-layout small`,
+1280x720, through `tools/agent-run.sh`): `b2-top-view`, `b2-side-view`,
+`b2-front-view`, `b2-under-view`, `b2-threequarter`; ground `b2-ground-side`,
+`b2-ground-side-zoom`, `b2-ground-front`, `crop3x-ground-gear`; drag rudders
+`rudder-{0,1,m1,2}-{top,rear,rear-left}` and the crops; `crop3x-nose-cockpit-top`;
+damage `b2-damage-0.6`, `b2-damage-1.0`, `b2-damage-1.0-nose-variant`,
+`b2-damage-1.0-tail-variant`.
