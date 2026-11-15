@@ -313,6 +313,39 @@ fn specification(id: Id) -> Option<Spec> {
                 &[(0x5adc, Part::Gear, 6)],
                 1. / 3.,
             ),
+            // Bomber batch A interim rig specs (BMB-A1, 2026-11-15): each
+            // shape's exact CODE size, runtime face count and state words
+            // from the source reviews (docs/formats/aircraft-variety.md, the
+            // three 2026-11-15 reviews). Only the gear word is mapped; the
+            // other words are pinned and unmapped, so each aircraft loads
+            // with the shared fitted gear law until its own rig slice.
+            // B52.SH: five words, gear 0x7a26 adds 32 faces (four trucks and
+            // two outriggers); the shape header scale is 2, so it draws at
+            // 2/3 ft a unit (decision 6, John 2026-11-15).
+            Id::B52 => (
+                27204,
+                271,
+                &[0x7a20, 0x7a26, 0x7a2c, 0x7a32, 0x7a38],
+                &[(0x7a26, Part::Gear, 32)],
+                2. / 3.,
+            ),
+            // B2.SH: three words, gear 0x648c adds 14 faces. It loads only
+            // with the reader's signed jl/jg state guards (BMB-A1).
+            Id::B2 => (
+                21668,
+                268,
+                &[0x6486, 0x648c, 0x6498],
+                &[(0x648c, Part::Gear, 14)],
+                1. / 3.,
+            ),
+            // F117.SH: two words, gear 0x4c5c adds 31 faces.
+            Id::F117 => (
+                15470,
+                207,
+                &[0x4c56, 0x4c5c],
+                &[(0x4c5c, Part::Gear, 31)],
+                1. / 3.,
+            ),
             _ => return None,
         };
     Some(Spec {

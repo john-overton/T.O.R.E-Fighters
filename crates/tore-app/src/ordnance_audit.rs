@@ -25,12 +25,16 @@ mod store_pairs;
 // M2K-1 raised it to 40 for the Mirage 2000; its placements belong to M2K-5/M2K-6.
 // B5-1 raised it to 45 for the F-15E, Gripen, F-5E, Tornado IDS and Mirage F1
 // (2026-11-10); their placements belong to each aircraft's station slice.
-const AIRCRAFT: usize = 45;
+// BMB-A1 raised it to 48 for the B-52, B-2 and F-117 (2026-11-15); their
+// placements belong to each aircraft's station slice.
+const AIRCRAFT: usize = 48;
 /// 17 from 14: the Gripen's one and the Mirage F1's two optional weapon rows
 /// (B5-1, 2026-11-10; the batch-5 records carry rows with no default weapon).
 /// 18 from 17: the F-5E's wing pair no longer holds the AIM-7 by default, so it
 /// is a third batch-5 optional weapon row (B5-2, John 2026-11-10).
-const RECOVERED_STATIONS: usize = 18;
+/// 20 from 18: the B-52's two empty bay rows (rows 5 and 6, no default weapon)
+/// keep an empty Mk 82 selection (BMB-A1, 2026-11-15).
+const RECOVERED_STATIONS: usize = 20;
 const TANK_RECORDS: usize = 9;
 /// 3,817 from 3,684: the F-16A's four wing and wingtip rows join the roster
 /// (slice F16A-4, 133 compatible supported-weapon placements: two 0x07e5 rows
@@ -78,7 +82,10 @@ const TANK_RECORDS: usize = 9;
 /// placements are 222 (the Tornado's side rail, TOR-6b), tanks 233, pods 80 and
 /// the recovered stations 18, as measured, with no change to those pins by the
 /// merge beyond the Cheat-only 222 the Tornado branch carries.
-const WEAPON_PLACEMENTS: usize = 4581;
+/// 4,792 from 4,581: the bomber batch A records join the same way (BMB-A1,
+/// 2026-11-15): B-52 71, B-2 102, F-117 38. First measurements of the retail
+/// rows; each aircraft's station slice owns its count.
+const WEAPON_PLACEMENTS: usize = 4792;
 /// 188 from 182: the F-16A's centreline tank row (F150.GAS or F250.GAS) plus
 /// the tank selection its two 0x07e5 wing rows accept, 6 tank placements.
 /// 192 from 188: the MiG-31 (M31-1). 201 from 192: the Mirage 2000 (M2K-1).
@@ -99,12 +106,17 @@ const TANK_PLACEMENTS: usize = 233;
 /// 222 from 220: the Tornado's AIM-9 side rail row (row 8, mask 0x85) takes
 /// the two novelty bombs under Cheat loading as the retired outer row did, two
 /// more (TOR-6b, John 2026-11-11).
-const NOVELTY_PLACEMENTS: usize = 222;
+/// 240 from 222: the bomber batch A records (BMB-A1, 2026-11-15), 18 more
+/// Cheat-only pairs on the B-52, B-2 and F-117 bay rows.
+const NOVELTY_PLACEMENTS: usize = 240;
 /// Station and designator-pod pairs the normal rules accept (A2G decision 7).
 /// 67 from 65: the F-16A's two 0x07e5 wing rows carry the decoded designator
 /// bit 0x400, one pod each (slice F16A-4). 68: the MiG-31 (M31-1). 71: the Mirage 2000 (M2K-1).
 /// 80 from 71: the batch-5 records (B5-1, 2026-11-10).
-const POD_PLACEMENTS: usize = 80;
+/// 84 from 80: the B-2's four bay rows carry the decoded designator bit 0x400
+/// (flags 0x1504), one pod each (BMB-A1, 2026-11-15; retail row flags, kept
+/// until the B-2's station slice).
+const POD_PLACEMENTS: usize = 84;
 
 pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
     if AircraftId::ALL.len() != AIRCRAFT {

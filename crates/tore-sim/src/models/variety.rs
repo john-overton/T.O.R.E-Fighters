@@ -61,6 +61,9 @@ impl VarietyFlightModel {
             F5E => ("F-5", "F5E.SH"),
             Tornado => ("Tornado", "TOR.SH"),
             Mf1 => ("MF1", "MF1.SH"),
+            B52 => ("B-52", "B52.SH"),
+            B2 => ("B-2", "B2.SH"),
+            F117 => ("F-117", "F117.SH"),
             _ => return None,
         })
     }
@@ -129,6 +132,14 @@ impl VarietyFlightModel {
             // scaled by the shape's height factor (17 units become 17.93,
             // 5.98 ft); the B5-1 note above gave the unscaled 17 units.
             Mf1 => 17. / 3. * tore_formats::aircraft::scale::shape_axis_scale(a.id)[2],
+            // Bomber batch A (BMB-A1, 2026-11-15): deployed gear low points
+            // from the source reviews, in shape units at the shape's own
+            // scale, not yet scaled by any real-size fit. B52.SH -14 at its
+            // header scale of 2/3 ft a unit; B2.SH -33 and F117.SH -21 at
+            // 1/3 ft a unit (F117-2 owns the F-117's per-axis fit).
+            B52 => 14. * 2. / 3.,
+            B2 => 33. / 3.,
+            F117 => 21. / 3.,
             _ => unreachable!("registered variety identity"),
         };
         let tuning = Tuning {
@@ -431,6 +442,20 @@ pub(crate) mod tests {
             (clearance - 11. * crate::combat::debris::scale(AircraftId::Tornado)).abs() < 1e-12
         );
         assert!((clearance - 22. / 3.).abs() < 1e-12);
+    }
+    /// BMB-A1: the bombers' deployed gear low points (B52.SH -14 at 2/3 ft a
+    /// unit, B2.SH -33 and F117.SH -21 at 1/3 ft a unit).
+    #[test]
+    fn the_bomber_batch_a_gear_low_points_follow_their_source_reviews() {
+        for (id, feet) in [
+            (AircraftId::B52, 28. / 3.),
+            (AircraftId::B2, 11.),
+            (AircraftId::F117, 7.),
+        ] {
+            let model = AircraftModel::for_aircraft(&synthetic(id)).unwrap();
+            let clearance = model.configuration().equipment.ground_clearance_ft;
+            assert!((clearance - feet).abs() < 1e-12, "{id:?}");
+        }
     }
     #[test]
     fn the_mirage_f1_gear_low_point_scales_with_its_shape_height() {

@@ -255,7 +255,9 @@ fn the_f5e_round_trips_at_code_43_and_no_identity_shares_it() {
     // The code after the last identity (46, the Tornado IDS (Clean), is the
     // runtime variant appended in TOR-13) is still unknown.
     let unknown = Coded {
-        body: vec![47],
+        // Update (BMB-A1, 2026-11-15): 47 to 49 are the bomber batch, so
+        // 50 is the first unknown code.
+        body: vec![50],
         records: Vec::new(),
     };
     assert!(from_bytes::<AircraftId>(&unknown, &NONE).is_err());
@@ -281,7 +283,9 @@ fn the_tornado_round_trips_at_code_44_and_no_identity_shares_it() {
     // The code after the last identity (46, the Tornado IDS (Clean), is the
     // runtime variant appended in TOR-13) is still unknown.
     let unknown = Coded {
-        body: vec![47],
+        // Update (BMB-A1, 2026-11-15): 47 to 49 are the bomber batch, so
+        // 50 is the first unknown code.
+        body: vec![50],
         records: Vec::new(),
     };
     assert!(from_bytes::<AircraftId>(&unknown, &NONE).is_err());
@@ -307,7 +311,9 @@ fn the_mf1_round_trips_at_code_45_and_no_identity_shares_it() {
     // The code after the last identity (46, the Tornado IDS (Clean), is the
     // runtime variant appended in TOR-13) is still unknown.
     let unknown = Coded {
-        body: vec![47],
+        // Update (BMB-A1, 2026-11-15): 47 to 49 are the bomber batch, so
+        // 50 is the first unknown code.
+        body: vec![50],
         records: Vec::new(),
     };
     assert!(from_bytes::<AircraftId>(&unknown, &NONE).is_err());
@@ -333,6 +339,36 @@ fn the_clean_tornado_round_trips_at_code_46_and_shares_no_code() {
         assert_eq!(loaded, id);
     }
     assert_eq!(codes.len(), AircraftId::SELECTABLE.len());
+}
+
+/// Slice BMB-A1 (2026-11-15): the bomber batch A identities are checkpoint
+/// codes 47 (B-52), 48 (B-2) and 49 (F-117), appended after the Tornado IDS
+/// (Clean)'s 46 in batch order. Each round-trips as itself, no two share a
+/// code, and code 50 is still unknown.
+#[test]
+fn the_bomber_batch_a_round_trips_at_codes_47_to_49_and_shares_no_code() {
+    for (id, code) in [
+        (AircraftId::B52, 47),
+        (AircraftId::B2, 48),
+        (AircraftId::F117, 49),
+    ] {
+        assert_eq!(same(&id).body, vec![code], "{id:?}");
+        let loaded: AircraftId = from_bytes(&same(&id), &NONE).unwrap();
+        assert_eq!(loaded, id);
+    }
+    let mut codes = std::collections::BTreeSet::new();
+    for id in AircraftId::SELECTABLE {
+        assert!(
+            codes.insert(same(&id).body.clone()),
+            "{id:?} repeats a code"
+        );
+    }
+    assert_eq!(codes.len(), AircraftId::SELECTABLE.len());
+    let unknown = Coded {
+        body: vec![50],
+        records: Vec::new(),
+    };
+    assert!(from_bytes::<AircraftId>(&unknown, &NONE).is_err());
 }
 
 #[test]

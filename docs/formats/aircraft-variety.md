@@ -7860,3 +7860,131 @@ F-117 (aerospaceweb.org/aircraft/bomber/f117/); FAS IRADS
 (man.fas.org/dod-101/sys/smart/gbu-27.htm), as summarised by the search
 results; the real leading-edge sweep and elevon layout are not from a fetched
 source.
+
+## Bomber batch A identities (BMB-A1, 2026-11-15)
+
+Implementation, batch slice BMB-A1, Claude Sonnet. The three source reviews above
+(B52-0, B2-0 and F117-0, all 2026-11-15) are now identities. `AircraftId` gains
+`B52`, `B2` and `F117`, appended in that order after `Mf1`: `ALL` goes from 45 to 48
+retail identities and `SELECTABLE` from 47 to 50 entries. The order is append-only
+(batch rule B4): the Tornado IDS (Clean) that TOR-13 inserted into `SELECTABLE`
+stays where it is (checkpoint code 46, wire position 45), so no existing code or
+wire position moves.
+
+| | B-52 | B-2 | F-117 |
+| --- | --- | --- | --- |
+| Record | `B52.PT` | `B2.PT` | `F117.PT` |
+| Parse keys | `b52`, `b52.pt` | `b2`, `b2.pt` | `f117`, `f117.pt` |
+| Checkpoint code | 47 | 48 | 49 |
+| Wire position (place in `SELECTABLE`, 9 bits) | 47 | 48 | 49 |
+| Place in `ALL` | 45 | 46 | 47 |
+| `typeSize` | **612 (new arm**, the AC-130's) | 660 (explicit arm) | **588 (new arm**, the MiG-31's) |
+| Short / long name | `B-52` / `B-52 Stratofortress` | `B-2` / `B- 2 Spirit` | `F-117` / `F-117A Nighthawk` |
+| Shape stem | `B52` | `B2` | `F117` |
+| HUD | `BMBROH.HUD` (the record's) | `B2.HUD` (explicit arm: the record's `hudName` is null) | `F117.HUD` (explicit arm: null in the record) |
+| Cockpit stem / picture | `AC130` / `~AC130H.PIC` | `B2` / `~B2H.PIC` | `F117` / `~F117H.PIC` |
+| PTS companion | none | `B2.PTS` | `F117.PTS` |
+| Radar / gun | `B52R.SEE` / `M61.JT` | `F18R.SEE` / none | none / none |
+| Live-fire default stores | `M61`, `AGM84E` | `MK82`, `PAVEWA3` | `PAVEWA3` |
+| Strike class (rule, no override) | Heavy | Heavy | Attack |
+| Interim rig: CODE bytes / runtime faces | 27,204 / 271 | 21,668 / 268 | 15,470 / 207 |
+| State words | `7a20 7a26 7a2c 7a32 7a38` | `6486 648c 6498` | `4c56 4c5c` |
+| Gear word / faces added | `7a26` +32 | `648c` +14 | `4c5c` +31 |
+| Gear low point (shape units) | 14 at 2/3 ft | 33 at 1/3 ft | 21 at 1/3 ft |
+| Draw scale | **2/3 ft a unit (header scale 2)** | 1/3 ft a unit | 1/3 ft a unit (identity; F117-2 owns the per-axis fit) |
+
+**No record correction is applied.** Every record value is the retail value; the
+corrections John accepted (decisions 5, 16, 23 and the rest) come in BMB-A2. The
+wire identity is 9 bits since protocol 83, so 50 selectable identities use codes
+0 to 49 of 512 and the compile-time assertion still passes; appending three
+identities at the end needs no protocol change.
+
+**John's accepted bindings applied (2026-11-15).**
+
+| Decision | Applied |
+| --- | --- |
+| 6 (B-52 size) | `debris::scale` lists `B52` beside the Tornado, the MiG-23 and the transports (2/3 ft a unit); the interim rig spec carries 2/3. |
+| 14 (B-52 HUD) | Follows the record: `BMBROH.HUD`, the AC-130 panel family (`~AC130H.PIC`, `~AC130_P.PIC`). Bound by name; `AC130.PT` is not aliased. |
+| 13 (B-52 gun) | `M61.JT` stays the B-52's gun and is a live-fire default; the move to the tail cone and the 1,242 rounds are BMB-A2 and B52-2. |
+| 15, 17 (B-2 name, HUD) | Name stays `B- 2 Spirit`; `B2.HUD`, cockpit stem `B2` and `~B2H.PIC`, by an explicit arm. |
+| 28 (F-117 AI, HUD) | `F117.HUD`, stem `F117`. No `strike_class` override: the rule already gives the F-117 Attack (604 kt, 54,000 lb, +6 G), so `OVERRIDES` stays empty. The retail level pass is F117-9's. |
+| Strike class | B-52 and B-2 sort Heavy by the rule (488,000 and 400,000 lb). |
+
+**Interim choices (agent decisions 2026-11-15, until the cockpit and rig slices).**
+
+| Choice | Interim | Why |
+| --- | --- | --- |
+| HUD glass of the B-2 and F-117 | `hud_aperture.rs` fails closed (an empty mask) | `~B2H.PIC` and `~F117H.PIC` have no measured polygon. Their cockpit slices measure them. |
+| HUD glass of the B-52 | The AC-130 family's whole-picture aperture (the arm the C-130, E-3, IL-76 and the airliners use) | The B-52 flies the same `~AC130H.PIC` picture, so it takes the shared reviewed glass; it needs no polygon of its own. Switch it to an empty mask if John wants it closed until a B-52 cockpit slice. |
+| Rig | Gear word only; the other words pinned, unmapped | As batch 5: the shared fitted gear law until each aircraft's rig slice. |
+| B-52 empty bay rows | Rows 5 and 6 keep an empty Mk 82 selection | The Harpoon and the M61 (the only defaults) fit neither row, so without a fallback the audit found the rows hiding compatible weapons (`live.rs`, the same device as the Mirage F1's belly pair). |
+
+**The reader change (B2.SH loads).** `B2.SH`'s state guards use two conditional
+jumps the reader refused with `unsupported shape state guard`: `0x7c` (jump if
+less) and `0x7f` (jump if greater), both on the signed drag-rudder word `6498`.
+`tore-formats/src/shape.rs` now takes them beside `0x74` (equal), `0x75` (not
+equal) and `0x7d` (greater or equal): `0x7c` takes the branch when the word is
+less than the immediate, `0x7f` when it is greater, signed. Decision 22 put this
+in B2-2; the identity probe needed the shape to load. The reader still executes
+no original code; it selects inert geometry. Tests: a unit test
+(`signed_less_and_greater_guards_select_geometry_by_the_signed_compare`) covers
+both opcodes against negative, zero and positive words and a non-zero immediate;
+the existing flap-guard test now expects the next unknown opcode, `0x7e`, to be
+refused (it had used `0x7f`); a retail-reading test (`bomber_batch_a.rs`) loads
+`B2.SH` at 268 faces and checks word `6498` at 0, +1, -1 and 2 (268, 272, 272, 266)
+and the gear word (+14).
+
+*Retail-wide effect.* A scratch example (deleted afterwards) loaded every one of
+the 1,275 shapes in `.local/m3-imports/scratch/shapes` through `Shape::parse`,
+`Shape::with_export_state` and `Shape::scenery`, once with the reader before the
+change and once after, and diffed the result lines (outcome, face, line and
+billboard counts). **Exactly one line differs: `B2.SH`**, which goes from the
+three `unsupported shape state guard` errors to 268 faces (269 in the export
+state, 268 scenery). The other 1,274 shapes are identical, including the 17 that
+already fail for reasons unrelated to guards (the effect and bullet pieces:
+`BULLET`, `CHAFF`, `DEBRIS`, `EXP`, `F8`, `FIRE`, `FLARE`, `MOON`, `MOTH`,
+`MOTHB`, `QUE`, `SMOKE`, `STARS`, `SUN`, `TRACER`, `WAVE1`, `WAVE2`). Nothing
+else changes because the new arms only turn a former error into a branch.
+
+**What the identity probe found.**
+
+- The B-52's bay rows 5 and 6 (flags `0x1120`, no default store) need a retained
+  selection, as above: with it the audit counts the two rows as recovered
+  stations.
+- The B-2's four bay rows carry flags `0x1504`, which include the decoded
+  designator bit `0x400`, so the audit's designator-pod check (pins below) counts
+  four pod placements on a B-2 that, on the real aircraft, has no pod station
+  (B7). That is a retail row flag; BMB-A2 or the B-2 station slice decides it.
+- The B-2 and F-117 cockpits have only the four panel pictures (`~B2.PIC`, `~B2H.PIC`,
+  `~B2S.PIC`, `~B2_P.PIC` and the `~F117*.PIC` set), no left, centre or right
+  overlay. `cockpit_overlays()` assumed overlays for any stem it did not list, so
+  the first headless flight stopped at `aircraft cache missing ~B2_LH.PIC`;
+  `B2` and `F117` now join the stems with no overlays (the B-52's `AC130` stem
+  already was).
+- `B52.PT` is the only one of the three without a `.PTS`, so `has_pts()` is false for
+  it alone; `B2.PTS` and `F117.PTS` (inert) are expected.
+- The F-117 record has no radar row (no `F18R.SEE`), so `radar()` is `None`; the
+  B-2 keeps `F18R.SEE` (the B-1B's row, decision 18).
+- The records are not parked targets and `parked_aircraft.rs` is unchanged.
+- The deployed gear low point is 14 units at 2/3 ft for the B-52 (9.3 ft), 33
+  units for the B-2 (11.0 ft) and 21 units for the F-117 (7.0 ft); real-size
+  fits (F-117 per axis, F117-2) move them later.
+- The B-52's variety flight model takes the default ground alignment rate (0.7);
+  the transport aircraft use 0.4. Flight tuning is B52-8's.
+
+**Audit pins (each with a dated note in `ordnance_audit.rs`).**
+
+| Pin | From | To | Why |
+| --- | ---: | ---: | --- |
+| Aircraft | 45 | 48 | The three identities |
+| Recovered (optional) weapon stations | 18 | 20 | The B-52's two empty bay rows |
+| Weapon placements | 4,581 | 4,792 | B-52 71, B-2 102, F-117 38 |
+| Tank placements | 233 | 233 | None of the three has a tank row |
+| Cheat-only novelty placements | 222 | 240 | 18 more on the bay rows |
+| Designator-pod placements | 80 | 84 | The B-2's four bay rows |
+| Weapon records, tank records | 82, 9 | 82, 9 | No record added |
+
+First measurements of the retail rows; each aircraft's station slice owns its
+count. The `menus-ordnance-availability` and `a2g-catalog` battery expected
+lines and `tools/test_battery_a2g.py` follow
+([ordnance availability](../baselines/ordnance-availability.md)).

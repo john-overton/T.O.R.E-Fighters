@@ -288,6 +288,13 @@ mod tests {
             // The Clean version shares the Tornado record (TOR-13).
             (AircraftId::TornadoClean, Fighter),
             (AircraftId::Mf1, Fighter),
+            // Bomber batch A (BMB-A1, 2026-11-15; John, decision 28): the rule
+            // gives the B-52 (488,000 lb) and the B-2 (400,000 lb) Heavy and
+            // the F-117 Attack (604 kt, 54,000 lb, +6 G); no override, so the
+            // F-117 keeps the retail level pass the rule already gives it.
+            (AircraftId::B52, Heavy),
+            (AircraftId::B2, Heavy),
+            (AircraftId::F117, Attack),
         ];
         assert_eq!(expected.len(), AircraftId::SELECTABLE.len());
         for (id, class) in expected {

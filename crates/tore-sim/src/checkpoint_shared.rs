@@ -94,6 +94,9 @@ crate::checkpoint_enum!(tore_formats::aircraft::AircraftId {
     Tornado = 44,
     Mf1 = 45,
     TornadoClean = 46,
+    B52 = 47,
+    B2 = 48,
+    F117 = 49,
 });
 
 crate::checkpoint_tuple!(Side(side));

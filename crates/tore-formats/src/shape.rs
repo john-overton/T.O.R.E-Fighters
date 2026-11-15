@@ -896,6 +896,11 @@ impl Shape {
                             // Y141.SH tests the signed flap word against zero.
                             // This selects inert geometry, never native execution.
                             0x7d => value >= imm,
+                            // B2.SH tests its signed drag-rudder word against
+                            // zero both ways (BMB-A1, 2026-11-15): `jl` and
+                            // `jg`, the same signed compares.
+                            0x7c => value < imm,
+                            0x7f => value > imm,
                             _ => return Err(invalid("unsupported shape state guard")),
                         };
                         if take {
@@ -1462,8 +1467,51 @@ mod tests {
             let shape = Shape::with_state(&data, &[(0x7100, value)].into()).unwrap();
             assert_eq!(shape.faces[0].colors, vec![color; 3]);
         }
-        code[11] = 127;
+        // Update (BMB-A1, 2026-11-15): 0x7f is now a known guard (below), so
+        // the still-unknown branch is 0x7e (jump-if-less-or-equal).
+        code[11] = 126;
         assert!(Shape::with_state(&module::fixture(&code), &[(0x7100, 0)].into()).is_err());
+    }
+    /// B2.SH's drag-rudder word is signed and tested both ways: `jl` (0x7c)
+    /// and `jg` (0x7f) against an immediate, as `jge` (0x7d) already is.
+    #[test]
+    fn signed_less_and_greater_guards_select_geometry_by_the_signed_compare() {
+        let build = |branch: u8, imm: u8| {
+            let mut code = vec![0xf0, 0, 0x66, 0x83, 0x3d, 0, 0x71, 0, 0, imm, branch, 11];
+            let mut pointers = Vec::new();
+            for _ in 0..2 {
+                pointers.push(code.len() + 1);
+                code.extend([0x68, 0, 0, 0, 0, 0x68, 0, 0, 0, 0, 0xc3]);
+            }
+            for (index, pointer) in pointers.iter().enumerate() {
+                let dest = 0x1000 + code.len() as u32;
+                code[*pointer..*pointer + 4].copy_from_slice(&dest.to_le_bytes());
+                let mut geometry = program();
+                geometry[27] = 100 + index as u8;
+                code.extend(geometry);
+            }
+            module::fixture(&code)
+        };
+        let colour = |data: &[u8], value: i32| {
+            Shape::with_state(data, &[(0x7100, value)].into())
+                .unwrap()
+                .faces[0]
+                .colors[0]
+        };
+        // The branch is taken (second geometry, 101) when the condition holds.
+        let less = build(0x7c, 0);
+        for (value, expected) in [(-2, 101), (-1, 101), (0, 100), (1, 100), (2, 100)] {
+            assert_eq!(colour(&less, value), expected, "jl {value}");
+        }
+        let greater = build(0x7f, 0);
+        for (value, expected) in [(-2, 100), (-1, 100), (0, 100), (1, 101), (2, 101)] {
+            assert_eq!(colour(&greater, value), expected, "jg {value}");
+        }
+        // The immediate is compared signed and may be non-zero.
+        let against_one = build(0x7f, 1);
+        for (value, expected) in [(0, 100), (1, 100), (2, 101)] {
+            assert_eq!(colour(&against_one, value), expected, "jg 1 {value}");
+        }
     }
     #[test]
     fn export_keeps_indexed_decals_that_gameplay_projection_omits() {

@@ -803,3 +803,53 @@ the row accepts changed: the inboard entries into the airframe match the outboar
 refused stores (R550 0.40, AT12 0.44, PL7 0.50, GBU12 1.02 ft, Cheat loading) and the seven kept
 missiles read 0.00 ft at 25, 45 and 67 degrees, so the audit pins stand at 4,581 weapon placements,
 233 tank placements and 222 Cheat-only placements (`--validate-ordnance --no-audio`).
+
+## Bomber batch A identities join the roster (BMB-A1, 2026-11-15)
+
+`B52.PT`, `B2.PT` and `F117.PT` joined `AircraftId` at the end (checkpoint codes
+47 to 49, after the Tornado IDS (Clean)'s 46), so the audit now checks 48
+aircraft. The pins in `ordnance_audit.rs` moved on purpose, with no record, mask
+or station position added or corrected (retail record values; the corrections are
+BMB-A2's): the roster from 45 to 48, recovered (optional) weapon stations from 18
+to 20, weapon placements from 4,581 to 4,792, Cheat-only novelty placements from
+222 to 240 and designator-pod placements from 80 to 84. Tank placements (233) and
+the weapon-record (82) and tank-record (9) counts are unchanged. Per pin:
+
+- **Recovered stations 18 to 20.** The B-52's bay rows 5 and 6 (flags `0x1120`,
+  no default store) kept no empty selection: the Harpoon and the M61, its only
+  defaults, fit neither row, so the audit reported the rows as hiding compatible
+  weapons. `live.rs` now gives them an empty Mk 82 selection (the same fallback
+  device as the Mirage F1's belly pair), which makes the two rows recovered
+  stations.
+- **Weapon placements 4,581 to 4,792.** B-52 71, B-2 102, F-117 38, first
+  measurements of the retail rows (the B-2's 32-item Mk 82 rows and 4-item
+  Paveway rows, the F-117's two single GBU-27 rows, the B-52's three bay rows).
+- **Cheat-only placements 222 to 240.** 18 more pairs on the three aircraft's bay
+  rows.
+- **Designator pods 80 to 84.** The B-2's four bay rows carry flags `0x1504`, which
+  include the designator bit `0x400`, so each takes one pod. This is a retail row
+  flag on an aircraft the real B-2 gives no pod station (B7); it is left as the
+  record has it for the B-2's station slice (or BMB-A2) to decide.
+
+Per-aircraft lines, measured with the decoded records and the live-fire lists of
+BMB-A1:
+
+```text
+ordnance B52.PT: 4 source rows, 2 optional weapon rows, 71 compatible weapon placements, 0 tank placements; defaults and restart passed; catalog 26 normal, 83 Cheat
+ordnance B2.PT: 4 source rows, 0 optional weapon rows, 102 compatible weapon placements, 0 tank placements; defaults and restart passed; catalog 26 normal, 83 Cheat
+ordnance F117.PT: 2 source rows, 0 optional weapon rows, 38 compatible weapon placements, 0 tank placements; defaults and restart passed; catalog 19 normal, 83 Cheat
+```
+
+The `menus-ordnance-availability` and `a2g-catalog` battery expected lines and
+`tools/test_battery_a2g.py` now read 48 aircraft, 20 recovered stations, 233 tank
+placements and 240 Cheat-only placements (4,792 weapon placements in the menus
+line; the a2g line matches any count).
+
+```text
+ordnance audit: 48 aircraft, 20 recovered weapon stations, 4792 weapon placements, 233 tank placements, 82 weapon and 9 tank records; passed
+ordnance audit: 1 designator pods, 84 pod placements, one to an aircraft, loaded and restored through the saved mission; passed
+ordnance audit: 2 novelty records, 240 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
+```
+
+Earlier sections that quote 45 aircraft, 4,581 weapon placements and 80 pods
+stay as written for their own states.

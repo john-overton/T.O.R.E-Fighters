@@ -40,8 +40,11 @@ pub fn scale(id: AircraftId) -> f64 {
         AircraftId::F14 => 4. / 3.,
         // The Tornado's shape header scale is 2 (B5-1, 2026-11-10, TOR-0
         // review), like the MiG-23's.
+        // The B-52's shape header scale is 2 too (BMB-A1, 2026-11-15; John,
+        // decision 6): the B-2 and F-117 headers are exponent 8, the default.
         AircraftId::Mig23
         | AircraftId::Tornado
+        | AircraftId::B52
         | AircraftId::C130
         | AircraftId::Ac130
         | AircraftId::E3
@@ -228,6 +231,16 @@ mod tests {
         ] {
             assert_eq!(scale(id), 1. / 3., "{id:?}");
         }
+    }
+
+    /// BMB-A1: the B-52 draws at its header scale (2/3 ft a unit) beside the
+    /// Tornado and the transports; the B-2 and F-117 keep the default.
+    #[test]
+    fn the_b52_is_drawn_at_its_header_scale_and_the_other_bombers_are_not() {
+        assert_eq!(scale(AircraftId::B52), 2. / 3.);
+        assert_eq!(scale(AircraftId::B52), scale(AircraftId::Tornado));
+        assert_eq!(scale(AircraftId::B2), 1. / 3.);
+        assert_eq!(scale(AircraftId::F117), 1. / 3.);
     }
 }
 

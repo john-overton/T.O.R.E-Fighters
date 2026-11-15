@@ -68,6 +68,9 @@ mod tests {
                 AircraftId::Mig17,
                 AircraftId::B747,
                 AircraftId::A310,
+                // Update (BMB-A1, 2026-11-15): F117.PT has no radar row (the
+                // record carries VIS340, Pave Spike, F18.ECM and AV8IR).
+                AircraftId::F117,
             ]
         );
         assert!(AircraftId::SELECTABLE[..14].iter().all(|id| has_radar(*id)));

@@ -1132,6 +1132,12 @@ impl Configuration {
                     ["BK27.JT", "PAVEWAY.JT", "MK82P3.JT", "AIM9M.JT"].contains(&name)
                 }
                 AircraftId::Mf1 => ["DEFA.JT", "R550.JT"].contains(&name),
+                // Bomber batch A (BMB-A1, 2026-11-15): the retail default
+                // stores. The B-52's M61 tail gun and AGM-84E rows, the
+                // B-2's Mk 82 and GBU-27 bay rows and the F-117's GBU-27.
+                AircraftId::B52 => ["M61.JT", "AGM84E.JT"].contains(&name),
+                AircraftId::B2 => ["MK82.JT", "PAVEWA3.JT"].contains(&name),
+                AircraftId::F117 => ["PAVEWA3.JT"].contains(&name),
             };
             if weapon.movement.acceleration > i32::MAX / 256
                 || weapon.movement.deceleration > i32::MAX / 256
@@ -1206,6 +1212,11 @@ impl Configuration {
                     // The Mirage F1's belly pair refuses the Magic (the only
                     // default weapon), so its empty selection is the Mk 82.
                     (AircraftId::Mf1, 5) => Some("MK82.JT"),
+                    // The B-52's two empty bay rows (BMB-A1, 2026-11-15; the
+                    // record's rows 5 and 6, flags 0x1120) retain an empty
+                    // bomb selection: the Harpoon and the M61 are the only
+                    // defaults and neither fits them.
+                    (AircraftId::B52, 5 | 6) => Some("MK82.JT"),
                     _ => None,
                 };
                 if let Some(name) = fallback {

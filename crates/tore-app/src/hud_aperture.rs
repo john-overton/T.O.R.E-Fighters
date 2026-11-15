@@ -192,7 +192,15 @@ pub fn mask(source: &Sprite, id: AircraftId) -> Vec<u8> {
         | AircraftId::Ah64
         | AircraftId::Ch47
         | AircraftId::B747
-        | AircraftId::A310 => ((1280, 490), &[(0, 0), (1279, 0), (1279, 489), (0, 489)]),
+        | AircraftId::A310
+        // The B-52 flies the AC-130 panel family its BMBROH.HUD names
+        // (BMB-A1, 2026-11-15; John, decision 14): the same ~AC130H.PIC.
+        | AircraftId::B52 => ((1280, 490), &[(0, 0), (1279, 0), (1279, 489), (0, 489)]),
+        // Bomber batch A (BMB-A1, 2026-11-15): the B-2 (~B2H.PIC) and F-117
+        // (~F117H.PIC) have cockpit pictures of their own, whose glass has not
+        // been measured. No expected size, so the aperture fails closed (an
+        // empty mask) until their cockpit slices measure a polygon.
+        AircraftId::B2 | AircraftId::F117 => ((0, 0), &[]),
         // F-5E (F5E-7, 2026-11-10): `F5E.PT` names f29.HUD, so it flies the
         // X-29's cockpit art `~F29H.PIC` by name (John, 2026-11-10,
         // opinionated). The glass is the opening between the two canopy

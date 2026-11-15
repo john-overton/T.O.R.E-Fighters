@@ -242,6 +242,11 @@ pub enum AircraftId {
     /// its own identity, never an alias.
     TornadoClean,
     Mf1,
+    /// Bomber batch A (BMB-A1, 2026-11-15): appended after the Mirage F1 in
+    /// batch order, each its own retail record and never an alias.
+    B52,
+    B2,
+    F117,
 }
 impl AircraftId {
     /// Retail donor for an opinionated runtime variant.
@@ -259,7 +264,7 @@ impl AircraftId {
             other => other.pt(),
         }
     }
-    pub const SELECTABLE: [Self; 47] = [
+    pub const SELECTABLE: [Self; 50] = [
         Self::F18,
         Self::Rafale,
         Self::F14,
@@ -307,6 +312,9 @@ impl AircraftId {
         Self::Tornado,
         Self::TornadoClean,
         Self::Mf1,
+        Self::B52,
+        Self::B2,
+        Self::F117,
     ];
     /// Whether the AI can fly this aircraft in a mission (`opinionated`, agent
     /// decision 2026-10-08, revised 2026-10-12). Every selectable aircraft is
@@ -335,7 +343,7 @@ impl AircraftId {
         matches!(self, Self::Ah64 | Self::Mi24 | Self::Ch47)
     }
     /// Retail import identities. Runtime variants reuse these dependencies.
-    pub const ALL: [Self; 45] = [
+    pub const ALL: [Self; 48] = [
         Self::F18,
         Self::Rafale,
         Self::F14,
@@ -381,6 +389,9 @@ impl AircraftId {
         Self::F5E,
         Self::Tornado,
         Self::Mf1,
+        Self::B52,
+        Self::B2,
+        Self::F117,
     ];
     pub fn parse(name: &str) -> Result<Self> {
         match name.to_ascii_lowercase().as_str() {
@@ -431,8 +442,11 @@ impl AircraftId {
             "tornado" | "tor" | "tor.pt" | "tornado-combat" => Ok(Self::Tornado),
             "tornadoc" | "tornado-clean" | "tornado_clean" => Ok(Self::TornadoClean),
             "mf1" | "mf1.pt" => Ok(Self::Mf1),
+            "b52" | "b52.pt" => Ok(Self::B52),
+            "b2" | "b2.pt" => Ok(Self::B2),
+            "f117" | "f117.pt" => Ok(Self::F117),
             _ => Err(invalid(
-                "supported aircraft: f18, rafale, f14, a4e, x31, mig29, su27, mig21, su25, mig23, su35, f22, f22n, faxx, c130, ac130, e3, il76, e2, av8, yak141, v22, ah64, mi24, ch47, mig17, f4b, f4j, f4e, f4g, a7, f15, f16c, f16a, f104, a10, b747, a310, mig25, mig31, m2000, f15e, gripen, f5e, tornado, tornadoc (the Tornado IDS Clean), mf1",
+                "supported aircraft: f18, rafale, f14, a4e, x31, mig29, su27, mig21, su25, mig23, su35, f22, f22n, faxx, c130, ac130, e3, il76, e2, av8, yak141, v22, ah64, mi24, ch47, mig17, f4b, f4j, f4e, f4g, a7, f15, f16c, f16a, f104, a10, b747, a310, mig25, mig31, m2000, f15e, gripen, f5e, tornado, tornadoc (the Tornado IDS Clean), mf1, b52, b2, f117",
             )),
         }
     }
@@ -483,6 +497,9 @@ impl AircraftId {
             Self::F5E => "F5E.PT",
             Self::Tornado | Self::TornadoClean => "TOR.PT",
             Self::Mf1 => "MF1.PT",
+            Self::B52 => "B52.PT",
+            Self::B2 => "B2.PT",
+            Self::F117 => "F117.PT",
         }
     }
     pub fn hud(self) -> &'static str {
@@ -547,6 +564,14 @@ impl AircraftId {
             // Mirage F1: decided, not interim (opinionated, John, 2026-11-10,
             // decision 25, MF1-7); the same binding as the Mirage 2000.
             Self::Mf1 => "RAFALE.HUD",
+            // Bomber batch A (BMB-A1, 2026-11-15; John accepted, decisions 14,
+            // 17, 28). The B-52 follows its record (the AC-130 module with a
+            // BAY annunciator). B2.PT's hudName is a null pointer, so the
+            // B-2 takes the retail B2.HUD by file name (the Su-35 and X-31
+            // precedent), and so does the F-117 with F117.HUD.
+            Self::B52 => "BMBROH.HUD",
+            Self::B2 => "B2.HUD",
+            Self::F117 => "F117.HUD",
         }
     }
     pub fn stem(self) -> &'static str {
@@ -599,6 +624,11 @@ impl AircraftId {
             Self::F5E => "F5E",
             Self::Tornado | Self::TornadoClean => "TOR",
             Self::Mf1 => "MF1",
+            // B52.PT names b52.SH, B2.PT b2.SH and F117.PT f117.SH, each with
+            // its own _A..D damage looks (BMB-A1).
+            Self::B52 => "B52",
+            Self::B2 => "B2",
+            Self::F117 => "F117",
         }
     }
     pub fn cockpit_stem(self) -> &'static str {
@@ -656,6 +686,12 @@ impl AircraftId {
             Self::Tornado | Self::TornadoClean => "EF2",
             // Mirage F1: decided as above (John, 2026-11-10); the Rafale family.
             Self::Mf1 => "RAF",
+            // The B-52 has no cockpit art of its own and flies the AC-130
+            // panel family its BMBROH.HUD names (decision 14); the B-2 and the
+            // F-117 have their own ~B2*.PIC and ~F117*.PIC (BMB-A1).
+            Self::B52 => "AC130",
+            Self::B2 => "B2",
+            Self::F117 => "F117",
             _ => self.stem(),
         }
     }
@@ -710,6 +746,9 @@ impl AircraftId {
             Self::F5E => "~F29H.PIC",
             Self::Tornado | Self::TornadoClean => "~EF2H.PIC",
             Self::Mf1 => "~RAFH.PIC",
+            Self::B52 => "~AC130H.PIC",
+            Self::B2 => "~B2H.PIC",
+            Self::F117 => "~F117H.PIC",
         }
     }
     /// Compact identity for lobby columns and server seat logs.
@@ -783,6 +822,10 @@ impl AircraftId {
             Self::Tornado => "Tornado IDS (Combat)",
             Self::TornadoClean => "Tornado IDS (Clean)",
             Self::Mf1 => "Mirage F1",
+            Self::B52 => "B-52 Stratofortress",
+            // Retail's own spelling, stray space and all (decision 15).
+            Self::B2 => "B- 2 Spirit",
+            Self::F117 => "F-117A Nighthawk",
         }
     }
     /// Exact reviewed short/long retail names, absent for the original loose fixtures.
@@ -832,6 +875,9 @@ impl AircraftId {
             Self::F5E => Some(("F-5", "F-  5E Tiger")),
             Self::Tornado => Some(("Tornado", "Tornado IDS")),
             Self::Mf1 => Some(("MF1", "Mirage F1")),
+            Self::B52 => Some(("B-52", "B-52 Stratofortress")),
+            Self::B2 => Some(("B-2", "B- 2 Spirit")),
+            Self::F117 => Some(("F-117", "F-117A Nighthawk")),
             _ => None,
         }
     }
@@ -884,6 +930,10 @@ impl AircraftId {
             Self::F5E => Some("F104R.SEE"),
             Self::Tornado | Self::TornadoClean => Some("F18R.SEE"),
             Self::Mf1 => Some("F18R.SEE"),
+            Self::B52 => Some("B52R.SEE"),
+            Self::B2 => Some("F18R.SEE"),
+            // F117.PT has no radar row (VIS340, Pave Spike, F18.ECM, AV8IR).
+            Self::F117 => None,
         }
     }
     /// Primary installed gun. Multi-gun identities expose every type in `guns`.
@@ -959,12 +1009,19 @@ impl AircraftId {
             Self::F5E => &["M61.JT"],
             Self::Tornado | Self::TornadoClean => &["BK27.JT"],
             Self::Mf1 => &["DEFA.JT"],
+            // The B-52H's M61 tail gun (decision 13); the B-2 and F-117 carry
+            // no gun.
+            Self::B52 => &["M61.JT"],
+            Self::B2 | Self::F117 => &[],
         }
     }
     /// Reviewed optional left, centre and right cockpit overlays.
     pub fn cockpit_overlays(self) -> [Option<String>; 3] {
         let available = match self.cockpit_stem() {
-            "AC130" | "M17" | "F16" | "F31" | "M21" | "F22" => [false; 3],
+            // The B-2 and F-117 cockpit art has no side or centre overlay
+            // pictures (`~B2_LH.PIC` and `~F117_LH.PIC` do not exist; the
+            // review sweeps found only the four panel pictures; BMB-A1).
+            "AC130" | "M17" | "F16" | "F31" | "M21" | "F22" | "B2" | "F117" => [false; 3],
             "SU33" | "Y141" | "F104" => [true, false, true],
             _ => [true; 3],
         };
@@ -1002,6 +1059,7 @@ impl AircraftId {
                 | Self::F5E
                 | Self::Tornado
                 | Self::Mf1
+                | Self::B52
         )
     }
 }
@@ -1088,6 +1146,11 @@ impl Aircraft {
             AircraftId::F15E | AircraftId::Gripen | AircraftId::Tornado => 660,
             AircraftId::F5E => 612,
             AircraftId::Mf1 => 636,
+            // Bomber batch A source reviews (2026-11-15): B52.PT 612 (the
+            // AC-130's), B2.PT 660, F117.PT 588 (the MiG-31's).
+            AircraftId::B52 => 612,
+            AircraftId::B2 => 660,
+            AircraftId::F117 => 588,
             _ => 660,
         };
         if object["structType"].number()? != 5 || object["typeSize"].number()? != size {
@@ -1960,6 +2023,9 @@ mod profile_tests {
             (AircraftId::F5E, "F-5", "F-  5E Tiger", 612),
             (AircraftId::Tornado, "Tornado", "Tornado IDS", 660),
             (AircraftId::Mf1, "MF1", "Mirage F1", 636),
+            (AircraftId::B52, "B-52", "B-52 Stratofortress", 612),
+            (AircraftId::B2, "B-2", "B- 2 Spirit", 660),
+            (AircraftId::F117, "F-117", "F-117A Nighthawk", 588),
         ] {
             let text = fixture()
                 .replace("F18.PT", id.pt())
@@ -2006,10 +2072,11 @@ mod profile_tests {
                 "{key}"
             );
         }
-        assert_eq!(AircraftId::ALL.len(), 45);
-        assert_eq!(AircraftId::SELECTABLE.len(), 47);
+        // Update (BMB-A1, 2026-11-15): the bomber batch appends three more.
+        assert_eq!(AircraftId::ALL.len(), 48);
+        assert_eq!(AircraftId::SELECTABLE.len(), 50);
         assert_eq!(
-            AircraftId::ALL[40..],
+            AircraftId::ALL[40..45],
             [
                 AircraftId::F15E,
                 AircraftId::Gripen,
@@ -2018,6 +2085,61 @@ mod profile_tests {
                 AircraftId::Mf1,
             ]
         );
+    }
+    #[test]
+    fn the_bomber_batch_a_aircraft_parse_by_key_and_follow_the_batch_five_ones() {
+        // BMB-A1 (2026-11-15): checkpoint codes 47 to 49, in batch order.
+        for (key, id) in [
+            ("b52", AircraftId::B52),
+            ("B52.PT", AircraftId::B52),
+            ("b2", AircraftId::B2),
+            ("B2.PT", AircraftId::B2),
+            ("f117", AircraftId::F117),
+            ("F117.PT", AircraftId::F117),
+        ] {
+            assert_eq!(AircraftId::parse(key).unwrap(), id, "{key}");
+            assert_eq!(id.source(), id);
+            assert!(
+                id.pt()
+                    .eq_ignore_ascii_case(&format!("{}.PT", key.trim_end_matches(".PT")))
+            );
+        }
+        // Separate records: no neighbour key reaches them.
+        for key in ["B1.PT", "B1B", "B52G.PT", "F117A", "F22.PT"] {
+            assert!(
+                !matches!(
+                    AircraftId::parse(key),
+                    Ok(AircraftId::B52 | AircraftId::B2 | AircraftId::F117)
+                ),
+                "{key}"
+            );
+        }
+        assert_eq!(
+            AircraftId::ALL[45..],
+            [AircraftId::B52, AircraftId::B2, AircraftId::F117]
+        );
+        assert_eq!(
+            AircraftId::SELECTABLE[47..],
+            [AircraftId::B52, AircraftId::B2, AircraftId::F117]
+        );
+        // The bindings John accepted (decisions 14, 15, 17, 28).
+        assert_eq!(AircraftId::B52.hud(), "BMBROH.HUD");
+        assert_eq!(AircraftId::B52.cockpit_stem(), "AC130");
+        assert_eq!(AircraftId::B2.hud(), "B2.HUD");
+        assert_eq!(AircraftId::B2.cockpit_stem(), "B2");
+        assert_eq!(AircraftId::B2.cockpit(), "~B2H.PIC");
+        assert_eq!(AircraftId::B2.label(), "B- 2 Spirit");
+        assert_eq!(AircraftId::F117.hud(), "F117.HUD");
+        assert_eq!(AircraftId::F117.cockpit(), "~F117H.PIC");
+        assert_eq!(AircraftId::B52.gun(), Some("M61.JT"));
+        assert_eq!(AircraftId::B2.gun(), None);
+        assert_eq!(AircraftId::F117.radar(), None);
+        // No overlay pictures exist for the three cockpit families.
+        for id in [AircraftId::B52, AircraftId::B2, AircraftId::F117] {
+            assert_eq!(id.cockpit_overlays(), [None, None, None], "{id:?}");
+        }
+        assert!(!AircraftId::B52.has_pts());
+        assert!(AircraftId::B2.has_pts() && AircraftId::F117.has_pts());
     }
     #[test]
     fn the_mirage_2000_reads_one_engine_and_one_m53_p2s_thrust_everyone_else_retail() {
