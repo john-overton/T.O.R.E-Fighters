@@ -23,6 +23,7 @@ mod attitude;
 mod audio;
 mod av8_animation;
 mod awacs_animation;
+mod b2_animation;
 mod b747_animation;
 mod bay_doors;
 mod blast_climate;

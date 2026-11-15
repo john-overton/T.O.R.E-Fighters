@@ -412,7 +412,8 @@ impl Airframe {
             crate::flight_views::turn(&mut c, body, view);
             // The rear view looks over the spine and tail from the pilot's seat.
             if view == 3 {
-                c.position = crate::mirrors::pilot_eye(state.position, body);
+                c.position =
+                    crate::mirrors::pilot_eye_of(Some(self.profile.id), state.position, body);
             }
         } else if view != 0 {
             c.view_fraction = 1.;

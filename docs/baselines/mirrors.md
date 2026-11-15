@@ -286,3 +286,14 @@ and `~EF2_RH` overlays. No other aircraft uses the family. The one shared pilot'
 (`mirrors::pilot_eye`) feeds the rear feed unchanged; the Tornado's two-seat eye is
 discussed in [the Tornado section](../formats/aircraft-variety.md#tornado-sensors-hud-and-cockpit-tor-7-2026-11-11).
 Frames are under `.local/m3-aircraft/frames/TOR-7/`.
+
+## 2026-11-15 B-2 cockpit: no mirrors, its own eye (B2-7)
+
+The B-2 flies its own retail cockpit family (`B2.HUD`, stem `B2`, `~B2H.PIC`,
+1394 x 508; John, 2026-11-15, decision 17). The picture has no flat mirror fill, so
+`mirrors::seeds` has no `B2` row and `--cockpit-sheet OUT_DIR b2` prints `b2 NO
+MIRRORS FITTED` (0 reviewed regions), as for the F-16 and the AC-130 picture. The rear
+feed camera (`mirrors::camera`) stays on the shared seat for every aircraft; only the
+Back view and the replay cameras take the new per-aircraft eye (`mirrors::eye_offset`),
+which gives the B-2 10 feet up and 20 feet ahead. See [the B-2 section](../formats/aircraft-variety.md#b-2-sensors-hud-and-cockpit-b2-7-2026-11-15). Frames are
+under `.local/m3-aircraft/frames/B2-7/`.

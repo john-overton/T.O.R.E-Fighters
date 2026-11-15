@@ -117,10 +117,37 @@ pub(crate) fn rear_basis(body: Basis) -> Basis {
         forward: body.forward.map(|v| -v),
     }
 }
-/// Fitted pilot's eye above and forward of the model origin, in feet.
-pub(crate) fn pilot_eye(position: [f64; 3], body: Basis) -> [f64; 3] {
-    std::array::from_fn(|i| position[i] + body.up[i] * 7. + body.forward[i] * 10.)
+/// The seat every aircraft without an entry of its own uses: 7 ft above and
+/// 10 ft ahead of the model origin (fitted).
+const DEFAULT_EYE: [f64; 2] = [7., 10.];
+/// Fitted pilot's eye (feet above, feet ahead of the model origin) for an
+/// aircraft whose drawn cockpit is not near the shared seat. Only entries
+/// listed here differ; every other aircraft keeps [`DEFAULT_EYE`].
+///
+/// B-2 (B2-7, 2026-11-15, fitted from the shape): the glasshouse of `B2.SH`
+/// starts 20 ft ahead of the origin (windscreen faces from y 62 to 80 shape
+/// units at 1/3 ft a unit, 21 units high at the back falling to 14), under a
+/// roof 22 units (7.3 ft) high at y 60, and the spine behind it peaks at 24
+/// units (8 ft) at y 44. The seat is 20 ft ahead and 10 ft up: at the
+/// windscreen, 2.7 ft above the roof, so the back view clears the spine, not
+/// the shared seat 10 to 17 ft behind the glass and a foot below the spine
+/// skin. The record's own `viewOffset` (0, 30, 60), which no host code
+/// reads, gives the same figure read at the shape's 1/3 ft a unit (30 up, 60
+/// ahead); that reading of its units is unproven. A seat inside the skin
+/// (6 ft up) draws the inside of the spine and was rejected.
+pub(crate) fn eye_offset(id: Option<AircraftId>) -> [f64; 2] {
+    match id {
+        Some(AircraftId::B2) => [10., 20.],
+        _ => DEFAULT_EYE,
+    }
 }
+/// The pilot's eye of aircraft `id` (the shared seat when the type is not
+/// known), in the world.
+pub(crate) fn pilot_eye_of(id: Option<AircraftId>, position: [f64; 3], body: Basis) -> [f64; 3] {
+    let [up, forward] = eye_offset(id);
+    std::array::from_fn(|i| position[i] + body.up[i] * up + body.forward[i] * forward)
+}
+
 /// How much wider the rear camera's field of view is than a 1x view's 60
 /// degrees vertical: 66 degrees vertical, about 105 across the 2:1 rear
 /// picture (98 before). Opinionated, John 2026-10-19 ("maybe 10% wider").
@@ -137,7 +164,9 @@ pub fn camera(state: &State) -> Camera {
     let [yaw, pitch, bank] = rear_basis(body).angles();
     let mut c = Camera::new();
     c.weather_slot = 1;
-    c.position = pilot_eye(state.position, body);
+    // The rear feed stays on the shared seat for every aircraft: only cockpit
+    // families with fitted mirror seeds draw it, and the B-2's has none.
+    c.position = pilot_eye_of(None, state.position, body);
     c.yaw = yaw as f32;
     c.pitch = pitch as f32;
     c.roll = -bank as f32;
@@ -432,6 +461,34 @@ mod tests {
                 [overlay.width as f32, overlay.height as f32],
                 [rect[2], rect[3]]
             );
+        }
+    }
+
+    /// B2-7: only the B-2 has a seat of its own; every other aircraft, and an
+    /// unknown type, keeps the shared one (7 ft up, 10 ft ahead).
+    #[test]
+    fn only_the_b2_has_its_own_pilot_eye() {
+        for id in AircraftId::ALL {
+            let want = if id == AircraftId::B2 {
+                [10., 20.]
+            } else {
+                [7., 10.]
+            };
+            assert_eq!(eye_offset(Some(id)), want, "{id:?}");
+        }
+        assert_eq!(eye_offset(None), [7., 10.]);
+        // Level, heading north (yaw 0): the seat is `up` above and `forward`
+        // ahead of the origin.
+        let level = Basis::new(0., 0., 0.);
+        let at = |id| pilot_eye_of(id, [100., 200., 300.], level);
+        let shared = at(None);
+        assert_eq!(at(Some(AircraftId::F18)), shared);
+        let b2 = at(Some(AircraftId::B2));
+        let up = level.up;
+        let forward = level.forward;
+        for i in 0..3 {
+            let moved = (b2[i] - shared[i]) - (up[i] * 3. + forward[i] * 10.);
+            assert!(moved.abs() < 1e-9, "axis {i}");
         }
     }
 }

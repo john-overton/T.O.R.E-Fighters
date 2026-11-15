@@ -330,7 +330,11 @@ fn specification(id: Id) -> Option<Spec> {
                 2. / 3.,
             ),
             // B2.SH: three words, gear 0x648c adds 14 faces. It loads only
-            // with the reader's signed jl/jg state guards (BMB-A1).
+            // with the reader's signed jl/jg state guards (BMB-A1). Update
+            // (B2-3 and B2-4, 2026-11-15): the B-2 loads through its own
+            // `b2_animation` rig (elevons, drag rudders and speed brake, gear,
+            // interim bay plates); this row pins the layout, the scale and
+            // `supported`.
             Id::B2 => (
                 21668,
                 268,
@@ -435,6 +439,9 @@ enum SpecificRig {
     /// plume.
     Mf1(crate::mf1_animation::Rig),
     Tornado(crate::tornado_animation::Rig),
+    /// B2-3 and B2-4: the elevons, the drag rudders and speed brake, the gear
+    /// and the interim bay plates.
+    B2(crate::b2_animation::Rig),
     /// F117-3 and F117-4: the ruddervators, the gear and the interim bay pose.
     F117(crate::f117_animation::Rig),
 }
@@ -768,6 +775,15 @@ impl Rig {
                     shape,
                 ));
             }
+            Id::B2 => {
+                let (rig, shape) = crate::b2_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::B2(rig),
+                    shape,
+                ));
+            }
             Id::F117 => {
                 let (rig, shape) = crate::f117_animation::Rig::load(bytes, shape)?;
                 return Ok(Self::with_specific(
@@ -907,6 +923,7 @@ impl Rig {
                 SpecificRig::F5E(_) => crate::f5e_animation::flame(address),
                 SpecificRig::Mf1(_) => crate::mf1_animation::flame(address),
                 SpecificRig::Tornado(_) => crate::tornado_animation::flame(address),
+                SpecificRig::B2(_) => crate::b2_animation::flame(address),
                 SpecificRig::F117(_) => crate::f117_animation::flame(address),
             };
         }
@@ -974,6 +991,7 @@ impl Rig {
                 SpecificRig::F5E(rig) => rig.animate(source, state),
                 SpecificRig::Mf1(rig) => rig.animate(source, state),
                 SpecificRig::Tornado(rig) => rig.animate(source, state),
+                SpecificRig::B2(rig) => rig.animate(source, state),
                 SpecificRig::F117(rig) => rig.animate(source, state),
             };
         }

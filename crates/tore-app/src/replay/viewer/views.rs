@@ -536,9 +536,11 @@ impl Viewer {
         id: u32,
         state: &flight::State,
     ) -> Taped {
-        let model = self.airframe(Some(state_kind(self, picture, id)));
+        let kind = state_kind(self, picture, id);
+        let model = self.airframe(Some(kind));
         let mut camera = Camera::new();
-        camera.position = crate::mirrors::pilot_eye(
+        camera.position = crate::mirrors::pilot_eye_of(
+            Some(kind),
             state.position,
             Basis::new(state.yaw, state.pitch, state.bank),
         );

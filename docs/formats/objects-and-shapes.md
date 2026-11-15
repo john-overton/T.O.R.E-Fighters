@@ -2120,6 +2120,12 @@ measured on that art; see [the Tornado sensors, HUD and cockpit
 section](aircraft-variety.md#tornado-sensors-hud-and-cockpit-tor-7-2026-11-11). No
 Tornado cockpit art exists, and no retail art is committed.
 
+**Cockpit family (B2-7, 2026-11-15).** The B-2 draws its own `~B2H.PIC` cockpit art
+(1394 x 508, an open three-pane window with no combiner and no overlay pictures; the record's
+HUD field is null and `B2.HUD` is bound by name; John, 2026-11-15, opinionated). Its HUD glass
+aperture is measured on that art and its pilot's eye is a per-aircraft table entry; see
+[the B-2 sensors, HUD and cockpit section](aircraft-variety.md#b-2-sensors-hud-and-cockpit-b2-7-2026-11-15). No retail art is committed.
+
 ## F-117A skin review (F117-2, 2026-11-15)
 
 `F117.SH` draws at its header scale (1/3 ft a unit) times the per-axis scale

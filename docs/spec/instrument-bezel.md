@@ -329,3 +329,9 @@ draws the `~EF2_P.PIC` bezel over `~EF2H.PIC` (TOR-7; the first aircraft to use 
 Its Systems window shows one engine readout, as every aircraft's does (it has two
 engines), and its own fuel: `FUEL 11221 LBS` and `(+ EXT 3300 LBS)` with the default
 tank pair (TOR-7 frames, instrument pages 0 to 9).
+
+The B-2 flies its own retail cockpit family by John's decision of 2026-11-15
+(opinionated): `B2.HUD` names the panel `~b2_p`, so it draws the `~B2_P.PIC` (81 x 80)
+bezel over `~B2H.PIC` (B2-7; the picture is 1394 x 508). Its Systems window shows one
+engine readout, as every aircraft's does (it has four engines), and its own fuel:
+`FUEL 167000 LBS` and `(+ EXT 0 LBS)` (B2-7 frames, instrument pages 0 to 9).

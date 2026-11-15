@@ -436,6 +436,21 @@ def scenarios() -> list[Scenario]:
             notes="Tornado IDS skin from above and below with the gear down, at its header scale (2/3 ft a unit, true size, no per-axis factor): no underside shape shows through the top and the double-sided panels do not z-fight. The shape's two E0 fin decal slots stay omitted rather than filled with skin (docs/formats/objects-and-shapes.md, Tornado skin review).",
         ),
         Scenario(
+            name="render-b2-skin",
+            lane="flight",
+            args=["--free-flight", "--aircraft", "b2", "--flight-view", "2", "--flight-look", "0,60", "--flight-zoom", "1.4", "--flight-devices", "1,0,0,0,0", "--capture-flight", "{work}/b2-top.ppm", "--no-audio"],
+            env={"TORE_WEATHER_TIME": "12:00"},
+            window=True,
+            outputs=["b2-top.ppm", "b2-under.ppm"],
+            expect=["Scene capture:"],
+            check=skin_capture_problems,
+            then=[
+                Step(["--free-flight", "--aircraft", "b2", "--flight-view", "2", "--flight-look", "0,-60", "--flight-zoom", "1.4", "--flight-devices", "1,0,0,0,0", "--capture-flight", "{work}/b2-under.ppm", "--no-audio"], window=True, timeout=180),
+            ],
+            timeout=180,
+            notes="B-2 skin from above and below with the gear down, at its header scale (1/3 ft a unit, true span, no per-axis factor): no underside shape shows through the top and the double-sided panels do not z-fight. The shape's one E0 decal slot (2a73, a 7 by 5 unit plate beside the cockpit) stays omitted rather than filled with skin (docs/formats/aircraft-variety.md, B-2 shape, size and looks).",
+        ),
+        Scenario(
             name="render-f117-skin",
             lane="flight",
             args=["--free-flight", "--aircraft", "f117", "--flight-view", "2", "--flight-look", "0,60", "--flight-zoom", "2", "--flight-devices", "1,0,0,0,0", "--capture-flight", "{work}/f117-top.ppm", "--no-audio"],

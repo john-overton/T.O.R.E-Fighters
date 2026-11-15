@@ -339,3 +339,21 @@ laser designator: `--weapon-slot 2 --combat-command sight-pin` reads `ARM 1`, `3
 `IN RNG`, `LSR 4.6`, `TTI 0:32` and the seeker view on the target camera; without a
 designation it reads `NO LASER`. Not run: any side-by-side tuning, or an RWR with a
 plotted emitter (no scripted path exists).
+
+## B-2 radar, jammer and the Pave Spike and IR rows, 2026-11-15 (B2-7)
+
+The B-2 keeps the B-1B's five sensor rows as retail (decision 18: no substitute, no pod
+body drawn): the F/A-18's `F18R.SEE` (`Preset::Advanced`, not the B-2's APQ-181), the
+`F18.ECM` record (`LateColdWar`, strength 0.30), `VIS340.SEE`, `PAVESPK.SEE` and
+`AV8IR.SEE`. No match arm and no code changed. `--sensor-summary` reads: `B2: radar
+F18R.SEE search 90 nmi 60x60 deg track 50 nmi 45x45 deg look-down 0 ADVANCED; infrared
+AV8IR.SEE search 15 nmi 60x60 deg track 15 nmi 45x45 deg; visual VIS340.SEE search 10
+nmi 170x140 deg track 5 nmi 170x140 deg; jammer F18.ECM LATE strength 0.30; signature
+radar 1 infrared 15`. The radar gives a bomber only the shared air-to-air modes (RWS,
+TWS, and the IR channel on M); there is no ground-mapping mode. `--live-fire --aircraft
+b2 --weapon-slot 1` reads `TWS 10 ... TRACK`, `--sensor-channel ir` reads `IR 10` with
+the contact, `--weapon-slot 3 --combat-command sight-pin` (a GBU-27 row) reads `LSR 4.5`
+and `REL 0:14` with `PIN`, `ZOOM 3` and `LASE` on the target camera, and the RCS page
+reads `SIG 1` with a dot for a contour (an F/A-18 reads `SIG 154` with an oval). Not run:
+an RWR with a plotted emitter (no scripted path exists). See [the B-2
+section](../formats/aircraft-variety.md#b-2-sensors-hud-and-cockpit-b2-7-2026-11-15).
