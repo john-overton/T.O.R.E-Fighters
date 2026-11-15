@@ -136,10 +136,13 @@ impl VarietyFlightModel {
             // from the source reviews, in shape units at the shape's own
             // scale, not yet scaled by any real-size fit. B52.SH -14 at its
             // header scale of 2/3 ft a unit; B2.SH -33 and F117.SH -21 at
-            // 1/3 ft a unit (F117-2 owns the F-117's per-axis fit).
+            // 1/3 ft a unit.
             B52 => 14. * 2. / 3.,
             B2 => 33. / 3.,
-            F117 => 21. / 3.,
+            // Update (F117-2, 2026-11-15): F117.SH's gear low point Z=-21 is
+            // scaled by the shape's height factor (21 units become 18.62,
+            // 6.21 ft); the note above gave the unscaled 21 units (7 ft).
+            F117 => 21. / 3. * tore_formats::aircraft::scale::shape_axis_scale(a.id)[2],
             _ => unreachable!("registered variety identity"),
         };
         let tuning = Tuning {
@@ -450,7 +453,11 @@ pub(crate) mod tests {
         for (id, feet) in [
             (AircraftId::B52, 28. / 3.),
             (AircraftId::B2, 11.),
-            (AircraftId::F117, 7.),
+            // F117-2: 7 ft at the plain scale, times the height factor.
+            (
+                AircraftId::F117,
+                7. * tore_formats::aircraft::scale::F117_SHAPE_SCALE[2],
+            ),
         ] {
             let model = AircraftModel::for_aircraft(&synthetic(id)).unwrap();
             let clearance = model.configuration().equipment.ground_clearance_ft;

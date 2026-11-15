@@ -5,8 +5,8 @@
 //! per source unit (`tore_sim::combat::debris::scale` holds that scalar).
 //! This table adds a per-axis multiplier on top of it, `[x, y, z]` in shape
 //! units (x right, y forward, z up). It is `[1, 1, 1]` for every aircraft but
-//! the Mirage 2000 (M2K-2) and the Mirage F1 (MF1-2), docs/formats/objects-and-shapes.md,
-//! "Aircraft shape scale". The factors are exact constants, never read from a device, so every
+//! the Mirage 2000 (M2K-2), the Mirage F1 (MF1-2) and the F-117A (F117-2),
+//! docs/formats/objects-and-shapes.md, "Aircraft shape scale". The factors are exact constants, never read from a device, so every
 //! multiplayer peer holds the same values.
 //!
 //! Apply the factors to the shape's vertices when the shape is loaded
@@ -63,13 +63,37 @@ pub const MF1_REAL_FEET: [f64; 3] = [27.559, 49.967, 14.764];
 /// point becomes 17.93 units, 5.98 ft).
 pub const MF1_SHAPE_SCALE: [f64; 3] = [1.0335, 1.1804, 1.0546];
 
+/// Measured `f117.SH` extents with the gear down (gear word `0x4c5c`), shape
+/// units (`docs/formats/aircraft-variety.md`, F-117 real size): x -85 to 85
+/// (wingtips), y -96 to 93 (the V-tail tips to the nose probe tip; the probe
+/// is y 89 to 93), z -21 to 21 (gear low point to fin tip).
+pub const F117_SHAPE_EXTENT: [f64; 3] = [170., 189., 42.];
+
+/// The real F-117A in feet: wingspan 43 ft 4 in, length 65 ft 11 in (the
+/// length includes the nose probe, so it is matched to the shape's own extent
+/// with its probe, as the Mirage F1), height 12 ft 5 in ground to tail tip
+/// (Lockheed Martin figures as given by the FAS Military Aircraft page,
+/// GlobalSecurity and Wikipedia, accessed 2026-11-15; two sources round the
+/// height to 12 ft 9 in, a 2.7 percent difference).
+pub const F117_REAL_FEET: [f64; 3] = [43. + 4. / 12., 65. + 11. / 12., 12. + 5. / 12.];
+
+/// `[x, y, z]` factors that bring `f117.SH` to [`F117_REAL_FEET`]:
+/// `real_ft * 3 / extent_units`, rounded to four places. **Fitted** (agent
+/// derivation) for an **opinionated** choice (John, 2026-11-15, decision 24,
+/// per axis to real as the Mirage 2000 and F1). x 0.7647 (span), y 1.0463
+/// (length with the probe), z 0.8869 (height, so the 21 unit gear low point
+/// becomes 18.62 units, 6.21 ft). The leading edge (13, 62) to (85, -71)
+/// moves from 61.6 to 68.4 degrees from the lateral axis (real about 67.5).
+pub const F117_SHAPE_SCALE: [f64; 3] = [0.7647, 1.0463, 0.8869];
+
 /// `[x, y, z]` factors for `id`'s shape, in shape-unit axes (x right, y
-/// forward, z up). `[1, 1, 1]` for every aircraft but the Mirage 2000 and the
-/// Mirage F1.
+/// forward, z up). `[1, 1, 1]` for every aircraft but the Mirage 2000, the
+/// Mirage F1 and the F-117A.
 pub fn shape_axis_scale(id: AircraftId) -> [f64; 3] {
     match id {
         AircraftId::M2000 => M2000_SHAPE_SCALE,
         AircraftId::Mf1 => MF1_SHAPE_SCALE,
+        AircraftId::F117 => F117_SHAPE_SCALE,
         _ => IDENTITY,
     }
 }
@@ -104,13 +128,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_aircraft_but_the_two_mirages_keeps_the_plain_shape_scale() {
+    fn every_aircraft_but_the_two_mirages_and_the_f117_keeps_the_plain_shape_scale() {
         for id in AircraftId::ALL.into_iter().chain(AircraftId::SELECTABLE) {
             if id == AircraftId::M2000 {
                 assert_eq!(shape_axis_scale(id), M2000_SHAPE_SCALE);
                 assert!(!is_identity(id));
             } else if id == AircraftId::Mf1 {
                 assert_eq!(shape_axis_scale(id), MF1_SHAPE_SCALE);
+                assert!(!is_identity(id));
+            } else if id == AircraftId::F117 {
+                assert_eq!(shape_axis_scale(id), F117_SHAPE_SCALE);
                 assert!(!is_identity(id));
             } else {
                 assert_eq!(shape_axis_scale(id), IDENTITY, "{id:?}");
@@ -138,6 +165,28 @@ mod tests {
         // Per axis, never uniform.
         assert_ne!(MF1_SHAPE_SCALE[0], MF1_SHAPE_SCALE[1]);
         assert_ne!(MF1_SHAPE_SCALE[1], MF1_SHAPE_SCALE[2]);
+    }
+
+    #[test]
+    fn the_f117_factors_bring_the_shape_to_its_real_size() {
+        for axis in 0..3 {
+            let feet = F117_SHAPE_EXTENT[axis] / 3. * F117_SHAPE_SCALE[axis];
+            assert!(
+                (feet - F117_REAL_FEET[axis]).abs() / F117_REAL_FEET[axis] < 0.0005,
+                "axis {axis}: {feet} against {}",
+                F117_REAL_FEET[axis]
+            );
+        }
+        // Span 43 ft 4 in, length 65 ft 11 in, height 12 ft 5 in, per axis.
+        assert_ne!(F117_SHAPE_SCALE[0], F117_SHAPE_SCALE[1]);
+        assert_ne!(F117_SHAPE_SCALE[1], F117_SHAPE_SCALE[2]);
+        // The leading edge (13, 62) to (85, -71) sweeps back to about 67.5.
+        let sweep = |scale: [f64; 3]| (133. * scale[1]).atan2(72. * scale[0]).to_degrees();
+        assert!((sweep(IDENTITY) - 61.6).abs() < 0.05);
+        assert!((sweep(F117_SHAPE_SCALE) - 68.4).abs() < 0.05);
+        // The gear low point (21 units) follows the height factor.
+        assert!((21. / 3. * F117_SHAPE_SCALE[2] - 6.208).abs() < 0.001);
+        assert_eq!(right_up_forward(AircraftId::F117), [0.7647, 0.8869, 1.0463]);
     }
 
     #[test]

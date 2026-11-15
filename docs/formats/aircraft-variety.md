@@ -7692,6 +7692,10 @@ point 21 units becomes 18.6, 6.2 ft). Options for John (none chosen):
 Whatever is chosen is a `shape_axis_scale` row and moves stations, the gear low
 point, the damage looks (same header), the tail rig and the bay with it.
 
+Update (F117-2, 2026-11-15): John chose option 2 (decision 24, per axis to
+real). Applied with the factors above; see [F-117 shape and real
+size](#f-117-shape-and-real-size-f117-2-2026-11-15).
+
 ### F-117 hardpoints and the bay (for John)
 
 Location byte of each row is the last record field (labelled `name` in the
@@ -7969,6 +7973,9 @@ else changes because the new arms only turn a former error into a branch.
 - The deployed gear low point is 14 units at 2/3 ft for the B-52 (9.3 ft), 33
   units for the B-2 (11.0 ft) and 21 units for the F-117 (7.0 ft); real-size
   fits (F-117 per axis, F117-2) move them later.
+  Update (F117-2, 2026-11-15): the F-117's low point is now 21 units times
+  the height factor 0.8869, 18.62 units, 6.21 ft ([F-117 shape and real
+  size](#f-117-shape-and-real-size-f117-2-2026-11-15)).
 - The B-52's variety flight model takes the default ground alignment rate (0.7);
   the transport aircraft use 0.4. Flight tuning is B52-8's.
 
@@ -7988,3 +7995,107 @@ First measurements of the retail rows; each aircraft's station slice owns its
 count. The `menus-ordnance-availability` and `a2g-catalog` battery expected
 lines and `tools/test_battery_a2g.py` follow
 ([ordnance availability](../baselines/ordnance-availability.md)).
+
+## F-117 shape and real size (F117-2, 2026-11-15)
+
+Implementation, slice F117-2 of bomber batch A (worktree `m3-f117`, plan
+`.local/m3-aircraft/PLAN-F117.md`). It mirrors M2K-2 (Mirage 2000, per-axis scale)
+and TOR-2 (Tornado). The per-aircraft scale mechanism is the one M2K-2 built
+([Aircraft shape scale](objects-and-shapes.md#aircraft-shape-scale-2026-11-09));
+this slice adds the F-117 row to it. Nothing new in the mechanism.
+
+**Decision.** John, 2026-11-15 (decision 24, "accept all"): scale the F-117 per
+axis to its real size. **Opinionated (John, 2026-11-15); the factors are fitted
+(agent derivation).**
+
+**Re-measurement.** `f117.SH` with the gear word `4c5c` = 1, read with the shape
+reader on 2026-11-15, 242 faces with the bay word as well, 238 with the gear
+only: x -85 to 85 (170 units), y -96 to 93 (189 units: V-tail tips to the nose
+probe tip; the probe is y 89 to 93), z -21 to 21 (42 units: gear low point to
+fin tip; gear up the shape is z -6 to 21). At 1/3 ft a unit: 56.67 by 63.00 by
+14.00 ft. This confirms the F117-0 extents exactly. The real aircraft is 43 ft
+4 in span, 65 ft 11 in long and 12 ft 5 in high (FAS Military Aircraft F-117
+page and Wikipedia, both read 2026-11-15; GlobalSecurity and the other
+published pages agree; Airforce Technology and Fiddler's Green give the height
+as 12 ft 9 in, 2.7 percent more, not used).
+
+| Axis | Units | Raw ft | Real ft | Factor (`real * 3 / units`) | Scaled ft |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| x span | 170 | 56.67 | 43.33 | 0.76471, **0.7647** | 43.333 |
+| y length (probe tip) | 189 | 63.00 | 65.92 | 1.04630, **1.0463** | 65.917 |
+| z height (gear down) | 42 | 14.00 | 12.42 | 0.88690, **0.8869** | 12.417 |
+
+The factors F117-0 proposed are right and are used as given: `[0.7647, 1.0463,
+0.8869]` in `tore_formats::aircraft::scale::F117_SHAPE_SCALE`, one new arm in
+`shape_axis_scale`. The length is matched to the shape's own extent including
+the probe (the Mirage F1 rule); to the nose alone the factor would be 1.069.
+Measured after scaling with the shape reader: 43.333, 65.917 and 12.417 ft.
+
+**Leading-edge sweep.** The wing's leading edge runs from (13, 62) to (85, -71).
+Measured from the lateral axis it is **61.6 degrees at identity and 68.4 degrees
+after scaling** (the convex outline from the tip to the nose chine at (7, 80) gives
+62.7 and 69.3). The real figure is about 67.5 degrees (67 degrees 30 minutes):
+GlobalSecurity's F-117A specification page (reached through a web search; the
+page itself answered 403 to a direct fetch) and f-117a.com's specification page
+(its certificate had expired, so it was not fetched; the search snippet reads
+67.30) give it. Wikipedia's text mentions a "high sweep angle (50 degrees)" without saying
+what it is measured against, so it is not used. The scaled shape is within one
+degree of the real sweep; the identity shape was 6 degrees short, which supports the
+per-axis fit over uniform scaling (one factor cannot do 0.78, 0.96 and 0.89).
+
+**What follows the scale.**
+
+| Consumer | How | Result |
+| --- | --- | --- |
+| Drawn shape, stores preview, parked draw, surface dump | every reader parses with `Shape::scaled(shape_axis_scale_f32(id))` | scaled, automatic |
+| Rig | the interim rig (gear word only) parses the scaled shape at load; no hinge point is named (F117-3 and F117-4 must use `scale_point`) | scaled |
+| Gear contact and low point | `variety.rs`: 21 units / 3 times the z factor | 7.00 ft becomes **6.21 ft**; wheelbase 18.3 to 19.2 ft, track 19.0 to 14.5 ft (the legs scale with the shape) |
+| Station rows | `placed_scaled` with the right/up/forward factors | bay rows (4 and 5) x -/+10 units: **-/+2.55 ft** (was 3.33); up -22 units: **-6.50 ft** (was -7.33); forward -2 units: -0.70 ft (unchanged to 0.01 ft). The F117-0 proposal's mounts of +/-2.55 ft follow without a special arm. Fixed rows (0 to 3, jammer at -50 forward): 0 and -17.4 ft (was -16.7). F117-5 measures the bay on this geometry |
+| Bay slot in the shape | the shape's open pose (word `4c56`) | 17.1 ft long, 1.0 ft wide, 2.4 ft deep (was 16.3, 1.3, 2.7) |
+| Damage looks | `DamageArt::load` scales `F117.SH` and the A to D shapes alike; regional damage sections cut on the scaled extents | scaled, automatic |
+| Debris attachment | `debris::attachment` scales the offset per axis | scaled (the F-117 has no registered damage variant, so the per-axis path is the same as the other variants' and has no direct F-117 test) |
+| Wingtip vapor point | `streamer_world_points` with `right_up_forward` | on the scaled tip (the record gives (85, -5, -81) units, which scales to x 65.0) |
+| Contrail and nozzle offsets | taken off the scaled shape; the shape has no flame word | follows; F117-4 maps the nozzle |
+| Hit size | one 28 ft sphere for every aircraft (not shape-derived) | **not changed**, as in M2K-2. The real span is 43 ft, so the sphere is still generous; John's call whether a per-aircraft hit size is wanted |
+| Pilot eye and cockpit camera | one fixed offset (7 ft up, 10 ft forward) for every aircraft (`mirrors::pilot_eye`) | **not changed**; the F-117's cockpit view and its glass aperture are F117-7's work |
+| HUD | no HUD aperture (fails closed, BMB-A1) | nothing to scale yet |
+| Parked placement | the F-117 is not a parked target (`parked_aircraft.rs` has no arm) | none |
+
+**Skin and decals.** 207 runtime faces (gear down 238; bay open 242), one
+texture `_F117.PIC`. 19 exact-vertex twin groups, all pairs, **all with opposite
+stored normals** (checked on the shape with a scratch program, not committed),
+so no MiG-21-style exception is needed. Five `E0` decal slots (`161a` slot 4 on the
+right wing underside at (57, -44), `2b91` slot 3 on the left wing top at (-56,
+-41), `24c9` slot 1 and `251e` slot 0 on the two ruddervators, `2d44` slot 2 on
+the fuselage side at x -7, y 27 to 34) are four-corner decal faces with an
+indexed texture the runtime does not use; they stay omitted as in M2K-2 and TOR-2,
+and the frames show plain skin in their place, no blank patch and no skin-filled
+patch. Every other marking is a textured face and draws whole. The top and under
+frames show no underside through the top and no z-fighting; the 3x crops of the
+fin and the nose show no clipped marking. The new `render-f117-skin` scenario
+pins this ([lane-flight](../testing/lane-flight.md)). No fix was needed.
+
+**Damage looks.** `F117_A.SH` (233 faces), `F117_B.SH` (48), `F117_C.SH` (199) and
+`F117_D.SH` (55) and their textures load through `DamageArt::load` at the same
+scale (the frames at damage 0.6 and 1.0, left-wing and tail sections, draw the dark
+patch, smoke and the regional cut on the scaled skin, with no loading error).
+They are redrawn bodies and pieces, not copies of the intact faces (at most four
+of A's 233 faces equal an intact face at any offset; A spans x -41 to 82 and C
+x -84 to 85, so what each body leaves out was not identified here; the
+F-5E's A and C are the nose and fin cuts). **No whole-body damage
+variant is registered for the F-117** (`debris::damage_variant` returns none), so a
+destroyed F-117 draws the intact skin with regional cuts, as the Mirage 2000,
+Tornado, Gripen, MiG-25 and MiG-31 do; the F-5E registered A and C by agent
+decision in F5E-2. Whether to register A and C for the F-117 is John's call
+(open item 1 of the F117-2 log). The breakup pieces use the shared C body with the D
+fragment at 1/3 ft a unit through `debris::variant`.
+
+**Gear in the frames.** With the gear down on a runway (ground start at airfield
+2, `ground-gear.png` and its 3x crop) the gear hangs under the belly at the
+scaled size; contact is the 6.21 ft low point above, the same height factor as the
+drawn legs, so the two agree by construction.
+
+**Provenance.** Per-axis choice opinionated (John, 2026-11-15); factors fitted (F117-0
+agent derivation, re-measured here); the 67.5 degree sweep and the dimensions are real figures
+cited above; the omitted-decal, damage-variant, hit-size and eye-point choices are
+agent decisions 2026-11-15, John's call to change.

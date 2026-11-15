@@ -1550,6 +1550,13 @@ draws and measures the same aircraft.
 | Mirage 2000 (`M2000.PT`, `m20.SH`) | `[1.3616, 1.2290, 1.5053]` | **opinionated** (John, 2026-11-09, "Per axis to real", over uniform scaling); the factors are **fitted** (agent derivation, below) |
 | Mirage F1 (`MF1.PT`, `mf1.SH`) | `[1.0335, 1.1804, 1.0546]` | **opinionated** (John, 2026-11-10, per axis to the real span, length and height, as the Mirage 2000); the factors are **fitted** (agent derivation, [Mirage F1 shape scale](#mirage-f1-shape-scale-mf1-2-2026-11-10)) |
 
+Update (F117-2, 2026-11-15): the F-117A (`F117.PT`, `f117.SH`) joins the table
+with `[0.7647, 1.0463, 0.8869]` (**opinionated**, John, 2026-11-15, decision 24, per
+axis to the real span, length and height; the factors are **fitted**, agent
+derivation, [F-117 shape and real
+size](aircraft-variety.md#f-117-shape-and-real-size-f117-2-2026-11-15)). Every
+other aircraft is still `[1, 1, 1]` apart from the two Mirages.
+
 **Fit.** `m20.SH` with the gear down measures x -33 to 33 (66 units, 22.0 ft),
 y -44 to 71 (115 units, 38.3 ft) and z -12 to 22 (34 units, 11.3 ft), checked
 against the shape on 2026-11-09. The real Mirage 2000 is 9.13 m (29.95 ft) in
@@ -2112,3 +2119,19 @@ the first aircraft to use the family. Its HUD glass aperture and mirror seeds ar
 measured on that art; see [the Tornado sensors, HUD and cockpit
 section](aircraft-variety.md#tornado-sensors-hud-and-cockpit-tor-7-2026-11-11). No
 Tornado cockpit art exists, and no retail art is committed.
+
+## F-117A skin review (F117-2, 2026-11-15)
+
+`F117.SH` draws at its header scale (1/3 ft a unit) times the per-axis scale
+`[0.7647, 1.0463, 0.8869]`, 43.3 by 65.9 by 12.4 ft. It has 207 runtime faces
+(238 with the gear down, 242 with the bay open) with one texture
+`_F117.PIC`, 19 exact-vertex twin groups (all pairs, all with opposite stored
+normals, so the smooth-mode panel contract hides the rear member without the
+MiG-21 exception) and five `E0` decal slots that stay omitted at runtime, as in
+the Mirage 2000 and Tornado reviews: two wing markings (slots 4 and 3), one on each
+ruddervator (slots 1 and 0) and one on the fuselage side (slot 2). The top and under
+frames show no underside through the top, no z-fighting and no blank or skin-filled patch.
+`F117_A.SH` to `F117_D.SH` (233, 48, 199 and 55 faces) load at the same
+scale; no whole-body damage variant is registered. The `render-f117-skin`
+scenario pins the look. Details and the list of what follows the scale:
+[F-117 shape and real size](aircraft-variety.md#f-117-shape-and-real-size-f117-2-2026-11-15).
