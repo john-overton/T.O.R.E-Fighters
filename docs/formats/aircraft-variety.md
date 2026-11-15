@@ -6307,3 +6307,561 @@ Update (TOR-11, 2026-11-12): the side rail is on the swivelling pylon's **inboar
 state), and its drawn arm is 3.0 ft (was 5.6, fitted). The Tornado's wing also starts to sweep at 304 kt
 (350 mph, John), not 250. Row 8's location byte in the source record, the mask, the placements
 (4,581 on the merged tree) and the Cheat-only 222 do not move. Details: [stores on pylons](../spec/stores-on-pylons.md#the-tornado-aim-9-rail-on-the-inboard-flank-shorter-and-the-sweep-from-350-mph-tor-11-2026-11-12).
+
+## B-2 source review (2026-11-15)
+
+Research mode, slice B2-0 (bomber batch A). This reviews `B2.PT` (B-2 Spirit)
+and its dependency closure before `AircraftId::B2` exists. `B2.PT` is not a
+parked target and has no `parked_aircraft.rs` entry. No original module was
+executed. PT, SEE, ECM and JT are read as bounded BRF data with the shared
+field order in `aircraft_schema.rs`; SH and HUD are inspected as data. Slice
+done by Claude Sonnet (sonnet-medium). Nothing here changes code or behaviour.
+Real-aircraft figures are cited and never establish game behaviour.
+
+Questions open for John, **not decided here**: the display name, the record
+values (template copies and the game's own encyclopedia figures), the HUD, the
+sensor rows, the real-size scale, the surface rig, the bay layout and counts,
+and the stealth model. They are listed under "Questions for John" in
+`.local/m3-aircraft/PLAN-B2.md`.
+
+### B-2 build and extraction
+
+`FA_1.LIB` and `FA_2.LIB` are the same pair as the MiG-31 review (see the
+[MiG-31 build section](#build-and-extraction)). The closure was extracted
+locally to `.local/m3-imports/scratch/b2` with `tore-extract --include 'B2*'
+--include '_B2*' --include '~B2*'` plus the named sensor, jammer, ordnance and
+AI files, and the sibling bomber records (`B52*`, `F117*`, `F22*`) for
+comparison; every `*.PT` was extracted once to compare records. The
+`SETUP.ESA` installer copy of `FA_2.LIB` holds a byte-identical `B2.PT` and
+`B2.SH`; only `B2.HUD` differs (4 bytes, a build difference, as with the
+Tornado's `E2000.HUD`). The usual five unrelated archive errors appear.
+
+`shape_inspect` refuses `B2.SH` as built: the shape's state guards use two
+conditional-jump opcodes the reader does not know (`0x7c` jump-if-less and
+`0x7f` jump-if-greater on the drag-rudder word, below), and it stops with
+`unsupported shape state guard`. For this review only, a private copy of
+`tore-formats` under `.local/m3-imports/scratch/b2/tf` was given those two
+cases (value less than, or greater than, the immediate) and its
+`shape_inspect` example was run on the shape. **The repository reader is
+unchanged and still rejects `B2.SH`; B2-2 must add the two branches** (a
+reader change, so a finding, not done here).
+
+The `~B20.M` to `~B29.M` files that match `~B2*` are Baltics campaign missions
+("FIRST LIGHT"), unrelated to the B-2, as the `~Q*STOR.M` files were for the
+Tornado.
+
+### B-2 identity and record
+
+| Field | Decoded value |
+| --- | --- |
+| PT | `B2.PT`, 8,970 bytes, SHA-256 `145d83a848f5f39c241c554c0a802a7b5a39f10591e7f932a65c5505f7300770` |
+| Displayed names | `B-2`, `B- 2 Spirit` (stray space), `B2.PT` |
+| Schema | OBJECT + NPC + PLANE, 219 statements; `structType` 5; `typeSize` 660; `instanceSize` 626 |
+| Object class / year / hit points | `0x4000` / 1998 / 241; `expType` 30; `flags` `0x1806bf3` |
+| PLANE flags | `0x15` (as the B-52 and Tornado) |
+| Shape | `b2.SH` (25,088 bytes, header exponent 8 so scale 1, CODE 21,668), shadow `b2_s.SH` (5 faces) |
+| Damage looks | `B2_A.SH` 248 faces, `B2_B.SH` 114, `B2_C.SH` 254, `B2_D.SH` 74 |
+| Skins | `_B2.PIC` 57,524 bytes (the shape's only texture), `_B2_A/B/C/D.PIC` |
+| Sounds | `&JET7f.11K` loop and second sound, `&powerup.5k`, `&powerdn.5k` (all present in `FA_2.LIB`) |
+| HUD | empty: `hudName` is a null dword (no block, no string) |
+| AI script | `b.BI` (4,608 bytes, present; the B-52 names the same file, the F-117 names `f117.BI`) |
+| Sensors / jammer | `VIS340.SEE`, `F18R.SEE`, `F18.ECM`, `PAVESPK.SEE`, `AV8IR.SEE` |
+| Stores | `MK82.JT` x2 rows, `PAVEWA3.JT` x2 rows (both in the TORE ordnance roster) |
+| PTS | `B2.PTS` exists (4,608 bytes, inert) |
+| Encyclopedia | `B2.INF` and eleven `B2_*.PIC` in `disc2/FA_3.LIB` (Jane's text, quoted below as reference media) |
+| Cockpit art | `~B2.PIC` 60,270, `~B2H.PIC` 319,446, `~B2S.PIC` 492,138, `~B2_P.PIC` 6,864 in `FA_1.LIB` |
+| Engines / thrust | 4 engines, thrust 114,000 lbf total, afterburner thrust 0, afterburner fuel 0 |
+| Weights | empty 100,000 lb, internal fuel 180,000 lb, max takeoff 400,000 lb |
+| Ceiling / G | 49,000 ft; envelope rows -1 to +3 (`envMin` -1, `envMax` 3, `negGLimit` 0) |
+| Signatures | `sigs` 220, 220, 15 (IR), 1 (radar), 0 |
+| Checkpoint code / CLI key | none yet, reserved for BMB-A1 |
+
+The decoded record equals the catalog row in [`fa-aircraft.csv`](fa-aircraft.csv)
+field for field (including the empty HUD column). Hashes of the files later
+slices depend on:
+
+| Resource | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `B2.SH` | 25,088 | `b81457f37ab578c4bc862b3a10a63c0afc15ce34ad21adf30399a383e7b01391` |
+| `B2_S.SH` | 4,608 | `b8bfe0c34175f8730bf0773561a23d1c4281d9ab109d66eb537f6ce47329890e` |
+| `B2_A.SH` | 16,896 | `93672d4e37ec8e719c8efc841070a8d22d107d82e16f4120a1a030556d0497a3` |
+| `B2_B.SH` | 8,704 | `3b71e8cef2a8bebe0ae854c894cbaab7d94b88662cf92987147a1342821880f2` |
+| `B2_C.SH` | 20,992 | `d971a215ca8ba1fc8b192927b41755b0051a37c240caab265c607caf524a97d5` |
+| `B2_D.SH` | 8,704 | `5182ca4ff0181e8013f69e081b0132f6d20bf88e2ee892dea83534c140c3c104` |
+| `B2.HUD` | 4,608 | `b2bf418785cff228b92b6aaee244333abf209f11e9cd1c5acd1287d03de35dee` |
+| `B.BI` | 4,608 | `781f27cddf73075f36659fe0910dda009a457cdd3f2386de6c9b8bb78946e7ae` |
+| `_B2.PIC` | 57,524 | `6f3ff4f0fb9d765b84eee93b7ee2db16671c6ac62a4ad885171af12bde076292` |
+| `~B2H.PIC` | 319,446 | `c085e47594704af8ded512ae12ab4600b26f2d4d265d3a9d6f6e60506891a509` |
+| `F18.ECM` | 366 | `0fb851d57d7f88f51a017d9663101b52c681c6a6d5ac55823588f25a942d31a9` |
+| `MK82.JT` | 2,703 | `dc548de6c7bb72bed20919b2452d4e4666bc426ea0e1aeca412e4a875a380fe6` |
+| `PAVEWA3.JT` | 2,735 | `1bd851487c84f6af4a40a92da279cbd63dc75f49d7297ee1b163ded4454b3537` |
+
+`VIS340.SEE`, `F18R.SEE`, `PAVESPK.SEE` and `AV8IR.SEE` are the shared
+records already hashed in the F-15E and Gripen baselines (`AV8IR.SEE`
+`d4791bcb...`, `VIS340.SEE` `445c35d1...`; `F18R.SEE` is
+`b0086101...`, `PAVESPK.SEE` `7fd9c6d3...`).
+
+The display name's stray space is retail: `B1.PT` has the same pattern
+("B- 1B Lancer"); the B-52 and F-117 names have none.
+
+### B-2: the template copy list (for John)
+
+`B2.PT` is **the `B1.PT` (B-1B) record with 48 numeric statements changed**:
+160 of 208 non-pointer statements are identical to the B-1B's (the next
+closest records share 154 or fewer: `C5.PT` 154, `F117.PT` 153). Everything
+the two share is the bomber flight tuning and housekeeping:
+`sigs[0]` and `sigs[1]` 220, climb and dive limits, camera and doppler words,
+`_bv` linear velocity block, `_brv` y and z axes, `gpullAOA` 20,
+`lowAOASpeed`/`lowAOAPitch`, rudder yaw/slip/drag/bank, stall (512, 512, 100),
+spin entry/exit and yaw/AOA/bank, crash speeds, `coefDrag` 256, `gearDrag` 23,
+`flapsDrag` 38, `flapsLift` 51, `airBrakesDrag` 256, `wheelBrakesDrag` 12,
+loaded-handling words, all 45 `systemDamage` bytes, `engines` 4 and
+`fuelConsumption` 6. The **five sensor rows are the B-1B's too** (`VIS340.SEE`,
+`F18R.SEE`, `F18.ECM`, `PAVESPK.SEE`, `AV8IR.SEE`, flags `0x1008`; the F-117
+carries the same four sensors), and the bay rows keep the B-1B's pattern
+(four-store `MK82AIR` bay rows at flags `0x1500` there). The 48 statements the
+B-2 re-authors, against the B-1B:
+
+| Field | `B2.PT` | `B1.PT` |
+| --- | ---: | ---: |
+| `year` | 1998 | 1985 |
+| `typeSize` / `instanceSize` / `flags` | 660 / 626 / `$1806bf3` | 636 / 609 / `$1002bf3` |
+| `maxVisDist` | 912 | 683 |
+| `sigs[2]` IR / `sigs[3]` radar | 15 / 1 | 60 / 40 |
+| `hitPoints` | 241 | 250 |
+| Empty weight (`weight`), lb | 100,000 | 192,000 |
+| `maxAlt`, ft | 49,000 | 55,000 |
+| `thrust` / `aftThrust`, lbf | 114,000 / 0 | 58,400 / 140,000 |
+| `internalFuel`, lb | 180,000 | 105,000 |
+| `maxTakeoffWeight`, lb | 400,000 | 447,000 |
+| `numHards` | 9 | 8 |
+| `envMin` / `envMax` | -1 / 3 | -2 / 5 |
+| `structure[0]` / `[1]` | 752 / 841 | 1,136 / 1,427 |
+| `turbulencePercent` | 10 | 90 |
+| `_brv.x`, `puffRot` ranges and rates | 45/31/63 | 60/51/102 |
+| `throttleAcc` / `throttleDacc` | 40 / 60 | 60 / 50 |
+| `bayDrag` | 25 | 12 |
+| `structureLimit` | 5,120 | 7,680 |
+| `stallPitchDown`, `_bankRate`, debris words, `aftFuelConsumption` | 30, 8190, own | 25, 10920, own |
+
+Real figures against the record, with the game's own Jane's text (`B2.INF`,
+reference media) and public sources (Air & Space Forces Magazine B-2 page,
+aerospaceweb.org B-2 data page, a Whiteman AFB fact sheet as summarised by a
+search, all read 2026-11-15; sources disagree where noted):
+
+| Field | Record | Real | Difference | Verdict |
+| --- | ---: | ---: | ---: | --- |
+| Empty weight, lb | 100,000 | `B2.INF` 100,000 to 110,000; public sources about 158,000 to 160,000 (aerospaceweb 150,000 to 160,000) | -37% vs 158,000 | **Not a template copy**: it is the low end of the game's own Jane's range. The game's number and the public number disagree |
+| Internal fuel, lb | 180,000 | `B2.INF` 180,000 to 200,000; Whiteman 167,000; aerospaceweb 200,000 | +7.8% vs 167,000 | Low end of the Jane's range (game's own figure) |
+| Max takeoff, lb | 400,000 | 376,000 (`B2.INF`, aerospaceweb); normal 336,500 (`B2.INF`, Air Force) | +6.4% vs 376,000 | Not in the media: B-1B's is 447,000; probably authored |
+| Thrust, lbf (total) | 114,000 | four F118-GE-100 at 17,300 = 69,200 (`B2.INF`, Air & Space Forces); Wikipedia says 19,000 each | +64.7% vs 69,200 | Own value, matches no known source and no template (per engine 28,500) |
+| Afterburner | 0 | none | | Correct |
+| Engines | 4 | 4 | | Correct |
+| G limit | -1 / +3 | not found in the sources read | | Own envelope, five rows |
+| Ceiling, ft | 49,000 | 50,000 (`B2.INF`, Air Force) | -2.0% | Close |
+| Hit points | 241 | none | | Own |
+| Year | 1998 | in service 1993 to 1997 | | Not examined |
+
+**Copied from the B-1B:** the whole flight tuning block and the five sensor
+rows (160 statements, listed above), not the weights, thrust, fuel, ceiling,
+stations, HUD or shape. **Weights, fuel and ceiling track the game's own Jane's
+text**, so the empty and fuel numbers are retail-encyclopedia values rather
+than errors against the game's media; they are low against public figures.
+
+Options for John (none chosen; the Mirage 2000 and Tornado precedent is that
+thrust, weight and G corrections are his call):
+
+1. Keep every value as retail (document only, audit pins).
+2. Correct thrust to the real four-engine figure (69,200 lbf total) and leave
+   weights, fuel and ceiling.
+3. Also correct weights to the public figures (empty about 158,000, normal 336,500,
+   max 376,000, fuel 167,000). The game's own `B2.INF` supports the max takeoff
+   (376,000) and the fuel range (180,000 to 200,000), but its empty range
+   (100,000 to 110,000) is below the public figure.
+
+Agent note: with no afterburner and 114,000 lbf the record gives a thrust to
+weight at empty of 1.14 and the climb of a fighter; the corrected 69,200 lbf
+gives 0.69. A default bay load is far below the 400,000 lb maximum, so the
+maximum weight is never the binding number.
+
+### B-2 G envelope rows
+
+Points are speed in ft/s at altitude in ft. Five rows, G -1 to +3 (the first
+word of each row is the G, the second its point count, then the speeds).
+
+| G | Points |
+| ---: | --- |
+| -1 | 260@0, 300@16,000, 445@35,000, 590@43,000, 700@41,000, 780@34,000, 720@0 |
+| 0 | 170@0, 200@15,500, 290@34,250, 420@46,625, 550@52,000, 720@51,500, 855@45,750, 895@36,000, 790@0 |
+| 1 | 220@0, 250@15,000, 350@33,500, 460@44,750, 560@49,000, 700@48,000, 800@43,000, 840@36,000, 750@0 |
+| 2 | same as -1 |
+| 3 | 300@0, 350@16,000, 490@31,500, 610@38,000, 705@35,500, 750@31,000, 720@0 |
+
+The 1 G row tops out at 840 ft/s (498 kt) at 36,000 ft and 750 ft/s (444 kt) at
+sea level, the catalog's top and sea-level speeds; the real aircraft is high
+subsonic (aerospaceweb 530 mph at 40,000 ft, Mach 0.8; Jane's approach speed 140 kt,
+the record's second speed word is 130). The 1 G row differs from the B-1B's
+(whose -1 row shares its first four points), so the envelope is authored for
+the B-2.
+
+### B-2 dependency closure: shape, HUD, AI, sensors, ECM, stores
+
+| Resource | Role | Note |
+| --- | --- | --- |
+| `B2.SH` | Shape | 268 runtime faces, 0 lines, 0 billboards, one texture `_B2.PIC`, three state words (`6486`, `648c`, `6498`); **no valid streamer record** (the parse gives a zero pivot and meaningless points: treat as absent, so no wingtip vapor point) |
+| `B2_S.SH` | Shadow | 5 faces |
+| `B2_A.SH` / `B2_C.SH` | Damage bodies | 248 / 254 faces |
+| `B2_B.SH` / `B2_D.SH` | Damage pieces | 114 / 74 faces |
+| `B.BI` | AI script | present, shared with the B-52 |
+| `VIS340.SEE`, `F18R.SEE`, `F18.ECM`, `PAVESPK.SEE`, `AV8IR.SEE` | Sensors, jammer | the B-1B's rows; see below |
+| `MK82.JT`, `PAVEWA3.JT` | Bay stores | both already in the TORE roster (`loadout.rs`, `missiles.rs`; `MK82.SH` real size 7.3 ft long, `store_sizes.rs`) |
+
+**The record's HUD field is empty, and a B-2 HUD exists anyway.** `hudName` is a
+null pointer (the F-117 and X-31 records are the same). The media holds
+`B2.HUD` (4,608 bytes, panel names `~b2`, `~b2h`, `~b2s`, `~b2_p`, `~b2_w`,
+indicator names `GEAR`, `FLAP`, `BRAKE`, `BAY`), and the cockpit pictures
+`~B2.PIC`, `~B2H.PIC`, `~B2S.PIC` and `~B2_P.PIC` exist. The B-52 names
+`bmbroh.HUD`; `AURORA.PT` and `TU160.PT` both name `b2.HUD`. What TORE does
+with an empty HUD field: it never reads the record's `hudName`.
+`AircraftId::hud()` (`crates/tore-formats/src/aircraft.rs`, the match near line
+488) is a per-identity table, and `crates/tore-app/src/assets.rs` (line 152) puts
+`id.hud()` in the dependency closure; the parser accepts the null pointer as an
+existing nullable pointer grammar (`docs/formats/aircraft.md`: "F31's null
+hudName is accepted ... its player HUD resource is F31.HUD"; "SU35.PT has a null
+HUD pointer; SU35.HUD is an explicit player-presentation choice"). So the empty
+field blocks nothing; a new identity needs an explicit arm, and nothing selects a
+default.
+
+Options (none chosen):
+
+1. **`B2.HUD`, cockpit stem `B2`, `~B2H.PIC`** (the retail B-2's own files;
+   the same explicit-choice precedent as the X-31 and Su-35). Needs the HUD
+   panel and one stem family; not an alias of any other record.
+2. Another reviewed bomber family (`bmbroh.HUD` of the B-52): opinionated.
+3. No HUD (the F-5E/Tornado glass-mask outcome until the mask exists).
+
+The sensors: `F18R.SEE` is the F/A-18's air-to-air radar, not the B-2's
+Hughes AN/APQ-181 LPI J-band strike radar (`B2.INF`); `F18.ECM` is the F/A-18
+jammer (the real aircraft carries the ZSR-63 defensive aids equipment and AN/APR-50
+RWR, `B2.INF`); `PAVESPK.SEE` and `AV8IR.SEE` are fixed internal rows at (0, 0, 0)
+with flag `0x1008`, the same rows the B-1B and F-117 records carry. **The real
+B-2 carries no external pods (B7)**, so these rows are bomber-template rows, not
+stations: the Tornado precedent (keep as retail, no pod body, nothing on a
+station) applies. Options: keep as retail; drop the Pave Spike and Harrier IR
+rows for TORE; keep them presented as the targeting sensor.
+
+### B-2 shape state words (rule 11 fold table)
+
+`B2.SH` has three state words, each a different kind. Counts from
+`Shape::with_state` in the private patched reader (neutral 268 faces;
+coordinates raw shape units, x right, y forward, z up; the object scale is 1, so
+one unit is 1/3 ft, see "real size").
+
+| Word | Values | Faces | Geometry | Reading | Status |
+| --- | --- | --- | --- | --- | --- |
+| `6486` | 1 | +8 | Four vertical plates (two windings each) at x -27, -3 (left) and 1, 26 (right), y -10 to 48, z -12 down to -25 | Bay doors open: the bay side walls hang below the belly | Slot meaning by position (bay), the word text `BAY` is in `B2.HUD` |
+| `648c` | 1 | +14 | Seven plates, two windings each: nose (x -6 to 7, y 97, z -14 to -5; y 71, z -24 to -9; x 0, y 88 to 96, z -30 to -6) and mains (x -71, -65, 62, 69; y -7 to 41; z -33 to -12) | Gear down | Confirmed (low point -33, `GEAR`) |
+| `6498` | +1 / -1 | +6 / -2 each | Right (+1): closed pair `465f`, `4679` replaced by six faces (below); left (-1): mirror. Value 0 neutral; **value 2 or more removes the right pair and adds nothing** | Split drag rudder, signed: +1 opens the right one, -1 the left | Confirmed by geometry |
+
+There is **no flame word, no airbrake word, no flap word, no slat word, no
+elevon word, no hook word, no canopy word and no reverser word** (the B-2 has no
+afterburner; the control surfaces below carry no word). Words `6486` and `648c`
+set to 2 change nothing; `6498` is a three-position word, not a flag, which is
+the first signed surface word in the bombers (the tail words of the Tornado and
+the Mirage are positive only).
+
+**Rule 11 face table** (every face of every moved or word-added surface; the
+shared-vertex test is exact coordinates against the neutral faces):
+
+| Surface | Faces | Vertices each | Moved | On hinge/spindle | Fixed off axis |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Bay plates (`6486`) | `4209 4220 4264 427b 431a 4331 42bf 42d6` | 4 | 4 (the lower edge) | 0 shared, the upper edge at z -12 free | 0 |
+| Gear plates (`648c`) | `41ae 41c5 4153 416a 4597 45b6 438d 43a4 449e 44b5 452c 454b 441b 443a` | 4 | all plates rigid | none shared with the skin | 0 |
+| Right drag rudder, upper plate | `47db`, `47f5` | 4 | 2 (the free edge) | 2 `(177,-46,0)`, `(215,-71,0)` | 0 |
+| Right drag rudder, lower plate | `47a7`, `47c1` | 4 | 2 | 2 `(177,-46,-7)`, `(215,-71,-7)` | 0 |
+| Right drag rudder, front plate | `480f` | 4 | 0 | 4 (both hinge lines) | 0 |
+| Right drag rudder, inboard cap | `4829` | 3 | 1 `(167,-53,-3)` | 2 on the hinge ends | 0 |
+| Left drag rudder | `46d0`/`46ea` upper, `4704`/`471e` lower, `4738` front, `4752` cap | 4, 4, 4, 3 | as the right (mirror, 1 unit off in places) | as the right | 0 |
+| Elevon strip, right (neutral, no word) | `4037`, `404e` quads; `4065`, `407a` triangles | 4, 4, 3, 3 | whole body turns | none shared | 0 |
+| Elevon strip, left | `40ce`, `40e5`; `40fc`, `4111` | 4, 4, 3, 3 | whole body turns | none shared | 0 |
+
+Verdict: no face folds. Every word plate is a whole four-vertex (or one
+three-vertex) face and shares no vertex with any other face except the drag
+rudders' hinge lines; every face lies wholly on one side of its hinge.
+
+### B-2 surfaces (for John)
+
+The flying wing has a **double-W trailing edge**; the shape draws two surface
+pairs on it. Planform (top view, red elevon strips, blue drag rudders, green
+bay panels) was drawn from the faces during this review (scratch only).
+
+- **Elevons: one strip per side, x 63 to 130 (right), -64 to -131 (left).** Each
+  is a thin wedge of four whole faces: a top quad at z 0 (hinge side) to z -3,
+  a bottom quad at z -6 to z -3, and a small triangle pair at the inboard end
+  (`4065`/`407a`). The leading edge runs (63,-70) to (120,-22), 74 units (24.8
+  ft) on the diagonal; the trailing edge (69,-80) to (130,-29); the chord is
+  about 12 units (4 ft). The strips share **no vertex** with any other face
+  (checked by exact coordinates) and nothing lies in front of them at their own
+  place: the wedge is the wing skin there. They are neutral geometry: **no state
+  word moves them**, so any elevon is a **fitted rig**. Real: "double-W trailing
+  edge incorporating elevons and drag rudders outboard of engines" (`B2.INF`);
+  the real inboard and outboard elevon pairs are one strip per side in the mesh.
+  Rule 12 (delta elevons): both would take pitch plus differential roll; the
+  source has one strip per side, so one term per side. Rule 11: the four faces
+  turn as one rigid body about the leading edge line (the wedge's z -3 centre
+  line), no vertex is fixed off axis; the seam is a hinge-line gap of at most
+  3 units times the sine of the deflection against the fixed skin ahead (to be
+  measured in B2-3). The whole-surface gate (no diagonal or partial surface, whole
+  faces only) is met: every candidate is a complete face.
+- **Drag rudders (split rudders) at x 167 to 215 (right) and -169 to -218 (left)**,
+  one word, signed. Closed: a wedge of two faces (top quad from z 0 at the leading
+  hinge edge down to z -3 at the free edge, bottom quad from z -7 up to z -3).
+  Open: the two faces are removed and **six are added**: an upper plate hinged at
+  z 0 whose free edge reaches z +7, a lower plate hinged at z -7 whose free edge
+  reaches z -14 (each in both windings), a vertical front plate between the
+  hinge lines (`480f`, left `4738`) and an inboard triangle cap (`4829`, left
+  `4752`). In angles of the chord (12.2 units in plan) that is the upper plate
+  from -13.8 to +29.9 degrees and the lower plate from +18.2 to -29.9 degrees:
+  about 44 and 48 degrees of swing, 21 units (7 ft) between the free edges. The
+  open pose is not an exact rotation of the closed one (free-edge corners move
+  1 to 2 units in plan, as the Mirage 2000 rudder swap). It is **a single open
+  pose per side, no proportional travel** in the source: a rig that opens
+  proportionally is fitted. The sign convention against rudder input (+1 is the
+  right) must be confirmed in B2-3. Real: the drag rudders yaw by opening
+  one side (the B-2's split rudders also act together as airbrakes), which the
+  source cannot show because the word opens only one side at a time.
+- **Gust and trailing-edge centre**: the centre beaver tail (x about -60 to 60)
+  and the outboard tip pieces are fixed skin; no surface is in the source.
+- **No slats, flaps, airbrakes, spoilers or reversers.** The drop-down spoiler
+  panels ahead of the bay doors in `B2.INF` do not exist in the mesh (the open
+  bay plates are the only geometry), and none is invented here.
+
+Options (none chosen): (a) rig the four elevon faces per side as whole panels
+with pitch and differential roll, fitted limit, and the drag rudders as the
+source's two-state word; (b) leave the elevons fixed and rig only the drag
+rudders and gear; (c) also add a fitted both-sides drag-rudder airbrake (not in
+the source). The reader change above is required before any of this runs.
+
+### B-2 gear
+
+Plate gear, no wheels or doors, the state words of other bombers: the nose
+(three plate pairs at y 71 to 97, z -30 to -5) and four main plates (x -71,
+-65 on the left, 62, 69 on the right; y -7 to 41 for the outer ones, -2 to 20 for
+the inner; z -33 to -12). Low point **-33** units, 22 units (7.3 ft) below the
+belly skin at -11/-12. At 1/3 ft per unit: track about 46.7 ft over the outer
+plates (42.3 ft over the inner), wheelbase about 25 ft (nose plate y 92 to the
+main plates' centre y 17); the real gear dimensions were not found, so these
+are unverified. Real (`B2.INF`): a tricycle gear adapted from the Boeing
+757/767, **inward-retracting four-wheel main bogies** with a large trapezoidal
+door, a **rearward-retracting** two-wheel nose unit with a small door with
+sawtooth edges, and a gear limit speed of 224 kt. The mesh has the gear wells
+as flat belly overlays at z -12 (`3ca3` x -72 to -58, `3cc9` x 55 to 70, y -6 to
+42), 15 units wide, which sit exactly under the main plates: the closed wells
+are skin, as on the Tornado. Gear rig options: fold the mains inward about a
+longitudinal axis at the belly and the nose aft, each plate rigid (whole faces,
+no door leaves in the source); the plate pairs are drawn in two windings and
+none shares a vertex with the skin, so the fold check passes trivially.
+
+### B-2 real size (for John)
+
+Measured on the neutral state (clean, gear up) and the gear word, raw units, header
+exponent 8 so the object scale is **1** (one unit is 1/3 ft, the aircraft
+default, so no scale-table entry is needed):
+
+| Axis | Units | At 1/3 ft | Real | Verdict |
+| --- | ---: | ---: | ---: | --- |
+| Span (x -258 to 258) | 516 | 172.0 ft | 172 ft (`B2.INF`, Air Force) | exact |
+| Length (y -87 to 107) | 194 | 64.7 ft | 69 ft | -6.3% |
+| Height, gear down (z -33 to 24) | 57 | 19.0 ft | 17 ft | +11.8% |
+| Height, gear up (z -12 to 24) | 36 | 12.0 ft | | |
+
+The leading edge from the nose (0, 107) to the tip (258, -59) makes 32.8 degrees
+with the lateral axis, against Jane's 33 degrees (`B2.INF`: "swept at 33 degrees"),
+a check that the mesh is the true planform. The bay rows' x (-15, +14) match the
+bay panel centres (-16, +14) to a unit, which also says the record stations were
+authored against this size. Options: (1) draw as is (span exact; the aft 4.3 ft
+of the real length and 2 ft of the real height are not modelled; the cockpit
+hump at z 24 is likely taller than real); (2) a per-axis fit (the Mirage 2000
+mechanism) of about y x 1.07 and z x 0.89 (opinionated, and it would shift the
+bay length and gear heights by the same factors).
+
+### B-2 bay survey
+
+**Measured in the shape (units, then feet at 1/3 ft per unit).** Both bays are
+flat overlay panels one unit below the belly skin; there is no bay interior and no
+door leaf in the mesh.
+
+| | Left bay | Right bay |
+| --- | --- | --- |
+| Panel face | `3c84` | `3c65` |
+| Width x | -28 to -4 (24 units, 8.0 ft) | 2 to 26 (24 units, 8.0 ft) |
+| Length y | -9 to 49 (58 units, 19.3 ft) | -9 to 49 (58 units, 19.3 ft) |
+| Centre x / y | -16 / 20 (-5.3 / 6.7 ft) | 14 / 20 (4.7 / 6.7 ft) |
+| Floor (belly skin) z | -11/-12 (-3.7 / -4.0 ft) | -11/-12 |
+| Upper skin above the bay, z | 14 to 17 at the bay centre line (4.8 to 5.7 ft), 3 to 4.5 at the outer edge x -27, 18 to 23 at the inner edge x -4 | 14 to 18 at the centre line, 2 to 4 at the outer edge x 25, 17 to 23 at x 2 |
+| Depth available | 26 to 29 units (8.7 to 9.7 ft) at the centre, 15 units (5 ft) at the outer edge | same |
+
+Both bays are 8.0 ft wide, 19.3 ft long, and sit centred about 4.7 to 5.3 ft
+either side of the axis (the mesh axis is x -1: the left panel and the right
+panel mirror about it). The belly is one 7-vertex polygon `396d` (x -89 to 88,
+y -28 to 69) with the panels 1 unit below it: **cutting an opening is a
+cut of a whole belly polygon**, not a face swap (the F-22 precedent cut its
+belly and intake polygons: `docs/spec/stores-on-pylons.md`, "F-22 naval
+stores"). The doors in the shape are the `6486` word: four hanging plates 13
+units (4.3 ft) deep at the bay's long edges (x -27, -3 and 1, 26), which leave
+the closed panels in place (the word removes nothing). Retail "open" therefore
+shows walls while the panels stay drawn over the opening; a door rig is
+fitted: the panels as door leaves hinged at an edge, the plates as the bay side
+walls. The gear wells beside the bays are the orange panels in the plan view
+(skin overlays at z -12, no word).
+
+**The record's nine hardpoints** (all in original order; location byte 0
+Centerline, 1 Fuselage, 2 Internal Gun, 3 Internal Bay, 4 Wing, 5 Wingtip;
+positions are record units right / up / forward, feet are units divided by 3):
+
+| Row | Location | Flags | x / y / z | Feet right / up / fwd | Max items | Weight class | Default | Role |
+| ---: | --- | ---: | --- | --- | ---: | ---: | --- | --- |
+| 0 | Fuselage | `0x1008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `VIS340.SEE` | Fixed visual sensor |
+| 1 | Fuselage | `0x1008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `F18R.SEE` | Fixed radar (APG-65 class) |
+| 2 | Fuselage | `0x1008` | 0 / 0 / -50 | 0 / 0 / -16.7 | 1 | 0 | `F18.ECM` | Fixed jammer |
+| 3 | Fuselage | `0x1008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `PAVESPK.SEE` | Fixed pod row |
+| 4 | Fuselage | `0x1008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `AV8IR.SEE` | Fixed IR row |
+| 5 | Internal Bay | `0x1504` | -15 / -38 / 34 | -5.0 / -12.7 / 11.3 | 32 | 160 | `MK82.JT` | Left bay, forward |
+| 6 | Internal Bay | `0x1504` | 14 / -38 / 35 | 4.7 / -12.7 / 11.7 | 32 | 160 | `MK82.JT` | Right bay, forward |
+| 7 | Internal Bay | `0x1504` | -15 / -38 / 6 | -5.0 / -12.7 / 2.0 | 4 | 160 | `PAVEWA3.JT` | Left bay, aft |
+| 8 | Internal Bay | `0x1504` | 14 / -38 / 7 | 4.7 / -12.7 / 2.3 | 4 | 160 | `PAVEWA3.JT` | Right bay, aft |
+
+Findings: **the nine hardpoints are five sensor rows and four bay rows; the
+record already carries the bays** as `Location::InternalBay` (byte 3), with no
+external station and no wing row. Their x (-5.0 / +4.7 ft) and forward (11.3 / 2.0
+ft) values fall inside the measured bays (centres -5.3 / +4.7 ft, y -3.0 to 16.3
+ft), so rows 5 and 6 are the forward Mk 82 stations and rows 7 and 8 the aft
+Paveway III stations, one pair per bay. The up value (-12.7 ft) is **8.7 ft below the belly**
+(-4.0 ft): as on the F-22's bay rows (-8.3 ft against its belly at -3 ft) it is
+not a measured position, so the placement code, not the raw number, must put the
+stores. The rows carry the pair flag `0x4` (the F-22's main bays do not), so a
+row at x -15 mirrors to +15: rows 5 and 6 would each put stores in both bays.
+Record capacity: 32 + 32 Mk 82 and 4 + 4 Paveway III (64 and 8 against the
+real 80 and 16 below); the 0x1000 bit is on every B-2, B-1B and F-117 row and is
+not interpreted in the reviewed specs.
+
+**Real bay loads (public sources, cited).** Two internal weapons bays, each
+"equipped with a rotary launcher and two bomb-rack assemblies" (Air Force
+Technology's B-2 page, via search; Wikipedia: "each holds munitions on a
+rotary launcher or on two bomb racks"). Air & Space Forces Magazine B-2 page
+(accessed 2026-11-15): 16 B61-7, B61-12 or B83 (or eight B61-11) on rotary
+launchers; 80 Mk 82 (500 lb) or 80 GBU-38 JDAMs, or 34 CBU-87/89, on rack
+assemblies; or 16 GBU-31, 16 Mk 84 (2,000 lb), 16 AGM-154 JSOW, 16 AGM-158
+JASSM, or eight GBU-28; "nearly 60,000 lb in various combinations". Maximum
+two GBU-57 massive ordnance penetrators, one per bay, at 30,000 lb each
+(Wikipedia, 2026-11-15). The game's own Jane's (`B2.INF`): a Boeing rotary
+launcher assembly in each bay, "up to eight large stores each", 16 AGM-129,
+16 B61 or B83, 80 Mk 82, 16 JDAM, 16 Mk 84, 36 M117, 36 CBU-87/89/97/98 and 80
+Mk 36/Mk 62 mines; stores of 1,000 lb and under on four bomb racks (two per
+bay); max weapon load 40,000 lb. No public source gave a bay's dimensions
+(searched 2026-11-15), so the measured 8.0 x 19.3 ft are the only figures.
+
+**Mechanism limits (the F-22 bay work).** `Location::InternalBay` rows are
+never drawn and never counted as external stores. The F-22's three bay rows
+become `Location::Magazine` (byte `0x83`) in `placed_on`
+(`crates/tore-sim/src/combat/hardpoints.rs`, `AircraftId::F22 | F22n`, rows
+5 to 7) at fitted mounts (right, floor up, release origin forward), and the
+magazine places its stores **in one straight lane front to back**, each
+separated by its length plus 0.25 ft, forward store first; they are drawn
+inside, hidden while the doors are closed, add nothing to the external-store
+radar signature, and leave from the same points
+(`docs/spec/stores-on-pylons.md`, "F-22 naval stores"; `loading.rs` has the
+magazine station kind). The door state is `flight.rs` `bay`/`bay_available()`,
+which is **true only for `AircraftModel::F22`** today. A single lane holds, in
+a 19.3 ft bay, two Mk 82 (2 x 7.3 + 0.25 = 14.85 ft; three need 22.1 ft) or one
+14 to 15 ft Paveway III-class store. The record's 32 per row do not fit that
+mechanism; a lane of 32 would run 241 ft.
+
+**Proposed authored bay stations (opinionated, for John; geometry fitted to
+the measured bays, counts from the source rows).** Reuse the magazine
+mechanism, extended:
+
+| Item | Proposal | Label |
+| --- | --- | --- |
+| Carriers | The four retail rows 5 to 8 become `Location::Magazine` in `placed_on` for the B-2 (rows 5 and 6 Mk 82, rows 7 and 8 Paveway III), no new rows | opinionated (precedent: the F-22 override) |
+| Pair flag | Treat each row as a one-bay carrier (clear flag `0x4` in the loaded definition, as `F22N.PT` rows were corrected to location 3 and its flags), so left rows 5 and 7 and right rows 6 and 8 each load one bay | opinionated, a record edit like F22N's |
+| Mount points | Left bay x -5.3 ft, right x +4.7 ft, floor -3.7 ft up, release origin 6.7 ft forward (the bay centre), the same for the Mk 82 and Paveway rows of one bay | fitted to measurement |
+| Lane layout | Mk 82: 2 tandem x 4 abreast x 4 tiers = 32 per bay (width 4 x 1.27 = 5.1 ft inside 8.0; height 4 x 0.9 = 3.6 ft inside 5.0 at the bay's outer edge; length 14.85 inside 19.3). Paveway III: 1 tandem x 4 abreast = 4 per bay (width about 4 x 1.3 ft) | opinionated; needs a code change, the lane only knows one line |
+| Exclusivity | The Mk 82 and Paveway rows of one bay are alternatives (real: one rotary launcher or two racks per bay), as the F-22 wing row 8 is exclusive with its tanks | opinionated |
+| Doors | Retail `6486` plates as the open side walls; the two panels as fitted door leaves hinged at the outboard edge, both bays opening and closing with the release (timing as the F-22 main bays); a hole in the belly polygon `396d` | fitted, rig in B2-3 |
+| Signature | Bay stores add nothing to the external-store signature (existing rule); the open-bay term needs `bay_available()` true for the B-2 | needs a code change |
+| Counts | Option A: keep the record's 64 Mk 82 and 8 Paveway (source). Option B: raise to the real 80 Mk 82 (40 per bay) and 16 large stores (8 per bay, the rotary launcher count) as authored values | A source, B opinionated |
+| Load Ordnance rows | Add rows only where the weapons data already allows (GBU-38, Mk 84 and CBU-87 are in the roster; no B61/B83 weapon exists) | opinionated, B2-6 |
+
+Option without a mechanism change: cap the Mk 82 at 2 and the Paveway at 1 per
+bay (a visible but tiny load, 4 Mk 82 and 2 Paveway in total against 64 and 8).
+Any of these is John's call; the proposal is what fits the measured bay.
+
+### B-2 stealth finding (shared with the F-117 review)
+
+**The sensor and detection code has a signature concept, and the B-2's record
+already fills it.** It is the PT `sigs` words, not a stealth flag:
+
+- `crates/tore-sim/src/sensors/signature.rs`: `SignatureProfile::from_source`
+  reads `sigs[3]` as the radar signature and `sigs[2]` as the infrared one
+  ("a relative game statistic and not square metres"). `effective_radar`
+  returns the PT radar value plus external stores (3 per store body and 2 per
+  1,000 lb), times an aspect factor (1 nose or tail, 2 side, 4 top or bottom)
+  and a configuration factor (gear 0.25, flaps 0.15, bay 0.50 of the deployed
+  fraction). A zero radar signature stays zero.
+- `crates/tore-sim/src/sensors/detection.rs` (lines 211, 231, 240): the radar
+  range is `nominal * sqrt(effective_signature / 100) * look-down * notch *
+  jammer`, capped at the nominal range, the jammer burn-through compares the same
+  value, and the IR range uses `sigs[2]`. The same function feeds the radar
+  missile seekers (`combat/missiles.rs` line 447, `combat/missiles/seeker.rs`
+  line 198), the RCS instrument page (`crates/tore-app/src/scope.rs`, `rcs()`)
+  and the store signature (`combat/live/store_signature.rs`).
+- `docs/radar.md` ("Agent-authored signature model", the store-weight table and
+  its closing paragraph) documents it as agent gameplay tuning, with the F-22
+  (`sigs[3]` 10) at 28.5 nmi against a 90 nmi radar.
+
+The records: **`B2.PT` `sigs[3]` is 1 and `sigs[2]` is 15**; `F117.PT` is 1 and
+20; `F22.PT` is 10 and 60; `B52.PT` is 100 and 200; `B1.PT` is 40 and 60. A
+signature of 1 gives 10% of a radar's nominal range nose-on in clear air (a
+90 nmi search radar sees it at 9, a 50 nmi track at 5), 20% from above or
+below (factor 4) and 14% abeam; with the bay fully open the configuration
+factor is 1.5. So **retail already encodes stealth for the B-2 and F-117 as a
+radar signature of 1, and the game's detection code uses it: no fitted
+per-aircraft value is needed** (standing decision 4's fallback), and no sensor
+change is made or implied here.
+
+Limits of the present model, for John's decision (none acted on):
+
+1. **Surface air-defence radars read no signature.** `docs/radar.md` (the
+   closing paragraphs of the store-signature section) says "Surface air-defence
+   radars detect by their records' range bands and read no signature at all", so
+   a B-2 is as visible to a SAM site as an F-15 today. Only air-to-air radar,
+   jammer burn-through, radar missiles and the RCS page see the 1.
+2. **The bay-open term only works for the F-22.** `flight.rs` `bay_available()`
+   is `matches!(model, AircraftModel::F22(_))`, so a B-2's `bay` fraction is
+   always 0 until that is extended (a code change; with signature 1 the
+   opening bay would raise it to 1.5).
+3. Bay stores add nothing and a store on a (nonexistent) external station would
+   add 3, which is three times a clean B-2's whole signature: keep every B-2
+   store internal.
+4. The real value is reported only: about 0.1 square metres (Wikipedia, "reported
+   rather than confirmed"); the model's 1 is a relative statistic, so this is
+   cited and never mapped.
+
+### B-2 roster note
+
+`B2.PT` is the 2nd aircraft of bomber batch A. `AircraftId` stays append-only
+from 47 on in batch order (B-52, B-2, F-117) and is assigned by BMB-A1; the
+wire identity is 9 bits, so there is no capacity constraint.
+
+### B-2 unknowns and next steps
+
+- The 32-versus-lane layout and the `bay_available()`, door and belly-polygon
+  work are B2-3 and B2-5 questions for John.
+- The reader needs the `0x7c` and `0x7f` state-guard branches before B2-2.
+- The nose-wheel and main-gear hinge axes and the engine exhaust positions (the
+  real exhausts are two V-shaped overwing outlets) were not examined; no nozzle
+  or flame word exists, so contrail and engine-position mapping is a B2-4
+  question.
+- Real main gear track and wheelbase, the real bay dimensions and a G limit
+  were not found in public sources.
