@@ -10,6 +10,7 @@ pub mod detection;
 pub mod passive;
 pub mod profile;
 pub mod signature;
+pub mod surface;
 pub mod track;
 
 pub use profile::{

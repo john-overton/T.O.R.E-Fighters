@@ -927,7 +927,7 @@ stateDiagram-v2
 
 | Step | Rule | Basis |
 | --- | --- | --- |
-| Detection range | The weapon's seeker `zone0` range and altitude band (SA-2 150,000 ft with an altitude floor of 3,000 ft; SA-6 80,000 ft, floor 500 ft); a sensor's range for GCI and BUTLER (303,800 ft, 50 nm). A battery detects from its radar's position with the battery missile's `zone0`; a GCI element also gives its 50 nm sensor for search, never for launch | retail; battery use defined (John) |
+| Detection range | The weapon's seeker `zone0` range and altitude band (SA-2 150,000 ft with an altitude floor of 3,000 ft; SA-6 80,000 ft, floor 500 ft); a sensor's range for GCI and BUTLER (303,800 ft, 50 nm). A battery detects from its radar's position with the battery missile's `zone0`; a GCI element also gives its 50 nm sensor for search, never for launch. For a radar-guided weapon the range is against a signature-100 aircraft and shrinks with the aircraft's signature, aspect, configuration, clutter and jamming ([update SAM-1](#update-sam-1-2026-11-15-surface-radar-detection)) | retail; battery use defined (John); the echo scaling agent, 2026-11-15 |
 | Search period | Quarter seconds in the NPC block: 5 s for small SAMs, ZSU-23 and vehicles, 10 s for big SAMs, guns and ships, 48 s for the SCUD | retail, B42 |
 | Eligibility | Hostile side, airborne, class matches the object's `react` attack mask (templates use `$c000`: fighters and bombers), inside detection range and band, terrain line of sight clear, inside `searchDist` when non-zero (unit unknown: 25 is read as 25 x 256 ft). Ground units and ships of the other side too, for a weapon whose record may aim at them ([surface against surface](#surface-against-surface)) | retail; the `searchDist` reading fitted |
 | Choice | Nearest eligible; keep the current target while valid; KS-12 and KS-19 re-evaluate every 10 s (`retargetT` 40), choosing as a team ([flak teams](#flak-teams)) | fitted (the retail ranking terms for surface actors are untraced); flak teams opinionated (John, 2026-10-14) |
@@ -1667,7 +1667,7 @@ radars to the rules above. Where the rules leave a choice, it chose as follows
 | Altitude bands | Zone altitudes are the target's height above the unit, as the AI's envelopes take them | spec-derived (B45) |
 | Gun reach and range | A gun's launch range is its fire zone capped by its shells' reach; a round ends 15 percent (at least 500 ft) past the target; a flak shell's time fuze is its time of flight to its own burst point in the egg around the lead point ([flak](#flak)) | fitted |
 | Lead | A radar gun observes its target every tick; a visual gun every 0.5 s and leads from that stale track; both through the shared gunsight time-of-flight solution | spec-derived, fitted refresh |
-| Detection | Range, the weapon's `zone0` altitude band, the react class mask (0 attacks any class), `searchDist` read as 256 ft units, and a terrain line of sight sampled every 500 ft | retail plus fitted |
+| Detection | Range, the weapon's `zone0` altitude band, the react class mask (0 attacks any class), `searchDist` read as 256 ft units, and a terrain line of sight sampled every 500 ft; for a radar weapon also the aircraft's echo at that distance ([update SAM-1](#update-sam-1-2026-11-15-surface-radar-detection)) | retail plus fitted |
 | Radar guns | A gun is radar-directed when its record carries flag 0x4000 and a radar seeker; the barrage zone's record carries the flag without the seeker and is not | inference |
 | Battery blind | A battery is Blind while its radar is destroyed or shut down by a HARM; a radar that is merely off (no hostile near) leaves it Idle | defined (agent) |
 | Battery launcher | Each salvo leaves from the nearest launcher with a loaded rail, line of sight and the target in its launch zone; the missile is the launcher's, its support the radar's | defined (John) |
@@ -1679,6 +1679,62 @@ radars to the rules above. Where the rules leave a choice, it chose as follows
 controller's phases, shots and bursts, radar and HARM events and the RWR
 (see [development](../DEVELOPMENT.md#surface-unit-inspection)).
 
+### Update (SAM-1, 2026-11-15): radar detection
+
+John asked that surface air-defence radars "work like air to air radars that
+have stealth, line of sights, etc affect it". The model and its numbers are in
+the [radar guide](../radar.md#update-sam-1-2026-11-15-surface-air-defence-radars);
+this is what changes for the surface units. All agent decisions, fitted, unless
+marked.
+
+- **Who sees by echo.** A weapon whose record is a radar seeker (signature 3):
+  a battery's radar, a self-contained radar missile unit, a radar-directed gun
+  and a flak team's shared picture (at the team's doubled range). IR SAMs
+  (SA-7, SA-9, SA-13, SA-14, SA-16, FIM-92), visual and tank guns, small arms,
+  the barrage zone and the blind battery's optical backup see as before.
+- **The rule.** The record's `zone0` range is the range against a
+  signature-100 aircraft; the range an aircraft is detected at is that range
+  times the square root of its effective signature over 100 (never above it),
+  where the signature is the aircraft's row's, seen from the antenna (aspect,
+  stores, gear, flaps, open bay), less the look-down clutter and the jammer's
+  interference. The terrain line of sight, the altitude band and the mount arcs
+  are the ones the table above already lists. A radar below its target meets no
+  look-down clutter.
+- **The chain is unchanged.** The echo test is part of eligibility, so a site
+  never chooses, prepares against, locks or fires at an aircraft it cannot
+  see, and an aircraft it loses while tracking drops the lock that tick
+  (Track to Search, as a lost line of sight does). Preparation, lock, launch
+  gates, salvos and reloads are untouched. A battery's missile in flight keeps
+  the radar's support only while the radar sees the aircraft; the missile's own
+  seeker reads the same signature as it did.
+- **Emission is not detection.** The radar still comes on for a hostile inside
+  its nominal range (the rule above is unchanged), so the RWR shows a Ground
+  square for a site that cannot see you, with no lock tone and no painting. A
+  HARM still homes on it.
+- **Receiver class.** Every surface radar is a `Basic` receiver (no Doppler
+  notch, burn-through 5 nm), one knob (`SURFACE_PRESET`), because no surface
+  radar record has a reviewed preset.
+- **Left out on purpose.** A radar horizon (the aircraft radars have none), chaff
+  against detection (the aircraft radars have none), weather attenuation,
+  per-record receiver presets, and the echo for ground units and ships as
+  targets (their objects' radar signature is not read by any surface weapon).
+  Surface-to-surface targeting is unchanged.
+- **Gameplay.** Every signature-100 aircraft is seen exactly as before. Against
+  an SA-6 (13.2 nm) a B-2 or F-117 is seen at 1.3 nm nose-on, 1.9 abeam and 2.6
+  from above, an F-22A at 4.2, 5.9 and 8.3, a Rafale C at 9.3 nose-on. Nose-on a
+  stealth aircraft is inside an SA-6's 9,000 ft minimum launch range before it
+  is seen (8,000 ft), so an SA-6 can only engage it abeam or from above; an SA-3
+  sees it at 1.7 nm (10,000 ft, launch minimum 7,500 ft) and an SA-2 at 2.5 nm.
+- **Determinism and versions.** No new state, no new draw, the same tick order,
+  every input a function of this tick's rows; the checkpoint format and the
+  wire are unchanged. The host's engagement outcomes change, so the simulation
+  version needs raising (and the protocol with it) when this merges: not
+  raised here.
+- **Jammers on rows.** The radar reads the same combat row every aircraft's
+  radar reads. Today no human or AI jammer is on a row (only the debug toggle
+  sets it), so jamming matters to surface radars exactly as much as to the air
+  ones; the surface radars follow when that is wired.
+
 ### Countermeasures
 
 No new countermeasure code is needed beyond wiring:
@@ -1686,7 +1742,7 @@ No new countermeasure code is needed beyond wiring:
 | Defense | Mechanism | Basis |
 | --- | --- | --- |
 | Chaff against radar SAMs, flares against infrared SAMs | Decoy rolls by seeker class and the record's chaff and flare chance, unchanged | spec-derived ([countermeasures](countermeasures.md)) |
-| Jammers | The seeker's deception chance against the aircraft's jammer, unchanged | spec-derived |
+| Jammers | The seeker's deception chance against the aircraft's jammer, unchanged; and the radar's own view of the aircraft shortens with the jammer until burn-through ([update SAM-1](#update-sam-1-2026-11-15-surface-radar-detection)) | spec-derived; the burn-through agent, 2026-11-15 |
 | Terrain masking | Launch needs line of sight; support ends when it breaks | retail (terrain blocking is shared with aircraft) |
 | Flying low | Seeker altitude floors (SA-2 3,000 ft, SA-3 2,000 ft, SA-6 500 ft) and launch zone floors gate detection and launch | retail |
 | Notching, out-turning | Existing seeker and missile turn-rate fields | spec-derived |

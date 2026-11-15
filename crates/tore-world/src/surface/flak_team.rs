@@ -66,7 +66,9 @@ use super::{
 };
 use crate::surface::fire::Arsenal;
 use std::collections::{BTreeMap, BTreeSet};
-use tore_sim::{ai::surface::Phase, attitude::Vector, combat::live::Side};
+use tore_sim::{
+    ai::surface::Phase, attitude::Vector, combat::live::Side, sensors::surface::Receiver,
+};
 
 /// Flak guns within this horizontal distance of each other fight as one
 /// team: 1 nautical mile (opinionated, John, 2026-10-14: "within 1 mile of
@@ -341,6 +343,8 @@ struct TeamGun<'a> {
     index: usize,
     weapon: &'a WeaponArms,
     place: Place,
+    /// A radar-directed gun's receiver (aircraft radar model), at its eye.
+    radar: Option<Receiver<'a>>,
 }
 
 impl TeamGun<'_> {
@@ -361,6 +365,13 @@ impl TeamGun<'_> {
                 .arms
                 .search_limit
                 .is_none_or(|limit| distance <= limit * FLAK_TEAM_DETECTION_FACTOR)
+            && self.radar.as_ref().is_none_or(|radar| {
+                radar.detects(
+                    &contact.observable(),
+                    FLAK_TEAM_DETECTION_FACTOR,
+                    scene.ground,
+                )
+            })
             && scene.line_of_sight(from, contact.position)
     }
     /// `contact` is inside the gun's fire zone (range and altitude band).
@@ -406,11 +417,16 @@ pub(super) fn plan_teams(
             .filter(|arms| state.unit(arms.unit).is_some_and(|u| u.armed))
             .filter_map(|arms| {
                 let (index, weapon) = flak_weapon(arms)?;
+                let place = state.place(arms);
                 Some(TeamGun {
                     arms,
                     index,
                     weapon,
-                    place: state.place(arms),
+                    place,
+                    radar: weapon
+                        .radar
+                        .as_ref()
+                        .map(|profile| scene.receiver(profile, place.eye)),
                 })
             })
             .collect();

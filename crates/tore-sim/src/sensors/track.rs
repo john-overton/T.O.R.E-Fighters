@@ -975,68 +975,15 @@ impl Sensors {
                 if beyond(&radar.search, &radar.track) {
                     return None;
                 }
-                let sighting = sighting.get();
-                let to_observer: Vector =
-                    std::array::from_fn(|i| observer.position[i] - target.position[i]);
-                let effective = target.signature.effective_radar(
-                    &target.basis,
-                    to_observer,
-                    target.configuration,
-                );
-                if effective <= 0. {
-                    return None;
-                }
-                let relative = effective / 100.;
-                let height = target.position[1]
-                    - (environment.ground)(target.position[0], target.position[2]);
-                let clutter = clutter_exposure(sighting, height);
-                let look_down = look_down_factor(radar.look_down, clutter);
-                let notch = notch_factor(
-                    &radar.notch,
-                    clutter,
-                    notch_speed_fps(sighting, target.velocity),
-                );
-                let coupled: f64 = self
-                    .strobes
-                    .iter()
-                    .map(|s| {
-                        s.received
-                            * angular_coupling(
-                                &radar.resistance,
-                                dot(s.line_of_sight, sighting.line_of_sight)
-                                    .clamp(-1., 1.)
-                                    .acos(),
-                            )
-                    })
-                    .sum();
-                let jammer = jammer_factor(interference_quotient(
-                    &radar.resistance,
-                    coupled,
-                    sighting.distance_nmi(),
-                    relative,
-                ));
-                (
-                    (
-                        &radar.search,
-                        effective_range_ft(
-                            radar.search.maximum_ft,
-                            relative,
-                            look_down,
-                            notch,
-                            jammer,
-                        ),
-                    ),
-                    (
-                        &radar.track,
-                        effective_range_ft(
-                            radar.track.maximum_ft,
-                            relative,
-                            look_down,
-                            notch,
-                            jammer,
-                        ),
-                    ),
-                )
+                let (search_ft, track_ft) = radar_ranges_ft(
+                    radar,
+                    observer.position,
+                    target,
+                    sighting.get(),
+                    environment.ground,
+                    &self.strobes,
+                )?;
+                ((&radar.search, search_ft), (&radar.track, track_ft))
             }
             Channel::Infrared => {
                 let infrared = self.profiles.infrared.as_ref()?;
@@ -1106,9 +1053,66 @@ impl Sensors {
     }
 }
 
+/// The radar channel's effective search and track distances against `target`
+/// from `observer`, or `None` when it returns no echo: the one rule the
+/// aircraft radars and the surface air-defence radars
+/// ([`super::surface`]) share. The signature seen from the antenna (aspect,
+/// configuration and stores), the look-down clutter, the Doppler notch and
+/// the received interference all scale the volume's nominal maximum through
+/// the square-root law ([`effective_range_ft`]). Geometry, terrain line of
+/// sight and who may see what are the caller's.
+pub fn radar_ranges_ft(
+    radar: &RadarProfile,
+    observer: Vector,
+    target: &Observable,
+    sighting: &Sighting,
+    ground: &dyn Fn(f64, f64) -> f64,
+    strobes: &[Strobe],
+) -> Option<(f64, f64)> {
+    let to_observer: Vector = std::array::from_fn(|i| observer[i] - target.position[i]);
+    let effective =
+        target
+            .signature
+            .effective_radar(&target.basis, to_observer, target.configuration);
+    if effective <= 0. {
+        return None;
+    }
+    let relative = effective / 100.;
+    let height = target.position[1] - ground(target.position[0], target.position[2]);
+    let clutter = clutter_exposure(sighting, height);
+    let look_down = look_down_factor(radar.look_down, clutter);
+    let notch = notch_factor(
+        &radar.notch,
+        clutter,
+        notch_speed_fps(sighting, target.velocity),
+    );
+    let coupled: f64 = strobes
+        .iter()
+        .map(|s| {
+            s.received
+                * angular_coupling(
+                    &radar.resistance,
+                    dot(s.line_of_sight, sighting.line_of_sight)
+                        .clamp(-1., 1.)
+                        .acos(),
+                )
+        })
+        .sum();
+    let jammer = jammer_factor(interference_quotient(
+        &radar.resistance,
+        coupled,
+        sighting.distance_nmi(),
+        relative,
+    ));
+    Some((
+        effective_range_ft(radar.search.maximum_ft, relative, look_down, notch, jammer),
+        effective_range_ft(radar.track.maximum_ft, relative, look_down, notch, jammer),
+    ))
+}
+
 /// Received emitters at the radar. A jammer beyond the selected display range
 /// still interferes; nothing here requires the emitter to be a known target.
-fn strobes(
+pub fn strobes(
     observer: &Observer,
     targets: &[impl std::borrow::Borrow<Observable>],
     radar: &RadarProfile,
