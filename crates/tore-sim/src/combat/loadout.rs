@@ -194,7 +194,7 @@ impl Loadout {
             .collect::<std::collections::BTreeMap<_, _>>()
             .into_values()
             .collect();
-        Ok(Self {
+        let mut load = Self {
             aircraft: a.id,
             quantities: configuration.stations.iter().map(|s| s.count).collect(),
             tank_hardpoints: configuration
@@ -209,7 +209,25 @@ impl Loadout {
             maximum_lbs: a.fields["maxTakeoffWeight"].number()? as f64,
             hardpoints,
             cheat: false,
-        })
+        };
+        load.cap_default_fuel();
+        Ok(load)
+    }
+    /// The tank starts full unless that puts the default load over the maximum
+    /// takeoff weight, in which case it starts at what the maximum allows (a
+    /// whole pound, never below empty). Only an aircraft whose full tank and
+    /// default stores exceed the maximum is touched: the B-52H, whose real
+    /// 312,197 lb of fuel plus 185,000 lb empty is over its 488,000 lb maximum
+    /// (BMB-A2, **opinionated**, agent decision 2026-11-15: the real jet
+    /// takes off with a partial tank, and the alternative, a default load the
+    /// takeoff check refuses, would not start). The editor still raises the
+    /// fuel to the full tank, and `validate` still refuses a takeoff over the
+    /// maximum.
+    fn cap_default_fuel(&mut self) {
+        let excess = self.total_lbs() - self.maximum_lbs;
+        if excess > 0. {
+            self.fuel_lbs = (self.fuel_lbs - excess).floor().max(0.);
+        }
     }
     pub fn tank_capacity(&self, slot: usize, tank: &live::TankStore) -> i32 {
         self.tank_pairs(slot)

@@ -853,3 +853,38 @@ ordnance audit: 2 novelty records, 240 Cheat-only placements, refused without Ch
 
 Earlier sections that quote 45 aircraft, 4,581 weapon placements and 80 pods
 stay as written for their own states.
+
+## Bomber batch A record and station corrections (BMB-A2, 2026-11-15)
+
+BMB-A2 changed one retail row flag and the ordnance audit pins moved on purpose
+(no record, mask or default weapon of any other aircraft changed; the B-52 gun
+rounds and the F-117 jammer row are not placements). The B-2's four bay rows
+(`B2.PT` rows 5 to 8) had flags `0x1504`; the designator bit `0x400` is cleared
+(`0x1104`, fitted, agent decision 2026-11-15, B7: the real B-2 has no pod station;
+the BMB-A1 finding the coordinator assigned to this slice). The bit also admits
+stores with more than one projectile in a pod (`pod_count > 1`, `loading.rs`), so
+four such stores leave each bay:
+
+| Pin | From | To | Why |
+| --- | ---: | ---: | --- |
+| Weapon placements | 4,792 | 4,776 | `B2.PT` 102 to 86 (the B-2 catalog 26 to 22 normal stores) |
+| Designator-pod placements | 84 | 80 | The B-2's four bay rows lose the bit |
+| Aircraft, recovered stations, tank placements, Cheat-only, records | 48, 20, 233, 240, 82 / 9 | unchanged | |
+
+The F-117's row 2 has no default `F18.ECM` and the B-52's tail gun row holds 1,242
+rounds; neither moves a placement. The audit also runs the loadout validator for every
+aircraft, so it covers the B-52's default load: the new starting-tank cap
+(303,000 lb, [aircraft records](../spec/aircraft-records.md#bomber-batch-a-record-corrections-b-52h-b-2a-f-117a-bmb-a2-2026-11-15))
+lets the load pass its maximum take-off check.
+
+```text
+ordnance B2.PT: 4 source rows, 0 optional weapon rows, 86 compatible weapon placements, 0 tank placements; defaults and restart passed; catalog 22 normal, 83 Cheat
+ordnance audit: 48 aircraft, 20 recovered weapon stations, 4776 weapon placements, 233 tank placements, 82 weapon and 9 tank records; passed
+ordnance audit: 1 designator pods, 80 pod placements, one to an aircraft, loaded and restored through the saved mission; passed
+ordnance audit: 2 novelty records, 240 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
+```
+
+The `menus-ordnance-availability` battery expected line now reads 4,776 weapon
+placements. The `a2g-catalog` line and `tools/test_battery_a2g.py` match any weapon
+and pod count, so they are unchanged. Earlier sections that quote 4,792 weapon
+placements and 84 pods stay as written for their own states.

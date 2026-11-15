@@ -216,7 +216,7 @@ impl Configuration {
         }
         if positive.iter().any(|v| !v.is_finite() || *v <= 0.)
             || nonnegative.iter().any(|v| !v.is_finite() || *v < 0.)
-            || m.empty_lbs + m.internal_fuel_lbs > m.max_takeoff_lbs
+            || m.empty_lbs >= m.max_takeoff_lbs
             || [e.deployment_seconds, e.exhaust_seconds, e.control_seconds]
                 .iter()
                 .any(|v| !v.is_finite() || *v < 1. / 120.)
