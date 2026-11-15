@@ -473,3 +473,127 @@ over Mach 0.9 (593 kt). The real sea-level top speed was not found in any source
 read (Wikipedia, MILAVIA, MIGFlug, aerospaceweb.org, which lists it as unknown;
 MIGFlug gives a never-exceed 710 kt indicated), so 623 kt is the record's shape
 at the same factor, not a cited figure, and stays under that 710 kt limit.
+
+## Bomber batch A record corrections: B-52H, B-2A, F-117A (BMB-A2, 2026-11-15)
+
+**Opinionated (John, 2026-11-15, bomber decision round: "accept all", decisions 5,
+13, 16, 23 and 26), implemented by slice BMB-A2.** The source reviews in
+[the variety document](../formats/aircraft-variety.md) found values in the three
+bomber records that are not the real aircraft's. Like the batch 5 corrections above,
+each is a TORE override over the record, not retail behaviour, applied where
+`Aircraft::parse` reads the record (`aircraft_corrections.rs`,
+`aircraft_stations.rs`), only to its own identity and only while every value it
+replaces still holds the retail number. The decoder, the catalog and the retail
+rows stay documented as retail.
+
+| Aircraft | Field | Retail | Game | Source |
+| --- | --- | ---: | ---: | --- |
+| B-52H | Military thrust, lbf (eight engines) | 120,000 | 136,000 | 8 x TF33-P-3 at 17,000 lbf (Wikipedia "Pratt & Whitney TF33", variants list; Jane's text in `B52.INF` 75.6 kN; read 2026-11-15) |
+| B-52H | Empty weight, lb | 235,220 | 185,000 | Wikipedia "Boeing B-52 Stratofortress", Specifications (B-52H); aircraftinformation.info B-52H page (read 2026-11-15) |
+| B-52H | Internal fuel, lb | 199,000 | 312,197 | 47,975 US gal (same Wikipedia page); Jane's 174,130 L is about 308,000 lb |
+| B-52H | Fuel flow, lb/s (all engines, military) | 18 | 20 | 136,000 lbf x 0.52 lb/(lbf h) / 3,600 = 19.6; TF33-P-3 dry static sea-level TSFC 0.52 (Wikipedia "Thrust-specific fuel consumption", "Dry jet engines, static, sea level", read 2026-11-15) |
+| B-52H | Tail gun rounds (`M61.JT`, row 4) | 2,000 | 1,242 | the H's magazine (aircraftinformation.info B-52H page) |
+| B-2A | Thrust, lbf (four engines) | 114,000 | 69,200 | 4 x F118-GE-100 at 17,300 lbf (`B2.INF`; Air & Space Forces Magazine "B-2 Spirit"; read 2026-11-15) |
+| B-2A | Empty weight, lb | 100,000 | 158,000 | public sources 158,000 to 160,000 (aerospaceweb.org "B-2 data" 150,000 to 160,000); the record's number is the low end of the game's own Jane's range |
+| B-2A | Internal fuel, lb | 180,000 | 167,000 | Whiteman AFB fact sheet (as read in the B-2 review); the record is the low end of Jane's 180,000 to 200,000 |
+| B-2A | Maximum take-off, lb | 400,000 | 376,000 | `B2.INF` and aerospaceweb.org |
+| B-2A | Bay rows 5 to 8, flags | `0x1504` | `0x1104` | the designator bit `0x400` cleared (fitted, below) |
+| F-117A | Maximum take-off, lb | 54,000 | 52,500 | Wikipedia "Lockheed F-117 Nighthawk"; aerospaceweb.org "F-117 data" (read 2026-11-15); 54,000 is the `F105.PT` value |
+| F-117A | Ceiling (`maxAlt`), ft | 42,000 | 45,000 | Wikipedia (the same 42,000 sits on 15 records) |
+| F-117A | 1 G fast edge at 36,000 ft, ft/s | 1,020 (604 kt, Mach 1.05) | 891 (527.7 kt, Mach 0.92) | Mach 0.92 (Wikipedia infobox, aerospaceweb.org); figure **fitted** |
+| F-117A | Jammer row 2 default | `F18.ECM` | none | the real jet carried no jammer (below) |
+
+Unchanged on purpose: the B-52H's 488,000 lb maximum (it is the real figure), its
+ceiling and top speed; the B-2's ceiling (49,000 against 50,000), G rows and top
+speeds; the F-117's thrust (21,600 lbf, agrees with MILAVIA), empty weight and G rows.
+The B-52's gun moves to the tail cone, the pods and bays are cut, and scale and the
+night rule are left to their own slices.
+
+**Fuel flows.** The B-52's 18 lb/s is its own authored number (no other record shares
+it), so it is not a template copy; it implied 0.476 lb/(lbf h) at the corrected
+thrust against the cited 0.52, and is refit to 20 lb/s (1.8 percent over, the
+whole-pound record unit). The B-2's 6 lb/s is the B-1B record's (listed as a copy in
+the review) and, at 69,200 lbf, implies 0.312 lb/(lbf h) against the cited
+F118-GE-100's 0.375 (Wikipedia "Thrust-specific fuel consumption", read
+2026-11-15): the same method gives 7 lb/s, **not applied** (John listed only
+thrust, weights and fuel for the B-2); it is a one-row change. The F-117's 2 lb/s
+implies 0.333; no F404-F1D2 figure was found (the F404-GE-402's 1.74 reheat figure
+is not this engine), so it stays and is listed.
+
+**F-117 envelope.** Two things express the ceiling, as for the F-5E (B5-2): the
+record's `maxAlt` and the top edge of the 1 G polygon. `maxAlt` goes to 45,000 ft, and
+the two vertices at the top of the 1 G polygon (570 and 715 ft/s at 42,000 ft) and of
+the 0 G polygon (570 and 715 ft/s at 44,000 ft) move up by 3,000 ft, to 45,000 and
+47,000 ft; no other altitude moves. The top speed trims only the vertex at 36,000 ft
+of the fast edge: 1,020 to 891 ft/s on the 1 G polygon (the 0 G polygon keeps its
+70 ft/s step, 1,090 to 961). The sea-level vertex (1,000 ft/s, 592 kt, Mach 0.90)
+and the 40,000 ft vertex (847 ft/s, Mach 0.875) stay, so the edge falls from sea level
+to 36,000 ft at about Mach 0.90 to 0.92 everywhere. The F-5E's single scale (B5-5) would pull
+sea level to 517 to 530 kt, under the cited sea-level maximum, which is why the
+altitude vertex alone moves (the F117-0 suggestion). Every other row's fast side is
+then held to the new 1 G edge at its altitude (the `fitted_row` rule: the -1 and 2 G
+rows' 960 ft/s at 34,000 ft becomes 897). Both changes apply only when `maxAlt` has
+just been corrected and the 0 G and 1 G polygons are the retail ones.
+
+**Jammer.** `F18.ECM` carries the late-Cold-War jammer (deception 30 percent) and 30
+chaff and 30 flares ([radar](../radar.md)); clearing the row's default (the F-5E way,
+B5-2: the row keeps its place, mask, count and position, so no index moves) removes
+all three. The real F-117 carried no jammer, and emitting would defeat the stealth.
+Whether it carried chaff or flare dispensers: no source found says so (Wikipedia's
+F-117 page, which says whether it carries any radar detection equipment "remained
+classified as of 2008", has no countermeasure dispenser; a web search turned up none).
+Nothing is added in their place, as decided; a chaff and flare bundle is a one-line
+change if John wants one.
+
+**B-2 bay flags (fitted, agent decision 2026-11-15).** The four bay rows carry the
+designator bit `0x400`, which admits equipment (a targeting pod) and stores with more
+than one projectile a pod (`loading.rs`). B7 forbids a pod on a bomb bay and the real
+B-2 has no pod station, so the bit is cleared on those four rows only. The ordnance
+audit's pod placements fall 84 to 80, and the four stores that carry several projectiles
+in a pod (rocket and cluster pods) are no longer offered on the four bays: B-2
+weapon placements 102 to 86.
+
+**Full fuel over the maximum (a rule the repository did not have; opinionated,
+agent decision 2026-11-15).** The B-52H's real empty weight and fuel make 497,197 lb,
+9,197 lb over its 488,000 lb maximum, as on the real jet. Two checks refused that
+record outright: `Aircraft::parse` ("empty plus fuel exceeds MTOW") and the flight
+model's `Configuration::validate`. Both now require only that the empty weight leave
+room under the maximum (empty weight below it). The loadout already refused a takeoff over
+the maximum ("This plane is too heavy to take off. Remove stores or fuel."), but it
+started every aircraft with a full tank, so the B-52's default load would have been
+refused too. `Loadout::new` now starts the tank at what the maximum allows when a full
+tank would put the default load over it (whole pounds): 303,000 lb for the B-52H
+(488,000 less 185,000 and no external stores). The editor can still raise the fuel to
+312,197 lb, and the takeoff check then refuses it. No other aircraft's default load is
+over its maximum, so none changes. The flight model itself flies at any weight (the free
+flight and `--headless-flight` starts use the full 312,197 lb tank and no limit applies);
+the loadout total counts external stores only, so a bay load (the B-52's twelve Harpoons,
+16,560 lb) does not count against the maximum.
+
+**What a player notices (`performance_probe`, clean, local records, full fuel;
+before and after under `.local/m3-aircraft/checks/BMB-A2/`).**
+
+| Aircraft | Quantity | Before | After |
+| --- | --- | --- | --- |
+| B-52H | Level top speed, sea level / 36,000 ft | 384.7 kt / 514.9 kt (Mach 0.90) | same (the envelope's edge) |
+| B-52H | Time 316 to 460 kt at 36,000 ft; peak Ps there | 119 s; 56 ft/s | 124 s; 105 ft/s |
+| B-52H | Best sustained climb rate (Mach 0.8 schedule) | 102 ft/s, never above 552 ft | 105 ft/s, never above 571 ft |
+| B-52H | Sustained turn, Mach 0.7 at 15,000 / 30,000 ft | 1.31 G / 2.01 G | none above 20 degrees bank / 1.79 G |
+| B-52H | Instantaneous pull, Mach 0.7 at 1,000 ft | 1.52 G | 1.22 G |
+| B-2A | Level top speed, sea level / 36,000 ft | 444.1 kt / 518.1 kt (Mach 0.90) | 443.9 kt / 497.0 kt (Mach 0.87, now thrust limited) |
+| B-2A | Time to 400 kt at sea level; peak Ps there | 19 s; 79 ft/s | 36 s; 42 ft/s |
+| B-2A | Time 316 to 460 kt at 36,000 ft; peak Ps there | 23 s; 294 ft/s | 180 s; 56 ft/s |
+| B-2A | Climb (Mach 0.8 schedule): time to 5,000 / 10,000 ft | 565 s / 819 s (36,000 ft at 1,436 s) | 1,000 s / 1,411 s (highest reached 11,479 ft in 1,500 s) |
+| B-2A | Sustained turn, Mach 0.7 at 15,000 / 30,000 ft | 1.16 G / 1.70 G | 1.39 G / 2.00 G |
+| F-117A | Level top speed, sea level / 36,000 ft | 592.2 kt / 603.9 kt (Mach 1.05) | 592.2 kt / 527.5 kt (Mach 0.92) |
+| F-117A | Climb (Mach 0.8 schedule): highest altitude; time to 36,000 ft | 41,153 ft; 324 s | 44,510 ft; 381 s |
+| F-117A | Peak Ps at 36,000 ft; sustained turn at Mach 0.9, 30,000 ft | 123 ft/s; 1.56 G | 108 ft/s; 1.21 G |
+
+The B-2 now climbs and accelerates much more slowly, as decision 16 expected. The
+B-52 changes little where it was already limited by its sea-level edge (385 kt: it
+cannot hold the probe's 450 kt climb schedule before or after); the heavier fuel
+load weighs on its turns through the loaded-elevator rule (fuel over empty weight
+rises from 0.85 to 1.69). The F-117's climb is a little slower because the lowered
+fast edge raises drag everywhere (the shared drag law, as for the F-5E in B5-5).
+
+Logs are local: `.local/m3-aircraft/checks/BMB-A2/`.

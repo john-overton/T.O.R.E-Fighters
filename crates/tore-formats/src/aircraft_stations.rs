@@ -42,6 +42,23 @@ pub const MF1_BELLY: usize = 5;
 pub const MF1_BELLY_CAPACITY: i32 = 2;
 /// The Mirage F1's paired wing row (`MF1.PT` row 6, two `R550.JT`).
 pub const MF1_WING: usize = 6;
+/// The B-52's tail gun row (`B52.PT` row 4, `M61.JT`, slewed aft) whose round
+/// count [`adjust_defaults`] sets to the real magazine.
+pub const B52_GUN: usize = 4;
+/// The B-52H's magazine (BMB-A2, John's decision 13): 1,242 rounds of 20 mm
+/// (aircraftinformation.info B-52H page, read 2026-11-15, fed by the gunner's
+/// AN/ASG-21). The record carries 2,000, the Tu-95 and Tu-26 tail-gun rows'
+/// number.
+pub const B52_GUN_ROUNDS: i32 = 1_242;
+/// The B-2's four internal bay rows (`B2.PT` rows 5 to 8, flags `0x1504`):
+/// [`adjust_defaults`] clears the designator bit `0x400` on them.
+pub const B2_BAY_ROWS: std::ops::Range<usize> = 5..9;
+/// The designator bit of a station's flags (a targeting or laser pod may sit
+/// there, and a multi-store pod: `loading.rs`).
+pub const DESIGNATOR_BIT: i32 = 0x400;
+/// The F-117's jammer row (`F117.PT` row 2, `F18.ECM`), whose default
+/// [`adjust_defaults`] clears.
+pub const F117_JAMMER: usize = 2;
 /// The radar the F-5E carries in place of the generic `F18R.SEE`: the F-104
 /// record, the closest reviewed small-fighter radar (see [`adjust_defaults`]).
 pub const F5E_RADAR_RECORD: &str = "F104R.SEE";
@@ -370,10 +387,10 @@ fn is_retail(id: AircraftId, rows: &[Hardpoint]) -> bool {
                 h.location,
                 h.flags,
                 h.position,
-                h.store.as_deref(),
+                h.store.as_deref().unwrap_or(""),
                 h.count,
                 h.weight_class,
-            ) == (s.0, s.1, s.2, Some(s.3), s.4, s.5)
+            ) == (s.0, s.1, s.2, s.3, s.4, s.5)
         })
 }
 
@@ -554,6 +571,36 @@ fn default_signature(id: AircraftId) -> &'static [Signature] {
             (4, 0x1c5, [21, -10, -3], "R550.JT", 2, 20),
             (5, 0x85, [41, 3, -11], "R550.JT", 2, 4),
         ],
+        // The bomber batch A records (BMB-A2). The empty B-52 bay rows have no
+        // default store (`""`).
+        AircraftId::B52 => &[
+            (1, 0x1008, [0, 0, 0], "VIS300.SEE", 1, 0),
+            (1, 0x1008, [0, 0, 0], "B52R.SEE", 1, 0),
+            (1, 0x1008, [0, 0, 0], "B52.ECM", 1, 0),
+            (3, 0x1100, [0, -40, 39], "AGM84E.JT", 12, 166),
+            (1, 0x180a, [0, 20, -220], "M61.JT", 2_000, 0),
+            (3, 0x1120, [0, -40, 13], "", 12, 166),
+            (3, 0x1120, [0, -40, -13], "", 12, 166),
+        ],
+        AircraftId::B2 => &[
+            (1, 0x1008, [0, 0, 0], "VIS340.SEE", 1, 0),
+            (1, 0x1008, [0, 0, 0], "F18R.SEE", 1, 0),
+            (1, 0x1008, [0, 0, -50], "F18.ECM", 1, 0),
+            (1, 0x1008, [0, 0, 0], "PAVESPK.SEE", 1, 0),
+            (1, 0x1008, [0, 0, 0], "AV8IR.SEE", 1, 0),
+            (3, 0x1504, [-15, -38, 34], "MK82.JT", 32, 160),
+            (3, 0x1504, [14, -38, 35], "MK82.JT", 32, 160),
+            (3, 0x1504, [-15, -38, 6], "PAVEWA3.JT", 4, 160),
+            (3, 0x1504, [14, -38, 7], "PAVEWA3.JT", 4, 160),
+        ],
+        AircraftId::F117 => &[
+            (1, 0x1008, [0, 0, 0], "VIS340.SEE", 1, 0),
+            (1, 0x1008, [0, 0, 0], "PAVESPK.SEE", 1, 0),
+            (1, 0x1008, [0, 0, -50], "F18.ECM", 1, 0),
+            (1, 0x1008, [0, 0, 0], "AV8IR.SEE", 1, 0),
+            (3, 0x1100, [-10, -22, -2], "PAVEWA3.JT", 1, 20),
+            (3, 0x1100, [10, -22, -2], "PAVEWA3.JT", 1, 20),
+        ],
         _ => &[],
     }
 }
@@ -594,6 +641,23 @@ fn default_signature(id: AircraftId) -> &'static [Signature] {
 ///   The alternatives are `F4BR.SEE` (the same ranges, a two-seat interceptor's
 ///   set) and `YAK141R.SEE` (40 / 25 nm, Transitional); `F8R.SEE` (35 / 20 nm)
 ///   is closest in range but has no reviewed preset and would never switch on.
+/// - **B-52** (`B52.PT` row 4, the tail gun; BMB-A2, John's decision 13): the
+///   row's round count is 1,242 in place of 2,000, the real H magazine
+///   ([`B52_GUN_ROUNDS`]). The gun keeps its row, mask, slew, weight class and
+///   position; moving the mount to the tail cone is the B-52 station slice's.
+/// - **B-2** (`B2.PT` rows 5 to 8, the four bay rows; BMB-A2, John's decision
+///   16 and the coordinator's call on the BMB-A1 finding): the designator bit
+///   `0x400` of the flags (`0x1504`) is cleared (`0x1104`), so no targeting or
+///   laser pod and no multi-store pod is offered on a bomb bay (B7: the real
+///   jet has no pod station). **Fitted** (agent decision 2026-11-15). The
+///   default stores, counts, classes and positions stay; every other bit stays.
+///   This is the one place the function changes a row's flags.
+/// - **F-117** (`F117.PT` row 2): no default `F18.ECM`. The real F-117
+///   carried no jammer (docs/formats/aircraft-variety.md, "F-117 sensors,
+///   jammer and pods"), and the record's row also carried 30 chaff and 30
+///   flares, which go with it (no source found for a chaff or flare dispenser
+///   on the real jet, and none is added). The row keeps its place, mask, count
+///   and position, the way the F-5E's did in B5-2.
 pub fn adjust_defaults(id: AircraftId, rows: &mut [Hardpoint]) {
     if !is_retail(id, rows) {
         return;
@@ -608,6 +672,13 @@ pub fn adjust_defaults(id: AircraftId, rows: &mut [Hardpoint]) {
             rows[MF1_CENTRELINE].store = None;
             rows[MF1_BELLY].count = MF1_BELLY_CAPACITY;
         }
+        AircraftId::B52 => rows[B52_GUN].count = B52_GUN_ROUNDS,
+        AircraftId::B2 => {
+            for row in &mut rows[B2_BAY_ROWS] {
+                row.flags &= !DESIGNATOR_BIT;
+            }
+        }
+        AircraftId::F117 => rows[F117_JAMMER].store = None,
         _ => {}
     }
 }
@@ -1123,7 +1194,7 @@ mod tests {
             location,
             flags,
             position,
-            store: Some(store.into()),
+            store: (!store.is_empty()).then(|| store.into()),
             count,
             weight_class,
         }
@@ -1485,5 +1556,60 @@ mod tests {
             adjust_defaults(AircraftId::F5E, &mut edited);
             assert_eq!(key(&edited), before);
         }
+    }
+    #[test]
+    fn the_bombers_get_the_real_gun_rounds_a_bay_without_pod_flags_and_no_jammer() {
+        // BMB-A2 (John, 2026-11-15; the B-2 flag is a fitted agent call).
+        // B-52: 1,242 rounds on the tail gun row, nothing else moves.
+        let retail = default_rows(AircraftId::B52);
+        assert_eq!(retail.len(), 7);
+        assert_eq!(retail[5].store, None);
+        let mut rows = retail.clone();
+        adjust_defaults(AircraftId::B52, &mut rows);
+        let mut expected = key(&retail);
+        expected[B52_GUN].4 = 1_242;
+        assert_eq!(key(&rows), expected);
+        assert_eq!(rows[B52_GUN].store.as_deref(), Some("M61.JT"));
+        adjust_defaults(AircraftId::B52, &mut rows);
+        assert_eq!(key(&rows), expected);
+        // B-2: the four bay rows lose only the designator bit (0x1504 to
+        // 0x1104); the sensor rows and every other field stay.
+        let retail = default_rows(AircraftId::B2);
+        let mut rows = retail.clone();
+        adjust_defaults(AircraftId::B2, &mut rows);
+        let mut expected = key(&retail);
+        for row in &mut expected[5..9] {
+            row.1 = 0x1104;
+        }
+        assert_eq!(key(&rows), expected);
+        assert!(rows[5..9].iter().all(|h| h.flags & DESIGNATOR_BIT == 0));
+        assert!(rows[..5].iter().all(|h| h.flags == 0x1008));
+        // F-117: the jammer row holds nothing, in its place with its mask.
+        let retail = default_rows(AircraftId::F117);
+        assert_eq!(retail[F117_JAMMER].store.as_deref(), Some("F18.ECM"));
+        let mut rows = retail.clone();
+        adjust_defaults(AircraftId::F117, &mut rows);
+        let mut expected = key(&retail);
+        expected[F117_JAMMER].3 = None;
+        assert_eq!(key(&rows), expected);
+        assert_eq!(
+            (rows[F117_JAMMER].flags, rows[F117_JAMMER].position),
+            (0x1008, [0, 0, -50])
+        );
+        // The same rows on another identity, or an edited record, stay retail.
+        for (id, from) in [
+            (AircraftId::F117, AircraftId::B2),
+            (AircraftId::B52, AircraftId::F117),
+        ] {
+            let mut other = default_rows(from);
+            let before = key(&other);
+            adjust_defaults(id, &mut other);
+            assert_eq!(key(&other), before);
+        }
+        let mut edited = default_rows(AircraftId::B2);
+        edited[0].weight_class += 1;
+        let before = key(&edited);
+        adjust_defaults(AircraftId::B2, &mut edited);
+        assert_eq!(key(&edited), before);
     }
 }

@@ -42,7 +42,9 @@ fn rows(aircraft: &Aircraft) -> Vec<(String, i32)> {
 }
 
 /// Each record parses as its own identity (the `typeSize` arms 612, 660 and
-/// 588) and its decoded rows are the retail ones, in order.
+/// 588) and its decoded rows are the retail ones, in order, with the BMB-A2
+/// station corrections: the B-52's 1,242 gun rounds and the F-117's empty
+/// jammer row.
 #[test]
 fn the_three_records_parse_as_their_own_identities_with_their_retail_rows() {
     let Some(fa2) = fa2() else { return };
@@ -54,7 +56,7 @@ fn the_three_records_parse_as_their_own_identities_with_their_retail_rows() {
                 ("B52R.SEE", 1),
                 ("B52.ECM", 1),
                 ("AGM84E.JT", 12),
-                ("M61.JT", 2000),
+                ("M61.JT", 1242),
                 ("", 12),
                 ("", 12),
             ],
@@ -78,7 +80,7 @@ fn the_three_records_parse_as_their_own_identities_with_their_retail_rows() {
             &[
                 ("VIS340.SEE", 1),
                 ("PAVESPK.SEE", 1),
-                ("F18.ECM", 1),
+                ("", 1),
                 ("AV8IR.SEE", 1),
                 ("PAVEWA3.JT", 1),
                 ("PAVEWA3.JT", 1),

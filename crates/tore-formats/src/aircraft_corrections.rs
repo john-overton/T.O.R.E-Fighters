@@ -467,6 +467,102 @@ const MF1_RETAIL_PLUS_7: [[f64; 2]; 6] = [
     [1_230., 0.],
 ];
 
+/// B-52H (BMB-A2, **opinionated**, John, 2026-11-15, decision 5 "all real").
+/// `B52.PT` is the game's own authored record (no template matches it), and
+/// three values are off the real B-52H (docs/formats/aircraft-variety.md,
+/// "B-52 source review"): empty weight 185,000 lb (Wikipedia "Boeing B-52
+/// Stratofortress", Specifications (B-52H); aircraftinformation.info B-52H
+/// page, both read 2026-11-15; the record carries 235,220), internal fuel
+/// 312,197 lb (47,975 US gal, the same Wikipedia page; the record carries
+/// 199,000; Jane's text in `B52.INF` gives 174,130 L, about 308,000 lb) and
+/// military thrust 136,000 lbf, eight TF33-P-3 at 17,000 each (Wikipedia
+/// "Pratt & Whitney TF33", variants list; Jane's 75.6 kN; the record carries
+/// 120,000). Maximum takeoff stays the record's 488,000 lb, which is also the
+/// real figure. Empty plus full fuel is then 497,197 lb, over the maximum, as
+/// on the real jet: `Loadout::new` starts the tank at what the maximum allows
+/// and the loadout refuses a takeoff over it.
+pub const B52_EMPTY_LB: i32 = 185_000;
+pub const B52_INTERNAL_FUEL_LB: i32 = 312_197;
+pub const B52_THRUST_LBF: i32 = 136_000;
+/// B-52H fuel flow (BMB-A2, **opinionated**): the record's `fuelConsumption`
+/// 18 lb/s (whole pounds a second for all eight engines at full military
+/// power, [`TORNADO_FUEL_LB_PER_S`]) is the B-52's own authored number, not a
+/// template (shared with no other record). It implies 0.476 lb/(lbf h) at the
+/// corrected thrust. The corrected flow is 136,000 lbf x 0.52 lb/(lbf h) /
+/// 3,600 s = 19.6, so 20 lb/s (1.8 percent over): the TF33-P-3 static
+/// sea-level dry figure, 0.52 (Wikipedia "Thrust-specific fuel consumption",
+/// "Dry jet engines, static, sea level", read 2026-11-15). No afterburner.
+pub const B52_FUEL_LB_PER_S: i32 = 20;
+
+/// B-2A (BMB-A2, **opinionated**, John, 2026-11-15, decision 16 "all real").
+/// `B2.PT` is the B-1B record with 48 values re-authored; four are off the
+/// real B-2A: thrust 69,200 lbf (four F118-GE-100 at 17,300 each, `B2.INF`
+/// and Air & Space Forces Magazine "B-2 Spirit", read 2026-11-15; the record
+/// carries 114,000), empty weight about 158,000 lb (public sources 158,000 to
+/// 160,000, aerospaceweb "B-2 data" 150,000 to 160,000; the record's 100,000
+/// is the low end of the game's own Jane's range), internal fuel about 167,000
+/// lb (Whiteman AFB fact sheet; the record carries 180,000, also the low end
+/// of Jane's 180,000 to 200,000) and maximum takeoff 376,000 lb (`B2.INF`,
+/// aerospaceweb; the record carries 400,000). The sources are those the B2-0
+/// review read (docs/formats/aircraft-variety.md, "B-2 source review").
+pub const B2_THRUST_LBF: i32 = 69_200;
+pub const B2_EMPTY_LB: i32 = 158_000;
+pub const B2_INTERNAL_FUEL_LB: i32 = 167_000;
+pub const B2_MAX_TAKEOFF_LB: i32 = 376_000;
+
+/// F-117A (BMB-A2, **opinionated**, John, 2026-11-15, decisions 23 and 26).
+/// Maximum takeoff 52,500 lb (Wikipedia "Lockheed F-117 Nighthawk",
+/// aerospaceweb "F-117 data", both read 2026-11-15; the record's 54,000 is
+/// the `F105.PT` value) and ceiling 45,000 ft (Wikipedia; the record's 42,000
+/// is shared with 15 records). `maxAlt` is the record's ceiling field; the
+/// flight model's ceiling is the top of the 1 G polygon, which
+/// [`fit_envelopes`] moves to the same altitude (the F-5E's way, B5-2).
+pub const F117_MAX_TAKEOFF_LB: i32 = 52_500;
+pub const F117_CEILING_FT: i32 = 45_000;
+const F117_RETAIL_CEILING_FT: i32 = 42_000;
+/// The F-117's high-altitude top speed (BMB-A2, John's decision 23, "about
+/// Mach 0.92"; the Mach number is the real one, Wikipedia "Lockheed F-117
+/// Nighthawk" infobox, aerospaceweb; the figure is **fitted**): the record's
+/// 1 G fast edge reaches 1,020 ft/s (604 kt, Mach 1.05) at 36,000 ft, past the
+/// speed of sound, which the real subsonic jet never was. Mach 0.92 at
+/// 36,000 ft is 527.7 kt, 891 ft/s (sound 573.6 kt, 968 ft/s). The edge's
+/// other vertices stay: sea level keeps the record's 1,000 ft/s (592 kt, Mach
+/// 0.90), the 40,000 ft vertex its 847 ft/s (Mach 0.875). TORE's level top
+/// speed is the 1 G fast edge divided by the loaded-drag factor, which is 1
+/// for this record (measured, docs/baselines/variety-flight.md), so the model
+/// flies the edge. The 0 G polygon keeps its 70 ft/s step over the 1 G edge
+/// there (1,090 to 961), and every other row's fast side is held to the new 1
+/// G edge ([`hold_to_one_g`]).
+const F117_TOP_FPS: f64 = 891.;
+const F117_RETAIL_TOP_FPS: f64 = 1_020.;
+const F117_RETAIL_ZERO_G_TOP_FPS: f64 = 1_090.;
+/// The altitude of the vertex the trim moves.
+const F117_TRIM_ALTITUDE_FT: f64 = 36_000.;
+/// The retail 0 G and 1 G rows (speed ft/s, altitude ft). The top edges are the
+/// record's ceiling (42,000 ft for 1 G; the 0 G row reaches 2,000 ft higher).
+const F117_RETAIL_ZERO_G: [[f64; 2]; 9] = [
+    [250., 0.],
+    [265., 16_000.],
+    [327., 29_500.],
+    [418., 38_750.],
+    [570., 44_000.],
+    [715., 44_000.],
+    [897., 42_000.],
+    [1_090., 36_000.],
+    [1_060., 0.],
+];
+const F117_RETAIL_ONE_G: [[f64; 2]; 9] = [
+    [285., 0.],
+    [305., 17_000.],
+    [367., 30_500.],
+    [458., 37_750.],
+    [570., 42_000.],
+    [715., 42_000.],
+    [847., 40_000.],
+    [1_020., 36_000.],
+    [1_000., 0.],
+];
+
 fn top_altitude(e: &Envelope) -> f64 {
     e.points.iter().map(|p| p[1]).fold(f64::MIN, f64::max)
 }
@@ -567,6 +663,13 @@ fn trim_top_speed(
             p[0] = (p[0] * scale).round().max(slowest);
         }
     }
+    hold_to_one_g(envelopes)
+}
+
+/// Holds every row but 0 G and 1 G to the 1 G polygon's fast edge at its
+/// altitude (the rule of [`fitted_row`]), so no higher row reaches past it.
+/// False when the record has no 1 G row.
+fn hold_to_one_g(envelopes: &mut [Envelope]) -> bool {
     let Some(one) = envelopes.iter().find(|e| e.g == 1).cloned() else {
         return false;
     };
@@ -732,6 +835,37 @@ pub(crate) fn fit_envelopes(
                 GRIPEN_RETAIL_CEILING_FT,
                 GRIPEN_RETAIL_ZERO_G_TOP_FT,
             )
+        }
+        AircraftId::F117 => {
+            // The ceiling and the top-speed trim follow the corrected `maxAlt`
+            // and need the retail 0 G and 1 G polygons (BMB-A2).
+            let corrected =
+                object.get("maxAlt").and_then(|t| t.number().ok()) == Some(F117_CEILING_FT);
+            let zero = envelopes.iter().position(|e| e.g == 0);
+            let one = envelopes.iter().position(|e| e.g == 1);
+            let (Some(zero), Some(one)) = (zero, one) else {
+                return false;
+            };
+            if !corrected
+                || envelopes[zero].points != F117_RETAIL_ZERO_G
+                || envelopes[one].points != F117_RETAIL_ONE_G
+            {
+                return false;
+            }
+            let shift = f64::from(F117_CEILING_FT - F117_RETAIL_CEILING_FT);
+            let step = F117_RETAIL_ZERO_G_TOP_FPS - F117_RETAIL_TOP_FPS;
+            for (row, top_fps) in [(zero, F117_TOP_FPS + step), (one, F117_TOP_FPS)] {
+                let top = top_altitude(&envelopes[row]);
+                for p in &mut envelopes[row].points {
+                    if p[1] == top {
+                        p[1] += shift;
+                    } else if p[1] == F117_TRIM_ALTITUDE_FT {
+                        p[0] = top_fps;
+                    }
+                }
+            }
+            hold_to_one_g(envelopes);
+            true
         }
         AircraftId::Mf1 => {
             if min != Some(MF1_RETAIL_G_MIN) || max != Some(MF1_RETAIL_G_MAX) {
@@ -1061,6 +1195,80 @@ pub const CORRECTIONS: &[Correction] = &[
         key: "aftFuelConsumption",
         retail: 23,
         corrected: MF1_AB_FUEL_LB_PER_S,
+    },
+    // BMB-A2 (opinionated, John, 2026-11-15): the bomber batch A records.
+    // B-52H: real thrust, weights and fuel, and the TF33 flow.
+    Correction {
+        id: AircraftId::B52,
+        block: Block::Object,
+        key: "weight",
+        retail: 235_220,
+        corrected: B52_EMPTY_LB,
+    },
+    Correction {
+        id: AircraftId::B52,
+        block: Block::Plane,
+        key: "internalFuel",
+        retail: 199_000,
+        corrected: B52_INTERNAL_FUEL_LB,
+    },
+    Correction {
+        id: AircraftId::B52,
+        block: Block::Plane,
+        key: "thrust",
+        retail: 120_000,
+        corrected: B52_THRUST_LBF,
+    },
+    Correction {
+        id: AircraftId::B52,
+        block: Block::Plane,
+        key: "fuelConsumption",
+        retail: 18,
+        corrected: B52_FUEL_LB_PER_S,
+    },
+    // B-2A: real thrust, weights and fuel (the flow stays, see the docs).
+    Correction {
+        id: AircraftId::B2,
+        block: Block::Object,
+        key: "weight",
+        retail: 100_000,
+        corrected: B2_EMPTY_LB,
+    },
+    Correction {
+        id: AircraftId::B2,
+        block: Block::Plane,
+        key: "internalFuel",
+        retail: 180_000,
+        corrected: B2_INTERNAL_FUEL_LB,
+    },
+    Correction {
+        id: AircraftId::B2,
+        block: Block::Plane,
+        key: "thrust",
+        retail: 114_000,
+        corrected: B2_THRUST_LBF,
+    },
+    Correction {
+        id: AircraftId::B2,
+        block: Block::Plane,
+        key: "maxTakeoffWeight",
+        retail: 400_000,
+        corrected: B2_MAX_TAKEOFF_LB,
+    },
+    // F-117A: the real maximum takeoff weight and ceiling.
+    Correction {
+        id: AircraftId::F117,
+        block: Block::Plane,
+        key: "maxTakeoffWeight",
+        retail: 54_000,
+        corrected: F117_MAX_TAKEOFF_LB,
+    },
+    Correction {
+        id: AircraftId::F117,
+        block: Block::Object,
+        key: "maxAlt",
+        retail: F117_RETAIL_CEILING_FT,
+        corrected: F117_CEILING_FT,
     },
 ];
 

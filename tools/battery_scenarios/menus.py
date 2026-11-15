@@ -496,7 +496,8 @@ def scenarios() -> list[Scenario]:
             # TOR-6b (2026-11-11, m3-tornado): 4,623 weapon placements, the Tornado's AIM-9 side rail row takes seven missiles (John's side rail, appended in the retired outer pair's place); the coordinator recomputes the total at integration.
             # Tornado merge (2026-11-11): the Tornado's refusals and side rail are independent of the F-15E's and the Mirage F1's, so 4,610 less the Tornado's 29 (TOR.PT 85 to 56) = 4,581 weapon placements (measured).
             # BMB-A1 (2026-11-15): 48 aircraft, 20 recovered stations and 4,792 weapon placements after the B-52 (71), B-2 (102) and F-117 (38) joined; tanks stay 233.
-            expect=[r"ordnance audit: 48 aircraft, 20 recovered weapon stations, 4792 weapon placements, 233 tank placements, 82 weapon and 9 tank records; passed"],
+            # BMB-A2 (2026-11-15): 4,776 weapon placements, the B-2's four bay rows lose the designator bit 0x400 (B-2 102 to 86; designator pods 84 to 80).
+            expect=[r"ordnance audit: 48 aircraft, 20 recovered weapon stations, 4776 weapon placements, 233 tank placements, 82 weapon and 9 tank records; passed"],
             notes="All reviewed source stations, compatible supported weapons/tanks, empty defaults and accepted-load restoration. The audit fails when a supported weapon or tank record is missing or a pinned count moves (ordnance_audit.rs).",
         )
     )

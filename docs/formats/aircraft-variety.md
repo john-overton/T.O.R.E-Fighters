@@ -7988,3 +7988,64 @@ First measurements of the retail rows; each aircraft's station slice owns its
 count. The `menus-ordnance-availability` and `a2g-catalog` battery expected
 lines and `tools/test_battery_a2g.py` follow
 ([ordnance availability](../baselines/ordnance-availability.md)).
+
+## Bomber batch A record and station corrections (BMB-A2, 2026-11-15)
+
+Opinionated (John, 2026-11-15, "accept all" of the bomber decision round:
+decisions 5, 13, 16, 23 and 26), implemented by slice BMB-A2. Earlier sections
+above stay as written for the retail state; this one records what the game now
+does. The behaviour and the sources of every changed number are in
+[aircraft records](../spec/aircraft-records.md#bomber-batch-a-record-corrections-b-52h-b-2a-f-117a-bmb-a2-2026-11-15);
+the audit pins in [ordnance availability](../baselines/ordnance-availability.md).
+
+**Values (retail to game).**
+
+| Aircraft | Field | Retail | Game |
+| --- | --- | ---: | ---: |
+| B-52H | Thrust, lbf / empty weight, lb / internal fuel, lb | 120,000 / 235,220 / 199,000 | 136,000 / 185,000 / 312,197 |
+| B-52H | Fuel flow, lb/s | 18 | 20 (TF33-P-3 TSFC 0.52) |
+| B-52H | Tail gun rounds (row 4) | 2,000 | 1,242 |
+| B-2A | Thrust, lbf / empty weight, lb | 114,000 / 100,000 | 69,200 / 158,000 |
+| B-2A | Internal fuel, lb / maximum take-off, lb | 180,000 / 400,000 | 167,000 / 376,000 |
+| B-2A | Bay rows 5 to 8 flags | `0x1504` | `0x1104` |
+| F-117A | Maximum take-off, lb / ceiling, ft | 54,000 / 42,000 | 52,500 / 45,000 |
+| F-117A | 1 G fast edge at 36,000 ft, ft/s | 1,020 (Mach 1.05) | 891 (Mach 0.92) |
+| F-117A | Row 2 default | `F18.ECM` | none |
+
+**The F-117 envelope, point by point (speed ft/s at altitude ft).**
+
+| Row | Retail | Game |
+| --- | --- | --- |
+| 1 G | 285@0, 305@17000, 367@30500, 458@37750, 570@42000, 715@42000, 847@40000, 1020@36000, 1000@0 | 285@0, 305@17000, 367@30500, 458@37750, 570@45000, 715@45000, 847@40000, 891@36000, 1000@0 |
+| 0 G | 250@0, 265@16000, 327@29500, 418@38750, 570@44000, 715@44000, 897@42000, 1090@36000, 1060@0 | the same with the two top vertices at 47000 and 961@36000 |
+| -1 G and 2 G | 315@0, 335@17000, 392@25500, 481@30750, 570@34000, 710@35000, 960@34000, 980@0 | 960@34000 becomes 897@34000 (held to the 1 G edge); the rest as retail |
+
+No other row's vertex moves (every other fast side is already inside the new 1 G
+edge). Guards: the corrections apply only while `maxAlt`, the 0 G and 1 G rows and the
+station rows are the retail ones (`aircraft_corrections.rs`, `aircraft_stations.rs`).
+
+**The B-52 fuel finding (the record validators).** Empty 185,000 plus fuel 312,197
+is 497,197 lb, over the 488,000 lb maximum. The record validator (`Aircraft::parse`,
+"aircraft empty plus fuel exceeds MTOW") and `Configuration::validate` rejected that
+sum; both now reject only an empty weight at or above the maximum. TORE had no fuel
+cap: `Loadout::new` filled the tank and the takeoff check refused an overweight load,
+so the default B-52 load would have been refused. `Loadout::new` now caps the starting
+tank so the default load fits (303,000 lb, whole pounds); no other aircraft is
+touched. Free flight and `--headless-flight` use the model's full tank. Loadout
+weight counts external stores only (`!s.internal`), so the B-52's and B-2's bay loads
+(16,560 lb of Harpoons, up to about 50,000 lb at the row classes) are outside the
+takeoff total.
+
+**Station rows.** The B-52's tail gun row (4) takes 1,242 rounds; its position stays at
+(0, 6.7, -73.3) ft (B52-5 moves it to the tail cone). The B-2's four bay rows lose the
+designator bit, so pods and the several-projectile stores are no longer offered there
+(weapon placements 102 to 86, pods 84 to 80). The F-117's row 2 keeps its place,
+mask, count and position but no default store, which removes the late-Cold-War
+jammer and 30 chaff and 30 flares of `F18.ECM`; no dispenser is added.
+
+**Not corrected, listed for John.** B-2 fuel flow (6 lb/s, the B-1B's; the cited
+F118-GE-100 TSFC 0.375 gives 7), F-117 fuel flow (2 lb/s, 0.333 implied; no cited
+F404-F1D2 value found), the B-2 and B-52 top speeds and sea-level edges, the B-2
+49,000 ft ceiling (real 50,000), and the engine count: `Configuration::from_source`
+clamps `engines` to 1 to 4 (`live.rs`), so the B-52's eight engines read as four
+(an existing behaviour, not touched here; B52-8's call).

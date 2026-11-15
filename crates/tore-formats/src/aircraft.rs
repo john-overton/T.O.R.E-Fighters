@@ -1252,10 +1252,12 @@ impl Aircraft {
                 return Err(invalid("nonpositive aircraft mass/thrust"));
             }
         }
-        if object["weight"].number()? as i64 + plane["internalFuel"].number()? as i64
-            > plane["maxTakeoffWeight"].number()? as i64
-        {
-            return Err(invalid("aircraft empty plus fuel exceeds MTOW"));
+        // The empty aircraft must leave room under the maximum takeoff weight.
+        // A full tank may pass it (the B-52H's real 312,197 lb of fuel does,
+        // BMB-A2): the loadout caps the fuel it starts with
+        // (`Loadout::new`) and refuses a takeoff over the maximum.
+        if object["weight"].number()? as i64 >= plane["maxTakeoffWeight"].number()? as i64 {
+            return Err(invalid("aircraft empty weight reaches MTOW"));
         }
         Ok(Self {
             id,
@@ -2365,6 +2367,174 @@ mod profile_tests {
         )
         .unwrap();
         assert_eq!((e.number("thrust"), e.number("weight")), (35_271., 41_885.));
+    }
+    #[test]
+    fn the_b52_b2_and_f117_read_their_real_figures_only_while_retail() {
+        // BMB-A2 (John, 2026-11-15, decisions 5, 16, 23 and 26).
+        // B-52H: thrust 136,000, empty 185,000, fuel 312,197 (over the 488,000
+        // maximum with the empty weight, as on the real jet), flow 20 lb/s.
+        let b52 = [
+            ("engines", 8),
+            ("weight", 235_220),
+            ("thrust", 120_000),
+            ("maxTakeoffWeight", 488_000),
+            ("internalFuel", 199_000),
+            ("fuelConsumption", 18),
+        ];
+        let text = batch_text(
+            "B52.PT",
+            "B-52",
+            "B-52 Stratofortress",
+            612,
+            (-2, 3),
+            &plain_rows(-2, 3),
+            &b52,
+        );
+        let a = Aircraft::parse(text.as_bytes()).unwrap();
+        assert_eq!(a.id, AircraftId::B52);
+        assert_eq!(a.number("thrust"), 136_000.);
+        assert_eq!(a.number("weight"), 185_000.);
+        assert_eq!(a.number("internalFuel"), 312_197.);
+        assert_eq!(a.number("fuelConsumption"), 20.);
+        assert_eq!(a.number("maxTakeoffWeight"), 488_000.);
+        assert!(a.number("weight") + a.number("internalFuel") > a.number("maxTakeoffWeight"));
+        // One changed number keeps the whole record retail.
+        let edited = b52.map(|(k, v)| if k == "thrust" { (k, 121_000) } else { (k, v) });
+        let text = batch_text(
+            "B52.PT",
+            "B-52",
+            "B-52 Stratofortress",
+            612,
+            (-2, 3),
+            &plain_rows(-2, 3),
+            &edited,
+        );
+        let a = Aircraft::parse(text.as_bytes()).unwrap();
+        assert_eq!(
+            (a.number("thrust"), a.number("weight")),
+            (121_000., 235_220.)
+        );
+        // B-2A: thrust 69,200, empty 158,000, fuel 167,000, maximum 376,000;
+        // the fuel flow stays the retail 6 lb/s.
+        let b2 = [
+            ("engines", 4),
+            ("weight", 100_000),
+            ("thrust", 114_000),
+            ("aftThrust", 0),
+            ("maxTakeoffWeight", 400_000),
+            ("internalFuel", 180_000),
+            ("fuelConsumption", 6),
+        ];
+        let text = batch_text(
+            "B2.PT",
+            "B-2",
+            "B- 2 Spirit",
+            660,
+            (-1, 3),
+            &plain_rows(-1, 3),
+            &b2,
+        );
+        let a = Aircraft::parse(text.as_bytes()).unwrap();
+        assert_eq!(a.id, AircraftId::B2);
+        assert_eq!(
+            (a.number("thrust"), a.number("weight")),
+            (69_200., 158_000.)
+        );
+        assert_eq!(
+            (a.number("internalFuel"), a.number("maxTakeoffWeight")),
+            (167_000., 376_000.)
+        );
+        assert_eq!(a.number("fuelConsumption"), 6.);
+        // F-117A: maximum 52,500 lb, ceiling 45,000 ft with both top edges
+        // moved, the 1 G fast edge at 36,000 ft trimmed to Mach 0.92 (891
+        // ft/s), sea level kept, the other rows held to the 1 G edge.
+        let mut rows = plain_rows(-3, 6);
+        let row = |p: &[[i32; 2]]| p.to_vec();
+        rows[3].1 = row(&[
+            [250, 0],
+            [265, 16_000],
+            [327, 29_500],
+            [418, 38_750],
+            [570, 44_000],
+            [715, 44_000],
+            [897, 42_000],
+            [1_090, 36_000],
+            [1_060, 0],
+        ]);
+        rows[4].1 = row(&[
+            [285, 0],
+            [305, 17_000],
+            [367, 30_500],
+            [458, 37_750],
+            [570, 42_000],
+            [715, 42_000],
+            [847, 40_000],
+            [1_020, 36_000],
+            [1_000, 0],
+        ]);
+        rows[2].1 = row(&[
+            [315, 0],
+            [335, 17_000],
+            [392, 25_500],
+            [481, 30_750],
+            [570, 34_000],
+            [710, 35_000],
+            [960, 34_000],
+            [980, 0],
+        ]);
+        let f117 = [
+            ("engines", 2),
+            ("weight", 29_500),
+            ("maxAlt", 42_000),
+            ("thrust", 21_600),
+            ("maxTakeoffWeight", 54_000),
+            ("internalFuel", 18_500),
+        ];
+        let text = batch_text(
+            "F117.PT",
+            "F-117",
+            "F-117A Nighthawk",
+            588,
+            (-3, 6),
+            &rows,
+            &f117,
+        );
+        let a = Aircraft::parse(text.as_bytes()).unwrap();
+        assert_eq!(a.id, AircraftId::F117);
+        assert_eq!(
+            (a.number("maxTakeoffWeight"), a.number("maxAlt")),
+            (52_500., 45_000.)
+        );
+        assert_eq!(a.number("thrust"), 21_600.);
+        let env = |g: i32| a.envelopes.iter().find(|e| e.g == g).unwrap();
+        assert_eq!(
+            env(1).points,
+            [
+                [285., 0.],
+                [305., 17_000.],
+                [367., 30_500.],
+                [458., 37_750.],
+                [570., 45_000.],
+                [715., 45_000.],
+                [847., 40_000.],
+                [891., 36_000.],
+                [1_000., 0.]
+            ]
+        );
+        assert_eq!(
+            env(0).points[4..],
+            [
+                [570., 47_000.],
+                [715., 47_000.],
+                [897., 42_000.],
+                [961., 36_000.],
+                [1_060., 0.]
+            ]
+        );
+        // The -1 G row's fast side is held to the 1 G edge at 34,000 ft
+        // (891 + 109 x 2,000 / 36,000 = 897).
+        assert_eq!(env(-1).points[6], [897., 34_000.]);
+        assert_eq!(env(-1).points[7], [980., 0.]);
     }
     #[test]
     fn the_mirage_f1_reads_one_atar_9k_50_and_the_f5e_its_real_fuel_g_and_ceiling() {
