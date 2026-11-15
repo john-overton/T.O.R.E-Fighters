@@ -271,10 +271,14 @@ impl Control {
             Self::Brake => Expectation::Unknown,
             // B52-3: the interim open-bay plates (word 7a20) are drawn at the bay
             // fraction (B52-5 replaces them with the fitted bay and doors).
-            Self::Bay if matches!(
-                id,
-                Id::F22 | Id::F22n | Id::Faxx | Id::F117 | Id::B2 | Id::B52
-            ) => {
+            // B2-3: the same for the B-2's interim bay plates (word 6486; B2-5
+            // replaces them with real bay doors).
+            Self::Bay
+                if matches!(
+                    id,
+                    Id::F22 | Id::F22n | Id::Faxx | Id::F117 | Id::B2 | Id::B52
+                ) =>
+            {
                 Expectation::Required
             }
             Self::Bay => Expectation::Unknown,
