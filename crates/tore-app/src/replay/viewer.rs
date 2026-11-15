@@ -3594,7 +3594,8 @@ impl Viewer {
         let held = held.is_some();
         // The back view from the player's seat draws its airframe but is
         // heard from the cockpit, as flight hears it.
-        let seat = crate::mirrors::pilot_eye(
+        let seat = crate::mirrors::pilot_eye_of(
+            picture.player.aircraft,
             picture.player.position,
             Body::posed(&picture.player, 1.).basis(),
         );
@@ -5419,7 +5420,7 @@ mod tests {
         let picture = v.playback.picture(300, 1.);
         let pose = picture.target(1).unwrap();
         let body = Body::posed(pose, 1.);
-        let eye = crate::mirrors::pilot_eye(pose.position, body.basis());
+        let eye = crate::mirrors::pilot_eye_of(pose.aircraft, pose.position, body.basis());
         assert!(feet(back.position, eye) < 1e-6);
         assert_eq!((back.hidden_target, back.hidden_projectile), (None, None));
         let labels = v.labels(&picture, &back, [1280, 960]);

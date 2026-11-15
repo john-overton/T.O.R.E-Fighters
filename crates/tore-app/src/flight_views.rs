@@ -141,6 +141,8 @@ pub(crate) struct Body {
     velocity: Vector,
     basis: Basis,
     missile: bool,
+    /// The aircraft type, where the picture says (it sets the pilot's eye).
+    aircraft: Option<tore_formats::aircraft::AircraftId>,
 }
 impl Body {
     pub(crate) fn new(id: u32, position: Vector, velocity: Vector, basis: Basis) -> Self {
@@ -150,6 +152,7 @@ impl Body {
             velocity,
             basis,
             missile: false,
+            aircraft: None,
         }
     }
     pub(crate) fn missile(id: u32, position: Vector, velocity: Vector, basis: Basis) -> Self {
@@ -162,12 +165,15 @@ impl Body {
     /// times `sign` (a replay played backwards moves the other way).
     pub(crate) fn posed(pose: &crate::snapshot::AircraftPose, sign: f64) -> Self {
         let [yaw, pitch, bank] = pose.attitude;
-        Self::new(
-            pose.id,
-            pose.position,
-            pose.velocity.map(|v| v * sign),
-            Basis::new(yaw, pitch, bank),
-        )
+        Self {
+            aircraft: pose.aircraft,
+            ..Self::new(
+                pose.id,
+                pose.position,
+                pose.velocity.map(|v| v * sign),
+                Basis::new(yaw, pitch, bank),
+            )
+        }
     }
     /// A weapon in flight as a picture draws it, its velocity times `sign`.
     pub(crate) fn weapon(p: &crate::snapshot::ProjectilePose, sign: f64) -> Self {
@@ -961,7 +967,8 @@ fn body_camera(body: Body, view: u8) -> Camera {
         3 | 4 => {
             turn(&mut camera, body.basis, view);
             if view == 3 && !body.missile {
-                camera.position = crate::mirrors::pilot_eye(body.position, body.basis);
+                camera.position =
+                    crate::mirrors::pilot_eye_of(body.aircraft, body.position, body.basis);
             }
         }
         1 | 2 => {
@@ -1070,6 +1077,7 @@ mod tests {
             velocity: [0., 0., 200.],
             basis: Basis::new(0., 0., 0.),
             missile: false,
+            aircraft: None,
         }
     }
     fn scene() -> Scene {
@@ -1302,6 +1310,24 @@ mod tests {
             rig.other_camera(&scene, Camera::new()).unwrap().position,
             saved
         );
+    }
+    /// B2-7: a recorded B-2's back view sits at its own seat; any other
+    /// aircraft's stays at the shared one.
+    #[test]
+    fn back_from_a_b2_sits_at_its_own_seat() {
+        use tore_formats::aircraft::AircraftId;
+        let level = Basis::new(0., 0., 0.);
+        let mut body = Body::new(1, [0., 1000., 0.], [0.; 3], level);
+        let shared = body_camera(body, 3).position;
+        body.aircraft = Some(AircraftId::F18);
+        assert_eq!(body_camera(body, 3).position, shared);
+        body.aircraft = Some(AircraftId::B2);
+        let own = body_camera(body, 3).position;
+        assert_eq!(
+            own,
+            crate::mirrors::pilot_eye_of(Some(AircraftId::B2), [0., 1000., 0.], level)
+        );
+        assert_ne!(own, shared);
     }
     #[test]
     fn back_from_another_aircraft_sits_at_its_pilot_eye_and_shows_it() {

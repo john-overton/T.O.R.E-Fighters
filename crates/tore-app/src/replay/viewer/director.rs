@@ -203,7 +203,8 @@ impl Viewer {
             let state = watched
                 .as_ref()
                 .ok_or("cockpit requires a recorded aircraft anchor")?;
-            camera.position = crate::mirrors::pilot_eye(
+            camera.position = crate::mirrors::pilot_eye_of(
+                watched_pose.and_then(|p| p.aircraft),
                 state.position,
                 Basis::new(state.yaw, state.pitch, state.bank),
             );

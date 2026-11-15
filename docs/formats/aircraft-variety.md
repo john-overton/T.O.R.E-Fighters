@@ -8421,3 +8421,183 @@ down, level). Looks: the open drag rudder reads as a dark upper plate and a ligh
 lower plate hinged off the trailing edge on the yaw side, both open together for the
 brake; the elevon wedge leans visibly at pitch down and at roll; the gear folds
 whole and inboard, hidden at 0.
+
+## B-2 sensors, HUD and cockpit (B2-7, 2026-11-15)
+
+Slice B2-7 (implementation mode, bomber batch A) made the B-2's retail cockpit family
+work. It applies John's accepted decisions of 2026-11-15: **17**, use `B2.HUD` and the
+`~B2*` art (opinionated), and **18**, keep the B-1B's five sensor rows with no pod body
+drawn (the Tornado precedent). The earlier B-2 sections stay as written (B11): the
+[source review](#b-2-source-review-2026-11-15) described the HUD field as empty and
+the eye point as the fixed seat, and BMB-A1 left the glass failing closed and the
+eye shared. This section records what the game now does. Changed: the B-2 glass
+polygon (`hud_aperture.rs`), a per-aircraft pilot's eye table (`mirrors.rs`, with the
+call sites that pass the aircraft type), and two tests (`hud_aperture.rs`, and the
+retail-reading `crates/tore-import/tests/b2_cockpit.rs`). Nothing else in the
+simulation changed. Frames are under `.local/m3-aircraft/frames/B2-7/`, logs under
+`.local/m3-aircraft/checks/B2-7/`.
+
+### Bindings (spec-derived names, opinionated binding)
+
+| Item | Value |
+| --- | --- |
+| Record `hudName` | null pointer (as retail; TORE never reads it) |
+| `AircraftId::hud()` | `B2.HUD`, which names the instrument frame `~b2_p`, read by `Hud::parse` as `~B2_P.PIC` (81 x 80) |
+| Cockpit stem, shape stem | `B2`, `B2` |
+| Forward art | `~B2H.PIC`, **1394 x 508** (not the 1280 x 490 of the older families, so the glass aperture is keyed to this size) |
+| Other pictures of the family | `~B2.PIC` (581 x 214) and `~B2S.PIC` (1737 x 633): the same picture at the other two resolutions, which TORE does not read (as for every family) |
+| Overlays | none: `~B2_LH.PIC`, `~B2_CH.PIC` and `~B2_RH.PIC` do not exist, so the B-2 is a no-overlay stem (BMB-A1) |
+| Sensor rows (fixed) | `VIS340.SEE`, `F18R.SEE`, `F18.ECM`, `PAVESPK.SEE`, `AV8IR.SEE` |
+
+The family is four pictures in `FA_1.LIB` (`~B2.PIC`, `~B2H.PIC`, `~B2S.PIC`,
+`~B2_P.PIC`) and `B2.HUD` in `FA_2.LIB`. No other flyable identity uses the stem or the
+HUD (the retail `AURORA.PT` and `TU160.PT` name `b2.HUD`, and neither is on the roster).
+The new test pins all of it, and the record's `viewOffset` (0, 30, 60).
+
+Views: front (the art with the HUD in its glass and the six small-layout windows), look
+left and right 45 degrees (the art turns away with the look; with no overlay stem nothing
+takes its place, as for the F-16 and the AC-130), 90 degrees and 60 degrees up (open
+sky, no art), `--flight-view 3` (F2 Back, from the pilot's eye, below) and `--flight-view
+4` (F3 Up, which does not use the eye). There is no down view. The instrument windows
+draw with the `~B2_P.PIC` bezel; the ten pages (0 to 9) draw (frame
+`instrument-pages-0-to-9`).
+
+### The glass aperture (fitted, measured)
+
+`~B2H.PIC` has no combiner glass: it is the open cockpit window of a large aircraft,
+like the AC-130's picture that the B-52 flies. Its transparent pixels are three
+separate panes, divided by the left diagonal strut and the right strut: the **main
+window** (x 141 to 1021, y 91 to 455, 247,572 pixels), a left side pane (x 0 to 322,
+y 90 to 440, 67,994 pixels) and a right side pane (x 1087 to 1393, y 91 to 418, 83,066
+pixels). `hud_aperture::mask` had failed closed for the B-2 (BMB-A1's interim, an empty
+mask, so no HUD drew). It now has a 20-vertex polygon along the main window's boundary,
+a pixel outside it: the top beam's lower edge at y 90, the right strut's funnel down
+to the monitor housing (x 1006 to 1021), the sloping console top (y 420 at x 540, 456
+at x 300 and left) and the left strut, from (140, 456) to (398, 90). The opaque art trims
+it, so the mask is exactly the transparent pixels inside: 246,986 pixels, 99.76 percent
+of the main window, no opaque pixel, none in either side pane, one connected region. The
+HUD symbols sit in the middle of the main window in the frames, well inside the polygon;
+the side panes would matter only to symbols far off axis, and a decision to draw the HUD
+there too (the whole-picture AC-130 choice) is a one-line change if John wants it. Two
+tests pin it: a synthetic one (centre in; above the beam, both side panes and the console
+out; an opaque pixel inside left out; any other picture size fails closed, and the F-117's
+mask is still empty) and a retail-reading one (the same three panes by flood fill, the
+exact coverage, no opaque pixel, no side pane, connected, at least 98 percent).
+
+### How the HUD fits a bomber
+
+`B2.HUD` is a resource of the B-1B and AURORA family (`TU160.PT` names it too), but TORE
+reads from any HUD module only the primary colour, the instrument frame name and the
+three window text colours (`tore-formats::hud`); the symbols are the one shared
+drawn HUD. So the B-2's HUD is the same drawn HUD as every aircraft's, and what changes
+for a bomber is what it is offered:
+
+- It draws flight data (heading tape, speed and altitude boxes, flight path marker,
+  pitch ladder), the weapon and its count (`31 MK-82`, `4 GBU-27`), `NO TARGET` with
+  no designation, and the **bomb sights**: the level-bombing cue for the Mk 82 rows (`LVL`),
+  and for the Paveway rows the laser box with `IN RNG`/`REL` and `LSR`, `TTI` and the
+  seeker (frame `hud-slot3-gbu27-laser-sightpin`: `REL 0:14`, `LSR 4.5`, the box on the
+  pinned point; without a pin the laser row reads `NO LASER`).
+- It has no air-to-air weapons, so no lock circle or gun cue appears (the record has no
+  gun and no missile). The radar and IR contacts show in the radar window, not as a HUD
+  lock.
+- The status column on the right of the glass shows `GEAR`, `BRAKE` (the speed brake,
+  which opens both drag rudders), `FLAP` and `HOOK` as they apply (frame
+  `hud-gear-down-brake` reads `GEAR` and `BRAKE`). `BAY` shows only while a bay is open
+  and the aircraft is the F-22 (`State::bay_available`), so it does not show for the
+  B-2 yet; B2-5 owns the bay and its cue.
+
+### The eye point (fitted; a per-aircraft table now exists)
+
+The B2-2 finding stands: the shared seat (7 ft up, 10 ft ahead of the origin, shape y 30
+and z 21) is 10 to 17 ft behind the B-2's glass, under the spine skin. No per-aircraft
+eye existed (`mirrors::pilot_eye` was one fixed offset), so B2-7 adds the smallest table
+that leaves every other aircraft unchanged: `mirrors::eye_offset(Option<AircraftId>)`,
+(up, forward) in feet, with the shared 7 and 10 for every identity and an unknown type,
+and one entry, **the B-2: 10 ft up and 20 ft ahead**. It is fitted and labelled so.
+
+Measured on the neutral `B2.SH` (1/3 ft a unit): the centre-line top surface rises from
+z 20.7 (6.9 ft) at y 20 to the spine peak of z 23.8 (7.9 ft) at y 44 (14.7 ft ahead),
+falls to 22.0 at y 60 (20 ft), where a steep face drops into the glass cavity, and the
+windscreen runs from z 21 at y 64 (21.3 ft) to z 13.7 at y 80 (26.7 ft), then the nose
+slope down to z 6.5 at y 88. The seat is at the windscreen's start, 2.7 ft above the
+roof (z 22 at y 60), so F2 Back looks over the roof and the spine, not out of the
+inside of the skin. A seat inside the skin (6 ft up) was drawn and rejected: Back shows
+the inside faces of the spine as a grey blur (frame `f2-back-eye-inside-skin-rejected`).
+The record's `viewOffset` (0, 30, 60), which no host code reads, gives the same
+figure read at the shape's 1/3 ft a unit (30 up, 60 ahead = 10 ft, 20 ft); that
+reading of the field's units is unproven and is not used by the code.
+
+What reads the eye, and what changed (all pass the aircraft type now; none of it moves
+for another aircraft):
+
+| Reader | Takes the table |
+| --- | --- |
+| F2 Back in flight (`aircraft.rs`, own aircraft) | yes |
+| F2 Back from another recorded or live aircraft (`flight_views.rs`: `Body` carries the type from its pose) | yes |
+| Replay: the cockpit camera (`director.rs`), the HUD camera (`views.rs`) and the listening seat (`viewer.rs`) | yes, so the replay's Back view and its sound sit where flight's do |
+| The mirror rear feed (`mirrors::camera`) | no: it stays on the shared seat. Only cockpit families with mirror seeds draw it, and `B2` has none (`--cockpit-sheet` prints `b2 NO MIRRORS FITTED`) |
+| The forward cockpit (2D art), the look and zoom controls, the chase and fly-by views, F3 Up, the external camera | no: they never used the eye (the forward view looks from the origin) |
+| Padlock and the target camera | no: they do not read the eye |
+
+Tests: `mirrors::tests::only_the_b2_has_its_own_pilot_eye` (the table for every
+identity), `flight_views::tests::back_from_a_b2_sits_at_its_own_seat`, and the existing
+replay Back test now compares against the typed eye. Every other aircraft's Back eye is
+unchanged (the replay and flight view tests pass). The mirror feed for the other
+aircraft is untouched.
+
+### Sensors (decision 18: kept as retail, no pod body)
+
+`--sensor-summary` reads: `B2: radar F18R.SEE search 90 nmi 60x60 deg track 50 nmi
+45x45 deg look-down 0 ADVANCED; infrared AV8IR.SEE search 15 nmi 60x60 deg track 15 nmi
+45x45 deg; visual VIS340.SEE search 10 nmi 170x140 deg track 5 nmi 170x140 deg; jammer
+F18.ECM LATE strength 0.30; signature radar 1 infrared 15`.
+
+- **No pod body draws.** `PAVESPK.SEE` and `AV8IR.SEE` are fixed rows at (0, 0, 0)
+  with flag `0x1008`, not stations, so no store pose is built for them (the Tornado
+  precedent). The external frames show the wing undersides and the nose bare
+  (`external-threequarter`, `external-side`, `external-front-under`, `external-under`).
+- **The laser designator works through the fixed Pave Spike row.** With the GBU-27 row
+  selected and `--combat-command sight-pin` the HUD reads `LSR 4.5`, `REL 0:14` and the
+  target camera `PIN`, `ZOOM 3`, `LASE` with the range `4.5 NM` (frame
+  `target-cam-gbu27-laser`). Without a designation the HUD reads `NO LASER`.
+- **The target camera** (page 4) opens in the small layout (`SLEW`, `ZOOM 3`) and shows
+  the pinned point when designating.
+- **The IR view.** `--sensor-channel ir` puts the radar window on the `AV8IR.SEE`
+  channel: `IR`, 10 nmi, with the target's contact (frame `ir-view-channel-ir-radar-page`).
+- **The radar is the F-18's `F18R.SEE`, not the B-2's APQ-181**, kept as the record says.
+  The modes it gives a bomber are the shared **air-to-air** ones: RWS search (to 90
+  nmi) and TWS with a fire-control track (to 50 nmi), both in the scope at 5, 10, 25, 50,
+  100 and 150, plus the IR channel (M cycles them, Y toggles history). There is **no
+  air-to-ground mapping mode** in the shared radar (`docs/radar.md`: air-to-ground
+  radar awaits ground weapons), so the B-2's strike work is the targeting sight and
+  the laser, which the fixed Pave Spike row provides. Frame `radar-mfd-livefire-track`
+  reads `TWS 10 ... TRACK`.
+- **The RCS page shows the stealth signature.** Page 0 reads `SIG 1` with the exposure
+  contour a dot at the centre of the 50 nmi scope, against `SIG 154` and an oval for
+  an F/A-18 in the same capture (frames `rcs-page-b2-sig1-crop3x` and
+  `rcs-page-f18-sig100-crop3x-comparison`; the F-18's record says 100 and the page
+  shows the figure with its aspect and loaded stores). The record's radar signature of 1 and infrared 15 are as
+  retail; the RWR and the stealth model are not in this slice.
+
+### Checks
+
+`cargo fmt --all -- --check` clean; `cargo clippy --workspace --all-targets --locked
+-- -D warnings` clean; `cargo test --locked --workspace --no-fail-fast` (counts in the
+plan's Session log); `--headless-flight 600 --aircraft b2` (same log); `check_docs`
+passes. Frames: `cockpit-front-view` (HUD inside the glass), `cockpit-look-left-45`,
+`-right-45`, `-up-60`, `cockpit-view-back-f2` (and the rejected inside-skin eye),
+`cockpit-view-up-f3`, `hud-gear-down-brake`, `hud-slot3-gbu27-laser-sightpin`,
+`hud-slot3-gbu27-no-laser`, `target-cam-gbu27-laser` and `crop3x-target-cam`,
+`radar-mfd-livefire-track` and `crop3x-radar-track`, `ir-view-channel-ir-radar-page`
+and `crop3x-ir-channel`, `rcs-page-live` and the two RCS crops, `instrument-pages-0-to-9`,
+the four `external-*` views, and `pre-cockpit-front` (before: no HUD).
+
+Not done: the bay cue and open-bay signature (B2-5), the RWR, any B-2-specific
+radar or ground-mapping mode (a sensor change, John's call), a battery scenario (the
+Mirage 2000 and Tornado cockpit slices added none; the closest, `render-b2-skin` and
+`flight-animation-b2`, were rerun).
+
+Provenance: sensor rows, HUD module, panel names and cockpit art are spec-derived
+(retail); the binding is opinionated (John, 2026-11-15, decisions 17 and 18); the glass
+polygon and the eye table are fitted, agent decisions 2026-11-15.

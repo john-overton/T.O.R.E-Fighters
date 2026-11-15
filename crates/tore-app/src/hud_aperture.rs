@@ -196,11 +196,47 @@ pub fn mask(source: &Sprite, id: AircraftId) -> Vec<u8> {
         // The B-52 flies the AC-130 panel family its BMBROH.HUD names
         // (BMB-A1, 2026-11-15; John, decision 14): the same ~AC130H.PIC.
         | AircraftId::B52 => ((1280, 490), &[(0, 0), (1279, 0), (1279, 489), (0, 489)]),
-        // Bomber batch A (BMB-A1, 2026-11-15): the B-2 (~B2H.PIC) and F-117
-        // (~F117H.PIC) have cockpit pictures of their own, whose glass has not
-        // been measured. No expected size, so the aperture fails closed (an
-        // empty mask) until their cockpit slices measure a polygon.
-        AircraftId::B2 | AircraftId::F117 => ((0, 0), &[]),
+        // Bomber batch A (BMB-A1, 2026-11-15): the F-117 (~F117H.PIC) has a
+        // cockpit picture of its own, whose glass has not been measured. No
+        // expected size, so the aperture fails closed (an empty mask) until
+        // its cockpit slice measures a polygon.
+        AircraftId::F117 => ((0, 0), &[]),
+        // B-2 (B2-7, 2026-11-15): `B2.HUD` and the cockpit art `~B2H.PIC`
+        // (1394 x 508, John decision 17, opinionated). The art has no
+        // combiner: its transparent area is three panes divided by the left
+        // diagonal strut and the right strut (the main window x 141 to 1021,
+        // y 91 to 455, 247,572 pixels; a left side pane x 0 to 322 and a right
+        // one x 1087 to 1393). The HUD is the main window's: the polygon runs
+        // along its boundary (the top beam's lower edge at y 90, the right
+        // strut's funnel and the monitor housing, the sloping console top and
+        // the left strut), a pixel outside it, so the opaque art trims it and
+        // the two side panes stay out. Measured on the imported art,
+        // `the_b2_glass_is_the_main_window_of_the_imported_art`. Fitted.
+        AircraftId::B2 => (
+            (1394, 508),
+            &[
+                (398, 90),
+                (956, 90),
+                (980, 155),
+                (1006, 187),
+                (1021, 299),
+                (1020, 331),
+                (1006, 347),
+                (1006, 420),
+                (540, 420),
+                (460, 424),
+                (420, 431),
+                (380, 445),
+                (340, 454),
+                (300, 456),
+                (140, 456),
+                (144, 443),
+                (175, 395),
+                (217, 331),
+                (273, 251),
+                (334, 171),
+            ],
+        ),
         // F-5E (F5E-7, 2026-11-10): `F5E.PT` names f29.HUD, so it flies the
         // X-29's cockpit art `~F29H.PIC` by name (John, 2026-11-10,
         // opinionated). The glass is the opening between the two canopy
@@ -711,5 +747,124 @@ mod tests {
             covered,
             "the glass is one connected region"
         );
+    }
+
+    /// B2-7: the B-2's own 1394x508 picture has a measured glass polygon (the
+    /// main window between the two struts); any other size fails closed, and
+    /// the F-117's glass is still unmeasured.
+    #[test]
+    fn the_b2_glass_is_measured_for_its_1394_picture() {
+        let source = transparent(1394, 508);
+        let b2 = mask(&source, AircraftId::B2);
+        assert_eq!(b2.len(), 1394 * 508);
+        let at = |x: usize, y: usize| b2[y * 1394 + x];
+        // Inside: the middle of the window, beside the HUD's centre.
+        assert_eq!(at(697, 250), 1);
+        assert_eq!(at(500, 380), 1);
+        // Outside: above the top beam's lower edge, the left and right side
+        // panes beyond the struts, the console below the sloping top.
+        assert_eq!(at(697, 80), 0);
+        assert_eq!(at(100, 250), 0);
+        assert_eq!(at(1200, 250), 0);
+        assert_eq!(at(697, 440), 0);
+        // An opaque art pixel inside the polygon stays out of the glass.
+        let mut framed = transparent(1394, 508);
+        framed.rgba[(250 * 1394 + 697) * 4 + 3] = 255;
+        assert_eq!(mask(&framed, AircraftId::B2)[250 * 1394 + 697], 0);
+        // A 1280x490 picture is not the B-2's: fail closed.
+        assert!(
+            mask(&transparent(1280, 490), AircraftId::B2)
+                .iter()
+                .all(|v| *v == 0)
+        );
+        assert!(mask(&source, AircraftId::F117).iter().all(|v| *v == 0));
+    }
+
+    /// Transparent pixels of the retail `~B2H.PIC`'s main window and the mask's
+    /// coverage of them (B2-7).
+    const B2_MAIN_WINDOW_PIXELS: usize = 247_572;
+    const B2_GLASS_PIXELS: usize = 246_986;
+
+    /// Retail-reading (skips without an install): the polygon on the real
+    /// `~B2H.PIC` covers the main window almost whole, never an opaque pixel,
+    /// and neither of the two side panes.
+    #[test]
+    fn the_b2_glass_is_the_main_window_of_the_imported_art() {
+        let root = std::env::var_os("TORE_GAME_DIR").map_or_else(
+            || {
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../gameassets/fighters-anthology")
+            },
+            std::path::PathBuf::from,
+        );
+        let Ok(media) = tore_import::MediaSource::detect(&root) else {
+            eprintln!("skipped: no retail install at {}", root.display());
+            return;
+        };
+        let Ok(library) = media.archive("FA_1.LIB") else {
+            eprintln!("skipped: no retail FA_1.LIB");
+            return;
+        };
+        let name = AircraftId::B2.cockpit();
+        assert_eq!(name, "~B2H.PIC");
+        let pic = tore_formats::Pic::parse(&library.read(name).unwrap()).unwrap();
+        assert_eq!((pic.width, pic.height), (1394, 508));
+        let source = Sprite {
+            width: pic.width,
+            height: pic.height,
+            rgba: pic.rgba(&[[0; 3]; 256]),
+            glyphs: vec![],
+        };
+        let mask = mask(&source, AircraftId::B2);
+        let (width, height) = (source.width, source.height);
+        let flood = |start: usize, allowed: &dyn Fn(usize) -> bool| -> Vec<bool> {
+            let mut seen = vec![false; width * height];
+            let mut todo = vec![start];
+            while let Some(at) = todo.pop() {
+                if seen[at] || !allowed(at) {
+                    continue;
+                }
+                seen[at] = true;
+                let x = at % width;
+                if x > 0 {
+                    todo.push(at - 1);
+                }
+                if x + 1 < width {
+                    todo.push(at + 1);
+                }
+                if at >= width {
+                    todo.push(at - width);
+                }
+                if at + width < width * height {
+                    todo.push(at + width);
+                }
+            }
+            seen
+        };
+        let transparent_at = |at: usize| source.rgba[at * 4 + 3] == 0;
+        // The three transparent panes: the main window, and one each side of
+        // the struts.
+        let window = flood(250 * width + 697, &transparent_at);
+        let left = flood(250 * width + 100, &transparent_at);
+        let right = flood(250 * width + 1200, &transparent_at);
+        assert_eq!(
+            window.iter().filter(|v| **v).count(),
+            B2_MAIN_WINDOW_PIXELS,
+            "the struts no longer close the main window"
+        );
+        assert!(!window[250 * width + 100] && !window[250 * width + 1200]);
+        let covered = mask.iter().filter(|v| **v == 1).count();
+        assert_eq!(covered, B2_GLASS_PIXELS, "glass area moved");
+        for (at, covered_pixel) in mask.iter().enumerate() {
+            if *covered_pixel == 1 {
+                assert_eq!(source.rgba[at * 4 + 3], 0, "mask covers opaque art");
+                assert!(window[at], "mask leaves the main window at {at}");
+                assert!(!left[at] && !right[at], "mask reaches a side pane");
+            }
+        }
+        // Almost all of the window is drawn.
+        assert!(covered * 100 >= B2_MAIN_WINDOW_PIXELS * 98);
+        let connected = flood(250 * width + 697, &|at| mask[at] == 1);
+        assert_eq!(connected.iter().filter(|v| **v).count(), covered);
     }
 }

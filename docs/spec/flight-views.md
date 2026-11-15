@@ -332,3 +332,16 @@ ahead, so the fixed eye stands 3.7 ft above that top and at the back of the forw
 Back shows the tailplanes and fin from there (frame `cockpit-view-back-f2`). Not changed:
 a seated, per-aircraft or rear-seat eye would be a fleet change, a question for John.
 Evidence in [the Tornado section](../formats/aircraft-variety.md#tornado-sensors-hud-and-cockpit-tor-7-2026-11-11).
+
+## Pilot's eye on the B-2 (2026-11-15, B2-7)
+
+The Back eye is no longer one fixed offset for every aircraft: `mirrors::eye_offset`
+is a per-identity table, 7 feet up and 10 feet ahead of the model origin for every
+aircraft except the B-2, which sits 10 feet up and 20 feet ahead (fitted, agent
+decision). The earlier paragraphs above, which say no per-aircraft eye exists, describe
+the state when they were written (B11). Measured on the B-2 shape, the glasshouse starts
+20 feet ahead and the shared seat sat 10 to 17 feet behind it under the spine skin; the
+new seat is at the windscreen's start, 2.7 feet above the roof, so Back looks over the
+spine and wings (frame `cockpit-view-back-f2`). The replay's Back, cockpit and HUD
+cameras and the listening seat use the same table; the mirror rear feed stays on the
+shared seat (the B-2 art has no mirrors). Evidence in [the B-2 section](../formats/aircraft-variety.md#b-2-sensors-hud-and-cockpit-b2-7-2026-11-15).
