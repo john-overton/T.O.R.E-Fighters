@@ -19,7 +19,7 @@ from battery_scenarios._strips import ground_airport
 
 # Original roster covered by the established fixed-wing maneuver battery.
 AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su25", "mig23", "su35", "f22", "f22n", "faxx"]
-VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310", "mig25", "f16a", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc", "f117"]
+VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310", "mig25", "f16a", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc", "b2", "f117"]
 # Aircraft whose PT disables spins (X-31 flag, F-22 family): they never enter one.
 SPIN_IMMUNE = {"x31", "f22", "f22n", "faxx"}
 
@@ -224,7 +224,16 @@ def tank_problems(output: str) -> list[str]:
     return problems
 
 
-def check_takeoff(output: str) -> list[str]:
+# The most ticks a takeoff may take to reach 100 ft, 4,500 (37 s) unless the
+# aircraft is listed: the B-2 at its 373,000 lb default gross takes 8,012 ticks
+# (67 s: liftoff at 7,018 ticks after 7,987 ft, the real takeoff run is about
+# 6,700 ft), so its scenarios run 12,000 ticks and allow 10,000 (B2-8,
+# 2026-11-15, agent decision).
+TAKEOFF_TICKS_MAX = {"b2": 10000}
+TAKEOFF_RUN_TICKS = {"b2": "12000"}
+
+
+def check_takeoff(output: str, ac: str | None = None) -> list[str]:
     problems = extremes_problems(output) + loadout_problems(output) + tank_problems(output)
     n = _plain_numbers(output)
     if "takeoff_complete=true" not in output:
@@ -233,7 +242,7 @@ def check_takeoff(output: str) -> list[str]:
         problems.append("crashed during takeoff")
     try:
         ticks = int(n["ticks"])
-        if not 300 <= ticks <= 4500:
+        if not 300 <= ticks <= TAKEOFF_TICKS_MAX.get(ac, 4500):
             problems.append(f"takeoff took {ticks} ticks")
         speed = float(n["speed_kt"])
         if not 60 <= speed <= 260:
@@ -335,6 +344,20 @@ APPROACH_TARGET.update({"f15e": (125, 145)})
 # then be re-fitted.
 LIFTOFF_TARGET["mf1"] = (125, 150)
 APPROACH_TARGET["mf1"] = (125, 150)
+# The B-2's windows (B2-8, 2026-11-15) are fitted, agent decisions. The one
+# published speed is the game's own Jane's text (`B2.INF`, retail media):
+# "Approach speed: 140 kts", with no weight. The scripted approach flies the
+# default load (gross 373,000 lb, 99 percent of the 376,000 lb maximum: 48,000
+# lb of bay bombs and a full tank), so its measured 166.2 kt (1.05 times the
+# loaded minimum level speed) sits above 140 kt on purpose: at the 250,000 to
+# 265,000 lb a real landing weighs, the same rule gives about 136 to 140 kt
+# (docs/formats/aircraft-variety.md, "B-2 flight review"). The approach window
+# is 140 to 170 kt; the liftoff window, 140 to 165 kt, is the wing-loading
+# estimate for 373,000 lb (about 72.6 lb per square foot, CL about 0.9: 154 kt)
+# and the measured 158.1 kt after 7,987 ft (the one published takeoff run is
+# 6,700 ft at an unstated weight, Aerocorner).
+LIFTOFF_TARGET["b2"] = (140, 165)
+APPROACH_TARGET["b2"] = (140, 170)
 # The figures the model gives with the fitted per-aircraft stall references
 # (`STALL_REFERENCE_FRACTIONS`, 2026-09-30), for the aircraft whose figure is not
 # exactly inside John's range, kept as a regression window of plus or minus 6
@@ -353,6 +376,9 @@ KNOWN_APPROACH.update({"f15e": 156.1})
 # above stay; the plus or minus 6 percent recorded windows follow the new values.
 KNOWN_LIFTOFF["mf1"] = 121.0
 KNOWN_APPROACH["mf1"] = 127.6
+# The B-2's measured liftoff and approach at its default load (B2-8, 2026-11-15).
+KNOWN_LIFTOFF["b2"] = 158.1
+KNOWN_APPROACH["b2"] = 166.2
 # TOR-6 (2026-11-11): the Tornado's default load is lighter than TOR-8 measured (one centreline tank, 1,650
 # lb of external fuel, not two): liftoff 146.4 kt (was 150.6), approach 155.1 kt (was 160.1), both inside the
 # windows and the plus or minus 6 percent regression band, so no window was refitted and the known values above
@@ -385,6 +411,13 @@ INTERNAL_FUEL_LB["f15e"] = 13662
 # MF1.PT internal fuel, 6,120 lb (MF1-0; the real F1 holds about 7,385 lb).
 INTERNAL_FUEL_LB["mf1"] = 6120
 
+# B2.PT internal fuel, 167,000 lb (BMB-A2). The approach scenario flies 65
+# percent of it, 108,550 lb, but `--flight-fuel` takes at most 100,000 lb, so the
+# B-2's approach scenario uses that cap (60 percent); the scripted approach speed
+# does not depend on the fuel in any case (B2-8).
+INTERNAL_FUEL_LB["b2"] = 167000
+APPROACH_FUEL_CAP_LB = 100000
+
 
 def _in_target(value: float, target: tuple, known: float | None) -> str | None:
     lo, hi = target
@@ -396,7 +429,7 @@ def _in_target(value: float, target: tuple, known: float | None) -> str | None:
 
 
 def check_liftoff_speed(output: str, ac: str) -> list[str]:
-    problems = check_takeoff(output)
+    problems = check_takeoff(output, ac)
     lift = re.search(r"^liftoff: tick=\d+ speed_kt=([\d.]+)", output, re.M)
     if lift and ac in LIFTOFF_TARGET:
         p = _in_target(float(lift.group(1)), LIFTOFF_TARGET[ac], KNOWN_LIFTOFF.get(ac))
@@ -456,9 +489,9 @@ def combat_g_scenarios() -> list[Scenario]:
     ]
 
 
-def check_retail_liftoff(output: str) -> list[str]:
+def check_retail_liftoff(output: str, ac: str | None = None) -> list[str]:
     """`--retail-stall-speeds`: the imported polygon speeds at every weight."""
-    problems = check_takeoff(output)
+    problems = check_takeoff(output, ac)
     if "stall_scale=1.000" not in output:
         problems.append("the retail switch did not set the stall scale to 1")
     return problems
@@ -482,6 +515,8 @@ LIFTOFF_AIRCRAFT += ["tornado"]
 # flares or outer pods, so its default gross, liftoff and approach are the figures the Tornado had
 # before the Combat version took on 1,158 lb of pods.
 LIFTOFF_AIRCRAFT += ["tornadoc"]
+# The B-2 joins them (B2-8, 2026-11-15).
+LIFTOFF_AIRCRAFT += ["b2"]
 
 
 def liftoff_scenarios() -> list[Scenario]:
@@ -491,7 +526,7 @@ def liftoff_scenarios() -> list[Scenario]:
             Scenario(
                 name=f"flight-liftoff-{ac}",
                 lane="flight",
-                args=["--theater", "UKR", "--ground-start", "1", "--headless-flight", "9000", "--maneuver", "takeoff", "--aircraft", ac, "--no-audio"],
+                args=["--theater", "UKR", "--ground-start", "1", "--headless-flight", TAKEOFF_RUN_TICKS.get(ac, "9000"), "--maneuver", "takeoff", "--aircraft", ac, "--no-audio"],
                 check=lambda output, ac=ac: check_liftoff_speed(output, ac),
             )
         )
@@ -499,8 +534,8 @@ def liftoff_scenarios() -> list[Scenario]:
             Scenario(
                 name=f"flight-liftoff-retail-{ac}",
                 lane="flight",
-                args=["--theater", "UKR", "--ground-start", "1", "--headless-flight", "9000", "--maneuver", "takeoff", "--retail-stall-speeds", "--aircraft", ac, "--no-audio"],
-                check=check_retail_liftoff,
+                args=["--theater", "UKR", "--ground-start", "1", "--headless-flight", TAKEOFF_RUN_TICKS.get(ac, "9000"), "--maneuver", "takeoff", "--retail-stall-speeds", "--aircraft", ac, "--no-audio"],
+                check=lambda output, ac=ac: check_retail_liftoff(output, ac),
             )
         )
         out.append(
@@ -509,7 +544,7 @@ def liftoff_scenarios() -> list[Scenario]:
                 lane="flight",
                 args=[
                     "--theater", "UKR", "--ground-start", "1", "--headless-flight", "60000", "--maneuver", "land",
-                    "--flight-fuel", str(round(0.65 * INTERNAL_FUEL_LB[ac])), "--aircraft", ac, "--no-audio",
+                    "--flight-fuel", str(min(round(0.65 * INTERNAL_FUEL_LB[ac]), APPROACH_FUEL_CAP_LB)), "--aircraft", ac, "--no-audio",
                 ],
                 check=lambda output, ac=ac: check_approach_speed(output, ac),
                 timeout=300,

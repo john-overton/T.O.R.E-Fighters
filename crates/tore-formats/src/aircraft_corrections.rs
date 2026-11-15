@@ -509,6 +509,59 @@ pub const B2_THRUST_LBF: i32 = 69_200;
 pub const B2_EMPTY_LB: i32 = 158_000;
 pub const B2_INTERNAL_FUEL_LB: i32 = 167_000;
 pub const B2_MAX_TAKEOFF_LB: i32 = 376_000;
+/// B-2A ceiling (B2-8, **opinionated**, agent decision 2026-11-15; the
+/// figure is the real one): 50,000 ft. `maxAlt` carries 49,000 ft in the
+/// record. The game's own Jane's text (`B2.INF`, "Service ceiling: 15,240 m
+/// (50,000 ft)"), Wikipedia "Northrop Grumman B-2 Spirit" (specifications,
+/// "Service ceiling 50,000 ft") and the Air Force fact sheets all say 50,000
+/// ft (read 2026-11-15). The flight model's ceiling is the top of the 1 G
+/// polygon, so [`fit_envelopes`] moves the 1 G and 0 G top vertices up by the
+/// same 1,000 ft (the F-117's way, BMB-A2) and nothing else in the polygons.
+pub const B2_CEILING_FT: i32 = 50_000;
+const B2_RETAIL_CEILING_FT: i32 = 49_000;
+/// B-2A speed brake (B2-8, **fitted**): the airbrake drag word. The record
+/// carries the B-1B's 256, which the hybrid adapter turns into a drag of
+/// weight x 256/256 x the brake x the speed share, so the B-2's two drag
+/// rudders (the only surfaces the rig opens for the brake, B2-3) pulled a
+/// 325,000 lb flying wing back at 0.4 G at 312 kt and 0.8 G at 400 kt, a
+/// fighter airbrake. The fit sizes the brake from the drawn plates: two plates
+/// on each side (upper and lower), each about 15.2 ft along the hinge by 4.1 ft
+/// of chord, opened about 50 degrees (shape units, `docs/formats/aircraft-variety.md`,
+/// "B-2 rig"), so about 190 square feet of frontal plate for all four, at a
+/// drag coefficient of 0.8 in the wake of a thick wing: q S Cd over the
+/// 325,000 lb weight is 0.14 G at 300 kt and 0.25 G at 400 kt at sea level. The
+/// model's device fraction is 0.66 at 300 kt and 0.93 at 400 kt, so the factor
+/// that fits both is 0.22 to 0.27; 64 is a quarter of the template (0.25). It
+/// is a fit to the drawn size, not a cited figure (no public drag-rudder drag
+/// was found); the model's brake drag cannot fall with altitude as the real
+/// dynamic pressure does, so at 36,000 ft it is about three times the plate
+/// estimate.
+pub const B2_AIRBRAKE_DRAG: i32 = 64;
+const B2_RETAIL_AIRBRAKE_DRAG: i32 = 256;
+/// The retail 0 G and 1 G polygons the ceiling fit needs (speed ft/s, altitude
+/// ft): the 1 G row tops out at 49,000 ft, the 0 G row 3,000 ft higher.
+const B2_RETAIL_ZERO_G: [[f64; 2]; 9] = [
+    [170., 0.],
+    [200., 15_500.],
+    [290., 34_250.],
+    [420., 46_625.],
+    [550., 52_000.],
+    [720., 51_500.],
+    [855., 45_750.],
+    [895., 36_000.],
+    [790., 0.],
+];
+const B2_RETAIL_ONE_G: [[f64; 2]; 9] = [
+    [220., 0.],
+    [250., 15_000.],
+    [350., 33_500.],
+    [460., 44_750.],
+    [560., 49_000.],
+    [700., 48_000.],
+    [800., 43_000.],
+    [840., 36_000.],
+    [750., 0.],
+];
 
 /// F-117A (BMB-A2, **opinionated**, John, 2026-11-15, decisions 23 and 26).
 /// Maximum takeoff 52,500 lb (Wikipedia "Lockheed F-117 Nighthawk",
@@ -865,6 +918,33 @@ pub(crate) fn fit_envelopes(
                 }
             }
             hold_to_one_g(envelopes);
+            true
+        }
+        AircraftId::B2 => {
+            // B2-8: the ceiling follows the corrected `maxAlt` and needs the
+            // retail 0 G and 1 G polygons, like the F-117's.
+            let corrected =
+                object.get("maxAlt").and_then(|t| t.number().ok()) == Some(B2_CEILING_FT);
+            let zero = envelopes.iter().position(|e| e.g == 0);
+            let one = envelopes.iter().position(|e| e.g == 1);
+            let (Some(zero), Some(one)) = (zero, one) else {
+                return false;
+            };
+            if !corrected
+                || envelopes[zero].points != B2_RETAIL_ZERO_G
+                || envelopes[one].points != B2_RETAIL_ONE_G
+            {
+                return false;
+            }
+            let shift = f64::from(B2_CEILING_FT - B2_RETAIL_CEILING_FT);
+            for row in [zero, one] {
+                let top = top_altitude(&envelopes[row]);
+                for p in &mut envelopes[row].points {
+                    if p[1] == top {
+                        p[1] += shift;
+                    }
+                }
+            }
             true
         }
         AircraftId::Mf1 => {
@@ -1254,6 +1334,21 @@ pub const CORRECTIONS: &[Correction] = &[
         key: "maxTakeoffWeight",
         retail: 400_000,
         corrected: B2_MAX_TAKEOFF_LB,
+    },
+    // B2-8: the real ceiling and a speed brake sized from the drawn plates.
+    Correction {
+        id: AircraftId::B2,
+        block: Block::Object,
+        key: "maxAlt",
+        retail: B2_RETAIL_CEILING_FT,
+        corrected: B2_CEILING_FT,
+    },
+    Correction {
+        id: AircraftId::B2,
+        block: Block::Plane,
+        key: "airBrakesDrag",
+        retail: B2_RETAIL_AIRBRAKE_DRAG,
+        corrected: B2_AIRBRAKE_DRAG,
     },
     // F-117A: the real maximum takeoff weight and ceiling.
     Correction {

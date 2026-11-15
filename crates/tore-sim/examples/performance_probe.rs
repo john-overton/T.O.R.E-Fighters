@@ -48,6 +48,8 @@ struct Turn {
 struct Setup {
     payload: f64,
     fuel: Option<f64>,
+    /// `PROBE_CLIMB=KEAS,MACH`: the bomber climb schedule (B2-8).
+    climb: Option<(f64, f64)>,
 }
 
 fn start(
@@ -184,6 +186,9 @@ fn accel_section(
 /// airspeed schedule (Mach 0.9 above 450 kt, otherwise 450 kt), then reports
 /// the time to each altitude.
 fn climb_section(a: &Aircraft, set: &Setup) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some((keas, mach)) = set.climb {
+        return bomber_climb_section(a, set, keas, mach);
+    }
     println!("-- afterburner climb from sea level, speed schedule max(450 kt, Mach 0.9)");
     for schedule in [0.8_f64, 0.9] {
         let mut s = start(a, set, 0., 450., true)?;
@@ -254,6 +259,118 @@ fn climb_section(a: &Aircraft, set: &Setup) -> Result<(), Box<dyn std::error::Er
     Ok(())
 }
 
+/// Density ratio of the standard atmosphere at `altitude` against sea level.
+fn density_ratio(altitude: f64) -> f64 {
+    let at = |h: f64| {
+        let a = Atmosphere::standard(h).expect("standard atmosphere");
+        a.static_pressure_pa / (287.053 * a.temperature_k)
+    };
+    at(altitude.clamp(0., 90_000.)) / at(0.)
+}
+
+/// A bomber's climb (B2-8): full thrust from sea level on a constant
+/// equivalent airspeed of `keas` knots, changing to `mach` once that is the
+/// slower of the two, with the pitch trimmed by a speed integrator (the fixed
+/// 15 degree law of the fighter climb cannot hold a speed at a thrust to
+/// weight of 0.2). Reports the time to each altitude and the best rate.
+fn bomber_climb_section(
+    a: &Aircraft,
+    set: &Setup,
+    keas: f64,
+    mach: f64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!(
+        "-- full thrust climb from sea level, {keas:.0} kt equivalent airspeed to Mach {mach:.2}"
+    );
+    let target_kt =
+        |h: f64| (keas / density_ratio(h).sqrt()).min(mach * sound_kt(h.clamp(0., 90_000.)));
+    let mut s = start(a, set, 0., target_kt(0.), true)?;
+    s.pitch = 4_f64.to_radians();
+    s.velocity = Basis::new(0., s.pitch, 0.).forward.map(|v| v * s.speed);
+    let marks = [
+        2_000., 5_000., 10_000., 20_000., 30_000., 36_000., 40_000., 45_000., 50_000.,
+    ];
+    let mut hits: Vec<Option<(f64, f64)>> = vec![None; marks.len()];
+    let mut want = 4_f64;
+    let mut last_kt = s.speed / KT;
+    let mut top = 0_f64;
+    let mut previous = (s.position[1], 0.);
+    let mut best: Vec<(f64, f64)> = Vec::new();
+    let mut at_alt = [(0_f64, 0_f64); 12];
+    for second in 0..3600_usize {
+        for _ in 0..TICKS {
+            let target = target_kt(s.position[1]);
+            let speed_kt = s.speed / KT;
+            want = (want + (speed_kt - target) * 0.004 / TICKS as f64).clamp(-5., 25.);
+            let accel_kt = (speed_kt - last_kt) * TICKS as f64;
+            last_kt = speed_kt;
+            let command = (want + 0.12 * (speed_kt - target) + 1.5 * accel_kt).clamp(-8., 30.);
+            let error = command - s.pitch.to_degrees();
+            let input = PilotInput {
+                pitch: (0.06 * error - 0.03 * s.pitch_rate.to_degrees()).clamp(-1., 1.),
+                roll: (-2. * s.bank).clamp(-1., 1.),
+                throttle: Some(1.),
+                ..Default::default()
+            };
+            s.step_surface(&input, ground);
+            if s.crashed {
+                break;
+            }
+        }
+        let t = (second + 1) as f64;
+        top = top.max(s.position[1]);
+        for (i, m) in marks.iter().enumerate() {
+            if hits[i].is_none() && s.position[1] >= *m {
+                hits[i] = Some((t, s.speed / KT));
+            }
+        }
+        if env::var("PROBE_TRACE").is_ok() && (second + 1) % 15 == 0 {
+            println!(
+                "    t {t:4.0} alt {:6.0} speed {:5.1} kt target {:5.1} pitch {:5.2} want {want:5.2}",
+                s.position[1],
+                s.speed / KT,
+                target_kt(s.position[1]),
+                s.pitch.to_degrees()
+            );
+        }
+        if (second + 1) % 10 == 0 {
+            let roc = (s.position[1] - previous.0) / 10.;
+            best.push((s.position[1], roc));
+            let band = ((s.position[1] / 5_000.) as usize).min(11);
+            if at_alt[band].1 == 0. {
+                at_alt[band] = (s.speed / KT, roc);
+            }
+            previous = (s.position[1], t);
+        }
+        if s.crashed
+            || (second > 120 && best.last().is_some_and(|b| b.1 < 1.) && s.position[1] < 1_000_000.)
+        {
+            break;
+        }
+    }
+    println!("  highest {top:.0} ft");
+    let row: Vec<String> = marks
+        .iter()
+        .zip(&hits)
+        .map(|(m, h)| match h {
+            Some((t, v)) => format!("{m:.0}:{t:.0}s@{v:.0}kt"),
+            None => format!("{m:.0}:-"),
+        })
+        .collect();
+    println!("  {}", row.join(" "));
+    let rate: Vec<String> = at_alt
+        .iter()
+        .enumerate()
+        .filter(|(_, v)| v.0 > 0.)
+        .map(|(i, v)| format!("{}k:{:.0}fpm@{:.0}kt", i * 5, v.1 * 60., v.0))
+        .collect();
+    println!(
+        "  first rate seen in each 5,000 ft band: {}",
+        rate.join(" ")
+    );
+    Ok(())
+}
+
 /// Level turn at constant altitude: bank held, load factor fed forward as
 /// 1/cos(bank), altitude held by the stick, burner on. Returns (speed after the
 /// run in kt, G at the end, largest altitude drift in ft, turn rate over the last
@@ -317,6 +434,17 @@ fn level_turn(
     })
 }
 
+/// The Mach numbers of the sustained-turn section: `PROBE_TURN_MACH=a,b,c`
+/// (default 0.7, 0.9, 1.1). A bomber whose sea level top speed is under Mach
+/// 0.7 needs slower ones (B2-8).
+fn turn_machs() -> Vec<f64> {
+    env::var("PROBE_TURN_MACH")
+        .ok()
+        .map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect())
+        .filter(|v: &Vec<f64>| !v.is_empty())
+        .unwrap_or_else(|| vec![0.7, 0.9, 1.1])
+}
+
 fn turn_section(
     a: &Aircraft,
     set: &Setup,
@@ -325,7 +453,7 @@ fn turn_section(
     println!("-- sustained level turn, afterburner (bank held, speed free for 40 s)");
     for &alt in altitudes {
         let sound = sound_kt(alt);
-        for mach in [0.7_f64, 0.9, 1.1] {
+        for mach in turn_machs() {
             let v = mach * sound;
             let mut best: Option<(f64, f64, f64, f64)> = None;
             for bank in (30..=86).step_by(2) {
@@ -389,6 +517,53 @@ fn turn_section(
             println!(
                 "  alt {alt:6.0} Mach {mach:.1} ({v:4.0} kt): peak {max_g:.2} G, {max_rate:4.1} deg/s, speed after 3 s {:.0} kt; push {min_g:.2} G",
                 min_speed / KT
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Speed brake (B2-8): idle descent-free deceleration in level flight over ten
+/// seconds, clean and with the airbrake out, at a few speeds. The altitude
+/// hold keeps the flight level, so the lost speed is the drag alone.
+fn brake_section(
+    a: &Aircraft,
+    set: &Setup,
+    altitudes: &[f64],
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("-- speed brake: idle throttle, level, 10 s (kt lost, mean deceleration in G)");
+    for &alt in altitudes {
+        let top = state_top(a, alt)?.1 / KT;
+        for share in [0.5_f64, 0.7, 0.9] {
+            let v = share * top;
+            let mut row = Vec::new();
+            for out in [false, true] {
+                let mut s = start(a, set, alt, v, false)?;
+                s.brake_out = out;
+                s.brake = if out { 1. } else { 0. };
+                s.throttle = 0.;
+                for _ in 0..(10 * TICKS) {
+                    s.step_surface(
+                        &PilotInput {
+                            pitch: hold_altitude(&s, alt),
+                            roll: (-2. * s.bank).clamp(-1., 1.),
+                            throttle: Some(0.),
+                            ..Default::default()
+                        },
+                        ground,
+                    );
+                }
+                let lost = v - s.speed / KT;
+                row.push((lost, lost * KT / 10. / 32.174));
+            }
+            println!(
+                "  alt {alt:6.0} {v:4.0} kt ({:.2} of the top speed): clean {:5.1} kt ({:.3} G), brake out {:5.1} kt ({:.3} G), brake adds {:.3} G",
+                share,
+                row[0].0,
+                row[0].1,
+                row[1].0,
+                row[1].1,
+                row[1].1 - row[0].1,
             );
         }
     }
@@ -509,6 +684,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .and_then(|v| v.parse().ok())
             .unwrap_or(0.),
         fuel: env::var("PROBE_FUEL").ok().and_then(|v| v.parse().ok()),
+        climb: env::var("PROBE_CLIMB").ok().and_then(|v| {
+            let (k, m) = v.split_once(',')?;
+            Some((k.parse().ok()?, m.parse().ok()?))
+        }),
     };
     let altitudes: Vec<f64> = env::var("PROBE_ALTS").map_or_else(
         |_| vec![1_000., 15_000., 30_000., 36_000.],
@@ -533,6 +712,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     if wants("fuel") {
         fuel_section(&a, &set)?;
+    }
+    if only.as_deref() == Some("brake") {
+        brake_section(&a, &set, &altitudes)?;
     }
     Ok(())
 }
