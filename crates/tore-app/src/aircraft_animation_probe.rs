@@ -14,6 +14,7 @@ mod b747;
 mod c130;
 mod e2;
 mod f104;
+mod f117;
 mod f14;
 mod f15;
 mod f15e;
@@ -184,6 +185,14 @@ impl Control {
             // trailing-edge panel per wing is the aileron), so the flap lever
             // moves nothing and the probe requires that it stays that way.
             Self::Flaps if id == Id::Mf1 => Expectation::Unsupported,
+            // F117-3 (decision 27, John 2026-11-15): the F-117's source has no
+            // elevon, flap or aileron faces (the trailing edge is the aft edge
+            // of whole wing facets), so those levers draw nothing and the probe
+            // requires that they stay that way. Its elevator and rudder move the
+            // two ruddervators (collective and differential), the gear and the
+            // interim bay pose are `Required` below. It has no afterburner and no
+            // airbrake word (brake and exhaust below).
+            Self::Aileron | Self::Flaps if id == Id::F117 => Expectation::Unsupported,
             Self::Elevator | Self::Rudder | Self::Aileron | Self::Flaps => Expectation::Required,
             Self::Gear if matches!(id, Id::Ah64 | Id::Ch47) => Expectation::Unsupported,
             Self::Gear => Expectation::Required,
@@ -192,6 +201,7 @@ impl Control {
             Self::Hook if id == Id::Ac130 => Expectation::Unknown,
             Self::Hook if state.hook_available() => Expectation::Required,
             Self::Hook => Expectation::Unsupported,
+            Self::Brake | Self::Exhaust if id == Id::F117 => Expectation::Unsupported,
             Self::Brake | Self::Exhaust
                 if matches!(
                     id,
@@ -240,7 +250,9 @@ impl Control {
                 Expectation::Required
             }
             Self::Brake => Expectation::Unknown,
-            Self::Bay if matches!(id, Id::F22 | Id::F22n | Id::Faxx) => Expectation::Required,
+            Self::Bay if matches!(id, Id::F22 | Id::F22n | Id::Faxx | Id::F117) => {
+                Expectation::Required
+            }
             Self::Bay => Expectation::Unknown,
             Self::VectorPitch if matches!(id, Id::Av8 | Id::Yak141) => Expectation::Required,
             Self::VectorPitch | Self::VectorYaw if id == Id::X31 => Expectation::Required,
@@ -639,6 +651,7 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
             | AircraftId::Mf1
             | AircraftId::Tornado
             | AircraftId::TornadoClean
+            | AircraftId::F117
     ) {
         "reviewed-controls-and-attachments"
     } else {
@@ -1087,6 +1100,17 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
                 );
             }
         }
+        if id == AircraftId::F117 {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                f117::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
         if id == AircraftId::F15E {
             for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
                 f15e::check(
@@ -1300,6 +1324,9 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     }
     if id == AircraftId::Mig31 {
         failures.extend(mig31::combinations(&airframe, &neutral, out)?);
+    }
+    if id == AircraftId::F117 {
+        failures.extend(f117::combinations(&airframe, &neutral, out)?);
     }
     if id == AircraftId::M2000 {
         failures.extend(m2000::combinations(&airframe, &neutral, out)?);

@@ -921,6 +921,8 @@ Update (MF1-4, 2026-11-10): the Mirage F1 adds the same 202-value dense gear swe
 
 The Tornado (TOR-4, 2026-11-10) adds the same 202-value dense gear sweep (grounded at 7.33 ft at gear 1, three rigid pieces folding forward, near-stow checked against the neutral skin), a seven-value brake sweep (two plates, closed flat at the hinge height) and a seven-value exhaust sweep (two plumes from the exit plane), beside TOR-3's 25-pose grids at 25 and 67 degrees and its 35-pose sweep/flap grid; `flight-variety-tornado` flies 1,200 headless ticks.
 
+The F-117 (F117-3 and F117-4, 2026-11-15) registers `flight-animation-f117`: its two ruddervator assemblies follow pitch (collective) and yaw (differential) in the 25-combination pitch/yaw grid, while aileron, flaps, brake and exhaust must move nothing (the shape has no elevon, flap, airbrake or plume faces, so the probe records them as not applicable); the 202-value dense gear sweep (grounded at gear 1, three legs and three doors, stow checked against the neutral skin) and the 8-value interim bay sweep (`bay-sweep.csv`) must pass every row, and `flight-variety-f117` flies 1,200 headless ticks.
+
 Run one repaired aircraft before expanding the audit:
 
 ```sh

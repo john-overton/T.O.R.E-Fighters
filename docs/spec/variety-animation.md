@@ -1068,3 +1068,26 @@ brake and exhaust `required moved`, a 202-value dense gear sweep with every row
 passing (rigidity at most 2.2e-6 ft, anchor gap 0, skin gap 0, ground contact at
 gear 1, near-stow overshoot at most 0.17 ft) and the closed brake flat within
 2e-6 units. Not a claim of original retraction timing.
+
+## F-117 rig fit
+
+Agent-authored whole-piece motion, 2026-11-15 (slices F117-3 and F117-4), over
+`F117.SH` drawn at its real size per axis. Faces, hinges, the fold table, the root
+seam measurements and provenance: [F-117 rig](../formats/aircraft-variety.md#f-117-rig-f117-3-2026-11-15).
+Every number is fitted; the real ruddervator limit and the real gear retraction
+directions were not found.
+
+| Control | Fitted motion |
+| --- | --- |
+| Elevator | both ruddervator assemblies (10 faces a side) turn whole about their lateral cant axis through the root chord midpoint; a pull raises both trailing edges, 0.12 rad at full stick |
+| Rudder | the same panels differentially: a right pedal lowers the right panel's trailing edge and raises the left's, 0.08 rad at full pedal; the sum on one panel is clamped to the 0.15 rad limit |
+| Aileron, flaps | not rigged (the shape has no elevon or flap faces); the lever moves nothing |
+| Gear | three rigid legs (mains inward, nose forward), three door plates and the door skins; legs stow by gear 0.30, doors close from 0.30 to 0; hidden at 0, the source pose at 1 |
+| Bay (interim) | `state.bay` above 0 draws the shape's open pose: the swapped belly triangle and two wall plates that swing from flat to the source pose about their top edges; F117-5 replaces it |
+| Brake, burner | none (no airbrake or plume word; the jet has no afterburner) |
+
+Acceptance: `--animation-probe` reports `reviewed-controls-and-attachments`,
+elevator, rudder, gear and bay `required moved`, aileron, flaps, brake, hook and
+exhaust `not-applicable`, a 25-pose pitch/yaw grid, a 202-value dense gear sweep
+(grounded at 6.21 ft at gear 1, stow overshoot at most 0.24 ft) and an 8-value bay
+sweep, every row passing. Not a claim of original control travel or retraction timing.

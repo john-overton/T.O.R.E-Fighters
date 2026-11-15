@@ -7649,6 +7649,9 @@ source in this pass.**
 
 **Bay doors.** Covered below (open pose only; no door panel in the source).
 
+Update (F117-3, 2026-11-15): John chose decision 27, whole ruddervators with a small
+limit and the elevons left unrigged; see [F-117 rig](#f-117-rig-f117-3-2026-11-15).
+
 ### F-117 gear
 
 At 1/3 ft per unit: nose leg at y 36 to 43 (centre y 40), main legs at x
@@ -8061,6 +8064,10 @@ per-axis fit over uniform scaling (one factor cannot do 0.78, 0.96 and 0.89).
 | HUD | no HUD aperture (fails closed, BMB-A1) | nothing to scale yet |
 | Parked placement | the F-117 is not a parked target (`parked_aircraft.rs` has no arm) | none |
 
+Update (F117-4, 2026-11-15): the "F117-4 maps the nozzle" line in the table above did
+not happen: the shape has no nozzle disc and no plume word, so no nozzle is mapped
+and the contrail keeps its fallback attachment.
+
 **Skin and decals.** 207 runtime faces (gear down 238; bay open 242), one
 texture `_F117.PIC`. 19 exact-vertex twin groups, all pairs, **all with opposite
 stored normals** (checked on the shape with a scratch program, not committed),
@@ -8099,3 +8106,186 @@ drawn legs, so the two agree by construction.
 agent derivation, re-measured here); the 67.5 degree sweep and the dimensions are real figures
 cited above; the omitted-decal, damage-variant, hit-size and eye-point choices are
 agent decisions 2026-11-15, John's call to change.
+
+## F-117 rig (F117-3, 2026-11-15)
+
+Implementation, slices F117-3 and F117-4 of bomber batch A, run together (the shape
+has only two state words). Worktree `m3-f117`, plan
+`.local/m3-aircraft/PLAN-F117.md`. It mirrors the Mirage 2000 (M2K-3, M2K-4) and
+Tornado (TOR-3, TOR-4) rigs: one own-source rig file,
+`crates/tore-app/src/f117_animation.rs`, with its probe witnesses in
+`crates/tore-app/src/aircraft_animation_probe/f117.rs`. The shape is already scaled
+per axis (F117-2), so every hinge named below is a shape-unit point turned through
+`scale_point` (F117-2 note), and a panel turned about it stays rigid in feet. The
+fitted fit is also in [variety animation](../spec/variety-animation.md#f-117-rig-fit).
+
+**Decision.** John, 2026-11-15, decision 27: rig the V-tail as whole ruddervators
+with a small limit, mixing pitch and yaw as a V-tail does, and leave the elevons
+unrigged. Opinionated (John, 2026-11-15); every number below is fitted (agent
+decision 2026-11-15) unless it is marked as read from the shape.
+
+### What is rigged and what is not
+
+| Control | F-117 | How |
+| --- | --- | --- |
+| Elevator | rigged | collective ruddervator deflection |
+| Rudder | rigged | differential ruddervator deflection |
+| Aileron | **not rigged** | no elevon faces; probe records `not-applicable` and requires no motion |
+| Flaps | **not rigged** | same (no flap faces) |
+| Gear | rigged (F117-4) | three legs, three open-door plates, the door skins |
+| Bay | rigged, **interim** (F117-4) | the shape's open pose, word `4c56`; F117-5 replaces it |
+| Brake | none | no airbrake word, and the real jet has none; `not-applicable` |
+| Exhaust and burner | wired, draws nothing | no afterburner, no plume word; `not-applicable` |
+| Hook | none | the record has no hook |
+
+Pitch and roll authority still come from the flight model; the missing elevons are a
+drawing-only gap, as the F-15E's missing rudder was (the probe rule is the same:
+`Expectation::Unsupported` for aileron and flaps, so the lever must move nothing).
+The retail record has `afterburner thrust 0`, and `--flight-devices` already refuses a
+nonzero fifth value for it; `flame()` is false and no nozzle faces are mapped
+(`engine_material::outlet_count` stays 0), because the shape has no nozzle disc: the
+real exhausts are slot exhausts and the aft body faces are plain skin. Nothing breaks:
+the headless flight, the probe and the free-flight captures run as before, and the
+contrail still takes the fallback attachment (15 percent of the span either side).
+
+### Ruddervators (F117-3)
+
+Each side is one assembly of 10 faces (right `22c5 22d9 231a 232e 2383 244b 2460 2475
+24b3 2e40`, 36 vertices; left `23ab 23bd 23d0 23f7 240b 2425 2489 249e 24f6 255e`, 35)
+that shares no vertex with any other face (F117-0). The rig refuses a shape in which
+any face holds a vertex outside the reviewed 10-point set of its side.
+
+- **Hinge (read from the shape, scaled).** Each assembly turns whole about its
+  **root chord midpoint** on a **lateral cant axis**: the line from that midpoint to
+  the tip chord midpoint, with no fore-aft part (rule 11: tilted by its own cant,
+  never a swept span axis). Right: through (2, -67, 1), direction (21.5, 0, 20);
+  left: through (-2.5, -67, 1), direction (-21, 0, 20). The cant measures 42.9
+  degrees in shape units (right; 43.6 left) and 47.2 degrees on the scaled shape
+  (right; 47.8 left); F117-0 gave "about 39 degrees" from a coarser reading.
+- **Limit (fitted).** Each panel's trailing edge turns at most **0.15 rad (8.6
+  degrees)** either way. **The real limit was not found** in any source read (a
+  search for the F-117 ruddervator deflection returned only generic V-tail text);
+  nothing is cited. For comparison the Tornado's tailerons take 0.25 rad and the
+  fleet's tails 0.4: 0.15 is a small limit chosen so the root seam below stays small.
+- **Mixing (fitted).** The angle that raises a trailing edge is `0.12 x elevator`
+  (collective; a pull raises both) plus or minus `0.08 x rudder` (differential; a
+  right pedal lowers the right panel's edge and raises the left's, which swings
+  both trailing edges toward +X), the sum clamped to the 0.15 rad limit. Full pitch
+  alone is 0.12 rad, full rudder alone 0.08 rad, both together reach the limit on
+  one panel. Unit-tested and probe-witnessed in sign: a pull raises both trailing
+  edges and moves them toward the centreline, a right pedal moves both toward +X.
+- **Real layout note.** The real jet's ruddervators are usually described as hinged
+  trailing-edge surfaces of the V-tail; the shape has no such faces, so the whole
+  assembly turns instead (John's decision 27).
+
+**Rule 11 fold table.** Right assembly: 10 faces, 3 or 4 vertices each, every vertex
+turns, none stays fixed, none sits on the axis (the spindle passes through the panel
+interior). Left: the same. No face folds. The probe measures the largest
+inter-vertex distance change at 3.2e-6 ft over the 25-pose grid, `skin_gap_ft` 0.
+
+**Root seam (measured, rule 11).** The assembly shares no vertex with the fuselage,
+so the root is already 0.18 ft (right) and 0.15 ft (left) from the nearest fixed
+face in the neutral pose, and a turn opens or buries it. The probe
+(`seam-gap.csv`) follows the four root vertices of each side and reports the worst
+one's distance to the nearest fixed triangle, and how far it travelled:
+
+| Pose | Right gap, ft | Right root move, ft | Left gap, ft | Left root move, ft |
+| --- | ---: | ---: | ---: | ---: |
+| Neutral | 0.18 | 0 | 0.15 | 0 |
+| Full pitch up (0.12 rad) | 0.39 | 0.51 | 0.29 | 0.51 |
+| Full pitch down | 0.24 | 0.51 | 0.25 | 0.51 |
+| Full yaw right (0.08 rad) | 0.19 | 0.34 | 0.26 | 0.34 |
+| Full yaw left | 0.39 | 0.34 | 0.19 | 0.34 |
+| Pitch up and yaw left (right panel at the 0.15 limit) | 0.36 | 0.63 | 0.23 | 0.17 |
+| Pitch up and yaw right (left panel at the limit) | 0.25 | 0.17 | 0.31 | 0.63 |
+
+Over the whole 25-pose grid the worst gap is **0.41 ft (right) and 0.31 ft (left)**,
+and the largest root travel is 0.63 ft at the limit. About 0.2 ft of that is
+the opening the turn adds; the rest is the gap the source already has. In the frames
+the opening is a dark wedge beside the aft body, and at the limit it shows the
+slot-exhaust grille texture through it. A fuller limit grows it with the angle (0.25
+rad: 0.73 ft by the F117-3 pre-measure), which is why the limit is small. John's
+call: accept it, or have the root hidden by a fitted fairing face.
+
+### Gear (F117-4)
+
+Word `4c5c` adds 31 faces (F117-0); the rig checks the exact set and each piece's
+extent at load. They are flat plates in both windings, so the rig turns whole pieces:
+
+| Piece | Faces | Vertices | On the hinge | Fixed off axis | Hinge (shape units) | Stow |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| Right main leg (strut and wheel plates) | 6 | 24 | 2 | 0 | line along Y at x 30, z -4 (outboard top edge) | inward 90 degrees |
+| Left main leg | 6 | 24 | 2 | 0 | line along Y at x -31, z -4 | inward 90 degrees |
+| Nose leg | 6 | 24 | 0 | 0 | lateral line at y 36, z -5 (belly plane) | forward 90 degrees; steers first about the vertical line at y 40 |
+| Right door (x 23 hexagon) | 2 | 12 | 4 | 0 | line along Y at x 23, z -4 | inward 90 degrees |
+| Left door (x -25) | 2 | 12 | 4 | 0 | line along Y at x -25, z -4 | inward 90 degrees |
+| Nose door (x 3 plate) | 2 | 10 | 4 | 0 | line along Y at x 3, z -4 | inward 90 degrees |
+| Door skins (z -6, 7 faces) | 7 | 30 | 0 | 0 | lift 1.5 units (translation) | closed 0.5 units inside the belly |
+
+No face folds. At gear 1 the pose is the source pose exactly and the lowest vertex is
+**-18.62 units = 6.208 ft** (the F117-2 low point the flight model stands the jet
+on, checked by the probe); gear 0 draws none of the 31. **Timing (fitted):** the
+doors stay open while the legs swing, so the legs go from the source pose at gear 1
+to stowed at gear 0.30 and the doors then close from 0.30 to 0, the skins lifting
+with them; extension runs it backwards (doors open first, then the legs lower).
+**Directions (fitted, no source found):** the mains retract inward and the nose
+forward, hinges chosen so each stowed piece lies inside the skin; the real retraction
+directions were not found. The nose hinge sits on the belly plane (z -5) instead of
+its top edge (z -4) because at the top edge the strut's top corner stood 0.49 ft out
+of the cockpit roof; at the belly plane it stands **0.24 ft** out (measured; the
+probe gate is 0.3 ft). Every other stowed vertex is inside the neutral skin. The
+doors and skins are interim: they ride the same schedule rather than a source
+sequence, and F117-5's bay doors are separate work.
+
+### Bay (interim, F117-4; F117-5 replaces it)
+
+Word `4c56` swaps the belly triangle `34e6` for its other winding `351d` (a different
+texture region: the belly painted open, with the two weapon trapezes) and adds the
+two wall plates (`319c 31b1` at x -3, `31ff 3214` at x +1). The interim pose is the
+shape's own: `state.bay` above 0 draws `351d` and the walls and hides `34e6`; each
+wall (two windings) is one rigid plate that swings from flat inside the belly at bay
+0.0 to the source pose at 1.0 about its top edge (z -4), outward. Left wall 6 vertices
+a face, 4 of 12 on the hinge, 0 fixed. **It is minimal on purpose:** F117-5 cuts
+two fitted belly bays with doors and the F-22 magazine mechanism, and this rig is
+replaced then. `Flight::bay_available()` is true only for the F-22 family, so the
+bay does not open in play yet (the probe and the stores preview set `state.bay`
+directly); making it available belongs to F117-5 with the stations.
+
+### Probe and checks
+
+`--animation-probe` for `f117` (scope `reviewed-controls-and-attachments`): 207
+neutral faces, **0 required/check failures**. Elevator, rudder, gear and bay
+`required moved`; aileron, flaps, brake, hook and exhaust `not-applicable` (no
+motion, as required); rotor and wing sweep stay `unreviewed` as for every fixed-wing
+without them. The 25-pose pitch/yaw grid passes 25 of 25 (anchor not applicable,
+skin gap 0, rigidity at most 3.2e-6 ft, direction witnesses 0); the 202-value dense
+gear sweep passes every row (rigidity at most 1.9e-6 ft, hinge gap 0, skin gap 0,
+ground contact at 1, stow overshoot at most 0.24 ft); the 8-value bay sweep passes
+(rigidity at most 3.2e-7 ft, hinge gap 0). The battery animation lane registers
+`f117` with those three sweeps (`dense-gear.csv` 203 lines,
+`pitch-yaw-combinations.csv` 26, `bay-sweep.csv` 9) and the variety flight lane
+registers it too (`flight-variety-f117`, 1,200 headless ticks).
+
+**Frames** (`.local/m3-aircraft/frames/F117-3/`, png with ppm; `capture.sh`,
+`batch-tail.sh` and `batch.sh` are the recorded commands). Ruddervators, rear
+three-quarter (look 335,-12) and side (270,-5), zoom 3, gear and bay up: `tail-<pose>-rear`
+and `tail-<pose>-side` for `neutral`, `pitch-up`, `pitch-down`, `yaw-right`,
+`yaw-left`, `limit-right` (right panel at 0.15 rad) and `limit-left`; 4x and 3x
+crops `tail-3x-<pose>-<view>` and the sheets `sheet-tail-rear`, `sheet-tail-side`;
+the root seam close-ups `seam-8x-neutral-rear`, `seam-8x-pitch-up-rear`,
+`seam-8x-limit-right-rear` and `sheet-seam-rear`. Gear, below (0,-60) and side
+(270,-25): `gear-<down|mid|doors|near-up|up>-<below|side>` (gear 1, 0.5, 0.15, 0.03,
+0) with `sheet-gear-below` and `sheet-gear-side`. Bay, through the GPU stores
+preview cameras: `bay-<closed|half|open>-<under|oblique>` and `sheet-bay-oblique`.
+I looked at the tail, seam, gear and bay frames: the panels turn whole, the wedge at
+the root shows at the limit; the legs swing in and the doors close after them; the
+open bay shows the painted trapezes between the walls. The views are oblique (the
+orbit view does not hold the jet level) and carry the instrument windows.
+
+**Provenance.** Faces and word roles spec-derived (retail shape, re-verified at
+load); the cant axis and root midpoints read from the shape; ruddervator limit and
+mixing, door timing, hinge heights, stow directions, the nose belly-plane hinge,
+the skin lift, the 0.3 ft stow gate and the interim bay pose fitted (agent
+decisions 2026-11-15); whole-assembly ruddervators and unrigged elevons per
+decision 27 (John, 2026-11-15). Nothing attributed to John beyond that. No retail
+bytes committed.

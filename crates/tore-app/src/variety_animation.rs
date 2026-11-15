@@ -338,7 +338,12 @@ fn specification(id: Id) -> Option<Spec> {
                 &[(0x648c, Part::Gear, 14)],
                 1. / 3.,
             ),
-            // F117.SH: two words, gear 0x4c5c adds 31 faces.
+            // F117.SH: two words, gear 0x4c5c adds 31 faces. F117-3 and F117-4
+            // load it through its own `f117_animation` rig (the two whole
+            // ruddervator assemblies, the rigid gear with its doors and the
+            // interim bay-open pose, word 0x4c56); this row still gives the
+            // load-time layout, the shape scale and `supported`. The elevons are
+            // unrigged (no elevon faces) and no plume or airbrake word exists.
             Id::F117 => (
                 15470,
                 207,
@@ -430,6 +435,8 @@ enum SpecificRig {
     /// plume.
     Mf1(crate::mf1_animation::Rig),
     Tornado(crate::tornado_animation::Rig),
+    /// F117-3 and F117-4: the ruddervators, the gear and the interim bay pose.
+    F117(crate::f117_animation::Rig),
 }
 pub struct Rig {
     id: Id,
@@ -761,6 +768,15 @@ impl Rig {
                     shape,
                 ));
             }
+            Id::F117 => {
+                let (rig, shape) = crate::f117_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::F117(rig),
+                    shape,
+                ));
+            }
             _ => {}
         }
         if tore_formats::module::code(bytes)?.0.len() != spec.code
@@ -891,6 +907,7 @@ impl Rig {
                 SpecificRig::F5E(_) => crate::f5e_animation::flame(address),
                 SpecificRig::Mf1(_) => crate::mf1_animation::flame(address),
                 SpecificRig::Tornado(_) => crate::tornado_animation::flame(address),
+                SpecificRig::F117(_) => crate::f117_animation::flame(address),
             };
         }
         self.groups
@@ -956,6 +973,7 @@ impl Rig {
                 SpecificRig::F5E(rig) => rig.animate(source, state),
                 SpecificRig::Mf1(rig) => rig.animate(source, state),
                 SpecificRig::Tornado(rig) => rig.animate(source, state),
+                SpecificRig::F117(rig) => rig.animate(source, state),
             };
         }
         let mut face = source.clone();
