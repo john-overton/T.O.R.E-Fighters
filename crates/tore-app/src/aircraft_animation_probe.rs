@@ -10,6 +10,7 @@ mod a4e;
 mod ac130;
 mod av8;
 mod awacs;
+mod b2;
 mod b747;
 mod c130;
 mod e2;
@@ -184,6 +185,12 @@ impl Control {
             // trailing-edge panel per wing is the aileron), so the flap lever
             // moves nothing and the probe requires that it stays that way.
             Self::Flaps if id == Id::Mf1 => Expectation::Unsupported,
+            // B2-3: the flying wing has no flap panel (its elevons are the
+            // pitch and roll surfaces and the drag rudders the yaw and speed
+            // brake), so the flap lever moves nothing and the probe requires
+            // that it stays that way. The elevator and aileron are the
+            // elevons and the rudder is the drag rudders, all `Required`.
+            Self::Flaps if id == Id::B2 => Expectation::Unsupported,
             Self::Elevator | Self::Rudder | Self::Aileron | Self::Flaps => Expectation::Required,
             Self::Gear if matches!(id, Id::Ah64 | Id::Ch47) => Expectation::Unsupported,
             Self::Gear => Expectation::Required,
@@ -235,12 +242,17 @@ impl Control {
                         | Id::Mf1
                         | Id::Tornado
                         | Id::TornadoClean
+                        | Id::B2
                 ) =>
             {
                 Expectation::Required
             }
             Self::Brake => Expectation::Unknown,
-            Self::Bay if matches!(id, Id::F22 | Id::F22n | Id::Faxx) => Expectation::Required,
+            // B2-3: the interim bay plates (word 6486) are drawn at the bay
+            // fraction (B2-5 replaces them with real bay doors).
+            Self::Bay if matches!(id, Id::F22 | Id::F22n | Id::Faxx | Id::B2) => {
+                Expectation::Required
+            }
             Self::Bay => Expectation::Unknown,
             Self::VectorPitch if matches!(id, Id::Av8 | Id::Yak141) => Expectation::Required,
             Self::VectorPitch | Self::VectorYaw if id == Id::X31 => Expectation::Required,
@@ -292,6 +304,8 @@ impl Control {
             {
                 Expectation::Required
             }
+            // B2-3: the B-2 has no afterburner and no flame word.
+            Self::Exhaust if id == Id::B2 => Expectation::Unsupported,
             Self::Exhaust => Expectation::Unknown,
         }
     }
@@ -639,6 +653,7 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
             | AircraftId::Mf1
             | AircraftId::Tornado
             | AircraftId::TornadoClean
+            | AircraftId::B2
     ) {
         "reviewed-controls-and-attachments"
     } else {
@@ -1142,6 +1157,17 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
                 );
             }
         }
+        if id == AircraftId::B2 {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                b2::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
         if id == AircraftId::Mig31 {
             for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
                 mig31::check(
@@ -1318,6 +1344,9 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     }
     if id.source() == AircraftId::Tornado {
         failures.extend(tornado::combinations(&airframe, &neutral, out)?);
+    }
+    if id == AircraftId::B2 {
+        failures.extend(b2::combinations(&airframe, &neutral, out)?);
     }
     failures.extend(rotorcraft::combinations(&airframe, &neutral, out)?);
     moving_parts(&airframe, &neutral, out)?;

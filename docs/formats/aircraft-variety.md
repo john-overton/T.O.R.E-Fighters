@@ -8229,3 +8229,195 @@ F404-F1D2 value found), the B-2 and B-52 top speeds and sea-level edges, the B-2
 49,000 ft ceiling (real 50,000), and the engine count: `Configuration::from_source`
 clamps `engines` to 1 to 4 (`live.rs`), so the B-52's eight engines read as four
 (an existing behaviour, not touched here; B52-8's call).
+
+## B-2 rig (B2-3, 2026-11-15)
+
+Implementation, slices B2-3 and B2-4 run together (bomber batch A), Claude Sonnet
+(sonnet-high). Binding: John's accepted decision 20 (2026-11-15): rig the elevon
+wedges as whole panels (rule 12), drive the signed drag-rudder word from yaw, add
+a fitted both-sides speed brake, rig the gear and the interim bay pose. The B-2
+now loads through its own rig, `crates/tore-app/src/b2_animation.rs` (the shared
+`variety_animation` row keeps only the layout, scale and `supported`), with its own
+probe module (`aircraft_animation_probe/b2.rs`) and battery entries. Nothing in the
+simulation changed. Frames are local only, in `.local/m3-aircraft/frames/B2-3/`.
+
+Provenance: the face lists, hinge edges, retail open poses and gear plates are
+spec-derived (retail `B2.SH`, read at load and refused if they differ). Everything
+that moves them (limits, mixing, the speed brake, hinge heights, retraction
+direction, the bay drop) is **fitted**, agent decisions of 2026-11-15, labelled
+below. No retail bytes are committed.
+
+### Elevons (rule 11 fold check and rule 12 mixing)
+
+One four-face wedge per side with no state word (`4037 404e 4065 407a` right,
+`40ce 40e5 40fc 4111` left). Re-checked by exact coordinates: no vertex of either
+wedge is shared with any other face (7 distinct vertices per side, 0 neighbours).
+
+| Face | Vertices | Move | On the hinge line | Fixed off the line |
+| --- | ---: | ---: | ---: | ---: |
+| `4037` top-of-wedge quad (right) | 4 | 4 | 0 (the line is the mid-thickness of the leading edge) | 0 |
+| `404e` quad | 4 | 4 | 0 | 0 |
+| `4065`, `407a` inboard triangles | 3 each | 3 each | 0 | 0 |
+| Left `40ce 40e5 40fc 4111` | 4, 4, 3, 3 | all | 0 | 0 |
+
+The whole wedge turns as one rigid body about its leading-edge mid-line (right
+(63, -70, -3) to (120, -22, -3), left (-121, -22, -3) to (-64, -70, -3) in shape
+units, a third of a foot each). The two leading-edge vertices at each end (z 0 and
+-6) sit 3 units off the line, so the hinge-line opening against the fixed skin ahead
+is at most 6 sin(angle/2) units: 0.9 units (0.30 ft) at pure pitch, 0.6 units
+(0.20 ft) at pure roll and 1.5 units (0.49 ft) at the clamp. The probe measures the
+midpoint of each leading-edge pair staying on the line (largest move 1.6e-7 ft) and
+the wedge rigid to 5e-6 ft.
+
+Mixing, rule 12: angle (positive lowers the trailing edge) = -0.30 x pitch
+-/+ 0.20 x roll, right sign minus, left plus, clamped to +-0.50 rad. A pull raises
+both trailing edges; a positive aileron raises the right and lowers the left. The
+limits are the fleet's own fitted values (Mirage 2000, Rafale, MiG-31: 0.30 pitch,
+0.20 roll), 17.2 and 11.5 degrees, 28.6 degrees at the clamp. **Fitted; no cited
+B-2 elevon limit was found** (the one source found only says the outer elevons are
+the primary pitch and roll surfaces and the inner ones low-speed, Virginia Tech
+slides, `archive.aoe.vt.edu/mason/Mason_f/B2Spr09.pdf`; the mesh has one strip per
+side, so the single wedge takes both terms). The flap lever moves nothing: the
+flying wing has no flap panel.
+
+### Drag rudders (word 6498) and the speed brake
+
+The rig never sets word 6498 (a magnitude of 2 or more removes a pair and adds
+nothing, B2-2). Each side keeps its two closed quads (`465f` upper, `4679` lower
+right; `4600`, `461a` left) and turns each as one rigid plate about its own hinge
+edge (z 0 for the upper plate, z -7 for the lower): right (177, -46) to (215, -71),
+left (-178, -46) to (-218, -72). The open angle is read at load from the retail
+open pose (the free edge's midpoint, about the hinge line), so the fully open rig
+reaches the source pose to within 0.6 unit (0.2 ft), the plate's own chord stretch (the retail open
+plate is 12.8 units on its chord against 12.1 to 12.4 closed, 5 percent, because the
+source open pose is not an exact rotation):
+
+| Plate | Hinge z | Angle to the retail open pose | Free edge z, closed to open |
+| --- | ---: | ---: | --- |
+| Right upper | 0 | 47.6 degrees up | -3 to +6.4 and +7.0 (retail +7) |
+| Right lower | -7 | 52.1 degrees down | -3 to -13.5 and -14.2 (retail -14) |
+| Left upper | 0 | 50.3 degrees up | -3 to +7.0 and +7.2 (retail +7 and +8) |
+| Left lower | -7 | 52.9 degrees down | -3 to -14.0 and -13.8 (retail -14) |
+
+A closed quad has one winding, so the rig adds a reversed-winding twin (built on
+the retail `back` face of the open pose: `47f5 47c1 46ea 471e`) while a side is
+open, plus the retail vertical front plate and inboard cap (`480f 4829`, left `4738
+4752`), drawn only while that side is open. Rule 11: each plate is a whole four
+vertex quad, both hinge vertices on the hinge line (largest hinge move 1.6e-7 ft),
+the two plates of a side meet only at the trailing edge, which opens by design.
+
+**Mapping (fitted).** Open fraction of the right side = min(1, brake +
+max(rudder, 0)); left = min(1, brake + max(-rudder, 0)). A positive rudder (a right
+yaw) opens the right drag rudder and a negative rudder the left, each from closed
+to the one open pose in proportion to the command. The real B-2 yaws by opening the
+drag rudder on the side it yaws toward, which raises the drag on that wing (Aviationist,
+"B-2 control surfaces" close-up of the pre-flight check, 2021-03-10; AeroXplorer,
+"How does a B-2 Spirit fly without a tail?"; the flight computer blends them with
+differential thrust). This is the same sense as the rig's `+1` (right), the repository's
+positive rudder (trailing edge to starboard, yaw right). Probe rows
+(`yaw-brake-combinations.csv`, 25 poses): the open sides match the formula, every
+plate rigid, direction correct, the right free edge never falls as the brake
+grows.
+
+**Speed brake (fitted, decision 20; label fitted).** The shape encodes one side
+open at a time (a signed word), so the both-sides pose cannot come from the word.
+The rig opens both sides by turning the closed quads, so the pose is the same
+geometry the left and right poses already use, mirrored and shown together: the
+"compose both open poses" method works because the rig turns plates instead of
+choosing a word. It is wired to the existing airbrake control (the `B` key,
+`Switch::Airbrake`, `State::brake`, which ramps over the record's deployment time)
+and its drag is the existing one (`airBrakesDrag` 256 in `B2.PT`, applied as
+`airbrake x brake` by the flight model; the B-2 record is the B-1B's, so the figure is
+the template's). Nothing was added to the simulation. With the brake at 1 both
+sides are fully open whatever the yaw; at a part brake the yaw side opens further,
+so the yaw stays visible below full. Cited use: the same surfaces open together as
+air brakes (one source says they open symmetrically at low speed and on takeoff and
+landing); that is a weaker citation than the yaw use, hence fitted.
+
+### Gear (word 648c, +14 faces)
+
+Seven plates, both windings each, retracting with the shared gear fraction
+(angle = 90 degrees x (1 - gear), hidden at 0, the source pose at 1, so the
+timing is the sim's own ramp). All hinge lines are fitted (the shape has none) and
+every piece turns as one rigid body:
+
+| Piece | Faces | Hinge (shape units) | Stow |
+| --- | --- | --- | --- |
+| Main door leaves | `438d 43a4`, `449e 44b5` | line along Y at z -10 (2 units above the leaf's top edge at -12), at x -71 and 69 | inboard, flat inside the closed well |
+| Main wheel plates | `441b 443a`, `452c 454b` | line along Y at z -9, at x -65 and 62 | inboard, flat inside the closed well |
+| Nose front leaf | `4153 416a` | lateral line (0, 71, -9), its top edge | aft, flat above the belly |
+| Nose rear leaf | `41ae 41c5` | lateral line (0, 97, -5), its top edge | aft |
+| Nose strut and wheel plate | `4597 45b6` | lateral line (0, 96, -5), its forward top corner; steers about a vertical line through (0, 92) | aft |
+
+The mains' hinge is raised above the leaf's top edge because the belly well panel
+is at z -12 (`3cc9`): a plate hinged on its own top edge would stow coplanar with
+that skin. Raised, the stowed plates lie at z -10 and -9, inside the closed well.
+Direction (inboard mains, aft nose) is fitted, as the Mirage 2000 and the Tornado (no
+B-2 gear retraction direction was found in public sources). Probe (`dense-gear.csv`,
+202 values plus the near-stow sample): rigid at every value, never below the gear-down
+pose, grounded at gear 1 at exactly 33 units (11.0 ft, the inner main plates), every
+piece at or above its own hinge height near stow, main plates inboard of their gear-down
+x, the strut foot aft of its gear-down y, 203 lines, all passing.
+
+**Wheel brakes.** None exist in the shape (plates only, no wheels, no brake
+word) and the simulation has no separate wheel-brake visual for any aircraft, so
+"brakes" here is the airbrake and speed brake above.
+
+**Nose wheel (decision for John's information).** The nose strut's lowest point is
+33 minus 31 = 2 units (0.67 ft) above the inner main plates', and the simulation
+stands every aircraft on one clearance below its model origin (the gear low point,
+11.0 ft for the B-2) with the pitch held level on the runway (`start_on_runway`
+sets pitch 0). So the B-2 sits level (0.00 degrees) with the nose wheel 0.67 ft
+(8 inches) off the pavement; the geometry that would put it down is 1.39 degrees
+nose down over the 27.7 ft wheelbase. **Chosen: accept it as the retail sit**, no
+fitted nose contact point. Why: a nose point is not a rig change, it is new ground
+physics (a per-aircraft contact table or a pitch on the ground) that the one-clearance
+contact model does not have for any of the 48 aircraft, it would touch
+`SIMULATION_VERSION` and determinism for a 1.4 degree effect, and the retail game drew
+the same plates over the same clearance. The frames (`ground-*`) show the nose wheel at
+or just off the pavement with no sinking and no visible float at normal distance.
+
+### Bay (word 6486): interim
+
+The four hanging plates (`4209 4220 4264 427b 431a 4331 42bf 42d6`, both
+windings, x -27, -3, 1, 26, y -10 to 48, z -12 to -25) are added to the shape and drawn
+only while `State::bay` is above 0, dropping from the belly line (z -12, their top edge
+stays) to the full 13 units as the bay fraction goes 0 to 1 (fitted, interim). Nothing
+raises the bay fraction for the B-2 yet: `State::bay_available` is true only for the
+F-22, so in play the plates never appear, and `--flight-bay` refuses the B-2. B2-5
+replaces this with real bay cuts, doors and the magazine grid (and owns the
+`bay_available`, signature and release-timing change); the frames of the interim pose
+(`bay-*`) came from a temporary, reverted patch to the capture option. The probe drives
+`State::bay` directly (control `bay`, 5 poses).
+
+### Burner, flame, hook, flaps
+
+The B-2 has no flame word, no nozzle faces and no afterburner thrust (`engine_material`
+returns no nozzle, `outlet_count` is 0, `--flight-devices` refuses a non-zero fifth
+fraction). The probe marks `exhaust` and `flaps` not applicable and requires that they
+move nothing; `hook` is not applicable (no hook). Nothing breaks: the exhaust and flap
+levers leave the geometry identical.
+
+### Probe result
+
+`--animation-probe .local/m3-aircraft/checks/B2-3/probe`: `animation probe B2.PT:
+268 neutral faces, 0 required/check failures` (B2-2: the same four required failures,
+unmapped). Required controls now pass: elevator (the elevons, 5 poses), aileron (the
+elevons, 5), rudder (the drag rudders, 5), gear (22), brake (the speed brake, 5) and
+bay (5). `flaps` and `exhaust` are not applicable, accepted explicitly (the flying wing
+has no flaps and no burner), `hook` not applicable. Grids: `pitch-roll-combinations.csv`
+(25 poses), `yaw-brake-combinations.csv` (25 poses), `dense-gear.csv` (202 values): all
+pass, rigidity at most 5e-6 ft, hinge gap at most 1.6e-7 ft. Battery entry:
+`flight-animation-b2` (expects the three CSVs).
+
+Frames (`.local/m3-aircraft/frames/B2-3/`, png with ppm; `cap.sh` and `batch1.sh` to
+`batch4.sh` record the commands; chase view, 200 kt, paused pose): `elevon-{neutral,
+pitch-up,pitch-down,roll-right,roll-left}-{rear3q,rear,side}` and 3x crops
+`crop3x-elevon-*-rear3q`; `drag-{neutral,yaw-left,yaw-right,speed-brake}-{rear3q,
+rear,side}` and `crop3x-drag-*-rear3q`; `gear-{down,up,mid}-{under,side}`,
+`gear-mid-{0.25,0.75}-under`; `bay-{open,half}-under`, `bay-open-gear-down-under`;
+`ground-{side,nose-side,front3q,rear3q,side-low,front-low}` (a runway start, gear
+down, level). Looks: the open drag rudder reads as a dark upper plate and a lighter
+lower plate hinged off the trailing edge on the yaw side, both open together for the
+brake; the elevon wedge leans visibly at pitch down and at roll; the gear folds
+whole and inboard, hidden at 0.
