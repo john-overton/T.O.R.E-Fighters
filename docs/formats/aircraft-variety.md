@@ -8008,6 +8008,112 @@ count. The `menus-ordnance-availability` and `a2g-catalog` battery expected
 lines and `tools/test_battery_a2g.py` follow
 ([ordnance availability](../baselines/ordnance-availability.md)).
 
+## B-52 shape, size and looks (B52-2, 2026-11-15)
+
+Implementation, slice B52-2, Claude Sonnet. John's accepted decision 6 (2026-11-15:
+draw at 2/3 ft per unit, lengthen the gear only if the frames show the belly or
+pods too low) is confirmed in code and frames. BMB-A1 had already put the
+B-52 at 2/3 ft a unit (`debris::scale`, the rig spec and the gear low point);
+this slice measured every consumer and changed no production code. A retail-reading
+test (`crates/tore-import/tests/b52_shape.rs`, skips without media) pins the numbers
+and the `render-b52-skin` battery scenario draws the top and under views with the gear
+down. Frames: `.local/m3-aircraft/frames/B52-2/` (local only).
+
+**Size (spec-derived measurements, shape units at 2/3 ft).** `B52.SH` of `FA_2.LIB`
+(CODE 27,204; the base archive is the only source). Neutral state: x -139 to 139, y
+-138 to 107, z -9 to 42; gear word `7a26` adds 32 faces and the low point -14.
+
+| Axis | Units | Feet at 2/3 | Real | Difference |
+| --- | ---: | ---: | ---: | ---: |
+| Span | 278 | 185.3 | 185 ft | +0.2% |
+| Length | 245 | 163.3 | 159 ft 4 in (Jane's 160.9 ft) | +2.5% (+1.5%) |
+| Height, gear down to fin tip | 56 | 37.3 | 40 ft 8 in | -8.2% |
+
+**Gear and the decision (fitted measurements, agent decision, nothing lengthened).**
+
+| Assembly | Faces | Measured (units, feet) |
+| --- | ---: | --- |
+| Four tandem trucks | 6 each | centres y +39.5 and -31.5 (wheelbase 71 units, 47.3 ft); plates x 5 to 13 and -14 to -5 (about 12.3 ft between truck centres); z -14 to -6 |
+| Two outriggers | 4 each | x +/-108 to 113 (74 ft out), y -38 to -32 (23 ft aft of the origin), z -14 to 3 (11.3 ft long) |
+
+- Contact line: every truck and both outriggers reach z -14, which is 9.33 ft below
+  the reference point; `models/variety.rs` uses the same 14 units at 2/3 ft. The
+  outriggers touch the ground line with the wings at rest (the wing tip is at z 3,
+  11.3 ft up, and the leg is 17 units). In the ground frames the truck wheels and an
+  outrigger wheel sit on the runway.
+- Clearance with the gear down: belly 3.3 ft (z -9), inboard pods 5.3 ft (z -6, x 45
+  to 61), outboard pods 4.7 ft (z -7, x 79 to 96), drawn tank pods 7.3 ft, wing tip
+  11.3 ft, fin tip 37.3 ft.
+- **Decision: the gear stays as drawn.** The frames show a low, long-legged-looking
+  bomber with the pods clear of the pavement; nothing reads as sunk or clipped. No
+  published pod or belly clearance figure was found (a web search returned the layout
+  only), so a lengthening of about 3.4 ft (5 units) to reach the real 40 ft 8 in
+  would be a guess. It remains an option for John: lengthen all six assemblies by the
+  same 5 units (fitted), which raises the belly to 6.7 ft and the pods to 8.0 and 8.6
+  ft, and moves the variety gear low point to 19 units (12.7 ft). Not applied.
+
+**Consumers at 2/3 ft.** The drawn aircraft, the stores preview and station
+underside, the damage looks and their section extents, the damage bodies and pieces,
+breakup offsets, the gear low point (9.33 ft) and the wingtip vapor point all use
+2/3. The vapor record's points are +/-278 CE units, 92.67 ft out, exactly the drawn
+tip (139 units), 2 ft up (the wing tip is at z 3) and 43.3 ft aft (inside the tip
+chord); no fix needed. The generic rig scale equals `debris::scale` for the B-52 (a
+test line was added beside the Tornado's). No consumer is still at 1/3.
+
+**Not shape-derived (shared, unchanged, flagged).**
+
+- *Hit volume.* One 28 ft sphere for every aircraft (`AIRCRAFT_RADIUS_FT`); the gun
+  contact boxes are fractions of it (wings to 0.92, nose to 0.92, tail to -0.92). For
+  the B-52 that is a hit box about 26 ft each side of the origin on a 92.7 ft
+  half-span, 26 ft forward of the origin on a nose 71 ft out and 26 ft aft on a tail
+  92 ft out: gunfire and fuzed weapons only touch the middle of the aircraft (the wing boxes reach 28 percent of the half-span). The transports
+  (C-130, E-3) share this. A per-aircraft radius would change every aircraft, so it
+  is John's call (flagged, not changed).
+- *Eye point.* `mirrors::pilot_eye` is a fixed 10 ft forward and 7 ft up of the
+  origin for every aircraft, and the front cockpit view sits at the origin. The B-52
+  flight deck is drawn at y 88 to 100 (the windscreen, roof z 11), 59 to 67 ft
+  forward and about 5 ft up: the rear view's seat is about 50 ft behind it. B52-7
+  (cockpit) owns this.
+- *Debris.* `debris::attachment` reads the shapes per axis at 2/3 with the identity
+  per-axis factor; covered by the existing scale test.
+
+**Skin.** 271 runtime faces (273 on the export path), one texture `_B52.PIC`. Twelve
+exact-vertex twin groups, all with opposite stored normals (no MiG-21 exception, no
+same-side sliver as the Tornado has); the smooth path pairs them and the top frame
+shows no show-through. The wing tanks (x +/-113 to 117, at the wing tip) are drawn
+airframe, no station (decision 10).
+
+**Decals.** Two `E0` runtime decal slots on the export path, both 10 by 10 unit
+plates one unit above the outer upper wing: slot 3 at `33b4` (left, x -126 to -136, y
+-48 to -58, z 4) and slot 4 at `4676` (right). The runtime projector omits both and
+the wing draws plain camouflage with no blank or skin-filled patch, as for the
+Mirage 2000 and the Tornado. The nose art, fuselage codes and tail codes are textured
+faces and draw whole; the fin carries no decal. No clipping and no fix needed.
+
+**Damage looks.** `B52_A.SH` 372 faces, `B52_B.SH` 116, `B52_C.SH` 387, `B52_D.SH` 84
+load at the intact shape's header scale (2). A is the body with the left wing cut at
+x -43 (piece B is the cut-off section, authored about its own origin, x -71 to 62),
+C the body with the right wing cut at x 82 (piece D, x -56 to 54, likewise); A and C lie inside the intact extents. No
+whole-body variant is registered for the B-52 (`debris::damage_variant`), so a
+destroyed B-52 draws the intact skin with regional cuts, as the Mirage 2000, the
+Tornado and the MiG-25 do (open decision for John: registering `LeftWing` as variant
+0 and `RightWing` as variant 1 would use the reviewed A to D pair, as the F-22 does
+for the left wing). Frames at 0.6 and 1.0 (left-wing section, view 2 look 0,60, 120
+ticks) show the wing cut at 1.0 with the fitted tear and fragment; the tail and core
+sections at 1.0 also draw.
+
+**A defect found on the way (not fixed, outside this slice).** With the B-52H the
+game does not start in free flight or from a runway ground start: it stops with
+"payload outside aircraft mass limits". BMB-A2 made the loadout cap the default tank
+at 303,000 lb, but the flight state keeps the full 312,197 lb and
+`flight::State::set_payload` rejects any payload on top of empty 185,000 plus that
+tank (over 488,000 lb). Headless level flight does not call it, which is why BMB-A2's
+checks passed. The frames and the battery scenario were captured with a temporary
+local patch (`.local/m3-aircraft/checks/B52-2/set-payload-fuel-cap.diff`: when the
+tank does not fit under the maximum, `set_payload` lowers it to what fits), reverted
+afterwards. The patch is a proposal for the coordinator; without it
+`render-b52-skin` fails at startup.
+
 ## B-2 shape, size and looks (B2-2, 2026-11-15)
 
 Implementation and measurement, slice B2-2, Claude Sonnet (sonnet-high). John's
@@ -8542,6 +8648,229 @@ F404-F1D2 value found), the B-2 and B-52 top speeds and sea-level edges, the B-2
 49,000 ft ceiling (real 50,000), and the engine count: `Configuration::from_source`
 clamps `engines` to 1 to 4 (`live.rs`), so the B-52's eight engines read as four
 (an existing behaviour, not touched here; B52-8's call).
+
+## B-52 rig (B52-3, 2026-11-15)
+
+Implementation, slices B52-3 and B52-4 run together (bomber batch A), Claude Sonnet
+(sonnet-high). Binding: John's accepted decisions 11 (no drawn roll surface, the
+stabilizer takes its real pitch range) and 12 (the outriggers retract with the gear,
+no crosswind crab), 2026-11-15. The B-52 now loads through its own rig,
+`crates/tore-app/src/b52_animation.rs` (the shared `variety_animation` row keeps only
+the layout, the scale and `supported`), with its own probe module
+(`aircraft_animation_probe/b52.rs`) and battery entries (`flight-animation-b52`).
+Nothing in the simulation changed. Frames are local only, in
+`.local/m3-aircraft/frames/B52-3/`.
+
+Provenance: the face lists, hinge edges and gear plates are **spec-derived** (retail
+`B52.SH`, read at load and refused if they differ). The stabilizer range and the
+outrigger direction are cited real facts; everything that moves a piece (the limits that
+no source gives, the hinge lines, the stow turns, the timing, the interim bay drop) is
+**fitted**, agent decisions of 2026-11-15, labelled below. No retail bytes are committed.
+
+### Word map (identified)
+
+| Word | Faces | Reading | Rig |
+| --- | ---: | --- | --- |
+| `7a20` | +4 | Bay: two plates (x -7 and +7, y -13 to 26, z -13 to -8), both windings | Drawn while `state.bay` > 0, dropping from the belly line (interim, fitted) |
+| `7a26` | +32 | Gear: four trucks (6 faces each) and two outriggers (4 each) | Appended to the shape, hidden at gear 0, six rigid assemblies |
+| `7a2c` | -2 | Left flap word: deletes the left inboard wedge `4f3b 4f5a`, adds nothing | Pinned at load, never set |
+| `7a32` | -2 | Right flap word: deletes `4e54 4e73`, adds nothing | Pinned at load, never set |
+| `7a38` | +2 / -2 | Rudder word: swaps the full-height quad `50f0 5117` for a skewed copy `5016 503d` | Pinned at load, never set; its pose gives the travel |
+
+The slot order of the flap words was "unconfirmed" in B52-0. `Shape::with_state` now
+shows it: `7a2c` removes exactly the two left faces and `7a32` exactly the two right
+faces, so the left and right reading is confirmed (the rig checks the exact removed
+and added address sets for all five words and refuses a shape that differs). The rig
+never sets the flap or rudder words: it keeps the neutral wedges and the neutral
+rudder drawn and turns them whole, so the wing and the fin never show a hole.
+
+### Rule 11 face table
+
+| Surface | Faces | Vertices | Move | On the hinge | Fixed |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Stabilizer right | `334e 3361` (two windings) | 4 each | 4 | 0 | 0 (shares no vertex with any face) |
+| Stabilizer left | `3167 317a` | 4 each | 4 | 0 | 0 |
+| Flap wedge right | `4e54` (lower skin), `4e73` (upper skin) | 4 each, 6 distinct vertices | all | 0 (the hinge is the mid line of the thick leading edge) | 0 |
+| Flap wedge left | `4f3b`, `4f5a` | 4 each | all | 0 | 0 |
+| Rudder | `50f0 5117` (two windings) | 4 each | 2 | 2 (the forward edge, shared with the fixed fin faces `3396 3434`) | 0 |
+| Truck (four) | 6 faces | 5 and 4 | all, one rigid piece | | 0 |
+| Outrigger (two) | 4 faces (crossed plates) | 4 | all, one rigid piece | | 0 |
+| Bay plates | `4dfb 4e12 4d5e 4d75` | 4 | 2 (the lower edge) | 2 (top edge on the belly line) | 0 |
+
+No face has a vertex held fixed off its hinge, and no panel folds: every one turns as a
+whole rigid piece (the probe measures the largest inter-vertex distance change at
+zero feet).
+
+### Stabilizer (decision 11)
+
+Each side is one floating quad at z 5 that touches no other face, so a whole-panel
+turn folds nothing and opens no seam (the probe's anchor gap is 0 ft). It turns about
+a lateral X axis through the root chord midpoint, right (4.5, -100.5, 5) and left
+(-4.5, -100.5, 5), the quad being flat so there is no anhedral to tilt the axis.
+
+**Real range (cited).** "The stabilizer is adjustable through 13 degrees of movement
+(nine up, four down)" (Wikipedia, "Boeing B-52 Stratofortress", Flight controls; the
+page also says the stabilizer is crucial in takeoff and landing "due to large pitch
+changes induced by flap application"). B52-0 had already quoted the 13 degrees. The
+source does not say which end "up" means. **Fitted reading:** nine degrees of nose-up
+trim (trailing edge up) and four of nose-down trim (trailing edge down), the larger
+travel being the one the flaps need and the sense of a pull in the fleet. At 2/3 ft a
+unit the aft tip corner (22.5 units from the spindle) moves 2.35 ft up at nine
+degrees and 1.05 ft down at four; the leading root corner (19.5 units) moves 2.03 ft
+the other way at nine.
+
+**Choice (fitted): the drawn stabilizer is the pitch surface.** On the real jet the
+stabilizer trims slowly and a separate elevator pitches the aircraft; the shape has no
+elevator and the state carries no trim. So the one drawn pitch panel follows the
+elevator command directly over the real trim range: a full pull raises the trailing
+edge nine degrees, a full push lowers it four, and the travel is linear in between
+(`0.5` gives 4.5 and 2). The alternative (a trim-only stabilizer driven by a slow trim
+state with the elevator undrawn) would need new state; it is left to John.
+
+**Roll (decision 11).** No drawn roll surface. The G and H have no ailerons and roll
+with six spoilerons a wing that the shape does not draw. The probe marks the aileron
+`Expectation::Unsupported` (the F-15E rudder and F-117 elevon precedent): the lever
+moves nothing and the probe fails the run if it ever does.
+
+### Flaps and the seam (rule 11 choice)
+
+The two inboard strips (x 9 to 53, chord 8.2 units, 5.5 ft) are each a thin wedge:
+two faces sharing the aft knife edge, the thick leading edge shared with fixed wing
+faces along its whole length. They turn as one rigid wedge about the mid line of the
+leading edge, right (15, 7, 8) to (53, -14, 6.5), left from (-53, -14, 6.5) to (-15, 7,
+8) so that a positive angle lowers the trailing edge on both sides. The two leading
+vertices at each end sit 2 and 1.5 units off the line, so the leading edge opens by at
+most 4 sin(angle/2) units (0.52 units, 0.35 ft at the limit).
+
+The trailing corners (9, 1, 9) and (47, -20, 7) (left (-9, 1, 9) and (-48, -20, 7)) are
+shared with fixed faces (`2651 2664` at the root, `3d8b 3e29` at the outer end), 8.2
+units from the line, so a turn opens a seam there of 2 x 8.2 x sin(angle/2) units. B52-0
+measured the source's 2.7 ft at 30 degrees (5.5 ft x sin 30; the true chord gap is 2.8
+ft). Options considered: a smaller limit, a different hinge, or a fitted fill face. A
+hinge on the trailing edge only moves the problem to the whole leading edge, which is
+shared with fixed faces along its length; a fill face would add new geometry the
+source does not have. **Chosen (fitted): a smaller limit, 15 degrees (0.2618 rad)**,
+about half of the real jet's large flap angle (no cited B-52 flap angle was found).
+**Seam in the end state: 1.43 ft at the inboard trailing corner on each side (probe,
+flaps 1.0; 0.72 ft at 0.5, 0.36 ft at 0.25) and 1.43 ft at the outboard corner (the
+same distance from the hinge), in a 185 ft airframe; the strips are rigid to 0 ft.**
+The inboard end sits against the fuselage side and the outboard end beside the
+inboard engine pod. A fill face remains an option if John finds the crack
+visible in the frames.
+
+### Rudder
+
+The full-height quad (z 11 to 42, chord about 8 units) turns about its own forward
+edge, (0, -101, 11) to (0, -114, 42), the edge it shares with the fixed fin faces, so
+nothing folds. **Travel is the retail word's pose (spec-derived):** the skewed copy in
+`7a38` moves the top rear vertex 4 units (7.4 units from the hinge line) and the
+bottom rear 8 units (14.8 units), a turn of 31.8 and 30.0 degrees about the hinge:
+0.54 rad (30.9 degrees) on average, to +X only, so the rig turns the neutral quad by
+0.54 rad x rudder (the load check refuses a word that differs by more than 0.06 rad).
+The retail swap is a skew rather than an exact rotation (the radii differ by 3 and 8
+percent), so a rigid turn reproduces it to within 0.4 units. The negative direction is
+the mirror (fitted). At full travel the top rear vertex moves 2.53 ft out of the fin
+plane and the bottom rear 5.06 ft. **No real B-52 rudder limit was found** (the
+sources say only "a relatively small, narrow chord rudder", Wikipedia); the word's pose
+is used instead, and 31 degrees is likely generous for the real jet.
+
+### Gear and outriggers (decision 12)
+
+All six assemblies are one gear word, `7a26`, appended to the shape and hidden at gear
+0. All move together, linearly with the gear fraction (fitted timing: no stagger, no
+doors, since none are drawn). No crosswind crab (decision 12). The real retraction
+directions were **not found**: Jane's (`B52.INF`) has "four individually retracted
+twin-wheel main units in tandem pairs" and "small outrigger units retract inward into
+wings outboard of outer engine positions" (cited in B52-0); Wikipedia and the
+Aviationist's gear article give the layout and the 20 degree crosswind steering but not
+the direction. Hinges below are **fitted**.
+
+- **Trucks (four).** Each truck (x 5 to 13, left -5 to -14, z -14 to -6) turns 90
+  degrees as one piece about a line along Y on the keel at the belly edge, (0, y, -8),
+  swinging up the fuselage side. A smaller turn about a hinge on the truck's own edge
+  cannot work: the truck is 8 units wide and 8 high, wider than the section above the
+  side wall allows. At stow every vertex of all four trucks lies inside the fuselage
+  section (belly z -9, side x 8 from z -6 to 5, narrowing to the roof) with at least
+  0.2 unit of margin (probe, near-stow sample, both sides; the left truck is one unit
+  wider). The path only rises from the gear-down pose. The motion passes through the
+  skin on the way (no doors drawn).
+- **Outriggers (two).** Each outrigger (leg 17 units, crossed plates) turns 90 degrees
+  inward about a line along Y at its own x (+/-111) and z 4.1, between the wing's
+  lower skin (z 3.7) and its upper skin (4.5 to 5.8), so it ends lying along the
+  wing, inboard of its wheel position (the real direction: inward into the wing,
+  Jane's). The side plate (the x = +/-111 plane) lies flat at z 4.1 between the skins
+  (probe check). **Limitation:** the cross plate is 5 units wide, thicker than the
+  0.8 unit gap, so near stow it stands 3 units (2 ft) through the wing skins. Nothing
+  rigid fits there; the outriggers are not drawn at gear 0, so only the last instant of
+  the retraction shows it. The cross plate is also 2 units wider than the hinge, so it
+  dips 0.11 unit (0.07 ft) below the ground contact line near the start of the turn.
+- **Gear down** is the source pose: the lowest point is the contact line, z -14 (9.33
+  ft), unchanged from B52-2.
+
+### Brakes, burner and the engines
+
+No airbrake is drawn (the real B-52 brakes with its spoilers, which the shape does not
+show; Jane's lists a 44 ft ribbon braking parachute, not drawn), so the brake control
+is `Expectation::Unsupported` (not applicable). The jet has no burner and the shape no
+flame word: exhaust is not applicable too, and `flame()` is false. The engine
+nozzles are not mapped: the transports (C-130, AC-130, E-3, Il-76, B747, A310) map
+none (`engine_material::outlet_count` is 0 for them) and the nozzle glow supports
+at most two outlets, the B-52 has eight. The contrail offsets fall back to the
+bounds-based spread (flagged for John below).
+
+### Interim open bay (word 7a20)
+
+B52-5 replaces it with fitted belly bays and doors. Until then the two retail plates
+(both windings) are drawn while the bay is open and drop out of the belly: the top
+edge stays on the belly line (z -8) and the lower edge falls to z -8 - 5 x bay. This
+is a presentation only (the same device as the B-2's interim plates); the lowest
+point is 5 units (3.3 ft) under the belly, above the gear contact line.
+
+### Probe and battery
+
+`--animation-probe` on `b52`: 271 neutral faces, 0 required and check failures, scope
+`reviewed-controls-and-attachments`. Elevator, rudder, gear, flaps and bay are
+`required moved` (5, 5, 22, 5 and 5 distinct poses); aileron, brake, exhaust and hook
+are `not-applicable` and stay still; the neutral pose equals the source. The b52
+module restates the witnesses independently (rigid to 0 ft, the spindle and hinge
+points stay at 0 ft, direction and magnitude of the stabilizer tip against the real
+range, the rudder rear vertices against the word, trucks inside the section, the
+outrigger side plates between the skins). Two combination files: a 25 pose pitch
+against rudder grid (`pitch-yaw-combinations.csv`) and a 202 value dense gear sweep
+(`dense-gear.csv`). The battery entry `flight-animation-b52` checks the two files'
+row counts. One rig unit test (`b52_animation::tests`) covers the stabilizer limits,
+the flap wedge and its seam, the rudder, the gear stow and the bay on synthetic faces.
+
+### Frames (local only)
+
+`.local/m3-aircraft/frames/B52-3/` (png with ppm; view 2, look yaw and pitch are orbit
+angles, the aircraft is in free flight so the views are not exact orthographics; the
+`hd-` set is 1920x1080). Rudder `rudder--1`, `rudder-0`, `rudder-1` (`-top`, `-rear`) and
+`rudder-top-3x-neg-0-pos` (the fin turns to either side of neutral). Stabilizer
+`stab--1`, `stab-0`, `stab-1` (`-side`, `-rear`), `hd-stab-*`, `stab-rear-3x-neg-0-pos`,
+`stab-side-sheet-neg-pos`. Flaps `flaps-0`, `flaps-0.5`, `flaps-1` (`-top`, `-under`,
+`-rear`), `hd-flaps-0` and `hd-flaps-1`, and the seam close-up
+`flaps-seam-closeup-3x-0-full` (the inboard trailing corner, flaps 0 against 1: a small
+notch where the wedge leaves the fixed skin). Gear `gear-1`, `gear-0.6`, `gear-0.25`,
+`gear-0.02`, `gear-0` (`-under`, `-side`, `-front`), `hd-gear-*` and the sheets
+`gear-under-sheet-1-0.6-0.25-0.02`, `gear-side-sheet-1-0.6-0.25-0.02`. Interim bay
+`hd-bay-0.5-*`, `hd-bay-1-*`, `bay-under-sheet-0.5-1` and `bay-belly-crop-3x-closed-0.5-1`.
+The bay frames came from a temporary, reverted patch to the capture option
+(`State::bay_available` is true only for the F-22, so `--flight-bay` refuses the B-52 and
+the plates never appear in play; B52-5 owns that). The frames batch scripts are
+`batch.sh` and `batch2.sh` in the same folder.
+
+### Open for John
+
+- Stabilizer as the drawn pitch surface (chosen) or as a slow trim with no elevator.
+- Flap limit 15 degrees with a 1.4 ft end seam (chosen), or a fill face and a larger
+  angle.
+- Rudder at the word's 31 degrees (chosen) or a smaller fitted angle.
+- Gear stow directions are fitted (the real ones were not found); the outrigger cross
+  plate pokes through the wing skins near stow.
+- Contrails: with eight engines the fallback spreads the contrail points to +/-1.05
+  half-spans, past the wing tips (the engine count the aircraft record carries is 8;
+  `live.rs` clamps to 4 elsewhere). Not changed here.
 
 ## B-2 rig (B2-3, 2026-11-15)
 

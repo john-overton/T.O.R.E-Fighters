@@ -321,7 +321,11 @@ fn specification(id: Id) -> Option<Spec> {
             // with the shared fitted gear law until its own rig slice.
             // B52.SH: five words, gear 0x7a26 adds 32 faces (four trucks and
             // two outriggers); the shape header scale is 2, so it draws at
-            // 2/3 ft a unit (decision 6, John 2026-11-15).
+            // 2/3 ft a unit (decision 6, John 2026-11-15). Update (B52-3 and
+            // B52-4, 2026-11-15): the B-52 loads through its own
+            // `b52_animation` rig (stabilizer, flap wedges, rudder, trucks and
+            // outriggers, interim bay plates); this row pins the layout, the
+            // scale and `supported`.
             Id::B52 => (
                 27204,
                 271,
@@ -439,6 +443,8 @@ enum SpecificRig {
     /// plume.
     Mf1(crate::mf1_animation::Rig),
     Tornado(crate::tornado_animation::Rig),
+    /// B52-3 and B52-4: the stabilizer, flaps, rudder, gear and the interim bay.
+    B52(crate::b52_animation::Rig),
     /// B2-3 and B2-4: the elevons, the drag rudders and speed brake, the gear
     /// and the interim bay plates.
     B2(crate::b2_animation::Rig),
@@ -775,6 +781,15 @@ impl Rig {
                     shape,
                 ));
             }
+            Id::B52 => {
+                let (rig, shape) = crate::b52_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::B52(rig),
+                    shape,
+                ));
+            }
             Id::B2 => {
                 let (rig, shape) = crate::b2_animation::Rig::load(bytes, shape)?;
                 return Ok(Self::with_specific(
@@ -923,6 +938,7 @@ impl Rig {
                 SpecificRig::F5E(_) => crate::f5e_animation::flame(address),
                 SpecificRig::Mf1(_) => crate::mf1_animation::flame(address),
                 SpecificRig::Tornado(_) => crate::tornado_animation::flame(address),
+                SpecificRig::B52(_) => crate::b52_animation::flame(address),
                 SpecificRig::B2(_) => crate::b2_animation::flame(address),
                 SpecificRig::F117(_) => crate::f117_animation::flame(address),
             };
@@ -991,6 +1007,7 @@ impl Rig {
                 SpecificRig::F5E(rig) => rig.animate(source, state),
                 SpecificRig::Mf1(rig) => rig.animate(source, state),
                 SpecificRig::Tornado(rig) => rig.animate(source, state),
+                SpecificRig::B52(rig) => rig.animate(source, state),
                 SpecificRig::B2(rig) => rig.animate(source, state),
                 SpecificRig::F117(rig) => rig.animate(source, state),
             };
@@ -1120,6 +1137,8 @@ mod tests {
             }
         }
         assert_eq!(specification(Id::Tornado).unwrap().scale, 2. / 3.);
+        // B52-2: the B-52 draws at its header scale too (true size).
+        assert_eq!(specification(Id::B52).unwrap().scale, 2. / 3.);
     }
     fn spread(a: &[[f32; 3]], b: &[[f32; 3]]) -> f32 {
         let d =

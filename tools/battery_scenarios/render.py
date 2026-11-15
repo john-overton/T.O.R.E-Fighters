@@ -436,6 +436,21 @@ def scenarios() -> list[Scenario]:
             notes="Tornado IDS skin from above and below with the gear down, at its header scale (2/3 ft a unit, true size, no per-axis factor): no underside shape shows through the top and the double-sided panels do not z-fight. The shape's two E0 fin decal slots stay omitted rather than filled with skin (docs/formats/objects-and-shapes.md, Tornado skin review).",
         ),
         Scenario(
+            name="render-b52-skin",
+            lane="flight",
+            args=["--free-flight", "--aircraft", "b52", "--flight-view", "2", "--flight-look", "0,60", "--flight-zoom", "0.5", "--flight-devices", "1,0,0,0,0", "--capture-flight", "{work}/b52-top.ppm", "--no-audio"],
+            env={"TORE_WEATHER_TIME": "12:00"},
+            window=True,
+            outputs=["b52-top.ppm", "b52-under.ppm"],
+            expect=["Scene capture:"],
+            check=skin_capture_problems,
+            then=[
+                Step(["--free-flight", "--aircraft", "b52", "--flight-view", "2", "--flight-look", "0,-60", "--flight-zoom", "0.5", "--flight-devices", "1,0,0,0,0", "--capture-flight", "{work}/b52-under.ppm", "--no-audio"], window=True, timeout=180),
+            ],
+            timeout=180,
+            notes="B-52H skin from above and below with the gear down, at its header scale (2/3 ft a unit, true size, no per-axis factor): no underside shape shows through the top and the 12 double-sided panels do not z-fight. The shape's two E0 wing-marking decal slots stay omitted rather than filled with skin (docs/formats/aircraft-variety.md, B-52 shape, size and looks). The zoom is 0.5 so the 185 ft span fits.",
+        ),
+        Scenario(
             name="render-b2-skin",
             lane="flight",
             args=["--free-flight", "--aircraft", "b2", "--flight-view", "2", "--flight-look", "0,60", "--flight-zoom", "1.4", "--flight-devices", "1,0,0,0,0", "--capture-flight", "{work}/b2-top.ppm", "--no-audio"],
