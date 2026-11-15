@@ -2392,3 +2392,31 @@ sustained 461 kt turn 4.14 G at 9.3 deg/s (was 9.4), instantaneous turn 6.13 G a
 1,945 ft), approach 156.2 kt, touchdown 155.3 kt, rollout 725 m (was 160.1 kt and
 757 m). The default-load rows above (two tanks) stay as the morning's record. Logs
 `.local/m3-aircraft/checks/TOR-10/`.
+
+## Boeing B-52H validation, 2026-11-15
+
+B52-8. Measured with `crates/tore-sim/examples/performance_probe.rs` (new options
+`PROBE_CLIMB=bomber`, `PROBE_SPEEDS_KT`, `PROBE_HOLD_SPEED`, `PROBE_CRUISE=ALT:KT`) on
+the corrected record, at 497,197 lb (full tank), 488,000 lb and 400,000 lb, and with
+`tore-app --headless-flight`. The script is
+`.local/m3-aircraft/checks/B52-8/run_probes.sh before|after`; logs are beside it. The
+before and after table with its sources is in
+[the B-52 flight review](../formats/aircraft-variety.md#b-52-flight-review-b52-8-2026-11-15).
+
+- Sustained level turn, speed held, bank at which the aircraft still holds altitude
+  (before to after): at 400,000 lb, 1,000 ft 250 to 350 kt 60 to 60 degrees (2.0 G);
+  15,000 ft 250 kt 34 to 60 degrees; 300 to 350 kt 60 to 60; 400 kt 44 to 44; 439 kt (the
+  top-speed edge) 42 to 42; 36,000 ft 400 kt 60 to 60 and 440 to 480 kt 42 to 42. At
+  497,197 lb, 1,000 ft 250 kt 28 to 54 degrees; 15,000 ft 250 kt none above 8 to 24; the
+  rest within 2 degrees.
+- Level acceleration at 488,000 lb, military power, peak specific excess power: 17 to 62
+  ft/s at sea level, 49 to 89 at 15,000 ft, 97 to 61 at 36,000 ft (the last falls because
+  the lapse height is lower; it settles at 515 kt both times).
+- `--headless-flight 1200`: 289.4 kt level at 5,000 ft (was 274.1), no crash, no
+  non-finite value, fuel 312,197 to 312,057 lb.
+- Takeoff (`--maneuver takeoff`, ground start, `--flight-fuel` for the lighter weights):
+  488,000 lb 7,674 ft at 158.6 kt on UKR airport 1 (5,532 ft runway) and 7,324 ft at 158.7
+  kt on GRE airport 1 (12,000 ft); 416,600 lb 4,843 ft at 147.8 kt; 301,600 lb 2,081 ft at
+  125.4 kt. Landing (`--maneuver land`, GRE 1): 270,000 lb approach 140.3 kt, touchdown
+  131.6 kt, rollout 4,131 ft; 404,000 lb approach 166.2 kt (the cap), touchdown 153.7 kt,
+  rollout 5,056 ft.

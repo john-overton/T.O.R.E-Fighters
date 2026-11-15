@@ -12789,8 +12789,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--flight-fuel" => {
                 let pounds: f64 = args.next().ok_or("--flight-fuel needs internal fuel in pounds")?.parse()?;
-                if !pounds.is_finite() || !(0. ..=100_000.).contains(&pounds) {
-                    return Err("--flight-fuel needs 0..100000 pounds".into());
+                // 400,000 lb since B52-8 (2026-11-15): the B-52H's tank is 312,197 lb
+                // and the landing scenario flies it at 65 percent; was 100,000.
+                if !pounds.is_finite() || !(0. ..=400_000.).contains(&pounds) {
+                    return Err("--flight-fuel needs 0..400000 pounds".into());
                 }
                 flight_fuel = Some(pounds);
             }
@@ -14278,6 +14280,14 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     .airport_scene
                     .runway(object)
                     .map_or(layout.runway.length_ft, |runway| runway.length_ft);
+                // B52-8 (2026-11-15): the approach is flown at the weight
+                // `--flight-fuel` gives, not the loadout's. It was built before the
+                // fuel was set, so every scripted approach flew the speed of the
+                // full ground-start load (a 166 kt cap for the B-52H at 65 percent
+                // fuel).
+                if let Some(pounds) = flight_fuel {
+                    state.fuel = pounds;
+                }
                 state.update_stall_scale();
                 let probe = flight_probe::Landing::new(
                     &state,

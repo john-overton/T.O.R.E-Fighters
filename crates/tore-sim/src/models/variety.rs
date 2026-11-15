@@ -6,6 +6,7 @@ use super::{
 use std::sync::Arc;
 use tore_formats::aircraft::{Aircraft, AircraftId};
 
+mod b52;
 mod lift;
 pub use lift::{
     BodyParameters, CorridorPoint, HandlingTargets, JetParameters, LiftEngines, LiftKind,
@@ -78,7 +79,8 @@ impl VarietyFlightModel {
         }
         use AircraftId::*;
         let alignment_rate = match a.id.source() {
-            C130 | Ac130 | E3 | Il76 | E2 => 0.4,
+            // The B-52 takes the transports' 0.4, not the fighters' 0.7 (B52-8).
+            C130 | Ac130 | E3 | Il76 | E2 | B52 => 0.4,
             B747 | A310 => 0.3,
             _ => 0.7,
         };
@@ -142,7 +144,7 @@ impl VarietyFlightModel {
             F117 => 21. / 3.,
             _ => unreachable!("registered variety identity"),
         };
-        let tuning = Tuning {
+        let mut tuning = Tuning {
             legacy_roll_limit_rad_per_second: 1.8,
             roll_response_seconds: 0.2,
             pitch_response_seconds: 0.1,
@@ -168,6 +170,9 @@ impl VarietyFlightModel {
         };
         let mut configuration = Configuration::from_aircraft(a, tuning, equipment)?;
         configuration.aerodynamics.envelopes = fitted_envelopes(a);
+        if a.id.source() == B52 {
+            b52::fit(&mut tuning, &mut configuration);
+        }
         // Transports and airliners: a little more drag, so full power in
         // level flight settles at 96 percent of the top speed, just under
         // the overspeed shake (John, 2026-10-08; the value is an agent fit).
@@ -188,6 +193,16 @@ impl VarietyFlightModel {
         })
     }
 }
+/// The stall reference fraction of a variety aircraft (see
+/// [`super::AircraftModel::stall_reference_fraction`]): 1, an explicit uncalibrated
+/// fit, except the B-52H's (B52-8, fitted).
+pub fn stall_reference_fraction(id: AircraftId) -> f64 {
+    match id.source() {
+        AircraftId::B52 => b52::STALL_REFERENCE_FRACTION,
+        _ => 1.,
+    }
+}
+
 /// Share of the 1 G top speed where the variety transports and airliners
 /// top out in level flight at full power (fitted, 2026-10-08).
 pub const HEAVY_LEVEL_SPEED_FRACTION: f64 = 0.96;
@@ -456,6 +471,143 @@ pub(crate) mod tests {
             let clearance = model.configuration().equipment.ground_clearance_ft;
             assert!((clearance - feet).abs() < 1e-12, "{id:?}");
         }
+    }
+    /// The B-52H's flight terms (B52-8, 2026-11-15): a B-52 built from
+    /// synthetic values near the corrected record (real thrust, weights and
+    /// fuel, a placard-like 1 G top edge of 385 kt at sea level and 515 kt at
+    /// 36,000 ft), against the published figures the terms were fitted to,
+    /// loosely: a climb of 3,600 ft/min or more at sea level and a cruise burn
+    /// that gives a range near the published 7,600 nautical miles.
+    fn b52_like() -> Aircraft {
+        let mut a = synthetic(AircraftId::B52);
+        for (key, value) in [
+            ("thrust", "136000"),
+            ("weight", "185000"),
+            ("internalFuel", "312197"),
+            ("maxTakeoffWeight", "488000"),
+            ("fuelConsumption", "20"),
+            ("loadedDrag", "0"),
+        ] {
+            a.fields.get_mut(key).unwrap().value = value.into();
+        }
+        for e in &mut a.envelopes {
+            e.points = vec![
+                [210., 0.],
+                [350., 41_250.],
+                [590., 55_000.],
+                [770., 55_000.],
+                [870., 36_000.],
+                [650., 0.],
+            ];
+        }
+        a
+    }
+    fn fly_b52_level(
+        altitude: f64,
+        kt: f64,
+        fuel: f64,
+        seconds: usize,
+        hold: bool,
+    ) -> crate::flight::State {
+        use crate::flight::{DT, PilotInput, State};
+        let mut s = State::new(&b52_like(), [0., altitude, 0.]).unwrap();
+        s.enable_research(1).unwrap();
+        s.cheats.unlimited_fuel = true;
+        s.fuel = fuel;
+        s.yaw = 0.;
+        s.pitch = 0.;
+        s.bank = 0.;
+        s.speed = kt * 1.68781;
+        s.velocity = [0., 0., s.speed];
+        s.throttle = 0.4;
+        let target = s.speed;
+        for _ in 0..(seconds as f64 / DT) as usize {
+            let throttle = if hold {
+                (s.throttle + (target - s.speed) * 0.01 * DT).clamp(0.05, 1.)
+            } else {
+                1.
+            };
+            let input = PilotInput {
+                pitch: (0.004 * (altitude - s.position[1])
+                    - 0.04 * s.velocity[1]
+                    - 0.5 * s.pitch_rate)
+                    .clamp(-1., 1.),
+                throttle: Some(throttle),
+                ..Default::default()
+            };
+            s.step_surface(&input, |_, _| crate::research::Surface::runway(-60_000.));
+        }
+        s
+    }
+    #[test]
+    fn the_b52_flies_its_fitted_terms_and_no_other_aircraft_does() {
+        for id in AircraftId::SELECTABLE {
+            if VarietyFlightModel::identity(id).is_none() {
+                continue;
+            }
+            let model = AircraftModel::for_aircraft(&synthetic(id)).unwrap();
+            let c = model.configuration();
+            let b52 = id.source() == AircraftId::B52;
+            assert_eq!(c.aerodynamics.drag_shape.is_some(), b52, "{id:?}");
+            assert_eq!(model.stall_reference_fraction() != 1., b52, "{id:?}");
+            assert_eq!(c.tuning.thrust_lapse_feet != 70_000., b52, "{id:?}");
+            // The transports and the B-52 turn their noses at 0.4 a second.
+            assert_eq!(
+                c.tuning.alignment_rate == 0.4,
+                matches!(
+                    id.source(),
+                    AircraftId::C130
+                        | AircraftId::Ac130
+                        | AircraftId::E3
+                        | AircraftId::Il76
+                        | AircraftId::E2
+                        | AircraftId::B52
+                ),
+                "{id:?}"
+            );
+        }
+        // The fitted drag is 1 at the reference speed like the square law,
+        // and well under it below.
+        let model = AircraftModel::for_aircraft(&synthetic(AircraftId::B52)).unwrap();
+        let a = &model.configuration().aerodynamics;
+        assert!((a.drag_ratio(1.) - 1.).abs() < 1e-12);
+        assert!(
+            (0.1..0.3).contains(&a.drag_ratio(0.78)),
+            "{}",
+            a.drag_ratio(0.78)
+        );
+        assert!(
+            (0.15..0.4).contains(&a.drag_ratio(0.857)),
+            "{}",
+            a.drag_ratio(0.857)
+        );
+        assert!(a.drag_ratio(0.5) < 0.25 * 0.5 * 0.5 + 1e-9);
+    }
+    #[test]
+    fn the_b52_climbs_cruises_and_tops_out_near_the_published_figures() {
+        // Sea level, 300 kt, 400,000 lb: published rate of climb 6,270 ft/min
+        // (105 ft/s); specific excess power from the speed gained in level
+        // flight, loosely between 60 and 180 ft/s (the model gives about 150).
+        let before = fly_b52_level(0., 300., 215_000., 1, false);
+        let after = fly_b52_level(0., 300., 215_000., 4, false);
+        let gained = (after.speed - before.speed) / 3.;
+        let ps = 0.5 * (after.speed + before.speed) * gained / 32.174;
+        assert!((60. ..180.).contains(&ps), "excess power {ps} ft/s");
+        // Mach 0.77 at 36,000 ft (441 kt) holding speed: the burn gives a
+        // range of 6,000 to 9,000 nautical miles from 312,197 lb (published
+        // combat range about 7,600).
+        let cruise = fly_b52_level(36_000., 441., 215_000., 400, true);
+        let flow = 20. * cruise.throttle;
+        let range_nm = 312_197. / flow * 441. / 3600.;
+        assert!((6_000. ..9_000.).contains(&range_nm), "range {range_nm} nm");
+        // Full power at 36,000 ft settles at the record's top-speed edge,
+        // unchanged by the fit.
+        let top = fly_b52_level(36_000., 441., 215_000., 300, false);
+        assert!(
+            (top.speed / 1.68781 - 515.).abs() < 20.,
+            "{}",
+            top.speed / 1.68781
+        );
     }
     #[test]
     fn the_mirage_f1_gear_low_point_scales_with_its_shape_height() {

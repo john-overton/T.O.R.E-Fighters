@@ -127,8 +127,9 @@ impl AircraftModel {
     /// Keyed by the aircraft's own model (its exact identity), never by weight,
     /// and read the same for the player and every AI aircraft.
     pub fn stall_reference_fraction(&self) -> f64 {
-        if matches!(self, Self::Variety(_)) {
-            return 1.;
+        if let Self::Variety(m) = self {
+            // 1 for every variety aircraft but the B-52 (B52-8).
+            return variety::stall_reference_fraction(m.id);
         }
         STALL_REFERENCE_FRACTIONS[match self {
             Self::F18(_) => 0,

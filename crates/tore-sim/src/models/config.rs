@@ -35,6 +35,40 @@ pub struct Aerodynamics {
     /// 1 for every decoded aircraft; a fitted value below 1 for the variety
     /// transports and airliners (docs/spec/variety-flight.md, "Top speeds").
     pub level_speed_fraction: f64,
+    /// Hybrid adapter: the shape of the clean-drag curve against the speed
+    /// over the reference speed. `None` is the shared square law every
+    /// aircraft has; a fitted shape is the B-52's (B52-8, below).
+    pub drag_shape: Option<DragShape>,
+}
+impl Aerodynamics {
+    /// The clean-drag share of the reference thrust at `ratio` times the
+    /// reference speed: the square law, or the aircraft's fitted shape.
+    pub fn drag_ratio(&self, ratio: f64) -> f64 {
+        self.drag_shape
+            .map_or_else(|| ratio.powi(2), |shape| shape.ratio(ratio))
+    }
+}
+/// A fitted two-term clean-drag curve (B52-8, 2026-11-15, **fitted**): a
+/// square-law part (`quadratic_share` of the reference thrust at the
+/// reference speed) plus a steep rise that carries the rest. It is 1 at the
+/// reference speed like the square law, so the top speed does not move, and
+/// it is smaller below it. The shared law ties the drag to the thrust at the
+/// top-speed edge, which suits an aircraft whose edge is the thrust-limited
+/// top speed and overstates the drag of one whose edge is a placard (the
+/// B-52's 385 kt at sea level), by three times at cruise.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DragShape {
+    /// Share of the reference drag that follows the square law, 0 to 1.
+    pub quadratic_share: f64,
+    /// Exponent of the remaining share, at least 2.
+    pub wall_exponent: f64,
+}
+impl DragShape {
+    pub fn ratio(self, ratio: f64) -> f64 {
+        let ratio = ratio.max(0.);
+        self.quadratic_share * ratio.powi(2)
+            + (1. - self.quadratic_share) * ratio.powf(self.wall_exponent)
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Equipment {
@@ -150,6 +184,7 @@ impl Configuration {
                 roll_limit_rad_per_second: number("_brv.x.max")?.to_radians(),
                 flaps_lift_f8: number("flapsLift")?,
                 level_speed_fraction: 1.,
+                drag_shape: None,
             },
             turbulence_percent: i16::try_from(
                 a.fields
@@ -226,6 +261,13 @@ impl Configuration {
             return Err(std::io::Error::other(
                 "invalid mass, propulsion, aerodynamic or equipment configuration",
             ));
+        }
+        if a.drag_shape.is_some_and(|s| {
+            !(0. ..=1.).contains(&s.quadratic_share)
+                || !s.wall_exponent.is_finite()
+                || s.wall_exponent < 2.
+        }) {
+            return Err(std::io::Error::other("invalid drag shape"));
         }
         if !a.envelopes.iter().any(|e| e.g == 1)
             || a.envelopes.len() > 64

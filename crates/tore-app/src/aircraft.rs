@@ -827,6 +827,31 @@ impl Airframe {
     }
 }
 
+/// The B-52H's eight engine contrails (B52-8, 2026-11-15, **fitted**), in
+/// feet as (lateral, up, aft): two a pod, four pods. The bounds-based
+/// fallback below spreads eight outlets to plus and minus 1.05 half-spans,
+/// past the wing tips. Measured from the drawn pods in `B52.SH` at its
+/// 2/3 ft a unit: the inner pods' centre lines sit 52.5 units (35.0 ft) out
+/// and the outer pods' 87.4 units (58.2 ft); each pod's aft face is 11 units
+/// (7.3 ft) wide, so its two engines sit a quarter of that either side of the
+/// centre line (1.8 ft); the aft faces are at y 18 units (12.0 ft) inner and
+/// -8 units (-5.3 ft) outer, so a contrail starts 2 ft behind them, as the
+/// reviewed aircraft's do; heights are the aft faces' middles (-0.7 ft inner,
+/// -1.7 ft outer). The real pods are about 35 ft and 58 ft out (B52-3).
+fn b52_contrail_offsets() -> Vec<[f64; 3]> {
+    const PODS: [(f64, f64, f64); 2] = [(35.0, -0.7, 10.0), (58.2, -1.7, -7.3)];
+    const HALF_SPACING: f64 = 1.8;
+    let mut offsets = Vec::with_capacity(8);
+    for side in [-1., 1.] {
+        for (out, up, aft) in PODS {
+            for engine in [-1., 1.] {
+                offsets.push([side * out + engine * HALF_SPACING, up, aft]);
+            }
+        }
+    }
+    offsets
+}
+
 /// Fitted attachment behind reviewed nozzle bounds, with a bounds-based
 /// fallback for aircraft whose outlet faces have not been reviewed.
 fn contrail_offsets(
@@ -835,6 +860,9 @@ fn contrail_offsets(
     rig: Option<&crate::additional_animation::Rig>,
     count: usize,
 ) -> Vec<[f64; 3]> {
+    if id.source() == tore_formats::aircraft::AircraftId::B52 && count == 8 {
+        return b52_contrail_offsets();
+    }
     let scale = f64::from(rig.map_or(1. / 3., |r| r.scale()));
     (0..count)
         .map(|group| {
@@ -1068,6 +1096,23 @@ mod tests {
     /// The Gripen has one engine (one RM12) and one exit disc made of two
     /// faces (the octagon `0x49a6` and the hexagon `0x49d5` at y -61): one
     /// trail on the centreline of the disc, 2 ft behind its exit plane (GRI-4).
+    #[test]
+    fn the_b52_draws_eight_contrails_two_behind_each_pod_inside_the_wing_tips() {
+        let offsets = b52_contrail_offsets();
+        assert_eq!(offsets.len(), 8);
+        // The wing tip is 92.7 ft out (185.3 ft span, B52-2).
+        assert!(offsets.iter().all(|o| o[0].abs() < 92.7));
+        for side in [-1., 1.] {
+            let mut out: Vec<f64> = offsets
+                .iter()
+                .filter(|o| o[0] * side > 0.)
+                .map(|o| (o[0] * side).round())
+                .collect();
+            out.sort_by(f64::total_cmp);
+            // Two engines each at the inner pod (about 35 ft) and the outer (about 58 ft).
+            assert_eq!(out, [33., 37., 56., 60.]);
+        }
+    }
     #[test]
     fn the_gripen_draws_one_contrail_behind_its_one_two_face_nozzle() {
         use tore_formats::aircraft::AircraftId;
