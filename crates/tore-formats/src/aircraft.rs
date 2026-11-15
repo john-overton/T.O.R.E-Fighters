@@ -2416,6 +2416,8 @@ mod profile_tests {
         );
         // B-2A: thrust 69,200, empty 158,000, fuel 167,000, maximum 376,000;
         // the fuel flow stays the retail 6 lb/s.
+        // B2-8 adds the real 50,000 ft ceiling (both top edges up 1,000 ft)
+        // and the fitted airbrake drag 64 (the B-1B's 256 in the record).
         let b2 = [
             ("engines", 4),
             ("weight", 100_000),
@@ -2424,16 +2426,35 @@ mod profile_tests {
             ("maxTakeoffWeight", 400_000),
             ("internalFuel", 180_000),
             ("fuelConsumption", 6),
+            ("maxAlt", 49_000),
+            ("airBrakesDrag", 256),
+            ("sigs[2]", 15),
+            ("sigs[3]", 1),
         ];
-        let text = batch_text(
-            "B2.PT",
-            "B-2",
-            "B- 2 Spirit",
-            660,
-            (-1, 3),
-            &plain_rows(-1, 3),
-            &b2,
-        );
+        let mut b2_rows = plain_rows(-1, 3);
+        b2_rows[1].1 = vec![
+            [170, 0],
+            [200, 15_500],
+            [290, 34_250],
+            [420, 46_625],
+            [550, 52_000],
+            [720, 51_500],
+            [855, 45_750],
+            [895, 36_000],
+            [790, 0],
+        ];
+        b2_rows[2].1 = vec![
+            [220, 0],
+            [250, 15_000],
+            [350, 33_500],
+            [460, 44_750],
+            [560, 49_000],
+            [700, 48_000],
+            [800, 43_000],
+            [840, 36_000],
+            [750, 0],
+        ];
+        let text = batch_text("B2.PT", "B-2", "B- 2 Spirit", 660, (-1, 3), &b2_rows, &b2);
         let a = Aircraft::parse(text.as_bytes()).unwrap();
         assert_eq!(a.id, AircraftId::B2);
         assert_eq!(
@@ -2445,6 +2466,40 @@ mod profile_tests {
             (167_000., 376_000.)
         );
         assert_eq!(a.number("fuelConsumption"), 6.);
+        assert_eq!(
+            (a.number("maxAlt"), a.number("airBrakesDrag")),
+            (50_000., 64.)
+        );
+        // The stealth signature (infrared 15, radar 1) is not touched.
+        assert_eq!((a.number("sigs[2]"), a.number("sigs[3]")), (15., 1.));
+        let env = |g: i32| a.envelopes.iter().find(|e| e.g == g).unwrap();
+        assert_eq!(env(1).points[4], [560., 50_000.]);
+        assert_eq!(env(0).points[4], [550., 53_000.]);
+        // Nothing else in the polygons moved: the 36,000 ft top speed (840
+        // ft/s, Mach 0.87) and the sea level edge (750 ft/s) are the record's.
+        assert_eq!(env(1).points[7], [840., 36_000.]);
+        assert_eq!(env(1).points[8], [750., 0.]);
+        assert_eq!(env(1).points[5], [700., 48_000.]);
+        // An edited B-2 (the ceiling already changed) keeps every retail value.
+        let mut edited = b2;
+        edited[7].1 = 48_000;
+        let e = Aircraft::parse(
+            batch_text(
+                "B2.PT",
+                "B-2",
+                "B- 2 Spirit",
+                660,
+                (-1, 3),
+                &b2_rows,
+                &edited,
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(
+            (e.number("maxAlt"), e.number("airBrakesDrag")),
+            (48_000., 256.)
+        );
         // F-117A: maximum 52,500 lb, ceiling 45,000 ft with both top edges
         // moved, the 1 G fast edge at 36,000 ft trimmed to Mach 0.92 (891
         // ft/s), sea level kept, the other rows held to the 1 G edge.

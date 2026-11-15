@@ -457,6 +457,139 @@ pub(crate) mod tests {
             assert!((clearance - feet).abs() < 1e-12, "{id:?}");
         }
     }
+    /// B2-8: the B-2 at its real thrust, weights and ceiling, with the record's
+    /// own flight tuning, climbs at about the one published rate (3,000 ft/min,
+    /// aerospaceweb) on a bomber's climb speed, and its speed brake slows it as a
+    /// pair of drag rudders would, not as a fighter airbrake. Loose pins of the
+    /// fitted figures (docs/formats/aircraft-variety.md, "B-2 flight review").
+    #[test]
+    fn the_b2_climbs_at_a_bombers_rate_and_its_speed_brake_is_a_modest_one() {
+        use crate::flight::{PilotInput, State};
+        let mut a = synthetic(AircraftId::B2);
+        for (key, value) in [
+            ("weight", 158_000),
+            ("internalFuel", 167_000),
+            ("thrust", 69_200),
+            ("maxTakeoffWeight", 376_000),
+            ("fuelConsumption", 6),
+            ("_gpullDrag", 12),
+            ("airBrakesDrag", 64),
+        ] {
+            a.fields.get_mut(key).unwrap().value = value.to_string();
+        }
+        // The corrected rows: only the 1 G polygon matters to the climb.
+        a.envelopes = [
+            (
+                0,
+                vec![
+                    [170., 0.],
+                    [200., 15_500.],
+                    [290., 34_250.],
+                    [420., 46_625.],
+                    [550., 53_000.],
+                    [720., 51_500.],
+                    [855., 45_750.],
+                    [895., 36_000.],
+                    [790., 0.],
+                ],
+            ),
+            (
+                1,
+                vec![
+                    [220., 0.],
+                    [250., 15_000.],
+                    [350., 33_500.],
+                    [460., 44_750.],
+                    [560., 50_000.],
+                    [700., 48_000.],
+                    [800., 43_000.],
+                    [840., 36_000.],
+                    [750., 0.],
+                ],
+            ),
+            (
+                2,
+                vec![
+                    [260., 0.],
+                    [300., 16_000.],
+                    [445., 35_000.],
+                    [590., 43_000.],
+                    [700., 41_000.],
+                    [780., 34_000.],
+                    [720., 0.],
+                ],
+            ),
+            (
+                3,
+                vec![
+                    [300., 0.],
+                    [350., 16_000.],
+                    [490., 31_500.],
+                    [610., 38_000.],
+                    [705., 35_500.],
+                    [750., 31_000.],
+                    [720., 0.],
+                ],
+            ),
+        ]
+        .into_iter()
+        .map(|(g, points)| tore_formats::aircraft::Envelope { g, points })
+        .collect();
+        let model = AircraftModel::for_aircraft(&a).unwrap();
+        let ceiling = model
+            .configuration()
+            .aerodynamics
+            .envelopes
+            .iter()
+            .find(|e| e.g == 1)
+            .unwrap()
+            .points
+            .iter()
+            .map(|p| p[1])
+            .fold(0., f64::max);
+        assert_eq!(ceiling, 50_000.);
+        const KT: f64 = 1.68781;
+        // One step of level flight at `speed_kt` and `altitude` with the brake
+        // as given: the thrust, the drag and the weight the model applied.
+        let step = |speed_kt: f64, altitude: f64, brake: f64| {
+            let mut s = State::from_model(model.clone(), [0., altitude, 0.]);
+            s.enable_research(1).unwrap();
+            s.speed = speed_kt * KT;
+            s.velocity = crate::attitude::Basis::new(0., 0., 0.)
+                .forward
+                .map(|v| v * s.speed);
+            s.throttle = 1.;
+            s.brake_out = brake > 0.;
+            s.brake = brake;
+            s.cheats.unlimited_fuel = true;
+            s.step(&PilotInput::default(), |_, _| -60_000.);
+            let t = s.trace.0.adapter.expect("hybrid step trace");
+            (
+                t.power.thrust_lbf,
+                t.forces.drag.total_lbf,
+                t.forces.weight_lbs,
+            )
+        };
+        // Climb: the specific excess power at 275 kt true at sea level (about
+        // 255 kt equivalent at 5,000 ft) at the full 325,000 lb, as a rate. The
+        // probe's bomber climb takes about 3,100 ft/min to 5,000 ft; this one
+        // step reads 2,456 ft/min (the state's own gear position). The one
+        // published rate is 3,000 ft/min (aerospaceweb), so the pin is loose.
+        let (thrust, drag, weight) = step(275., 0., 0.);
+        assert_eq!(weight, 325_000.);
+        assert!((thrust - 69_200.).abs() < 1.);
+        let rate = (thrust - drag) * 275. * KT / weight * 60.;
+        assert!((2_000. ..4_500.).contains(&rate), "{rate} ft/min");
+        // The thrust to weight at the real gross weight is the published 0.205
+        // (336,500 lb, Wikipedia).
+        assert!((69_200. / 336_500. - 0.205_f64).abs() < 0.002);
+        // Speed brake at 312 kt at 1,000 ft: the extra drag is a modest
+        // fraction of the weight (fitted 0.14; the template's 256 gave 0.44).
+        let (_, clean, w) = step(312., 1_000., 0.);
+        let (_, braked, _) = step(312., 1_000., 1.);
+        let extra = (braked - clean) / w;
+        assert!((0.08..0.22).contains(&extra), "{extra} G");
+    }
     #[test]
     fn the_mirage_f1_gear_low_point_scales_with_its_shape_height() {
         let model = AircraftModel::for_aircraft(&synthetic(AircraftId::Mf1)).unwrap();

@@ -597,3 +597,24 @@ rises from 0.85 to 1.69). The F-117's climb is a little slower because the lower
 fast edge raises drag everywhere (the shared drag law, as for the F-5E in B5-5).
 
 Logs are local: `.local/m3-aircraft/checks/BMB-A2/`.
+
+## B-2A flight review: ceiling and speed brake (B2-8, 2026-11-15)
+
+Dated note, additions only. Two more `B2.PT` fields are read differently, each applied
+only while the record still holds its retail value and every other B-2 correction
+(BMB-A2) still holds, in `tore-formats` `aircraft_corrections.rs`:
+
+| Field | Retail | Read as | Label |
+| --- | ---: | ---: | --- |
+| `maxAlt` (ceiling), with the top vertex of the 1 G and 0 G speed polygons | 49,000 ft | 50,000 ft | opinionated (the real service ceiling: the game's `B2.INF`, Wikipedia, Air Force fact sheets) |
+| `airBrakesDrag` (the drag rudders opened together) | 256 (the B-1B's) | 64 | fitted, from the drawn plate area, no cited figure |
+
+The 1 G and 0 G polygons move only at their top vertex (the 1 G one, 560 ft/s, from
+49,000 ft to 50,000 ft; the 0 G one, 550 ft/s, from 52,000 ft to 53,000 ft); every other vertex, the 36,000
+ft top speed (840 ft/s, Mach 0.87) and the sea level edge (750 ft/s, 444 kt) are the
+record's. The stealth signature (infrared 15, radar 1), the thrust, weights, fuel and
+the 6 lb/s fuel flow are unchanged. What a player notices: the speed brake slows the
+bomber by about a third as much (0.14 G rather than 0.44 G of extra deceleration at 312
+kt at 1,000 ft), the landing rollout with the brake out is 19 percent longer, and the
+record ceiling is 50,000 ft. Evidence, tables and open questions:
+[B-2 flight review](../formats/aircraft-variety.md#b-2-flight-review-b2-8-2026-11-15).

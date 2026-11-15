@@ -8601,3 +8601,186 @@ Mirage 2000 and Tornado cockpit slices added none; the closest, `render-b2-skin`
 Provenance: sensor rows, HUD module, panel names and cockpit art are spec-derived
 (retail); the binding is opinionated (John, 2026-11-15, decisions 17 and 18); the glass
 polygon and the eye table are fitted, agent decisions 2026-11-15.
+
+## B-2 flight review (B2-8, 2026-11-15)
+
+Validation and fitting, slice B2-8 (bomber batch A), Claude Sonnet (sonnet-high).
+The B-2 flies the hybrid adapter's `variety` configuration built from `B2.PT` and
+`B2.SH` with BMB-A2's real thrust (69,200 lbf), weights (empty 158,000 lb, fuel
+167,000 lb, maximum takeoff 376,000 lb) and the 6 lb/s fuel flow kept (John has not
+answered the 7 lb/s question). The question was whether the bomber flight-tuning block
+(the B-1B's, 160 of 208 statements, B2-0) makes the B-2 too slow. Raw probe output is
+local: `.local/m3-aircraft/checks/B2-8/` (`before/`, `after/`, `run_perf.sh`,
+`run_probes.sh`, `battery.txt`).
+
+### The cause
+
+**The slow figures were mostly the probe's climb schedule, not the tuning.** The
+BMB-A2 probe climbs at "max(450 kt, Mach 0.8)" true. The hybrid adapter's drag is not
+a polar: parasite drag is the full thrust times the square of the speed over the 1 G
+fast edge (`State::airframe_drag`: reference thrust x lapse x (V / top speed)^2, plus
+the G-pull, flap, gear and airbrake terms). The B-2's own 1 G edge at sea level is
+750 ft/s (444 kt, Mach 0.67), so at 450 kt the drag is already more than the thrust
+and the aircraft cannot climb there at all. The BMB-A2 numbers (5,000 ft in 1,000 s,
+11,479 ft highest in 1,500 s) are a bomber held 6 kt above its own top speed. The
+same aircraft on a bomber's schedule (full thrust, constant 250 kt equivalent airspeed
+to Mach 0.70, pitch held by a speed integrator, the new `PROBE_CLIMB=250,0.70`) climbs
+5,000 ft in 94 s (3,190 ft/min average) and 40,000 ft in 1,098 s (18.3 min), at the
+record's thrust and weight, with nothing changed. Real figure: an initial climb of
+3,000 ft/min (aerospaceweb "B-2 data"; Aerocorner repeats it). Thrust to weight at the
+real normal takeoff weight (336,500 lb) is 69,200 / 336,500 = 0.206, the published
+0.205 (Wikipedia, "Northrop Grumman B-2 Spirit").
+
+**What the B-1B terms do and do not do.** Checked one by one against a flying wing of
+172 ft span and about 5,140 square feet (Wikipedia; aerospaceweb gives 5,000):
+
+| Term (B2.PT, the B-1B's value) | What it does here | Verdict |
+| --- | --- | --- |
+| `coefDrag` 256, `loadedDrag` 0 | `coefDrag` is read only by the native diagnostic; the hybrid drag is scaled from the thrust and the 1 G edge, and `loadedDrag` 0 adds nothing | no effect on the flight; kept |
+| `_gpullDrag` 12 (induced drag) | drag per G above 1 is weight x 12 / 256 = 0.047 W. A lifting-line estimate for a span of 172 ft, area 5,140 square feet and e 0.95 gives 0.036 W per G at 300 kt at sea level and 0.063 W per G at Mach 0.8 and 40,000 ft | inside the band; kept |
+| `flapsDrag` 38, `flapsLift` 51 | the flap lever is a generic high-lift device for every aircraft (stall x 0.75, lift and drag): the flying wing has none drawn (B2-3) but keeps the lever like the Mirage F1 and the F-117 | fleet-level, not touched |
+| `airBrakesDrag` 256 | weight x 1.0 x brake x speed share: a fighter airbrake, 0.44 G of extra deceleration at 312 kt on a 325,000 lb flying wing | **fitted to 64** (below) |
+| `rudderDrag` 128, `bayDrag` 25, `wheelBrakesDrag` 12 | read by the native diagnostic only, not by the hybrid step | no effect |
+| swing-wing or sweep terms | none exist in the flight model for any aircraft (the Tornado review found the same, TOR-8) | nothing to remove |
+| `loadedElevator` 40 | divides the G limit by 1 + 0.4 x (fuel + stores) / empty weight: +3 G becomes 1.95 G at 325,000 lb, 2.0 G at the default load | kept (the real G limit was not found) |
+
+**Takeoff and landing speeds** come from the envelope's 130 kt sea-level 1 G stall edge,
+which the model scales by the square root of the weight over the empty weight
+(`stall_reference_fraction` is 1 for every variety aircraft): at the 373,000 lb default
+load that is a flapped stall of 150 kt. That is physically sound for this wing (a
+wing-loading estimate for 373,000 lb, about 72.6 lb per square foot at a lift
+coefficient near 0.9, gives about 154 kt), so no lift fit was made.
+
+### What was fitted
+
+1. **Ceiling 49,000 to 50,000 ft (opinionated, the figure is real).**
+   `maxAlt` and the top vertex of the 1 G and 0 G polygons move up 1,000 ft
+   (`B2_CEILING_FT`, a `CORRECTIONS` row and a `fit_envelopes` arm, the F-117's way).
+   Cited: the game's own Jane's text `B2.INF` ("Service ceiling: 15,240 m (50,000 ft)"),
+   Wikipedia "Northrop Grumman B-2 Spirit" (specifications), aerospaceweb "B-2 data",
+   Air Force fact sheets (all read 2026-11-15). Nothing else in the polygons moves. The
+   practical effect is small: level flight held to 48,000 ft (414 kt) before and after,
+   and the scripted climb tops out 100 ft higher (48,160 to 48,263 ft), because the band
+   between the two edges is narrow in the last thousand feet.
+2. **Speed brake, `airBrakesDrag` 256 to 64 (fitted).** See below. A `CORRECTIONS`
+   row, applied only while the record still holds 256 and the rest of the B-2 rows are
+   retail.
+3. **Nothing else.** Top speed, climb, acceleration, turns, thrust lapse, stall and
+   lift were left as the record and the shared model give them; the figures below show
+   why.
+
+### Before, after and real
+
+Probe: `performance_probe` (clean unless said; 325,000 lb at full fuel; normal takeoff
+336,500 lb is `PROBE_PAYLOAD=11500`, maximum 376,000 lb is `51000`), ground probes at
+`--theater UKR --ground-start 1` with the default load (gross 373,000 lb: 48,000 lb of
+bay stores and the full tank). "Before" is the repository at 1e162bac.
+
+| Quantity | Before | After | Real (source) |
+| --- | --- | --- | --- |
+| Time to 5,000 / 10,000 ft, the BMB-A2 probe (450 kt true schedule) | 1,000 s / 1,411 s; 11,479 ft highest in 1,500 s | same (probe artifact) | not a real figure |
+| Time to 5,000 / 10,000 / 20,000 ft, bomber schedule 250 kt EAS to M0.70, 325,000 lb | 94 s / 188 s / 420 s | same | initial climb 3,000 ft/min (aerospaceweb; Aerocorner): the model's 3,190 ft/min over the first 5,000 ft |
+| Same at 336,500 lb / 376,000 lb | 97 / 195 / 435 s; 106 / 219 / 487 s | same | none |
+| Time to 36,000 / 40,000 / 45,000 ft, 325,000 lb | 955 s / 1,098 s / 1,329 s | same | none found |
+| Same, 300 kt EAS to M0.78 | 5,000 ft in 105 s; 40,000 ft in 1,966 s; highest 45,024 ft | same | none |
+| Highest altitude on the schedule | 48,160 ft | 48,263 ft | service ceiling 50,000 ft (`B2.INF`; Wikipedia; Air Force) |
+| Polygon ceiling (1 G top vertex) and `maxAlt` | 49,000 ft | 50,000 ft | 50,000 ft |
+| Level top speed, sea level | 444 kt (Mach 0.67), the 1 G edge | same | 485 mph = 421 kt (Mach 0.65), aerospaceweb |
+| Level top speed, 36,000 ft / 40,000 ft | 497 kt (Mach 0.87) / 483 kt (Mach 0.84), the edge | same | at 40,000 ft: 630 mph = 550 kt (Mach 0.95) in Wikipedia, Migflug and Aerocorner; 530 mph = 460 kt (Mach 0.80) in aerospaceweb; official sheets say only "high subsonic"; National Interest says the figure is classified, estimates Mach 0.7 to 0.9 |
+| Cruise | trimmed cruise at 65 percent of the edge at 20,000 ft: 309 kt, 2.61 lb/s, 5,486 nm from 167,000 lb | same | 560 mph = 487 kt at 40,000 ft (Wikipedia); 515 mph = 448 kt (Mach 0.78) at 37,000 ft (aerospaceweb); range 6,000 nmi (Wikipedia, aerospaceweb) |
+| Acceleration 316 to 400 / 460 kt at 36,000 ft | 75 s / 180 s | same | none |
+| Acceleration to 400 kt at sea level (from 364 kt) | 36 s | same | none |
+| Sustained turn, bomber speeds (Mach 0.5 to 0.7, 1,000 to 30,000 ft) | 2.0 G (60 degrees, held by the G limit), 4.6 to 5.9 deg/s | same | none found |
+| Takeoff, 373,000 lb, sea level | liftoff 158.1 kt after 7,987 ft (67 s of ticks), rotation 153.1 kt | same | takeoff distance 6,700 ft at an unstated weight (Aerocorner); no liftoff speed published |
+| Approach, scripted at the default load | 166.2 kt (1.05 x the loaded minimum), touchdown 154 to 157 kt | same | 140 kt at an unstated weight (`B2.INF`); the same rule gives 136 to 140 kt at 250,000 to 265,000 lb |
+| Landing roll from touchdown to a stop | 1,960 ft (597 m) | 2,330 ft (710 m) (the brake is out on the rollout) | landing distance 3,450 ft at an unstated weight (Aerocorner) |
+| Speed brake, extra deceleration at 312 kt / 401 kt at 1,000 ft | 0.44 G / 0.63 G | 0.14 G / 0.20 G | plate estimate 0.14 G / 0.25 G (not a cited figure) |
+| Thrust to weight at 336,500 lb | 0.206 | same | 0.205 (Wikipedia) |
+| Stealth signature (infrared 15, radar 1) | 15, 1 | 15, 1 (pinned by the record test) | n/a |
+
+Sources read 2026-11-15: Wikipedia "Northrop Grumman B-2 Spirit" (specifications, Block
+30; Migflug copies it), aerospaceweb.org "B-2 data", Aerocorner "Northrop Grumman B-2
+Spirit", the Air Force and Air Force Global Strike Command fact sheets, the National
+Interest "How Fast Is the B-2 Spirit Stealth Bomber?", and the game's own Jane's text
+`B2.INF` (retail media, not committed). The published top speed is not settled: the
+record's Mach 0.84 to 0.87 sits between the two published figures (Mach 0.80 and Mach
+0.95) and is 5 percent above aerospaceweb at both altitudes (421 kt and 460 kt against
+444 kt and 483 kt), so it was **not changed**; see the question at the end.
+
+### The speed brake and the drag rudders
+
+The brake is the existing airbrake control (the `B` key, `State::brake`), which opens
+both drag rudders in the rig (B2-3), and its drag is `weight x airBrakesDrag / 256 x
+brake x the speed share`. The yaw use (one rudder opens with the pedals) has no drag
+term in the flight model: only the brake position does, and the sim's rudder does not
+add drag on the hybrid adapter (`rudderDrag` is read by the native diagnostic only).
+Idle throttle, level, ten seconds, `PROBE_ONLY=brake` (extra deceleration of the brake
+over the clean run, G):
+
+| Altitude, speed | Template 256 | Fitted 64 |
+| --- | ---: | ---: |
+| 1,000 ft, 223 kt (0.5 of the edge) | 0.22 | 0.08 |
+| 1,000 ft, 312 kt (0.7) | 0.44 | 0.14 |
+| 1,000 ft, 401 kt (0.9) | 0.63 | 0.20 |
+| 20,000 ft, 332 kt / 427 kt | 0.47 / 0.67 | 0.15 / 0.20 |
+| 36,000 ft, 348 kt / 448 kt | 0.42 / 0.70 | 0.15 / 0.21 |
+
+The template's brake slowed the 325,000 lb flying wing by 100 kt in ten seconds at 312
+kt, a fighter's airbrake. The fit sizes the brake from the drawn plates: two plates a
+side (upper and lower), each about 15.2 ft along the hinge by 4.1 ft of chord and
+opened about 50 degrees, so about 190 square feet of frontal plate for all four, at a
+drag coefficient of 0.8 in a thick wing's wake: q S Cd over the weight is 0.14 G at 300
+kt and 0.25 G at 400 kt at sea level. The model's speed share is 0.66 at 300 kt and
+0.93 at 400 kt, so the factor that fits both is 0.22 to 0.27 of the template; 64 is a
+quarter. **Fitted; no public drag-rudder drag exists.** The model's brake drag cannot
+fall with altitude as the real dynamic pressure does, so at 36,000 ft it is about
+three times the plate estimate. The landing rollout, flown with the brake out, is 19
+percent longer (2,330 ft against 1,960 ft); the 5,532 ft runway still has 853 ft left.
+At approach speeds (about 150 kt) the brake adds under 0.05 G. The wheel brakes
+(`Tuning::brake_deceleration` 18 ft/s^2, shared by every variety aircraft) were not
+touched; the rollout is still shorter than the 3,450 ft published.
+
+### Other findings
+
+- Air maneuvers (`--headless-flight`, same ticks as the Tornado set): level 7,200
+  ticks, pull 7,200 (2.1 G, loop completed), loop, sprint 36,000 ticks (450.4 kt), rudder, devices (3 s deployments), stall-recover and
+  spin-recover (entered at tick 3, recovered at 1,252 after 0.98 revolutions) all
+  ended with `non_finite=0` and no crash; `dive` and `overspeed` ended in the overspeed
+  loss by design. `after/probes/` and `before/probes/` match except `devices` (the
+  lighter brake: 216.7 kt against 232.1 kt) and the landing rollout.
+- The full-stick pull is 2.1 G at 330 kt and 1.41 G at 461 kt and above (the +3 G row
+  divided by the loaded-elevator rule), and 0.70 G of push.
+- The gear limiting speed in Jane's text (224 kt) has no counterpart in the flight
+  model; not checked or added.
+- Fuel: 6 lb/s gives 464 minutes at military power and 5,486 nm at the trimmed
+  cruise. At the cited 7 lb/s it would be 5,000 nm. Unchanged, for John.
+- The probe: `performance_probe` gained `PROBE_CLIMB=KEAS,MACH` (the bomber climb),
+  `PROBE_ONLY=brake` and `PROBE_TURN_MACH`; `flight.py` adds `b2` to the variety,
+  liftoff, retail-stall and approach scenarios (windows 140 to 165 kt and 140 to 170
+  kt, fitted, agent decisions; recorded 158.1 and 166.2 kt), with a longer takeoff
+  allowance (10,000 ticks) and the approach fuel capped at the probe's 100,000 lb
+  (`--flight-fuel`).
+
+### Checks
+
+`cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D
+warnings`, `cargo test --locked --workspace --no-fail-fast` (counts in the plan's
+Session log; the new tests are `the_b52_b2_and_f117_read_their_real_figures_only_while_retail`
+(extended: ceiling, brake, polygons, stealth signature) and
+`the_b2_climbs_at_a_bombers_rate_and_its_speed_brake_is_a_modest_one`), `--headless-flight
+1200 --aircraft b2` (303.2 kt level at 5,010 ft, no crash, 0 non-finite), `battery.py
+--scenario '*-b2' --lane flight` 6 of 6 (animation, liftoff, liftoff-retail, approach,
+variety, skin), `check_docs`.
+
+Provenance: the thrust, weights and fuel are BMB-A2's (John's decision 16, real); the
+ceiling is opinionated (the real figure, an agent decision); the speed brake factor and
+the battery windows are fitted (agent decisions 2026-11-15); the real figures are
+public pages and the game's own Jane's text, for comparison only; nothing else changed.
+
+Open for John: (1) the top speed: keep the record's Mach 0.84 to 0.87 (inside the
+published Mach 0.80 to 0.95), or trim the 1 G fast edge to Wikipedia's Mach 0.95 at
+40,000 ft (about +14 percent at 40,000 ft, the F-117's one-vertex way); (2) the fuel
+flow, 6 or the cited 7 lb/s; (3) whether the wheel brakes and rollout (shorter than the
+published 3,450 ft) should be fitted for the bombers (a per-aircraft tuning change);
+(4) whether the drag rudders should add yaw drag on the hybrid adapter (`rudderDrag`
+128 is unread there).

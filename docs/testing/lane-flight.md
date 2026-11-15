@@ -158,6 +158,16 @@ that the Combat version's chaff and flares are at the BOZ-107's aft face
 default speed and at 650 kt, and that the Clean version carries and releases
 none.
 
+Update (B2-8, 2026-11-15): the B-2 (`b2`) joins the variety, liftoff, retail-stall and
+approach scenarios of `flight.py` (fitted windows 140 to 165 kt liftoff and 140 to 170 kt
+approach, recorded 158.1 and 166.2 kt at the 373,000 lb default load; the approach
+scenario flies 100,000 lb of fuel, the `--flight-fuel` cap, because 65 percent of the
+B-2's 167,000 lb tank is over it). `performance_probe` gained `PROBE_CLIMB=KEAS,MACH` (a
+bomber's climb on a constant equivalent airspeed, its pitch held by a speed integrator),
+`PROBE_ONLY=brake` (idle deceleration with and without the airbrake) and
+`PROBE_TURN_MACH`. Evidence: the
+[variety flight review](../formats/aircraft-variety.md#b-2-flight-review-b2-8-2026-11-15).
+
 `flight-variety-gcurve-*` sweeps the full-stick G limit of the seven transports
 and airliners from 100 to 750 kt at 5,000 ft (`--maneuver gcurve`). Once the
 limit has passed 1.4 G it must not fall below 1.3 G, through the top speed and
