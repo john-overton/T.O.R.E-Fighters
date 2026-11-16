@@ -2420,3 +2420,33 @@ before and after table with its sources is in
   125.4 kt. Landing (`--maneuver land`, GRE 1): 270,000 lb approach 140.3 kt, touchdown
   131.6 kt, rollout 4,131 ft; 404,000 lb approach 166.2 kt (the cap), touchdown 153.7 kt,
   rollout 5,056 ft.
+
+## Tupolev Tu-160 validation, 2026-11-16
+
+T160-8. Measured with `crates/tore-sim/examples/performance_probe.rs` (the B-52's options `PROBE_CLIMB=bomber`,
+`PROBE_CLIMB=KEAS,MACH`, `PROBE_SPEEDS_KT`, `PROBE_HOLD_SPEED`, `PROBE_CRUISE=ALT:KT`) on the corrected record
+at 568,785 lb (full tank), 600,532 lb (the default load, 12 AS-16) and 450,000 lb, and with `tore-app
+--headless-flight`. The scripts are `.local/m3-aircraft/checks/T160-8/run_probes.sh before|after` and
+`run_ground.sh`; logs are beside them. The before and after table with its sources is in
+[the Tu-160 flight review](../formats/aircraft-variety.md#tu-160-flight-review-t160-8-2026-11-16).
+
+- Level acceleration in afterburner, settled speed (before to after, full tank): sea level 969 to 524 kt
+  (edge 1,203 to 556 kt); 36,000 ft 1,023 to 1,020 kt; 40,000 ft 1,018 to 1,130 kt (edge 2,133 ft/s, 1,264 kt,
+  to 2,025 ft/s, 1,200 kt). At military power: sea level 726 to 469 kt; 36,000 ft 764 to 930 kt.
+- Peak specific excess power at sea level in afterburner, full / max / typical: 249 / 232 / 339 ft/s to
+  180 / 168 / 243 ft/s (published 13,780 ft/min is 230 ft/s).
+- Cruise (trimmed, 500 kt at 36,000 ft): 11.2 to 6.2 lb/s, 4,037 to 7,360 nautical miles from the full tank.
+  Fuel at full throttle: military 26 to 25 lb/s, afterburner 174 to 104 lb/s.
+- `--headless-flight 1200` (`flight-variety-tu160`): no crash, 0 non-finite values.
+- Takeoff (`--maneuver takeoff`, ground start, the default load): UKR 1 8,721 ft at 251.6 kt (rotation 186.7)
+  to 4,072 ft at 167.7 kt (rotation 146.2); GRE 1 8,524 to 3,886 ft at 167.8 kt. Landing (`--maneuver land`,
+  GRE 1, `--flight-fuel`): 212,085 lb crashed (touchdown at 207 kt, 100 ft/s sink) to approach 143.6 kt,
+  touchdown 134.2 kt, rollout 4,100 ft; 100,000 lb approach 115.9 kt, touchdown 110.0 kt, rollout 3,017 ft;
+  67,463 lb (the maximum landing weight) 110.8 kt, 104.8 kt, 2,813 ft.
+- The sustained-turn rows are the record's rows over the loading divisor (2.0 G at 250 to 600 kt and a typical
+  load, 1.7 G at the full tank); the stall fit raised the slow-side ones (300 kt at 1,000 ft, full tank: 48 to
+  54 degrees).
+- Battery: `flight-variety-tu160`, `flight-liftoff-tu160`, `flight-liftoff-retail-tu160`,
+  `flight-approach-tu160`, `flight-variety-gcurve-tu160`, `ai-heavy-takeoff-tu160-gre-a1` and
+  `ai-heavy-land-tu160-ukr-a2` pass (counts in the plan entry).
+Logs are local: `.local/m3-aircraft/checks/T160-8/`.

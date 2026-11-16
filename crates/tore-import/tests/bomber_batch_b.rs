@@ -131,6 +131,21 @@ fn the_corrected_records_carry_the_real_figures_and_station_flags() {
         (123_600, 220_400)
     );
     assert_eq!(n(&tu160, "maxTakeoffWeight"), 606_260);
+    // T160-8 (2026-11-16): the NK-32 flows (the record's 26 and 174 lb/s) and the
+    // real top-speed edges on the 1 G row: 2,025 ft/s (1,200 kt) at 40,000 ft and
+    // 938 ft/s (556 kt) at sea level, with the record's own 245 ft/s slow edge.
+    assert_eq!(
+        (
+            n(&tu160, "fuelConsumption"),
+            n(&tu160, "aftFuelConsumption")
+        ),
+        (25, 104)
+    );
+    assert_eq!(top(&tu160, 1), 2_025.);
+    let one = tu160.envelopes.iter().find(|e| e.g == 1).unwrap();
+    assert_eq!(one.speeds(0.), Some((245., 938.)));
+    assert_eq!(one.speeds(40_000.).map(|s| s.1), Some(2_025.));
+    assert_eq!(top(&tu160, 0), 2_125.);
     // The bay rows never carried the designator bit. Update (T160-5,
     // 2026-11-16): the pair flag `0x4` is cleared (`0x1184` to `0x1180`), so a
     // row is one bay.

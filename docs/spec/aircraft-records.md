@@ -797,3 +797,22 @@ loadout's starting-tank cap (78086f7e) lowers the fuel, the numbers are in the v
 document. Free flight and `--headless-flight` use the model's full tank.
 
 Logs are local: `.local/m3-aircraft/checks/BMB-C2/`.
+
+## Tu-160 flight review: fuel flows and top-speed edges (T160-8, 2026-11-16)
+
+Dated note, additions only. Three more `TU160.PT` readings differ from the retail record, each applied only
+while the record still holds its retail values and every other Tu-160 correction (BMB-B2) still holds, in
+`tore-formats` `aircraft_corrections.rs`:
+
+| Field | Retail | Read as | Label |
+| --- | ---: | ---: | --- |
+| `fuelConsumption` (military, all four engines, lb/s) | 26 (the Tu-26's, scaled) | 25 | fitted: 123,600 lbf x 0.725 lb/(lbf h) / 3,600 = 24.9, the NK-32's cited 0.72 to 0.73 (Wikipedia "Kuznetsov NK-32") |
+| `aftFuelConsumption` (afterburner, lb/s) | 174 | 104 | fitted (the coordinator's BMB-B1/B2 note): 220,400 lbf x 1.70 / 3,600 = 104.1, the NK-32's cited supersonic 1.70 |
+| 1 G and 0 G fast-edge vertices (speed envelope, ft/s at altitude) | 2,030 at sea level, 2,143 at 36,000 ft, 2,133 at 40,000 ft (0 G +100) | 938 at sea level, 1,111 at 10,000, 1,331 at 20,000, 1,615 at 30,000, 1,827 at 36,000, 2,025 at 40,000 ft (0 G +100, 2,125 at 41,000) | fitted from real figures: 556 kt (640 mph, aerospaceweb.org) at sea level, 1,200 kt at 40,000 ft (`TU160.INF`, Wikipedia), a constant calibrated airspeed 556 to 595 kt between |
+
+The slow edges, the ceiling (50,000 ft), the G rows other than their fast side (held to the new edge), the
+thrust, weights, fuel and the stations are unchanged. What a player notices: the Tu-160 no longer flies Mach
+1.47 at sea level; it tops out at 524 kt there in afterburner (the record edge 556 kt) and 1,130 kt at 40,000
+ft; its 326,285 lb lasts 52 minutes in afterburner instead of 31. The flight terms that go with them (a drag
+shape, a stall reference, a wheel brake) are model code, not record readings: see
+[the Tu-160 flight review](../formats/aircraft-variety.md#tu-160-flight-review-t160-8-2026-11-16).

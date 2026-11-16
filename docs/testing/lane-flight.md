@@ -143,6 +143,16 @@ Greece airport 1). `--flight-fuel` takes up to 400,000 lb and the `land` probe a
 before it works out the approach speed. Results: the
 [variety flight baseline](../baselines/variety-flight.md#boeing-b-52h-validation-2026-11-15).
 
+Update (T160-8, 2026-11-16): `tu160` joins `VARIETY_AIRCRAFT`, `LIFTOFF_AIRCRAFT` (liftoff, retail-stall and
+approach scenarios) and `HEAVY_AIRCRAFT` (`flight-variety-gcurve-tu160`, floor 1.15 G like the B-52's) in
+`flight.py`, with fitted windows (liftoff 155 to 185 kt, recorded 167.8; approach 130 to 160 kt, recorded
+143.6), a 6,000 tick takeoff limit and Athens (`THEATER_FOR`, 12,000 ft). `ai.py` adds
+`ai-heavy-takeoff-tu160-gre-a1` and `ai-heavy-land-tu160-ukr-a2` (see
+[lane-ai](lane-ai.md)). `ai-strike-tu160-stick` now starts 10 nm out, not 12: with the corner speed the stall
+fit lowered, the AI's pass from 12 nm opens the bay a second late and exits without bombing, while 8, 10, 14 and
+16 nm all drop the six (a timing edge of the AI's bay lead, T160-9's). Results: the
+[variety flight baseline](../baselines/variety-flight.md#tupolev-tu-160-validation-2026-11-16).
+
 Update (MF1-8, 2026-11-11): the Mirage F1 results, clean and with the default load,
 with the full-stick pull by fuel against the Mirage 2000, the Gripen, the F-5E and
 the F-16A, are in the

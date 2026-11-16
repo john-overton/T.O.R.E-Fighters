@@ -3009,6 +3009,8 @@ mod profile_tests {
             ("aftThrust", 232_398),
             ("maxTakeoffWeight", 606_260),
             ("internalFuel", 368_000),
+            ("fuelConsumption", 26),
+            ("aftFuelConsumption", 174),
         ];
         let text = batch_text(
             "TU160.PT",
@@ -3032,6 +3034,11 @@ mod profile_tests {
         assert_eq!(
             (a.number("maxTakeoffWeight"), a.number("maxAlt")),
             (606_260., 50_000.)
+        );
+        // T160-8: the NK-32 flows, 25 and 104 lb/s (the record's 26 and 174).
+        assert_eq!(
+            (a.number("fuelConsumption"), a.number("aftFuelConsumption")),
+            (25., 104.)
         );
         // F-111F: fuel 32,663 lb (the record's 5,025 is gallons), thrust
         // 29,120 / 50,200 and the flows refitted to 5 and 35 lb/s.

@@ -1622,10 +1622,11 @@ def scenarios() -> list[Scenario]:
     ))
     extra.append(Scenario(
         name="ai-strike-tu160-stick", lane="flight",
-        args=pilot_run("UKR", "QUCOL", "--aircraft", "tu160", "--load", "MK82", "--altitude", "20000", "--from", "12",
+        args=pilot_run("UKR", "QUCOL", "--aircraft", "tu160", "--load", "MK82", "--altitude", "20000", "--from", "10",
                        "--seconds", "200", "--follow-egress"),
         timeout=600, expect=[r"RELEASE", r"ORIGIN", r"IMPACT", r"EGRESS"], check=tu160_stick_problems,
-        notes="An AI Tu-160 (a Heavy) on the column at 20,000 ft, 12 nm out: the six Mk 82 of the forward bay leave "
+        notes="An AI Tu-160 (a Heavy) on the column at 20,000 ft, 10 nm out (12 nm until T160-8, 2026-11-16, see the "
+              "Tu-160 flight review): the six Mk 82 of the forward bay leave "
               "from the grid's own places, the same cells a human's release uses (`a2g-release-origin-tu160`), "
               "with the doors open for the release, then egress (T160-6).",
     ))

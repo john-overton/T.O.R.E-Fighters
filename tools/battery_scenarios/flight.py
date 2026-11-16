@@ -19,7 +19,7 @@ from battery_scenarios._strips import ground_airport
 
 # Original roster covered by the established fixed-wing maneuver battery.
 AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su25", "mig23", "su35", "f22", "f22n", "faxx"]
-VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310", "mig25", "f16a", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc", "b52", "b2", "f117", "f111"]
+VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310", "mig25", "f16a", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc", "b52", "b2", "f117", "f111", "tu160"]
 # Aircraft whose PT disables spins (X-31 flag, F-22 family): they never enter one.
 SPIN_IMMUNE = {"x31", "f22", "f22n", "faxx"}
 
@@ -243,6 +243,9 @@ def tank_problems(output: str) -> list[str]:
 # 2026-11-15, agent decision). The B-52H's 7,674 ft run takes 7,326 ticks at
 # 488,000 lb, so its scenarios run 18,000 ticks and allow 9,000 (B52-8, 2026-11-15).
 TAKEOFF_TICKS_MAX = {"b2": 10000, "b52": 9000}
+# The Tu-160's 600,532 lb default load lifts off at 167.8 kt after 4,056 ft (T160-8, 2026-11-16) and reaches 100 ft at
+# tick 4,324, 4 percent under the shared 4,500 tick limit, so its scenarios allow 6,000 ticks.
+TAKEOFF_TICKS_MAX["tu160"] = 6000
 TAKEOFF_RUN_TICKS = {"b2": "12000", "b52": "18000"}
 
 
@@ -411,6 +414,16 @@ KNOWN_APPROACH["b2"] = 167.5
 # The F-117A's measured liftoff and approach at its default load (F117-8, 2026-11-15).
 KNOWN_LIFTOFF["f117"] = 177.2
 KNOWN_APPROACH["f117"] = 166.2
+# The Tu-160 (T160-8, 2026-11-16; agent decisions, fitted windows). The game's own Jane's text (`TU160.INF`)
+# gives no takeoff or approach speed; the published wing (4,306 square feet at 20 degrees) and a flapped lift
+# coefficient of 2.2 stall at 137 kt at 600,000 lb, so a liftoff at 1.15 to 1.3 times that is 157 to 178 kt. The
+# scripted takeoff at the 600,532 lb default load lifts off at 167.8 kt after 4,056 ft; the approach at 65 percent
+# fuel (212,085 lb, 486,000 lb gross) flies 143.6 kt and touches down at 134 to 140 kt (a flapped stall of about 120
+# kt at that weight times 1.2).
+LIFTOFF_TARGET["tu160"] = (155, 185)
+APPROACH_TARGET["tu160"] = (130, 160)
+KNOWN_LIFTOFF["tu160"] = 167.8
+KNOWN_APPROACH["tu160"] = 143.6
 # TOR-6 (2026-11-11): the Tornado's default load is lighter than TOR-8 measured (one centreline tank, 1,650
 # lb of external fuel, not two): liftoff 146.4 kt (was 150.6), approach 155.1 kt (was 160.1), both inside the
 # windows and the plus or minus 6 percent regression band, so no window was refitted and the known values above
@@ -435,6 +448,9 @@ KNOWN_APPROACH["b52"] = 166.2
 # The B-52H's liftoff and approach scenarios start from a 12,000 ft runway (Greece, airport 1):
 # UKR airport 1 is 5,532 ft, shorter than its 7,674 ft takeoff run and its 5,000 ft rollout.
 THEATER_FOR = {"b52": "GRE"}
+# The Tu-160's landing roll is 4,100 ft from a 1,470 ft touchdown (T160-8, 2026-11-16): UKR airport 1 (5,532 ft) is
+# too short, so its liftoff and approach scenarios start from Athens (GRE 1, 12,000 ft) like the B-52H's.
+THEATER_FOR["tu160"] = "GRE"
 # Internal fuel of each aircraft's default load, pounds.
 INTERNAL_FUEL_LB = {
     "f18": 11220, "rafale": 9900, "f14": 15741, "a4e": 4434, "x31": 9975, "mig29": 13000, "su27": 19000,
@@ -465,6 +481,8 @@ INTERNAL_FUEL_LB["mf1"] = 6120
 
 # B52.PT internal fuel, 312,197 lb (BMB-A2: the real B-52H tank, 47,975 US gal).
 INTERNAL_FUEL_LB["b52"] = 312197
+# TU160.PT internal fuel, 326,285 lb (BMB-B2: 148,000 kg). The approach scenario flies 65 percent, 212,085 lb.
+INTERNAL_FUEL_LB["tu160"] = 326285
 # B2.PT internal fuel, 167,000 lb (BMB-A2). The approach scenario flies 65
 # percent of it, 108,550 lb, but `--flight-fuel` takes at most 100,000 lb, so the
 # B-2's approach scenario uses that cap (60 percent); the scripted approach speed
@@ -587,6 +605,8 @@ LIFTOFF_AIRCRAFT += ["b52"]
 LIFTOFF_AIRCRAFT += ["b2"]
 # The F-117A joins them (F117-8, 2026-11-15).
 LIFTOFF_AIRCRAFT += ["f117"]
+# The Tu-160 joins them (T160-8, 2026-11-16).
+LIFTOFF_AIRCRAFT += ["tu160"]
 
 
 def liftoff_scenarios() -> list[Scenario]:
@@ -2816,12 +2836,16 @@ def variety_scenarios() -> list[Scenario]:
 
 # Transports and airliners: their higher G rows end well short of the 1 G row's
 # top speed, the band where they once could not pull at all (John, 2026-10-08).
-HEAVY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "b747", "a310", "b52"]
+HEAVY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "b747", "a310", "b52", "tu160"]
 
 
 # The B-52H's record has only +3 and +2 G rows, and its tank divides the 2 G row by the
 # loading divisor 1.64 (2 / 1.64 = 1.22 G, B52-8, 2026-11-15), so its floor is lower than 1.3.
 HEAVY_GCURVE_FLOOR = {"b52": 1.15}
+# The Tu-160 (T160-8, 2026-11-16): the sweep's 100 to 750 kt at 5,000 ft now runs past its fitted top-speed edge
+# (607 kt there, the real 556 kt calibrated limit), where the full-stick limit settles at 1.20 G (the 2 G row held to
+# the edge, divided by the loading divisor at the full tank); it holds 1.79 G from 300 to 600 kt.
+HEAVY_GCURVE_FLOOR["tu160"] = 1.15
 
 
 def check_heavy_gcurve(output: str, floor: float = 1.3) -> list[str]:

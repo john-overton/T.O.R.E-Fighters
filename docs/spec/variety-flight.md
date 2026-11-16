@@ -933,6 +933,37 @@ Not changed: the top-speed edges (515 kt at 36,000 ft against a published 560 to
 the 55,000 ft ceiling (published 50,000), the G rows and the roll limit. Engines stay
 clamped to four in the live configuration (see the review).
 
+## Tupolev Tu-160 (T160-8, 2026-11-16)
+
+The Tu-160 flies the `variety` configuration built from `TU160.PT` with the BMB-B2 values (123,600 /
+220,400 lbf, empty 242,500 lb, tank 326,285 lb, 606,260 lb maximum takeoff) and the record's own G rows. The
+top-speed edge and the fuel flows are corrected in the record, and five fitted terms are the aircraft's own;
+every other aircraft keeps the shared value ([review and table](../formats/aircraft-variety.md#tu-160-flight-review-t160-8-2026-11-16)):
+
+- **Top speed.** The 1 G edge is 556 kt at sea level (the published 640 mph) and rises on a constant
+  calibrated airspeed (556 kt, 595 kt at 40,000 ft) to 1,200 kt (2,025 ft/s) at 40,000 ft; above that the
+  record's edge stays. The record's 1,203 kt at sea level and 1,270 kt at 36,000 ft are gone. Level flight in
+  afterburner settles at 94 percent of the edge: 524 kt at sea level, 1,020 kt at 36,000 ft, 1,130 kt at
+  40,000 ft. Above the edge the overspeed rule applies as for every aircraft.
+- **Fuel flow.** 25 lb/s at military power and 104 lb/s with afterburner (the NK-32's 0.72 to 0.73 and 1.70
+  specific consumption): 218 minutes dry, 52 minutes with afterburner from the 326,285 lb tank.
+- **Clean-drag shape**, the B-52's form with 0.40 of the reference drag on the square law and the rest on the
+  12th power: 0.27 of the afterburner thrust at 430 kt at sea level (the climb), 0.07 at Mach 0.77 at 36,000
+  ft (the range). The peak climb at sea level is 14,600 ft/min at 450,000 lb (published 13,780) and 10,800
+  ft/min at the full tank; Mach 0.9 from the full tank covers 7,100 to 7,400 nautical miles (published 6,640).
+- **Stall reference fraction** 2.3 (shared 1): the weight-scaled stall speed carries 558,000 lb on the record's
+  speeds. At the 600,532 lb default load the flapped stall is 113 kt, rotation 146 kt and liftoff 168 kt after
+  4,072 ft (it was 252 kt after 8,721 ft); the scripted approach flies 143.6 kt at 486,000 lb and 110.8 kt at
+  the 341,710 lb landing weight (it crashed at 207 kt before). **Brake deceleration** 4.5 ft/s squared
+  (shared 18): the landing roll from touchdown is 4,100 ft at 486,000 lb and 2,813 ft at the landing weight.
+  **Nose alignment** 0.4, the transports'.
+
+Not changed: the 50,000 ft ceiling (published 49,200 to 52,495), the G rows (a 2.1 G full-stick pull at a
+typical load, 1.8 G at the full tank; Jane's "g limit: 2"), the thrust lapse (70,000 ft), the rolling
+deceleration (the takeoff run is 1,241 m against a published 2,200 m of unknown weight), the sweep schedule
+(35 to 48 degrees at the 524 to 556 kt sea-level top speed) and the roll limit. The AI heavy-class flaps law
+no longer applies to it (flaps-up minimum 151 kt at the takeoff weight, under 190.5 kt).
+
 ## Unknown evidence
 
 Retail hover power, altitude ceiling, nozzle travel/rate, rotor torque, lift
