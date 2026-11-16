@@ -20,6 +20,8 @@ from battery_scenarios._strips import ground_airport
 # Original roster covered by the established fixed-wing maneuver battery.
 AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su25", "mig23", "su35", "f22", "f22n", "faxx"]
 VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310", "mig25", "f16a", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc", "b52", "b2", "f117", "f111"]
+# The Tu-26 Backfire-C joins the variety flight (T26-8, 2026-11-16).
+VARIETY_AIRCRAFT += ["tu26"]
 # Aircraft whose PT disables spins (X-31 flag, F-22 family): they never enter one.
 SPIN_IMMUNE = {"x31", "f22", "f22n", "faxx"}
 
@@ -476,14 +478,43 @@ INTERNAL_FUEL_LB["b2"] = 167000
 INTERNAL_FUEL_LB["f117"] = 18500
 APPROACH_FUEL_CAP_LB = 100000
 
+# The Tu-26 Backfire-C (T26-8, 2026-11-16; agent decisions, fitted windows). The
+# game's own Jane's text (`TU26.INF`, retail media) gives a take-off speed of 200
+# kt, a normal landing speed of 154 kt, a 2,100 m take-off run and a 1,300 m
+# landing run. Liftoff (150 to 205 kt) brackets the measured 167.3 kt at the
+# default load (253,971 lb: the full 110,230 lb tank and six AS-16) and the 200 kt
+# figure; the model lifts off at 1.09 times its weight-scaled flapped stall, 13
+# percent under Jane's 200 kt (docs/formats/aircraft-variety.md, "Tu-26
+# Backfire-C flight review"). The approach window (150 to 175 kt) is for the
+# scenario's 60 percent fuel (66,138 lb, 209,879 lb gross): the model flies the cap,
+# 166.2 kt (0.85 times the record's landing limit), and touches down at 157.0 kt
+# against Jane's 154 kt. A scripted landing between 71,650 and 80,000 lb of fuel and up cannot
+# hold that cap and lands short (the loaded flapped minimum is 166.3 kt at full
+# fuel). Both start from Athens (GRE 1, 12,000 ft): the run is 4,402 ft and the
+# rollout 4,213 ft after a touchdown 1,253 ft past the threshold, which would
+# leave only 66 ft of Simferopol's 5,532 ft (UKR 1), so the scenarios use Athens.
+LIFTOFF_TARGET["tu26"] = (150, 205)
+APPROACH_TARGET["tu26"] = (150, 175)
+KNOWN_LIFTOFF["tu26"] = 167.3
+KNOWN_APPROACH["tu26"] = 166.2
+INTERNAL_FUEL_LB["tu26"] = 110230
+THEATER_FOR["tu26"] = "GRE"
+TAKEOFF_TICKS_MAX["tu26"] = 6000
+
+
+# The approach scenario's share of the internal fuel, 0.65 unless listed. The Tu-26 flies
+# 60 percent (T26-8, 2026-11-16): at 65 percent (71,650 lb) the scripted flare touches down at
+# 12.1 ft/s, over the 12 ft/s hard-touchdown line; at 60 percent (66,138 lb) it is 10.0 ft/s.
+APPROACH_FUEL_SHARE = {"tu26": 0.60}
+
 
 def approach_fuel(ac: str) -> int:
     """The approach scenario's `--flight-fuel`: 65 percent of the internal fuel.
 
     The B-2 keeps its 100,000 lb cap (B2-8); every other aircraft, the B-52H
     included (B52-8 raised the option's maximum to 400,000 lb), flies the full
-    65 percent."""
-    fuel = round(0.65 * INTERNAL_FUEL_LB[ac])
+    65 percent, except those in `APPROACH_FUEL_SHARE` (the Tu-26, 60 percent)."""
+    fuel = round(APPROACH_FUEL_SHARE.get(ac, 0.65) * INTERNAL_FUEL_LB[ac])
     return min(fuel, APPROACH_FUEL_CAP_LB) if ac == "b2" else fuel
 
 
@@ -496,13 +527,25 @@ def _in_target(value: float, target: tuple, known: float | None) -> str | None:
     return f"{value} kt, outside {lo} to {hi} kt and its recorded {known} kt"
 
 
+# The ground runs the fitted bombers are held to, ft (T26-8, 2026-11-16): the
+# Tu-26's takeoff run at the default load and its landing rollout at 65 percent
+# fuel, against the game's own Jane's 6,890 ft run at 273,370 lb and 4,265 ft
+# landing run (the model gives 4,402 ft and 4,213 ft; docs/formats/aircraft-variety.md).
+LIFTOFF_RUN_FT = {"tu26": (3500, 5500)}
+ROLLOUT_FT = {"tu26": (3500, 5000)}
+
+
 def check_liftoff_speed(output: str, ac: str) -> list[str]:
     problems = check_takeoff(output, ac)
-    lift = re.search(r"^liftoff: tick=\d+ speed_kt=([\d.]+)", output, re.M)
+    lift = re.search(r"^liftoff: tick=\d+ speed_kt=([\d.]+) distance_ft=(\d+)", output, re.M)
     if lift and ac in LIFTOFF_TARGET:
         p = _in_target(float(lift.group(1)), LIFTOFF_TARGET[ac], KNOWN_LIFTOFF.get(ac))
         if p:
             problems.append("liftoff at " + p)
+    if lift and ac in LIFTOFF_RUN_FT:
+        lo, hi = LIFTOFF_RUN_FT[ac]
+        if not lo <= int(lift.group(2)) <= hi:
+            problems.append(f"takeoff run {lift.group(2)} ft, outside {lo} to {hi} ft")
     return problems
 
 
@@ -518,6 +561,12 @@ def check_approach_speed(output: str, ac: str) -> list[str]:
         p = _in_target(float(m.group(1)), APPROACH_TARGET[ac], KNOWN_APPROACH.get(ac))
         if p:
             problems.append("approach at " + p)
+    if ac in ROLLOUT_FT:
+        down = re.search(r"touchdown_past_threshold_ft=(-?\d+)", output)
+        stop = re.search(r"stop_past_threshold_ft=(-?\d+)", output)
+        lo, hi = ROLLOUT_FT[ac]
+        if down and stop and not lo <= int(stop.group(1)) - int(down.group(1)) <= hi:
+            problems.append(f"landing roll {int(stop.group(1)) - int(down.group(1))} ft, outside {lo} to {hi} ft")
     return problems
 
 
@@ -589,6 +638,8 @@ LIFTOFF_AIRCRAFT += ["b52"]
 LIFTOFF_AIRCRAFT += ["b2"]
 # The F-117A joins them (F117-8, 2026-11-15).
 LIFTOFF_AIRCRAFT += ["f117"]
+# The Tu-26 Backfire-C joins them (T26-8, 2026-11-16).
+LIFTOFF_AIRCRAFT += ["tu26"]
 
 
 def liftoff_scenarios() -> list[Scenario]:

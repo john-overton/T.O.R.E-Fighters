@@ -1084,6 +1084,37 @@ mod tests {
         assert!(!t.has_swivel());
     }
 
+    /// T26-8 (2026-11-16): the Tu-26's speed schedule read at the speeds its
+    /// own flight model gives: the takeoff and approach (gear and flaps out)
+    /// fly spread, the climb-out below 300 knots stays spread, the cruise at
+    /// Mach 0.85 is part-swept and the dash is fully swept. The schedule is
+    /// the coordinator's first pass (BOMBERS-DECISIONS-C, Tu-26 item 4,
+    /// fitted); the real wing has manual positions only.
+    #[test]
+    fn the_tu26_flies_spread_for_takeoff_and_approach_and_swept_for_the_dash() {
+        let t = &TU26;
+        // Liftoff at the default load, 167.3 kt (T26-8 probe), flaps and gear out.
+        assert!((degrees(t, 167.3, 1., 1.) - 20.).abs() < 1e-9);
+        // The scripted approach, 166.2 kt, and its touchdown at 157.6 kt.
+        assert!((degrees(t, 166.2, 1., 1.) - 20.).abs() < 1e-9);
+        assert!((degrees(t, 157.6, 1., 1.) - 20.).abs() < 1e-9);
+        // Even a clean aircraft below 300 knots keeps the spread wing.
+        assert!((degrees(t, 250., 0., 0.) - 20.).abs() < 1e-9);
+        // Mach 0.85 at 36,000 ft is 490 knots: 20 + 45 x 190 / 260 degrees.
+        assert!((degrees(t, 490., 0., 0.) - (20. + 45. * 190. / 260.)).abs() < 1e-9);
+        // The dash, Mach 1.88 (1,080 kt), and the speed the model reaches (1,000 kt).
+        assert!((degrees(t, 1080., 0., 0.) - 65.).abs() < 1e-9);
+        assert!((degrees(t, 1000., 0., 0.) - 65.).abs() < 1e-9);
+        // Always between the real limits and never narrowing as the speed rises.
+        let mut last = 0.;
+        for k in (0..=1200).step_by(10) {
+            let d = degrees(t, f64::from(k), 0., 0.);
+            assert!((20. ..=65.).contains(&d), "{k} kt: {d}");
+            assert!(d >= last - 1e-9, "{k} kt");
+            last = d;
+        }
+    }
+
     #[test]
     fn the_f111fs_wing_spreads_to_250_knots_and_swivels_the_inner_rows() {
         let f = &F111F;

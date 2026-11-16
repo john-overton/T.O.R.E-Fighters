@@ -15973,3 +15973,200 @@ AI battery lanes, `--smoke-test`.
 7. The B-52's AI tail-gun lethality and rear-cue questions apply unchanged.
 
 Provenance: slew words, sensor rows, HUD module, art spec-derived (retail); the radar and jammer assignments, the eye and the scenarios fitted, agent decisions 2026-11-16. No retail bytes committed.
+
+## Tu-26 Backfire-C flight review (T26-8, 2026-11-16)
+
+Implementation mode. The Tu-26 flies the hybrid adapter's `variety` configuration built from
+`TU26.PT` with BMB-C2's real thrust (66,000 / 110,000 lbf), empty weight (127,868 lb), the
+record's own tank (110,230 lb), flows (10 and 66 lb/s) and maximum takeoff (273,370 lb, the game's
+own Jane's figures), the 1,080 kt and 43,635 ft edges and the record's G rows. None of those
+changed. What changed is two ground-run terms for this aircraft only, the way the B-52's are
+([variety flight](../spec/variety-flight.md#tupolev-tu-26-backfire-c-t26-8-2026-11-16) and the
+[variety flight baseline](../baselines/variety-flight.md#tupolev-tu-26-backfire-c-validation-2026-11-16)).
+Both are **fitted**, agent decisions of 2026-11-16; neither is retail behaviour. Logs and probe
+tables: `.local/m3-aircraft/checks/T26-8/{before,after}/`.
+
+### What was wrong, and what was not
+
+1. **The ground run, both ways.** The shared contact law has no flap, gear or induced drag and
+   no thrust lost with speed, and its wheel brakes stop a heavy from 140 kt in about 1,500 ft.
+   The game's own Jane's text (`TU26.INF`, retail media, quoted as before) gives a take-off run
+   of 2,100 m (6,890 ft) at the 124,000 kg maximum and a landing run of 1,300 m (4,265 ft). The
+   model ran 3,895 ft at 273,370 lb (3,287 ft at the 253,971 lb default load) and rolled 2,202 ft
+   after a 157.6 kt touchdown. That is clearly wrong by half, so both are fitted (below).
+2. **Not wrong (reported, not fitted).** The climb, the cruise burn and range, the sea-level and
+   high-altitude top speeds, the ceiling, the turns and the roll rate all sit near the real
+   figures or have no figure to fit to (table below). The clean-drag shape that the B-52 and
+   the B-1B needed is not needed here: the Tu-26's edges are thrust edges (598 kt at sea level,
+   1,080 kt at 36,000 ft), not placards, so the shared square law already gives 3,475 nautical
+   miles at the Jane's 485 kt cruise against 3,700 published. The shared drag, the thrust lapse,
+   the stall reference and the nose alignment (0.7) are left alone.
+3. **The scripted landing at full fuel.** The probe flies at 0.85 times the record's 330 ft/s
+   landing limit, 166.2 kt, never under 1.05 times the loaded minimum. At the 253,971 lb default
+   load the loaded flapped minimum is 166.3 kt, so the approach is under the speed it can hold
+   and it lands short (the B-1B's open item, the same cause). It lands cleanly at 71,650 lb of
+   fuel (215,391 lb gross) and crashes short at 80,000 lb; the scenario flies 60 percent, 66,138 lb (the
+   scripted flare touches down at 12.1 ft/s at 65 percent, over the battery's 12 ft/s line, and at 10.0
+   ft/s at 60). This is the record's landing limit meeting a heavy aircraft, not a flight term.
+
+### The fitted terms
+
+| Term | Shared value | Tu-26 | Fitted against |
+| --- | --- | --- | --- |
+| Rolling and takeoff-run deceleration | 0.8 ft/s squared | 6.0 | Jane's 6,890 ft at 273,370 lb. Held under the 8.4 that would match it (see below). The model's run at 273,370 lb is 5,479 ft, and 4,402 ft at the default load |
+| Wheel brake deceleration | 18 ft/s squared | 6.0 | Jane's 4,265 ft landing run: the scripted landing at 65 percent fuel rolls 4,213 ft from a 157.6 kt touchdown (4,124 ft at 40,000 lb of fuel) |
+
+Why 6.0 and not 8.4. The 6,890 ft figure needs a deceleration of 8.4 ft/s squared (6,871 ft
+at 273,370 lb measured). At 273,370 lb that is 71,000 lbf of rolling resistance against 66,000
+lbf of military thrust, so the aircraft could not roll or taxi without the afterburner, and the
+AI's taxi law (BMB-AI, `mission::taxi_throttle_of`: the throttle that balances the rolling
+deceleration, then 1.1 times it as a floor) would ask for more than full throttle. 6.0 keeps
+that balance at 0.72 at the default load (0.77 at the maximum), so the floor is 0.79 to 0.85 and a
+player or an AI can still taxi on dry power, and leaves the run 20 percent short of Jane's at
+the maximum weight. The model also lifts off at 1.09 times its flapped stall, 167 to 174 kt, 13
+percent under Jane's 200 kt take-off speed, and the real aircraft's mean acceleration to 173
+kt would cover the same ground in about 5,150 ft, so the fitted 5,479 ft is close to what the
+Jane's acceleration gives at the model's own liftoff speed. A speed-dependent rolling drag
+would remove the compromise; that needs a new field in the shared `Tuning` (see Open for John).
+
+Code: `crates/tore-sim/src/models/variety/tu26.rs` (the two terms and their notes) and its hook in
+`models/variety.rs`. Every other aircraft keeps the shared contact values (the B-52 its own); one
+test checks it. No shared law was touched, so no other aircraft's probe could move: the
+`performance_probe` tables and the thirteen air maneuvers of the Tu-26 are byte for byte the
+same before and after (`cmp`), and only the ground takeoff and landing lines differ.
+
+### Before, after and real
+
+Weights: full is the free-flight and `--headless-flight` start (127,868 + 110,230 = 238,098 lb,
+clean), max is 273,370 lb (the maximum takeoff weight; `--flight-fuel 129629` on the default load
+of 15,873 lb), default is the ground-start load (253,971 lb: full tank and six AS-16), typical is
+197,868 lb (70,000 lb of fuel). Ground figures are from Athens (GRE 1, 12,000 ft). The speed
+rows are at the weights named; real figures are from the game's own Jane's text (`TU26.INF`)
+unless a source is named.
+
+| Figure | Before | After | Real (source) |
+| --- | --- | --- | --- |
+| Takeoff run to liftoff, 273,370 lb | 3,895 ft, 173.7 kt (measured at 272,741 lb) | 5,479 ft, 173.8 kt | 2,100 m (6,890 ft), take-off speed 200 kt (Jane's) |
+| Takeoff run, 253,971 lb default load / 223,741 lb | 3,287 ft, 167.5 kt / 2,937 ft, 170.4 kt | 4,402 ft, 167.3 kt / 3,596 ft, 170.2 kt | none for these weights |
+| Takeoff with `--retail-stall-speeds`, default load | 2,059 ft, 136.4 kt | 2,592 ft, 136.3 kt | none |
+| Landing, 65 percent fuel (71,650 lb, 215,391 lb gross; the scenario flies 60 percent, 157.0 kt and 4,195 ft after): approach, touchdown, roll | 166.2 kt, 157.6 kt, 2,202 ft | 166.2 kt, 157.6 kt, 4,213 ft | landing speed 154 kt, landing run 1,300 m (4,265 ft) (Jane's) |
+| Landing, 40,000 lb of fuel: touchdown, roll | 155.0 kt, 2,157 ft | 155.0 kt, 4,124 ft | the same |
+| Landing at full fuel (238,098 lb or more) | crashes short (approach 166.2 kt is under the 166.3 kt loaded flapped minimum) | the same | not a flight term (finding 3) |
+| Level top speed, afterburner, 36,000 ft (full / typical / max weight) | 962 / 1,000 / 932 kt (Mach 1.68 / 1.74 / 1.62) | the same | Mach 1.88, 1,080 kt at height (Jane's); 1,078 kt at 30,000 ft (Wikipedia). The record's edge is 1,080 kt: the record's loaded drag (30 percent times the loading) holds the aircraft 7 to 14 percent under it |
+| Level top speed, afterburner, sea level | 533 / 554 / 516 kt | the same | Mach 0.86, 567 kt at low altitude (Jane's); the record's edge is 598 kt |
+| Level top speed, military power, 36,000 ft / sea level | 745 to 775 kt (Mach 1.30 to 1.35) / 413 to 429 kt | the same | none found |
+| Ceiling | the climb tops out at 44,400 ft (full thrust, 300 KCAS then Mach 0.90), 44,950 ft (military power, Mach 0.77 schedule) | the same | 13,300 m (43,635 ft) (Jane's, Wikipedia); the record's edge is 43,635 ft |
+| Climb, 238,098 lb, afterburner, 300 KCAS then Mach 0.90: 5,000 / 20,000 / 36,000 ft | 45 / 138 / 264 s (9,440 ft/min at 5,000 ft) | the same | Wikipedia "15 m/s (3,000 ft/min)", no weight, altitude or power stated: not used |
+| Same at 273,370 lb / 197,868 lb | 51 / 165 / 312 s; 39 / 112 / 212 s | the same | none found |
+| Military power, Mach 0.77 schedule, 238,098 lb: 5,000 / 20,000 / 36,000 ft | 60 / 166 / 270 s | the same | none found |
+| Cruise, 485 kt at 36,000 ft, trimmed: burn and range from the 110,230 lb tank | 4.27 lb/s, 3,475 nautical miles | the same | cruise 485 kt (Jane's); range 3,700 nautical miles, 6,800 km (Wikipedia). 6 percent under |
+| Speed brake, 0.5 / 0.9 of the top speed at 1,000 ft | brake adds 0.23 / 0.50 G | the same | none found |
+| Sustained turn, speed held, 197,868 lb: 300 / 400 kt at 1,000 ft; 450 / 550 kt at 30,000 ft | 70 degrees bank, 2.9 to 3.0 G, 10.4 / 7.6 / 6.8 / 5.5 deg/s | the same | +2.5 G (Jane's); the record's rows run to +4 |
+| Instantaneous pull | 3.2 G | the same | +2.5 G (Jane's) |
+| Roll rate (full stick) | 30 deg/s | the same | none found |
+
+Sources (all read 2026-11-16): the game's own Jane's text `TU26.INF` (reference media, as in the
+T26-0 review: Mach 1.88 / 1,080 kt at height, Mach 0.86 / 567 kt low, cruise 485 kt, take-off
+speed 200 kt, landing speed 154 kt, ceiling 13,300 m, +2.5 G, take-off run 2,100 m, landing run
+1,300 m, maximum take-off 124,000 kg); Wikipedia "Tupolev Tu-22M", Tu-22M3 specification (1,997 km/h at
+9,140 m, 1,078 kn; range 6,800 km; ceiling 13,300 m; rate of climb 15 m/s; empty 58,000 kg; maximum
+126,000 kg). Jane's does not say at what weight the run or the speeds apply, or whether the landing
+run includes the brake parachute the Tu-22M uses; the take-off run is read as at maximum weight and
+the landing speed as at a landing weight. Both are plausibility figures, not values to hit exactly.
+
+### The sweep schedule (read, not fitted)
+
+The sweep is a speed schedule read by the rig only (`swing::TU26`, SWING-1; 20 degrees to 300 kt
+and whenever the gear or flaps are out, linear to 65 degrees at 560 kt, the coordinator's first
+pass). No flight term reads it, so the sweep does not change lift, drag or the stall. Read at the
+speeds the flight model gives (new test `the_tu26_flies_spread_for_takeoff_and_approach_and_swept_for_the_dash`):
+
+| Phase | Speed | Sweep |
+| --- | --- | --- |
+| Takeoff roll and liftoff, flaps and gear out | 167 to 174 kt | 20 degrees |
+| Approach and touchdown, flaps and gear out | 166 and 158 kt | 20 degrees |
+| Climb-out, gear up | 222 kt (the AI's 650 ft point) | 20 degrees |
+| Climb at 300 KCAS | 371 kt at 10,000 ft, 393 kt at 20,000 ft | 32 and 36 degrees |
+| Cruise, Mach 0.85 at 36,000 ft | 490 kt | 53 degrees |
+| Low-level dash, sea level | 540 kt | 62 degrees |
+| High-speed dash | 560 kt and up (Mach 1.2 at 36,000 ft is 690 kt) | 65 degrees |
+
+Finding: a subpersonic cruise reads 53 degrees swept, because the schedule is on true airspeed and
+a Mach 0.85 cruise at 36,000 ft is 490 kt. The real wing is selected by hand with no published
+bands; Jane's gives only the 20 and 65 degree limits. A Mach-based law, or a 30 degree detent
+(single-sourced, not used), would keep the wing forward in the cruise. Not changed.
+
+### AI heavy-class laws (BMB-AI)
+
+The Tu-26's flaps-up minimum is above 190.5 kt at its heavy weights, so the BMB-AI flaps law, the
+climb-out wait and the taxi throttle apply to it.
+
+- **Takeoff passes.** `ai-heavy-takeoff-tu26-gre-a1` (new): an AI Tu-26 at the full default load
+  from Athens (12,000 ft) takes the line-up, rolls, lifts off, climbs out with its flaps down,
+  is airborne at 196 s (222 kt at 650 ft) and flies on, 0 anomalies. It rolls 8,800 ft: the AI
+  lights the burner only after half the runway (`BURNER_RUNWAY_FRACTION`) and the dry run is
+  longer than the player's afterburner run (4,402 ft).
+- **Landing does not.** An airborne AI Tu-26 sent home to Simferopol (5,532 ft) with 70,000 lb of
+  fuel turns onto final at 217 kt and 581 ft, 7,200 ft from the touchdown, slows to 166 kt in
+  23 s and touches down about 15 ft off the landable surface, short of the runway, and is
+  destroyed. **It fails the same way on the shared contact values** (rolling 0.8, brake 18: destroyed at
+  257.3 s, identical lines), so the fit did not cause it. The cause is the AI's descent profile on a fast
+  aircraft with a high flaps-up minimum (a flight, not a ground-run, term). No scenario added;
+  handed to T26-9 (AI).
+
+### Tests
+
+`tore-sim`: `models::variety::tests::the_tu26_rolls_and_brakes_to_its_fitted_runs_and_no_fighter_does`
+(the two terms; nothing else of the Tu-26's flight fitted; seven other aircraft on the shared
+values; the taxi balance under 1) and `combat::swing::tests::the_tu26_flies_spread_for_takeoff_and_approach_and_swept_for_the_dash`.
+Battery (`tools/battery_scenarios/flight.py`, `ai.py`, `tools/test_battery_flight.py`, `test_battery_ai.py`):
+`tu26` joins `VARIETY_AIRCRAFT` and `LIFTOFF_AIRCRAFT` (`flight-variety-tu26`, `flight-liftoff-tu26`,
+`flight-liftoff-retail-tu26`, `flight-approach-tu26`) with the windows liftoff 150 to 205 kt (recorded
+167.3, Jane's 200), approach 150 to 175 kt (recorded 166.2, Jane's landing speed 154), a 6,000 tick
+takeoff allowance, Athens, 60 percent fuel (66,138 lb) for the approach (`APPROACH_FUEL_SHARE`), and two new run windows (takeoff run 3,500
+to 5,500 ft, landing roll 3,500 to 5,000 ft: `LIFTOFF_RUN_FT`, `ROLLOUT_FT`); `ai-heavy-takeoff-tu26-gre-a1`.
+
+### Checks
+
+All through `.local/m3-imports/light3.sh`, profile `.local/m3-aircraft/profile-tu26` refreshed first (logs in
+`.local/m3-aircraft/checks/T26-8/`): `cargo fmt --all -- --check` clean; `cargo clippy --workspace --all-targets
+--locked -- -D warnings` clean; `cargo test --locked --workspace --no-fail-fast` 7,876 passed, 0 failed, 108
+ignored (7,874 at T26-6/7, plus the two new tests); `--aircraft tu26 --headless-flight 1200` 423.9 kt level at
+5,000 ft, 0 non-finite, no crash, fuel 110,230 to 110,160 lb; the ground-start takeoff (GRE 1, default load)
+4,402 ft at 167.3 kt, 100 ft at 4,712 ticks; battery (`--jobs 2 --windows 1`) 114 of 114: every `*tu26*` scenario
+(27), every `flight-approach-*` and `flight-liftoff-*` and the `ai-heavy-*` set (7 with the new takeoff; the
+first run was 113 of 114, `flight-approach-tu26` at 65 percent fuel touching down at 12.1 ft/s, fixed by the
+60 percent share and rerun: 4 of 4); `python3 -B -m unittest discover -s tools` 588 tests OK (5 skipped);
+`tools/check_docs.py` passed (382 files). **Not run:** `check_assets`, the mission, net, replay and AI lanes
+beyond the `ai-heavy-*` set, a windowed `--smoke-test`, `--validate-ordnance` (no ordnance, station or catalog
+code was touched).
+
+### Open for John
+
+1. **The ground run is 20 percent short of Jane's at the maximum weight on purpose.** Matching the
+   6,890 ft needs a rolling deceleration of 8.4 ft/s squared, which is more than the 66,000 lbf
+   of dry thrust at that weight and would stop the aircraft taxiing. A speed-dependent rolling
+   drag (a new `Tuning` field, a change to every model's tuning literal and to the checkpoint)
+   would give both; or accept 6.0. Recorded as 6.0.
+2. **Liftoff is 13 percent under Jane's 200 kt take-off speed** (167 to 174 kt at 1.09 times the
+   flapped stall). The landing speed matches (157.6 against 154 kt), so raising the stall
+   reference would spoil the landing. Not changed.
+3. **Top speed.** The loaded aircraft tops out at 962 to 1,000 kt at 36,000 ft (Mach 1.68 to
+   1.74) against the record's and Jane's 1,080 kt (Mach 1.88), and 533 to 554 kt at sea level
+   against 567: the shared loaded-drag law, the same as every other loaded aircraft. Not fitted.
+4. **G limit.** The model pulls 3.2 G against Jane's +2.5 G. The record's rows run to +4 (the +4
+   row repeats the -2 polygon). Trimming `envMax` or the rows is a record change; left.
+5. **The scripted landing at the full 238,098 lb tank crashes short** (the 0.85 times landing-limit
+   cap is under the loaded flapped minimum); a human can fly final faster. Landing at 65 percent
+   fuel or less is clean. Same as the B-1B.
+6. **The AI Tu-26 cannot land at Simferopol** (flies into the ground short at 70,000 lb of fuel,
+   with or without the fit), and its dry takeoff roll is 8,800 ft (afterburner after half the
+   runway), so it needs a long field. Goes to T26-9.
+7. **Sweep schedule on airspeed.** A Mach 0.85 cruise is swept 53 degrees. A Mach law or a
+   30 degree detent would keep it forward. The coordinator's first pass stands.
+8. **Nose alignment** stays 0.7 (the fighters'); the transports and the B-52 use 0.4. One line
+   if wanted; the B-2 and F-117 kept 0.7.
+9. **Climb rate.** Wikipedia's 15 m/s (3,000 ft/min) is far under what 110,000 lbf gives a
+   238,000 lb aircraft (9,400 ft/min at 5,000 ft); no figure at a stated weight and power was
+   found, so the model's climb is reported, not fitted.
+10. **Roll rate** 30 degrees a second has no published figure.

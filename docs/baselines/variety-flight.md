@@ -2420,3 +2420,44 @@ before and after table with its sources is in
   125.4 kt. Landing (`--maneuver land`, GRE 1): 270,000 lb approach 140.3 kt, touchdown
   131.6 kt, rollout 4,131 ft; 404,000 lb approach 166.2 kt (the cap), touchdown 153.7 kt,
   rollout 5,056 ft.
+
+## Tupolev Tu-26 Backfire-C validation, 2026-11-16
+
+T26-8. Measured with `crates/tore-sim/examples/performance_probe.rs` (`PROBE_CLIMB=KEAS,MACH` and
+`bomber`, `PROBE_SPEEDS_KT`, `PROBE_HOLD_SPEED`, `PROBE_CRUISE=ALT:KT`, `PROBE_ONLY=brake`) on the
+corrected record at 238,098 lb (full tank, clean), 273,370 lb (the maximum) and 197,868 lb (typical),
+and with `tore-app --headless-flight`. The scripts are
+`.local/m3-aircraft/checks/T26-8/run_perf.sh before|after`, `run_probes.sh before|after` and
+`ground.sh`; logs are beside them. The before and after table with its sources is in
+[the Tu-26 flight review](../formats/aircraft-variety.md#tu-26-backfire-c-flight-review-t26-8-2026-11-16).
+
+- The two ground-run terms are the only change. The `performance_probe` tables (accel, climb, turn,
+  fuel, brake) and the thirteen air maneuvers of `--headless-flight 1800` (`level`, `climb`, `roll`,
+  `pull`, `stall`, `stall-recover`, `loop`, `dive`, `sprint`, `overspeed`, `rudder`, `gcurve`,
+  `spin-recover`) are byte for byte the same before and after.
+- Takeoff (`--maneuver takeoff`, Athens, `--flight-fuel` for the weights): 273,370 lb 5,479 ft at
+  173.8 kt (was 3,895 ft); 253,971 lb (default load) 4,402 ft at 167.3 kt (was 3,287 ft at 167.5);
+  223,741 lb 3,596 ft at 170.2 kt (was 2,937 ft). Jane's: 6,890 ft to 200 kt at the maximum weight.
+- Landing (`--maneuver land`, Athens, `--flight-fuel`): 66,138 lb of fuel (the scenario's 60 percent) touchdown 157.0 kt at 10.0 ft/s, roll 4,195 ft; 71,650 lb touchdown 157.6 kt at 12.1 ft/s, roll
+  4,213 ft (was 2,202 ft); 40,000 lb touchdown 155.0 kt, roll 4,124 ft (was 2,157 ft). Jane's: 154 kt,
+  4,265 ft. From 80,000 lb of fuel up (it lands at 71,650 lb) the scripted approach (166.2 kt) is under the loaded
+  flapped minimum (166.3 kt at full fuel) and lands short, before and after alike.
+- Level afterburner speed at 36,000 ft: 962 kt full tank, 1,000 kt typical, 932 kt at the maximum
+  weight (Mach 1.68, 1.74, 1.62); 30,000 ft 891 and 926 kt; sea level 533, 554 and 516 kt. Military
+  power 745 to 775 kt at 36,000 ft and 413 to 429 kt at sea level. The record's edges are 1,080 and
+  598 kt.
+- Climb, 300 KCAS then Mach 0.90 at full thrust, 238,098 lb: 5,000 ft in 45 s (9,440 ft/min), 20,000
+  ft in 138 s, 36,000 ft in 264 s, top 44,400 ft. 273,370 lb: 51, 165 and 312 s. 197,868 lb: 39, 112
+  and 212 s. Military power, Mach 0.77 schedule: 60, 166 and 270 s, top 44,950 ft.
+- Sustained level turn at a held speed, 197,868 lb: 2.9 to 3.0 G at the probe's 70 degree bank limit
+  from 250 to 400 kt at 1,000 ft, 300 to 500 kt at 15,000 ft and 450 to 700 kt at 30,000 ft; 66
+  degrees (2.5 G) at 500 kt and 1,000 ft, and 50 degrees (1.56 G, 3.8 degrees a second) at 350 kt
+  and 30,000 ft. 10.4 and 7.6 degrees a second at 300 and 400 kt, 1,000 ft. Instantaneous pull 3.2
+  G. Roll rate 30 degrees a second.
+- Cruise at 485 kt, 36,000 ft, throttle trimmed: 4.27 lb/s, 3,475 nautical miles from the 110,230 lb
+  tank (published 3,700). Speed brake adds 0.23 G at half the top speed and 0.50 G at 0.9 of it
+  at 1,000 ft.
+- AI (BMB-AI heavy-class laws): `ai-heavy-takeoff-tu26-gre-a1` passes (rolls 8,800 ft, airborne at 196
+  s, 222 kt at 650 ft, 0 anomalies); an AI Tu-26 sent home to Simferopol with 70,000 lb of fuel flies into
+  the ground about 15 ft off the landable surface at 166 kt, on the shared contact values as well, so
+  `ai-heavy-land-tu26-ukr-a2` was not added.

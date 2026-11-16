@@ -1702,7 +1702,7 @@ def scenarios() -> list[Scenario]:
     # Takeoff alone: the B-2 and B-52 from Athens (GRE 1, 12,000 ft; at their full weights they need about
     # 7,200 ft and the scripted player's own B-2 runs off the end of Mikonos' 7,246 ft), the F-117 from
     # Mikonos (GRE 2, 7,246 ft). Each leaves the ground, climbs out and flies on.
-    for aircraft, field in (("b2", 1), ("b52", 1), ("f117", 2)):
+    for aircraft, field in (("b2", 1), ("b52", 1), ("f117", 2), ("tu26", 1)):
         out.append(probe(f"heavy-takeoff-{aircraft}-gre-a{field}", [
             "--theater", "GRE", "--ground-start", str(field),
             "--aircraft", aircraft, "--probe-friendly-aircraft", aircraft,

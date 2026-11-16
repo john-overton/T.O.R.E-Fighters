@@ -8,6 +8,7 @@ use tore_formats::aircraft::{Aircraft, AircraftId};
 
 mod b52;
 mod lift;
+mod tu26;
 pub use lift::{
     BodyParameters, CorridorPoint, HandlingTargets, JetParameters, LiftEngines, LiftKind,
     PoweredLift, RotorLayout, RotorParameters, RotorRotation, TiltrotorParameters,
@@ -197,6 +198,10 @@ impl VarietyFlightModel {
         configuration.aerodynamics.envelopes = fitted_envelopes(a);
         if a.id.source() == B52 {
             b52::fit(&mut tuning, &mut configuration);
+        }
+        // The Tu-26's ground-run terms (T26-8, fitted).
+        if a.id.source() == Tu26 {
+            tu26::fit(&mut tuning, &mut configuration);
         }
         // Transports and airliners: a little more drag, so full power in
         // level flight settles at 96 percent of the top speed, just under
@@ -962,6 +967,48 @@ pub(crate) mod tests {
             "{}",
             top.speed / 1.68781
         );
+    }
+    /// The Tu-26's ground-run terms (T26-8, 2026-11-16): the takeoff and
+    /// wheel-brake decelerations fitted to the game's own Jane's runs, for the
+    /// Tu-26 alone among the fighters and the older bombers.
+    #[test]
+    fn the_tu26_rolls_and_brakes_to_its_fitted_runs_and_no_fighter_does() {
+        let tu26 = AircraftModel::for_aircraft(&synthetic(AircraftId::Tu26)).unwrap();
+        let t = tu26.configuration().tuning;
+        assert_eq!(t.rolling_deceleration, tu26::ROLLING_DECELERATION);
+        assert_eq!(t.brake_deceleration, tu26::BRAKE_DECELERATION);
+        // Nothing else of the Tu-26's flight is fitted: the clean drag, the
+        // lapse and the stall reference stay on the shared laws.
+        let c = tu26.configuration();
+        assert!(c.aerodynamics.drag_shape.is_none());
+        assert_eq!(c.tuning.thrust_lapse_feet, 70_000.);
+        assert_eq!(tu26.stall_reference_fraction(), 1.);
+        // The fighters, the transports and the other variety bombers keep the
+        // shared contact law (or, for the B-52, its own).
+        for id in [
+            AircraftId::F15,
+            AircraftId::F16C,
+            AircraftId::Tornado,
+            AircraftId::Mig31,
+            AircraftId::C130,
+            AircraftId::B2,
+            AircraftId::F117,
+        ] {
+            let t = AircraftModel::for_aircraft(&synthetic(id))
+                .unwrap()
+                .configuration()
+                .tuning;
+            assert_eq!(
+                (t.rolling_deceleration, t.brake_deceleration),
+                (0.8, 18.),
+                "{id:?}"
+            );
+        }
+        // The aircraft can still roll on dry power: the throttle that holds the
+        // rolling deceleration at the 273,370 lb maximum is under 1 on the real
+        // 66,000 lbf, which is what the AI's taxi law needs (BMB-AI).
+        let balance = tu26::ROLLING_DECELERATION * 273_370. / (66_000. * 32.174);
+        assert!((0.5..0.95).contains(&balance), "{balance}");
     }
     #[test]
     fn the_mirage_f1_gear_low_point_scales_with_its_shape_height() {

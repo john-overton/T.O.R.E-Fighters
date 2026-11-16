@@ -1055,3 +1055,12 @@ after), `flight-bay-fire-tu26-pylon-row7` (a Mk 82 from the fixed glove with the
 `bay-tu26-0`, `-0.5` and `-1` (the `--flight-bay` frames) and `render-tu26-clearance` (headless: the four
 Kh-15 clear the open bay's doors, walls, roof and floor by 0.05 ft, the six default Kh-15 clear the swing
 panel at every sweep and the gear).
+
+Update (T26-8, 2026-11-16): `tu26` joins `VARIETY_AIRCRAFT` and `LIFTOFF_AIRCRAFT` in `flight.py`
+(`flight-variety-tu26`, `flight-liftoff-tu26`, `flight-liftoff-retail-tu26`, `flight-approach-tu26`) with
+fitted windows (liftoff 150 to 205 kt, recorded 167.3; approach 150 to 175 kt, recorded 166.2; takeoff
+run 3,500 to 5,500 ft and landing roll 3,500 to 5,000 ft through `LIFTOFF_RUN_FT` and `ROLLOUT_FT`), a
+6,000 tick takeoff limit (`TAKEOFF_TICKS_MAX`), Athens (`THEATER_FOR`) and 60 percent fuel (66,138 lb,
+`APPROACH_FUEL_SHARE`; at 65 percent the scripted flare touches down at 12.1 ft/s) for the approach. `ai-heavy-takeoff-tu26-gre-a1` joins the [AI lane](lane-ai.md); the landing twin was
+not added (the AI Tu-26 lands short at Simferopol, see the review). Results: the
+[variety flight baseline](../baselines/variety-flight.md#tupolev-tu-26-backfire-c-validation-2026-11-16).
