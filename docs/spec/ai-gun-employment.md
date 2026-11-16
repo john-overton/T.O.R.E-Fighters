@@ -172,3 +172,11 @@ at 2,000 to 3,000 ft (the M61's range is 7,500 ft), over 90 percent at 500 ft an
 fighter that sweeps the mount at 20 degrees a second untouched at 2,500 ft.
 
 Evidence and the scenario: see [aircraft variety](../formats/aircraft-variety.md#ai-fixes-for-the-bombers-bmb-ai-2026-11-16).
+
+## Update (T26-6, 2026-11-16): the Tu-26's tail turret
+
+The Tu-26's `T23_1.JT` (2,000 rounds, `slewH` 180 degrees, 30 degree arcs) reads as the same slewed mount: an AI Tu-26 engages a fighter inside its
+rear arcs with the rules and the aim error above, and no rule was added. The mount hangs on the nozzle exit plane (T26-5), so the muzzle is the drawn
+tail. `flight-tu26-tail-gun` (`--aircraft f22 --probe-enemy-aircraft tu26 --probe-geometry rear --separation 1 --probe-guns`): the AI Tu-26 fired 253
+rounds at the closing F-22 and 4 hit (1.6 percent; the B-52's run is 2 of 176). See [the Tu-26
+section](../formats/aircraft-variety.md#tu-26-backfire-c-ordnance-sensors-hud-and-cockpit-t26-67-2026-11-16).

@@ -4051,3 +4051,112 @@ ignores the lists) on the outboard shoulder at the spread, 26 and 72.5 degree wi
 0.00 ft at every sweep. The four refused clip: `R550` 0.40 ft (all three sweeps), `PL7` 0.83 ft (0.50 at 72.5 on
 the left rail), `AT12` 0.44 ft and `GBU12` 1.02 ft. `F111_RAIL_REFUSED` is therefore **unchanged**, now measured
 on the outboard shoulder it names. See [the F-111F section](../formats/aircraft-variety.md#f-111f-ordnance-sensors-hud-and-cockpit-f111-67-2026-11-16).
+
+## Tu-26 bay, stations and pylons (T26-5, 2026-11-16)
+
+Implementation specification, **opinionated** and **fitted**, agent-authored (T26-5), applying the
+coordinator's first-pass decisions of 2026-11-15 for John to review (`BOMBERS-DECISIONS-C.md`,
+"Tu-26 Backfire-C" items 5 to 8, "BMB-C1/C2"). A game configuration, not a claim of original
+behaviour. The measurements and the choices are in
+[Tu-26 bay, stations and pylons](../formats/aircraft-variety.md#tu-26-bay-stations-and-pylons-t26-5-2026-11-16).
+It reuses the B-2's and B-52's machinery ([B-2 weapon bays](#b-2-weapon-bays-b2-5-2026-11-15),
+[B-52 bay](#b-52-bay-pylons-and-tail-gun-b52-5-2026-11-15)): `bays::STATIONS`, `GRIDS` and
+`OPENINGS`, `placed_on`, `bay_doors::centre_doors`, the F-22's door timing; no second grid.
+
+**Stations (feet right / up / forward).**
+
+| Row | Station | Mount | Capacity, class |
+| ---: | --- | --- | --- |
+| 5 | bay, `Location::Magazine`, shared grid | 0 / -4.0 / +19.63 (bay middle 24.0 less 4.37) | 8, 12,000 lb |
+| 6 | intake-trunk pair, Fuselage, record | +/-6.33 / -13.33 / +9.67 | 2, 5,400 lb |
+| 7 | inner glove pair, Wing, record, fixed | +/-11.33 / -11.67 / +4.33 | 2, 10,800 lb |
+| 8 | outer glove pair, Wing, record, fixed | +/-16.67 / -11.67 / -0.33 | 2, 16,000 lb |
+| 3 | `T23_1.JT` tail gun, slewed aft | 0 / +2.67 / -38.67 (record `[0, 8, -116]`) | 2,000 rounds |
+
+**Bay (feet).** Opening x +/-2.95 (5.9 wide), 12.52 to 35.48 forward (22.97 long, centred 24.0), belly
+plane -4.0 (the outer belly panels, z -3 units at 4/3 ft a unit), keel strip -5.33 (z -4 units), roof
++1.2 (5.2 deep, flat, `inner_depth` equal to `depth`), under a top skin at +5.3. Two doors 2.95 ft
+wide hinged on the outer edges at the belly plane, 90 degrees down in the flight's 1.00 s bay
+travel; the doors are cut from 17 belly faces (`tu26_animation::BELLY`: the keel strip, the slopes
+and the outer panels, which the opening crosses) and turn as one rigid piece each (the keel strip
+rides 1.33 ft under the hinge plane, so a leaf's lowest point is `-4.0 - 2.95 sin(a) - 1.33 cos(a)`,
+-6.95 ft open). A lined box (ceiling and four walls, the end walls down to the keel line) closes the
+recess while the doors are off their seat. Code: the Tu-26 row of `bays::OPENINGS` (`centre` 0,
+`inner` 0, `outer` 2.95), `bay_doors::{centre_doors, centre_lining_from}` (`centre_lining` with the
+walls standing from a given floor), `tu26_animation.rs`.
+
+**Grid (`bays::GRIDS`).** Floor 5.9 by 22.97 ft, ceiling 1.2 ft up of the reference point. For the
+Kh-15 (`KIKBK.SH`, 15.7 ft by 1.49 ft, span 3.0 ft) that is 3 abreast at 1.59 ft and 1 long, the fourth
+on a second tier; for a 500 lb class bomb (1.27 ft span, 7.3 ft long) 4 abreast, 3 long, and eight
+Mk 82 hang as two rows of four on one tier. The row's mount is the bay's middle less 4.37 ft
+(`bays::T26_ORIGIN_AHEAD`): the `KIKBK.SH` shape spans -3.47 to +12.23 ft about the origin a store
+hangs and leaves from, so the Kh-15 is centred; the B-52's +0.87 ft (which centres a `MK82.SH`
+bomb) stands the missile 1.6 ft through the fore wall. One mount a row, so the bombs lie up to
+4.4 ft aft of centre.
+
+**Admitted and refused (feet clear, open bay, each store at its full count, `TORE_STORES_PREVIEW_B52CLEAR`
+with `TORE_STORES_PREVIEW_AIRCRAFT=tu26`).** The retail mask (`0x1500`) is changed to `0x1120`
+by BMB-C2; the bay admits 24 stores. The Harpoon `AGM84A.JT` and the Exocet class `AM39.JT`, which
+the active-radar bit admits, are refused by name (coordinator, BMB-C1/C2); the rest are measured.
+
+| Store | Count | Side wall | Door leaf | Aft end | Fore end | Roof | Nearest store | Result |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `AGM45.JT` | 8 | -0.31 | 0.69 | 2.55 | 6.72 | 0.66 | 0.00 | refused |
+| `AGM88.JT` | 8 | -0.31 | 0.69 | 2.55 | 6.72 | 0.66 | 0.00 | refused |
+| `AS16.JT` | 4 | 0.30 | 0.60 | 3.63 | 3.64 | 0.97 | 0.00 | stays |
+| `AT2.JT` | 8 | 0.23 | 0.40 | 9.05 | 6.07 | 3.27 | 0.00 | refused |
+| `CBU87.JT` | 8 | -0.10 | 0.39 | -0.59 | 7.91 | 3.52 | 0.00 | refused |
+| `CBU89.JT` | 8 | -0.10 | 0.13 | -0.61 | 7.93 | 3.22 | 0.00 | refused |
+| `FAB1000.JT` | 5 | 0.95 | 1.00 | -2.55 | 6.47 | 0.73 | 0.25 | refused |
+| `FAB250.JT` | 8 | 0.52 | 0.38 | 3.70 | 6.22 | 3.97 | 0.25 | stays |
+| `FAB500.JT` | 8 | 0.05 | 0.66 | -0.91 | 7.83 | 3.52 | 0.00 | refused |
+| `GBU29.JT` | 4 | -1.70 | 0.34 | -0.83 | 9.90 | -0.28 | 0.00 | refused |
+| `GBU29P.JT` | 4 | -1.70 | 0.34 | -0.83 | 9.90 | -0.28 | 0.00 | refused |
+| `GBU30.JT` | 4 | -1.70 | 0.34 | -0.83 | 9.90 | -0.28 | 0.00 | refused |
+| `GBU38.JT` | 8 | 0.16 | 0.18 | -1.26 | 8.58 | 3.45 | 0.00 | refused |
+| `MK20.JT` | 8 | 0.28 | 0.29 | -0.23 | 7.55 | 3.67 | 0.00 | refused |
+| `MK82.JT` | 8 | 0.55 | 0.40 | 2.60 | 5.52 | 4.04 | 0.25 | stays |
+| `MK82AIR.JT` | 3 | 0.55 | 0.32 | 13.27 | 2.40 | 4.03 | 0.40 | stays |
+| `MK82HD.JT` | 8 | 0.37 | 0.37 | 4.30 | 3.62 | 3.85 | 0.03 | refused |
+| `MK82P.JT` | 4 | 0.37 | 0.37 | 11.95 | 3.62 | 3.85 | 0.03 | refused |
+| `MK82P3.JT` | 8 | 0.55 | 0.40 | 2.60 | 5.52 | 4.04 | 0.25 | stays |
+| `MK84.JT` | 6 | 0.60 | 0.73 | -4.71 | 5.83 | 3.32 | 0.11 | refused |
+| `RBK250.JT` | 8 | 0.32 | 0.32 | 3.43 | 6.49 | 3.91 | 0.00 | refused |
+| `RBK500.JT` | 8 | 0.47 | 0.53 | -1.83 | 8.15 | 1.90 | 0.00 | refused |
+
+The rule is the B-52's: a store stays only if every gap is at least 0.05 ft. The Kh-15 is the
+exception to "nearest store" (0.00 ft: its 3.0 ft wings overlap at the grid's 1.59 ft pitch; the
+real launcher stows them), kept as the real load. 19 refusals in `T26_BAY_REFUSED` (two by name, 17
+for fit); five stay. The floor gap (above the belly plane) is 0.08 ft or more for every store.
+
+**External rows.** The record's positions stay. Stores each row admits, measured two a row at the
+record's place with the generic clip report (how far the store stands inside the airframe) and the
+Tu-26 pylon report (store bodies against the fuselage, the glove, the swing panel spread, with the
+flaps down (0.40 rad) and swept to full sweep, and the whole station against the gear down), over all
+35 stores the three rows admit (`.local/m3-aircraft/checks/T26-5/pylon-sweep.txt`). The F-15E A2
+rule: refuse a store that enters the airframe by more than 0.3 ft or touches the swing panel.
+
+| Row | Refused | Why |
+| ---: | --- | --- |
+| 6 | 17: `AGM45`, `AGM84E`, `AGM88`, `AS14`, `AS30`, `AT12`, `AT2`, `GBU10`, `GBU10A`, `GBU12`, `GBU16`, `GBU28`, `GBU29`, `GBU29P`, `GBU30`, `PAVEWA3`, `PAVEWAY` | 0.33 to 1.93 ft in the intake trunk (the 5.4 ft finned ones also touch the gear) |
+| 7 | 4: `GBU29`, `GBU29P`, `GBU30`, `PAVEWA3` | 1.10 ft in the glove, 0.23 ft from the swing panel at full sweep |
+| 8 | the same 4, and `GBU28` | the same, and the 19 ft `GBU28` touches the drooped flap strip (0.00 ft) |
+
+The default `AS16.JT` (two a row): row 6 enters the intake trunk by 0.15 ft (kept) and clears the
+glove by 1.18 ft, the swing panel by 11.8 ft (6.3 ft swept) and the gear by 4.0 ft, 8.7 ft above the
+gear contact line; row 7 clears the fuselage by 3.6 ft, the panel by 4.9 ft (2.0 ft swept) and the
+gear by 6.3 ft; row 8 the panel by 2.0 ft at every sweep and the gear by 8.9 ft; the nearest two
+stores of the six are 3.4 ft apart. The glove rows do not swing: `swing::TU26` has no `swivel_rows`.
+
+**Tail gun.** `adjust_defaults` moves the `T23_1.JT` row (3) from `[0, 22, -130]` (in the open air
+4.6 ft behind the nozzles) to `[0, 8, -116]`, the nozzle exit plane on the centre line. Fire direction
+astern (B52-6 slew), 2,000 rounds, flags and class unchanged.
+
+**Tests.** `bays::the_tu26_has_one_centred_bay_row_on_the_shared_grid`,
+`hardpoints::the_tu26_bay_row_is_a_grid_magazine_and_no_external_row_swings`,
+`aircraft_stations::the_batch_c_rows_are_corrected_and_nothing_else_moves` (the gun mount and the
+refusal lists), `tu26_animation::tests::the_tu26_rig_turns_whole_panels_about_their_hinges` (the cut
+doors and lining), `ai_wings::release::an_ai_bomb_leaves_the_tu26_bay_grid_inside_the_opening`,
+the probe's bay check (`flight-animation-tu26`), and the battery scenarios
+`flight-bay-fire-tu26-row5`, `flight-bay-fire-tu26-pylon-row7`, `bay-tu26-0`, `-0.5`, `-1` and
+`render-tu26-clearance`.

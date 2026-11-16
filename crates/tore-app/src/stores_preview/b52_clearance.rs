@@ -16,6 +16,12 @@
 //!   of the airframe, and how high each store's lowest point is above the
 //!   gear contact line.
 //!
+//! The same variable reports the Tu-26 (T26-5, 2026-11-16): its one bay (the
+//! same measures, the belly faces and the lining of `tu26_animation`) and its
+//! three external rows against the fuselage, the glove, the swing panels at
+//! spread and at full sweep, the flap strips and the gear
+//! ([`tu26_pylons`]).
+//!
 //! A screening aid, not a certification (docs/spec/stores-on-pylons.md, "B-52
 //! bay and pylons").
 use super::pod_clearance::{Tri, drawn, gap};
@@ -108,7 +114,9 @@ pub(super) fn report(
 ) {
     bay(short, id, airframe, art, stores, start);
     // The B-1B has no external station (B1B-5): the pylon report is the B-52's.
-    if id.source() == AircraftId::B52 {
+    if id.source() == AircraftId::Tu26 {
+        tu26_pylons(short, airframe, art, stores, start);
+    } else if id.source() == AircraftId::B52 {
         pylons(short, airframe, art, stores, start);
     }
 }
@@ -121,7 +129,7 @@ fn bay(
     stores: &[StorePose],
     start: &State,
 ) {
-    use crate::{b1b_animation, b52_animation};
+    use crate::{b1b_animation, b52_animation, tu26_animation};
     let bays: Vec<_> = openings(id);
     if bays.is_empty() {
         println!("Bay clearance: {short} has no centred bay");
@@ -132,6 +140,7 @@ fn bay(
     // furniture; the B-1B's has none).
     let (belly, furniture_from): (&[usize], usize) = match id.source() {
         AircraftId::B1b => (&b1b_animation::BELLY, usize::MAX),
+        AircraftId::Tu26 => (&tu26_animation::BELLY, tu26_animation::LINING_BASE + 5),
         _ => (&[b52_animation::BELLY], b52_animation::LINING_BASE + 5),
     };
     let mut state = start.clone();
@@ -155,7 +164,9 @@ fn bay(
     }
     // The leaves, and the rails and posts.
     let leaves = faces(airframe, &state, |f, p| {
-        belly.contains(&f.address) && p.iter().any(|v| v[1] < bays[0].belly - 0.05)
+        belly.contains(&f.address)
+            && p.iter()
+                .any(|v| v[1] < bays[0].belly - 0.05 && (id.source() != AircraftId::Tu26 || v[0].abs() > 2.))
     });
     let furniture = faces(airframe, &state, |f, _| f.address >= furniture_from);
     // Each placed store with the bay it hangs in.
@@ -224,6 +235,135 @@ fn bay(
     println!(
         "Bay clearance: {short} {} stores, nearest pair {nearest:.2} ft ({worst})",
         placed.len()
+    );
+}
+
+/// The Tu-26's external rows (6 under the intake, 7 and 8 on the glove) as the
+/// stores hang: each row's stores (their bodies, the pylon meets the skin it
+/// hangs from by design and is left out) against the fuselage (faces within 5.5
+/// units of the centre line), the glove (the fixed wing root beyond it, the
+/// swing panels and the gear aside), the swing panel at spread, with the flaps
+/// down (the rig's 0.40 rad droop) and swept to full sweep, and the whole
+/// station (pylon and stores) against the gear down, then store against store
+/// (T26-5). Depth into the airframe is the generic clip report's.
+fn tu26_pylons(
+    short: &str,
+    airframe: &Airframe,
+    art: &CombatArt,
+    stores: &[StorePose],
+    start: &State,
+) {
+    use crate::tu26_animation::{FLAME, GEAR, TAIL_L, TAIL_R, WING_L, WING_R};
+    let panel = |a: usize| WING_R.contains(&a) || WING_L.contains(&a);
+    let other = |a: usize| {
+        GEAR.contains(&a) || FLAME.contains(&a) || TAIL_R.contains(&a) || TAIL_L.contains(&a)
+    };
+    // The gear's contact line, feet up: the plates' low point, z -11 units.
+    const CONTACT: f64 = -11. * 4. / 3.;
+    let mut state = start.clone();
+    state.gear = 1.;
+    state.bay = 0.;
+    state.speed = 0.;
+    let fuselage = faces(airframe, &state, |f, p| {
+        !panel(f.address) && !other(f.address) && centroid(p)[0].abs() < 5.5 * 4. / 3.
+    });
+    let glove = faces(airframe, &state, |f, p| {
+        !panel(f.address) && !other(f.address) && centroid(p)[0].abs() >= 5.5 * 4. / 3.
+    });
+    let gear = faces(airframe, &state, |f, _| GEAR.contains(&f.address));
+    // The swing panels spread (flaps up and down) and fully swept (gear up, or
+    // the rig holds them spread).
+    let panels: Vec<(&str, Vec<Tri>)> = [
+        ("spread", 0., 0.),
+        ("flaps down", 1., 0.),
+        ("swept", 0., 700.),
+    ]
+    .into_iter()
+    .map(|(name, flaps, knots)| {
+        let mut s = start.clone();
+        s.flaps = flaps;
+        s.gear = 0.;
+        s.bay = 0.;
+        s.speed = knots * 1.68781;
+        (name, faces(airframe, &s, |f, _| panel(f.address)))
+    })
+    .collect();
+    for store in stores.iter().filter(|s| s.rack.location().external()) {
+        let station = drawn(store, airframe, art);
+        let held: Vec<Tri> = crate::pylons::hung(store)
+            .iter()
+            .filter(|p| p.held)
+            .flat_map(|p| body(store, art, p.centre))
+            .collect();
+        let mut line = format!(
+            "Pylon clearance: {short} row {} {} x{}:",
+            store.hardpoint,
+            store.shape.as_deref().unwrap_or("body"),
+            store.items
+        );
+        for (name, part) in [("fuselage", &fuselage), ("glove", &glove)] {
+            let (d, at) = gap(&held, part);
+            line += &format!(
+                " {name} {d:.2} (at [{:.1} {:.1} {:.1}]),",
+                at[0], at[1], at[2]
+            );
+        }
+        for (name, part) in &panels {
+            let (d, at) = gap(&held, part);
+            line += &format!(
+                " wing panel {name} {d:.2} (at [{:.1} {:.1} {:.1}]),",
+                at[0], at[1], at[2]
+            );
+        }
+        let (d, at) = gap(&station, &gear);
+        line += &format!(
+            " gear {d:.2} (at [{:.1} {:.1} {:.1}]),",
+            at[0], at[1], at[2]
+        );
+        let low = extremes(&station).0[1];
+        line += &format!(
+            " lowest point {:.2} ft above the gear contact line",
+            low - CONTACT
+        );
+        println!("{line}");
+    }
+    let mut bodies: Vec<(String, Vec<Tri>)> = Vec::new();
+    for store in stores.iter().filter(|s| s.rack.location().external()) {
+        for place in crate::pylons::hung(store).iter().filter(|p| p.held) {
+            bodies.push((
+                format!(
+                    "row{} {} {}{}",
+                    store.hardpoint,
+                    store.shape.as_deref().unwrap_or("body"),
+                    if place.side == 0 { "R" } else { "L" },
+                    place.slot
+                ),
+                body(store, art, place.centre),
+            ));
+        }
+    }
+    let mut nearest = (f64::MAX, String::new());
+    let mut touching = 0;
+    for (a, one) in bodies.iter().enumerate() {
+        for two in &bodies[a + 1..] {
+            let (d, _) = gap(&one.1, &two.1);
+            if d < 0.05 {
+                touching += 1;
+                println!(
+                    "Pylon clearance: {short} {} / {} gap {d:.2} ft",
+                    one.0, two.0
+                );
+            }
+            if d < nearest.0 {
+                nearest = (d, format!("{} / {}", one.0, two.0));
+            }
+        }
+    }
+    println!(
+        "Pylon clearance: {short} {} stores, nearest pair {:.2} ft ({}), {touching} pairs under 0.05 ft",
+        bodies.len(),
+        nearest.0,
+        nearest.1
     );
 }
 

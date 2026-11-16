@@ -575,6 +575,53 @@ def tu160_origin_problems(output: str) -> list[str]:
     return problems
 
 
+# The Tu-26's rows (T26-6, 2026-11-16; T26-5's stations): per run, (station, store, presses, what each release
+# hangs at (feet right, up, forward), the pylon depth). The AS-16 (Kh-15) on the intake-trunk pair (row 6) and
+# the glove pairs (rows 7 and 8) leave left then right from where the record hangs them (a 2 inch rail under
+# the fuselage, a 1 ft pylon on the glove); the bay (row 5) leaves them from the shared magazine grid, three
+# abreast at 1.59 ft (outermost left, right, then the middle) 19.63 ft forward on the bay's mount, the fourth on
+# the second tier 1.59 ft higher (the first press opens the doors, so six presses give the four). The same bay loaded with Mk 82s hangs four abreast at 1.3 ft, 3.29 ft under the
+# reference point, the front row 27.18 ft forward, then the back row 19.63 ft (six presses fit the run); the AI's
+# stick (`ai-strike-tu26-stick`) leaves from the same places.
+TU26_RUNS = [
+    (1, "AS16", 2, [(-6.33, -4.91, 9.67), (6.33, -4.91, 9.67)], RAIL),
+    (2, "AS16", 2, [(-11.33, -4.41, 4.33), (11.33, -4.41, 4.33)], WING),
+    (3, "AS16", 2, [(-16.67, -4.41, -0.33), (16.67, -4.41, -0.33)], WING),
+    (4, "AS16", 6, [(-1.59, -2.42, 19.63), (1.59, -2.42, 19.63), (0.0, -2.42, 19.63), (-1.59, -0.83, 19.63)], None),
+    (4, "MK82", 8, [(x, -3.29, f) for f in (27.18, 19.63) for x in (-1.95, 1.95, -0.65, 0.65)][:6], None),
+]
+
+
+def tu26_args(station: int, load: str, presses: int) -> list[str]:
+    return ["--a2g-run", "UKR", "QUCOL", "--attack", "release", "--from", "1", "--altitude", "20000" if load == "MK82" else "3000",
+            "--speed", "300", "--repeat", str(presses), "--gap", "0.5", "--aircraft", "tu26", "--station",
+            str(station), "--load", load, "--count", str({"MK82": 8}.get(load, 4 if station == 4 else 2))]
+
+
+def tu26_origin_problems(output: str) -> list[str]:
+    parts = runs(output)
+    if len(parts) != len(TU26_RUNS):
+        return [f"{len(parts)} runs finished, want {len(TU26_RUNS)}"]
+    problems: list[str] = []
+    for part, (station, load, _presses, cells, depth_want) in zip(parts, TU26_RUNS):
+        label = f"Tu-26 station {station} {load}"
+        found = ORIGIN.findall(part)
+        if len(found) < len(cells):
+            problems.append(f"{label}: {len(found)} releases, want at least {len(cells)}")
+            continue
+        for n, ((_, r, u, f, _station, _after, hr, hu, hf, depth), (wr, wu, wf)) in enumerate(zip(found, cells)):
+            r, u, f, hr, hu, hf = (float(v) for v in (r, u, f, hr, hu, hf))
+            if abs(r - hr) > 0.05 or abs(u - hu) > 0.05 or abs(f - hf) > 0.5:
+                problems.append(f"{label}: release {n} left from {r:.2f} {u:.2f} {f:.2f}, hung at {hr:.2f} {hu:.2f} {hf:.2f}")
+            if abs(r - wr) > 0.05 or abs(u - wu) > 0.06 or abs(f - wf) > 0.5:
+                problems.append(f"{label}: release {n} at {r:.2f} {u:.2f} {f:.2f}, want {wr:.2f} {wu:.2f} {wf:.2f}")
+            if depth_want is not None and abs(float(depth) - depth_want) > 0.01:
+                problems.append(f"{label}: release {n} pylon depth {depth}, want {depth_want:.2f}")
+            if depth_want is None and depth != "none":
+                problems.append(f"{label}: release {n} pylon depth {depth}, want none (a bay has no pylon)")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     base = ["--a2g-run", "UKR", "QUCOL", "--attack", "release", "--from", "1", "--altitude", "3000",
             "--speed", "420"]
@@ -727,6 +774,16 @@ def scenarios() -> list[Scenario]:
             ],
             check=f111_origin_problems,
             notes="The F-111F's wing pylons leave stores from where they hang (F111-5): the fixed outer pylon from 15.46 ft out on the chord's middle with the wing spread, and carried 10 degrees aft at 650 kt because a store on the outer rows holds the wing to 26 degrees (a free wing would be swept to 72.5); the swivelling inner pylon beside the pivot likewise. Left then right.",
+        ),
+        Scenario(
+            name="a2g-release-origin-tu26", lane="flight",
+            args=tu26_args(*TU26_RUNS[0][:3]),
+            timeout=300,
+            then=[Step(tu26_args(*r[:3]), timeout=300) for r in TU26_RUNS[1:]],
+            check=tu26_origin_problems,
+            notes="The Tu-26's AS-16 rows (T26-6): the intake-trunk pair and the two glove pairs leave left then right from "
+                  "where the record hangs them, the bay row from its magazine grid (AS-16 three abreast then a second tier, Mk 82 "
+                  "four abreast in two rows), the cells the AI's stick uses.",
         ),
         Scenario(
             name="a2g-release-origin-tornado-rail", lane="flight",

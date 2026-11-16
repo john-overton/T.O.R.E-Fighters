@@ -193,6 +193,44 @@ def f111_bay_problems(output: str) -> list[str]:
     return problems
 
 
+def tu26_clearance_problems(output: str) -> list[str]:
+    """The Tu-26's four Kh-15 and eight Mk 82 clear the open bay, and its six default Kh-15 hang clear (T26-5)."""
+    problems = []
+    for shape, count in (("KIKBK", 4),):
+        stores = [line for line in output.splitlines() if re.match(rf"Bay clearance: row5 {shape}\.SH slot\d:", line)]
+        if len(stores) != count:
+            problems.append(f"{len(stores)} bay stores reported, expected {count}")
+        for line in stores:
+            # The Kh-15's wings (3.0 ft over a 1.59 ft pitch) touch their neighbours (the real load, kept);
+            # every other part must clear by 0.05 ft.
+            for label in ("side wall", "door leaf", "aft end", "fore end", "roof", "above the belly plane"):
+                m = re.search(rf"{label} (-?[\d.]+)", line)
+                if not m:
+                    problems.append(f"no {label} in {line[:48]}")
+                elif float(m.group(1)) < 0.05:
+                    problems.append(f"{line[:46]} clears the {label} by only {m.group(1)} ft")
+    m = re.search(r"Bay clearance: tu26 (\d+) stores, nearest pair (-?[\d.]+) ft", output)
+    if not m or int(m.group(1)) != 4:
+        problems.append("no bay summary line for 4 stores")
+    for row in (6, 7, 8):
+        line = re.search(rf"Pylon clearance: tu26 row {row} KIKBK\.SH x2: .*", output)
+        if not line:
+            problems.append(f"no pylon line for row {row}")
+            continue
+        # The Kh-15 stand clear of the swing panel (spread, flaps down, fully swept) and the gear; they hang
+        # from the fuselage and glove skin, so those gaps are the pylons' design contact and not checked here.
+        for label in ("wing panel spread", "wing panel flaps down", "wing panel swept", "gear"):
+            m = re.search(rf"{label} (-?[\d.]+)", line.group(0))
+            if not m:
+                problems.append(f"row {row}: no {label} gap")
+            elif float(m.group(1)) < 0.05:
+                problems.append(f"row {row}: the Kh-15 touch the {label} ({m.group(1)} ft)")
+    m = re.search(r"Pylon clearance: tu26 (\d+) stores, nearest pair (-?[\d.]+) ft .*, (\d+) pairs under", output)
+    if not m or int(m.group(1)) != 6 or int(m.group(3)):
+        problems.append("the six default Kh-15 are not clear of each other")
+    return problems
+
+
 def skin_capture_problems(output: str) -> list[str]:
     """Every aircraft skin capture drew a non-blank frame."""
     captures = [line for line in output.splitlines() if line.startswith("Scene capture:")]
@@ -281,6 +319,15 @@ def scenarios() -> list[Scenario]:
                  "TORE_STORES_PREVIEW_AIRCRAFT": "tu160"},
             expect=["Bay clearance: tu160 bay row 4", "Bay clearance: tu160 bay row 5"], check=tu160_clearance_problems,
             notes="Headless Tu-160 clearances in feet (T160-5): the default 12 AS-16 (six a bay, three abreast and two long) in the open bays against the door leaves, walls, ends, roof, floor, rail and each other.",
+        ),
+        Scenario(
+            name="render-tu26-clearance", lane="flight",
+            args=["--stores-preview", "{work}/stores"],
+            env={"TORE_STORES_PREVIEW_CPU": "1", "TORE_STORES_PREVIEW_B52CLEAR": "1",
+                 "TORE_STORES_PREVIEW_AIRCRAFT": "tu26",
+                 "TORE_STORES_PREVIEW_RECORDS": "5=AS16.JT:4"},
+            expect=["Bay clearance: tu26 opening", "Pylon clearance: tu26 row 7"], check=tu26_clearance_problems,
+            notes="Headless Tu-26 clearances in feet (T26-5): four Kh-15 in the open bay against the doors, walls, roof and floor; the six default Kh-15 on the intake and glove rows against the fuselage, glove, swing panel (spread, flaps down, swept) and gear, and each other.",
         ),
         Scenario(
             name="render-ah64-stub-wing-pylons", lane="flight",

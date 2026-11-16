@@ -15477,6 +15477,9 @@ limit found):
   fraction (hung from the belly line z -2, hidden shut); they are **not** an airbrake. There is no
   frame: `--flight-bay` refuses an aircraft with no reviewed bay (`bay_available`), which T26-5
   adds.
+  Update (T26-5, 2026-11-16): the plates are no longer drawn; the bay is the fitted one of
+  [Tu-26 bay, stations and pylons (T26-5)](#tu-26-bay-stations-and-pylons-t26-5-2026-11-16),
+  and `--flight-bay` works.
 
 ### Probe, tests and checks
 
@@ -18006,3 +18009,608 @@ the held wing are F111-5's; no retail bytes committed.
 4. **The Pave Tack stays in the shut bay** while the AI lases; its cradle does not rotate out (F111-5).
 5. **The AI drops one Mk 82 a pass** (Attack class); an F-111F with four retarded Mk 82 packs lays one six-pack a
    pass. A stick like the heavies' is a design choice.
+
+## Tu-26 bay, stations and pylons (T26-5, 2026-11-16)
+
+Implementation mode, slice T26-5, Claude Sonnet. Opinionated and **fitted**, agent-authored,
+applying the coordinator's first-pass decisions of 2026-11-15 (`BOMBERS-DECISIONS-C.md`, "Tu-26
+Backfire-C" items 5 to 8 and "BMB-C1/C2") for John to review. Earlier sections stay as written;
+the interim plates of [the Tu-26 rig (T26-3)](#surfaces-gear-plume-and-the-bay-plates-t26-3)
+and the stations of [the batch C corrections (BMB-C2)](#bomber-batch-c-record-and-station-corrections-bmb-c2-2026-11-15)
+are what this builds on. The numbers and the clearance tables are in the
+[stores specification](../spec/stores-on-pylons.md#tu-26-bay-stations-and-pylons-t26-5-2026-11-16).
+It reuses the B-2's and B-52's mechanisms: `bays::STATIONS`, `GRIDS` and `OPENINGS`, the shared
+magazine grid, `bay_doors::centre_doors`, `Location::Magazine`; no second grid.
+
+**Stations after T26-5.** The record's nine rows are kept (no row is added or removed).
+
+| Row | What it is | Position (feet right / up / forward) | Capacity, class | Default |
+| ---: | --- | --- | --- | --- |
+| 0 to 2, 4 | sight, radar, jammer, laser designator (`SU37L.SEE`), fixed | as the record | 1 | as the record |
+| 3 | `T23_1.JT` tail gun, slewed aft (B52-6) | 0 / 2.67 / -38.67 (was 0 / 7.3 / -43.3) | 2,000 rounds | the gun |
+| 5 | bay, one magazine row on the shared grid | 0 / -4.0 (belly plane) / +19.63 (bay middle 24.0 less the 4.37 ft origin offset) | 8, class 120 (12,000 lb; four Kh-15 by class) | none (empty `AS16.JT` selection) |
+| 6 | intake-trunk pair, Fuselage | +/-6.33 / -13.33 (record) / +9.67 | 2, class 54 | 2 `AS16.JT` |
+| 7 | inner glove pair, Wing, **fixed** | +/-11.33 / -11.67 / +4.33 | 2, class 108 | 2 `AS16.JT` |
+| 8 | outer glove pair, Wing, **fixed** | +/-16.67 / -11.67 / -0.33 | 2, class 160 | 2 `AS16.JT` |
+
+**Bay (decision 6).** The record's row 5 hangs 13.3 ft under the reference point, below the gear
+contact line (-14.7 ft); it is lifted into a fitted belly bay and drawn through the shared bay
+machinery. The size is Jane's, 22.97 ft by 5.9 ft (`TU26.INF`), centred on the record's 24 ft
+forward (12.5 to 35.5 ft). The belly under it is not a flat panel: `TU26.SH` has a keel strip down
+the middle (x +/-1 unit, z -4 units, -5.33 ft), slopes from it to the outer belly panels (x 1 to 2
+units) and the outer panels at z -3 units (-4.0 ft) that rise to z -2 forward of y 19. **Seventeen
+belly faces** cross the opening (`tu26_animation::BELLY`; the rig checks them at load and checks
+that together they cover the 76.2 square unit opening to within 1 percent, the only part left
+uncovered being a 0.2 by 0.6 unit corner of the glove's front wall). The doors are cut from them
+where the opening crosses them, the two leaves (each half the width, 2.95 ft) turn as one rigid
+piece about the hinge lines on the outer edges (x +/-2.95 ft, z -4.0 ft, the outer panels' plane),
+90 degrees down in the flight's one second bay travel. A leaf is not flat (it carries the keel
+strip, 1.33 ft under the hinge plane, and the slope), so its lowest point is the keel's centre edge,
+`-4.0 - 2.95 sin(a) - 1.33 cos(a)` feet up for the door angle `a` (-6.95 ft open;
+`aircraft_animation_probe/tu26.rs` checks it, 0 failures).
+A lined recess (a ceiling at 1.2 ft, four walls, material of the shape's own `788c` plate, which is
+no longer drawn but still reviewed) closes it down to the keel line (-5.33 ft) so no sky shows
+through; it draws only while the doors are off their seat. The roof is 5.2 ft over the belly plane
+(fitted, about the 5.2 ft drum of the real six-round launcher), 4.1 ft under the fuselage's top skin
+(z +4 units over the bay), so nothing opens to the sky. No rail or post (the launcher is not
+drawn). Two leaves are drawn; the real doors were not found (fitted, as the F-117's and the
+B-52's two). `State::bay_available` is true for the Tu-26 now (it has a row in `bays::STATIONS`), so
+`--flight-bay` works and the open-bay radar term applies by itself, as for the B-52.
+
+**The shared grid and the Kh-15's offset.** The row is one `bays::GRIDS` row: floor 5.9 by 22.97
+ft, ceiling 1.2 ft (5.2 over the belly plane), flat. For the Kh-15 (`KIKBK.SH`, 15.7 by 1.49 ft,
+3.0 ft span; the shape spans -3.47 to +12.23 ft about the origin stores hang and leave from) the
+grid is 3 abreast at 1.59 ft (the diameter plus 0.1 ft; the span plus 0.03 ft is capped at 1.3 ft
+first), 1 long, with the fourth on a second tier. A store's origin is not its middle, and the
+mount is one per row, so the row's mount is the bay's middle less 4.37 ft (`T26_ORIGIN_AHEAD`),
+which centres the Kh-15, the real load (the B-52's +0.87 ft, which centres a Mk 82, stood the missile
+1.6 ft through the fore wall). The bombs then lie up to 4.4 ft aft of centre; the measured sweep below
+refuses those that then stand through the aft wall. **The Kh-15's wings (3.0 ft over a 1.59 ft
+pitch) touch their neighbours** (gap 0.00 ft in the report, the shared grid's pitch cap, not a
+per-aircraft number): the real launcher stows them; kept as the real load, listed for John.
+
+**What the bay admits (decision 6).** Flags `0x1500` become `0x1120` (BMB-C2: designator bit
+cleared, B7; active-radar bit `0x20` set, so the bay takes `AS16.JT`). The retail mask admitted 24
+stores on the 8-store, class-120 row. The same bit also admits the Harpoon (`AGM84A.JT`) and the
+Exocet class `AM39.JT`, which the Tu-26 never carried: **refused by name** (coordinator, BMB-C1/C2;
+`aircraft_stations::T26_BAY_REFUSED`, which holds all 19 refusals; `weapon_allowed` applies it to
+row 5 only). A bay sweep loaded each admitted store at its full count in the open bay
+(`.local/m3-aircraft/checks/T26-5/bay-sweep.txt`, the B-52's rule: a store stays only if it clears a
+door leaf, a wall, the roof, the floor and every other store by 0.05 ft). **Five stay**: `AS16`
+(four), `FAB250`, `MK82`, `MK82AIR`, `MK82P3` (eight each, three for the `MK82AIR` by class). 17
+are refused for fit, as `T26_BAY_REFUSED` lists: eight stand with their rear row through the aft wall (`MK84` 4.7 ft,
+`FAB1000` 2.6, `RBK500` 1.8, `GBU38` 1.3, `FAB500` 0.9, `CBU89` 0.6, `CBU87` 0.6, `MK20` 0.2),
+four have fins touching their neighbours (`AT2`, `RBK250` at 0.00 ft; `MK82P`, `MK82HD`, the
+Snakeye shape, at 0.03 ft), `GBU29`, `GBU29P` and `GBU30` (5.4 ft fins) stand 1.7 ft through a side
+wall and 0.3 ft through the roof and the two HARM class 0.3 ft through a side wall. **The real "12,000 kg" load cannot be
+carried**: the class is 120 (12,000 lb), the real half load, and the Kh-15 holds four by class (six
+by the real launcher; the coordinator accepted 8 at class 120 in BMB-C1/C2). Options for John: the
+real 12,000 kg (24 stores, class 265, opinionated, T26-0's option); per-shape centring so the long
+bombs fit.
+
+**External rows (decision 7, BMB-C1/C2).** Positions are the record's (unchanged, decision 7). The
+default external load is **six `AS16.JT`**, four on the glove rows (rows 7 and 8, one a side) and two
+under the intake (row 6), as accepted in BMB-C1/C2; the real count is four underwing ("four more
+underwing", `TU26.INF`; Wikipedia, "Tupolev Tu-22M": six internal and four underwing), the two
+intake missiles are the record's. No Kh-22: no weapon record exists and the record has no centreline
+row (decision 10, not authored). **No glove or intake row swings**: the Tu-26's `SwingSpec`
+(`combat/swing.rs`, `TU26`) has no swivel rows and no fixed-store rows, so the rows ride the fixed
+fuselage and glove (rows 7 and 8 stand at x 11.3 and 16.7 ft, the panel's pivot at 18.7 ft), pinned by
+`hardpoints::the_tu26_bay_row_is_a_grid_magazine_and_no_external_row_swings`. A clearance sweep
+of every store the three rows admit (`.local/m3-aircraft/checks/T26-5/pylon-sweep.txt`, two a row at
+the record's place, against the fuselage, the glove, the swing panel spread, with the flaps down
+(0.40 rad) and fully swept, and the gear down, plus the generic clip report) gave the lists:
+
+- **Intake pair (row 6)**: 17 stores enter the airframe by more than 0.3 ft (John's F-15E A2
+  precedent): `T26_INTAKE_REFUSED`. The default `AS16.JT` enters it by 0.15 ft (kept, the default).
+- **Glove rows (7 and 8)**: the four 5.4 ft finned laser bombs (`GBU29`, `GBU29P`, `GBU30`, `PAVEWA3`)
+  enter the glove by 1.10 ft and touch the swing panel (`T26_GLOVE_REFUSED`); the outer row also
+  refuses `GBU28.JT`, which touches the drooped flap strip (`T26_OUTER_GLOVE_REFUSED`). Every other
+  store enters the glove by 0.14 ft or less.
+- The default six `AS16.JT` clear the swing panel by 1.4 ft and more at every sweep, the gear by
+  4.0 ft and more, each other by 3.4 ft; the lowest is 8.7 ft above the gear contact line.
+
+**Tail gun (decision 8).** `T23_1.JT` keeps B52-6's rear-facing slewed mount and its 2,000 rounds.
+The retail mount (0, 7.3, -43.3 ft) stands in the open air 4.6 ft behind the drawn nozzles and 3.3 ft
+over the fuselage's top skin (the T26-0 review called it the real turret position); **moved onto the
+tail** (the B52-5 precedent) to the nozzle exit plane on the centre line, 38.7 ft aft and 2.7 ft up
+(`aircraft_stations::TU26_GUN_MOUNT`, record `[0, 8, -116]`). The fire direction stays astern
+(`the_retail_tu26_and_tu95_gun_rows_are_slewed_tail_guns_that_fire_astern`).
+
+**Release.** Bay: doors open, the weapon leaves once they are at 0.95, they close after it, as the
+F-22's, F-117's, B-2's and B-52's do (`flight-bay-fire-tu26-row5`). The glove row releases with the
+doors shut (`flight-bay-fire-tu26-pylon-row7`). The AI's release does not wait for the doors (the
+shared strike release): an AI Tu-26's bombs leave from the grid inside the opening with the doors
+drawn shut (`an_ai_bomb_leaves_the_tu26_bay_grid_inside_the_opening`). The default `AS16.JT` needs a
+target the preview does not give it; the AS-16's live-fire slot scenario is T26-6's.
+
+**Pins.** `--validate-ordnance`: 54 aircraft, 23 recovered stations, **5,350 weapon placements** (from
+5,395: `TU26.PT` 129 to 84, minus 19 on the bay row, 17 on the intake pair, 4 on the inner and 5 on
+the outer glove row), 257 tank placements, 82 pod placements and 278 Cheat-only placements
+unchanged; the normal catalog is 31 stores. `ordnance_audit.rs` carries the dated note; the
+coordinator recomputes the total at integration (B4). See
+[ordnance availability](../baselines/ordnance-availability.md#tu-26-bay-intake-and-glove-refusals-t26-5-2026-11-16).
+
+**Open for John.**
+1. The bay holds four Kh-15 by class (the real launcher holds six; the real half load is 24 at class
+   265). Keep 8 at class 120, or the real half load?
+2. The Kh-15's wings touch each other on the shared grid (3.0 ft span, 1.59 ft pitch). Accept, or
+   a per-shape pitch?
+3. The bay refuses 19 stores, five stay (`AS16`, `FAB250`, `MK82`, `MK82AIR`, `MK82P3`); the 2,000 lb
+   `MK84` and the 1,000 kg `FAB1000` do not fit the grid with the missile centred (one mount a
+   row; per-shape centring would admit them).
+4. The external default is six `AS16.JT` (the real four underwing plus the record's two on the
+   intake rows); the intake pair refuses 17 stores, the glove rows four or five.
+5. Two door leaves are drawn, hinged on the outer edges (real count not found).
+6. The tail gun moved 4.6 ft forward and 4.6 ft down onto the nozzle plane (fitted).
+
+## Tu-26 Backfire-C ordnance, sensors, HUD and cockpit (T26-6/7, 2026-11-16)
+
+Slices T26-6 (ordnance, default load, countermeasures, tail gun) and T26-7 (sensors, HUD, cockpit, instruments) ran together
+(implementation mode, bomber batch C, Claude Sonnet). They apply the coordinator's first-pass decisions of 2026-11-15 and 2026-11-16
+(`BOMBERS-DECISIONS-C.md`, "Tu-26 Backfire-C" items 7 to 10 and "Tu-26 stations (T26-5)") for John to review. Earlier Tu-26 sections stay as written (B11): the
+[bay and stations section](#tu-26-bay-stations-and-pylons-t26-5-2026-11-16) said the live-fire slots and the AS-16 release from the bay were not run (the preview
+has no target); this section runs them. It reuses the B-52's slewed tail-gun mount
+([B52-6/7](#b-52-ordnance-tail-gun-sensors-and-cockpit-b52-67-2026-11-15)) and BMB-AI's aim model unchanged. Frames are in `.local/m3-aircraft/frames/T26-6/`, logs in
+`.local/m3-aircraft/checks/T26-6/`.
+
+### T26-6: the load, the live fire and the guided stores (checked)
+
+- **Default load (no change).** Load Ordnance shows the Fuselage row `23mmx1 turret 2000 (max 2000)`, an empty Internal Bay row, the Fuselage pair `AS-16 Kickback 2
+  loaded (max 2)` and the two Wing rows `AS-16 Kickback 2 loaded (max 2)`: 2,000 rounds and six AS-16, 253,971 of 273,370 lb with 110,230 lb of fuel, 19,399 lb
+  available, and the helper line `Built-in laser designator: no pod needed for laser ordnance.` (frame `load-ordnance`). The bay row has no default store in the
+  record and keeps an empty AS-16 selection (T26-5); nothing was added to it. **Open for John: the brief for this slice described the default as the bay's AS-16 plus the six
+  external; the record and T26-5 leave the bay empty (loadable with the AS-16, 4 by class), and it was kept that way.** `--validate-ordnance` before and after: no pin moved
+  (54 aircraft, 23 recovered stations, 5,350 weapon placements, 257 tank placements, 82 pod placements, 278 Cheat-only; `TU26.PT` 84).
+- **Live fire** (`flight-livefire-tu26-slot1` to `slot5`, new `STATIONS["tu26"] = [2000, 2, 2, 2, 0]`): slot 1, the tail turret, fires astern (75 rounds in 1,200 ticks,
+  ammo 1,925); slots 2 to 4, the three AS-16 rows, fire nothing against the practice aircraft (`TARGET TYPE` on the HUD, the same as the Harpoon: a surface missile) and
+  are in `REFUSED_SLOTS`; slot 5, the bay row, is never loaded and stays empty. `SHOTS_PER_ROUND` needed no entry (no pack store; the Tu-26 has no pack default).
+  The three `flight-jettison-tu26-slot2` to `slot4` runs release their AS-16 pairs (payload 15,873 to 10,582 lb).
+- **Guided stores against a target.** `a2g-antiship-tu26`: over `~QUSFLT` two AS-16 leave the outer glove row (station 3) and then the bay (station 4) at the Krivak,
+  designated on the A-G page through the Tu-26's radar (below); each launches midcourse, goes active (`Pitbull`) and hits the ship (500 to 458 hit points each). The bay
+  launch is a second later than the glove's (the doors open first, as the F-117's and the B-52's do). **This is the AS-16 release from the bay and from a glove row against
+  a target that T26-5 could not run.** `a2g-laser-tu26`: a GBU-16 from the inner glove pair guides onto the spot of the built-in `SU37L.SEE` designator and destroys a tank
+  (the glove mask admits the GBU-12 and GBU-16, so the laser row has something to guide; a GBU-12 alone leaves the tank at 100 of 200 hit points).
+  An AI Tu-26 loaded only with AS-16 does not release at a ground vehicle (`kind=RadarAgm`, a surface radar missile wants a ship), so the AI strike is flown with Mk 82.
+- **Release origin, human and AI cells.** `a2g-release-origin-tu26` (five runs): the intake pair leaves from (-6.33, -4.91, 9.67) then (6.33, ...) off a 2 inch rail; each
+  glove pair from (+-11.33, -4.41, 4.33) and (+-16.67, -4.41, -0.33) off a 1 ft pylon; the bay's AS-16 three abreast at 1.59 ft (-1.59, 1.59, 0) 19.63 ft forward and 2.42 ft
+  under the reference point, the fourth on the second tier at -0.83 ft; the bay loaded with Mk 82 four abreast (-1.95, 1.95, -0.65, 0.65) at 27.18 ft forward, then at 19.63 ft,
+  3.29 ft under. Each leaves within 0.05 ft of where it hangs. `ai-strike-tu26-stick` (an AI Tu-26, a Heavy, eight Mk 82 in the bay, 20,000 ft): a stick of eight 0.25 s apart,
+  the doors open at every release and shut after, from exactly the same eight cells (the `ai-strike: ORIGIN` lines), so the human's and the AI's cells match.
+- **Countermeasures (as the record gives them).** `TU26.ECM` gives 99 chaff and 99 flares; the chaff and flare commands release them (five and three leave 94 and 96, six flares
+  burning and 210 chaff puffs after 240 ticks, `flight-countermeasures-tu26`), the Weapons window reads `99 CHAFF 99 FLARE`, and `--jammer-on` lights `JAM` on the RWR window
+  (frame `systems-rwr-weapons-strip-jam-chaff-flare`). The record has no RF mode and strength 0.00, so the jammer adds no noise (the annunciator follows the command, as for
+  the F-4's and the F-104's records).
+
+### The tail gun (checked, no new code)
+
+The `T23_1.JT` row (record position moved onto the nozzle exit plane by T26-5) is a slewed mount (heading 32,760, 30 degree arcs), so the B-52-6 mechanism applies unchanged
+(`ai_wings::tail_gun_tests::the_retail_tu26_and_tu95_gun_rows_are_slewed_tail_guns_that_fire_astern` already pinned the retail row). The HUD gun line is `TAIL 2000 23MMX1`
+(frame `cockpit-front-view`); a human's rounds leave astern from the tail (frames `tail-gun-side`, `tail-gun-external`). New scenario `flight-tu26-tail-gun`
+(`--aircraft f22 --probe-enemy-aircraft tu26 --probe-enemy-skill ace --probe-geometry rear --separation 1 --probe-guns`): the AI Tu-26 fired 253 rounds at the closing
+F-22 and 4 hit (1.6 percent, inside BMB-AI's 35 percent cap; the B-52's run is 2 of 176). No rear cue exists (the rear views draw no HUD).
+
+### T26-7: sensors
+
+`--sensor-summary` reads `Tu26: radar TU26R.SEE search 100 nmi 60x60 deg track 100 nmi 45x45 deg look-down 0 TRANSITIONAL; infrared none; visual VIS300.SEE search 10 nmi 150x120 deg track 5
+nmi 150x120 deg; jammer TU26.ECM EARLY strength 0.00 (no RF mode); signature radar 100 infrared 100`.
+
+- **The radar was not enabled; it is now (agent decision, fitted, John to confirm).** `TU26R.SEE` had no preset, so it decoded as `UNREVIEWED (not enabled)` and the
+  Tu-26 flew with no radar, as the B-52 did before B52-7. It is `Preset::Transitional` (the B-52's class: a 100 ft/s Doppler notch, burn-through 8 nmi;
+  [radar](../radar.md#presets)). `TU26.ECM` is `Generation::Early` (no RF mode, strength 0, the class of `F4.ECM` and `F104.ECM`). One line each to revert. The radar gives the AI
+  Tu-26 its radar too. Same modes as the B-52's: RWS and TWS to 100 nmi, scope 5 to 100 nmi, no ground-mapping mode (a sensor change, John's call), no infrared channel.
+- **Every sensor row against the real aircraft.** The record's four sensor rows are `VIS300.SEE` (the visual sight), `TU26R.SEE` (the radar), `TU26.ECM` (the jammer, chaff and flares) and
+  `SU37L.SEE` (a built-in laser designator, a fixed row at the origin, flags `0x1008` with no designator-pod bit). The real Tu-22M3 has the radar and the defensive suite
+  but no laser designator, so the laser is a retail extra kept as decided (item 9). **No pod body hangs anywhere**: no station was added or changed, the designator-pod
+  placements stay at 82 (none to the Tu-26), and the external frames show nothing under the nose or the glove (frames `tail-gun-external`).
+- **RCS page.** Page 0 reads `SIG 150` closed and `SIG 225` with the bay open (frame `crop3x-rcs-closed-vs-bay-open`; `--flight-bay 1`). The open-bay term of 1.5 reaches only
+  the RCS page, as for the B-52.
+
+### T26-7: HUD and cockpit
+
+- **HUD (item 10): the record.** `BMBROH.HUD`, the instrument frame `~ac130_p`, the forward art `~AC130H.PIC` (1280 x 490), the cockpit stem `AC130`, no overlays: the AC-130
+  family as the B-52 flies it. It draws the gun line `TAIL 2000 23MMX1`, the weapon `ARM 2 AS-16` and the refusal `TARGET TYPE` against a non-surface target, the radar window
+  `TWS 10 ... TRACK` once the radar is on, and the target camera window `SLEW`/`ZOOM` for the laser row (frames `cockpit-front-view`, `radar-mfd-livefire-track`). No Tu-26 cockpit art exists.
+- **Glass (measured, not failed closed).** BMB-C1 gave the Tu-26 the AC-130 family's whole-picture aperture (the polygon is the picture, trimmed by the art). It is now
+  measured on the imported art: `~AC130H.PIC` is 1280 x 490 with 504,831 transparent pixels (80.5 percent; the rest is the cockpit frame), the mask is exactly those pixels, and it equals the
+  B-52's mask (`hud_aperture::tests::the_tu26_glass_is_the_transparent_part_of_the_imported_ac130_art`, retail-reading).
+- **Eye (fitted, measured).** `mirrors::eye_offset` gains the Tu-26: **7 ft up and 56 ft ahead** of the model origin (the shared seat is 7 up and 10 ahead). Measured on
+  `TU26.SH` (4/3 ft a unit): the fuselage top is flat at 5.33 ft (z 4) from 16 ft to 61.3 ft ahead, the windscreen faces (y 46 to 49) fall to 2.67 ft at 65.3 ft and 1.33 ft at 68 ft,
+  the glasshouse (side glass and roof, y 34 to 49, 45.3 to 65.3 ft ahead, 5.3 ft wide) stands no higher than the fuselage behind it. The shared seat is 46 ft aft of the windscreen and 1.7 ft over the top
+  skin, out of its own cockpit. The seat is the glasshouse's middle, 1.7 ft over the crown (the B-52's margin), so F2 Back clears the spine and looks down it to the fin and the nozzles (frame
+  `cockpit-view-back-f2`). Readers and tests are the B2-7 ones (`mirrors::tests::only_the_b2_the_f117_the_b52_and_the_tu26_have_their_own_pilot_eye`,
+  `flight_views::tests::back_from_a_b2_sits_at_its_own_seat`); the forward cockpit, mirrors, padlock and target camera do not read the eye. The record's `viewOffset` (0, 20, 60) is not used
+  (pinned by the retail-reading test `tore-import/tests/tu26_cockpit.rs`).
+- **Rear view.** F2 Back draws no HUD (none exists in the game), so there is no rear cue for the tail gun; the tracers show the line.
+
+### Tests
+
+`tore-sim`: `sensors::profile::tests::the_tu26_radar_and_jammer_records_are_reviewed`. `tore-app`: the eye table and the Back camera (`mirrors`, `flight_views`), the retail-reading glass test (`hud_aperture`).
+`tore-import`: `tests/tu26_cockpit.rs` (bindings: four sensor rows, `BMBROH.HUD`, the AC-130 stem and art, the panel, the unread `viewOffset`). Battery (all new): `flight-livefire-tu26-slot1..5`,
+`flight-jettison-tu26-slot2..4`, `flight-countermeasures-tu26`, `flight-tu26-tail-gun`, `a2g-antiship-tu26`, `a2g-laser-tu26`, `a2g-release-origin-tu26`, `ai-strike-tu26-stick`.
+
+### Checks
+
+All through `.local/m3-imports/light3.sh`, profile `.local/m3-aircraft/profile-tu26` refreshed first (logs in `.local/m3-aircraft/checks/T26-6/`): `cargo fmt --all -- --check`
+clean; `cargo clippy --workspace --all-targets --locked -- -D warnings` clean; `cargo test --locked --workspace --no-fail-fast` 7,874 passed, 0 failed, 108 ignored;
+`--validate-ordnance` before and after identical (no pin moved); `--aircraft tu26 --headless-flight 600` 428 kt level at 5,000 ft, 0 non-finite, no crash; battery
+(`--jobs 2 --windows 1`) 24 of 24: every `*tu26*` scenario (22, 14 of them new), `menus-ordnance-availability` and `a2g-catalog`; `python3 -B -m unittest discover -s tools` OK;
+`tools/check_docs.py` passed. **Not run:** the guns and live fire of every other aircraft (no shared gun or sight code was touched), `check_assets`, the mission, net, replay and
+AI battery lanes, `--smoke-test`.
+
+### Open for John
+
+1. **Default load.** The bay stays empty (the record's); six AS-16 are the default, as T26-5 left them. Loading the bay with its four AS-16 by default is a one-row change if wanted (about 10,600 lb more, 264,550 of 273,370).
+2. **Radar enabled** as Transitional and the jammer as Early (above). The alternative is a Tu-26 with no radar.
+3. **Laser row and laser bombs.** The real Tu-22M3 has no designator; the retail row and the glove masks (GBU-12, GBU-16, GBU-38) are kept as the record has them.
+4. **No ground-mapping radar mode**, so the strike aids are the A-G designation of a radar contact (ships) and the bomb sights; the AS-16 cannot be fired at a ground vehicle by the AI.
+5. **Eye** 7 ft up, 56 ft ahead: fitted, change in `mirrors::eye_offset`.
+6. **`JAM` lights** with a jammer that has no RF mode (the annunciator follows the command).
+7. The B-52's AI tail-gun lethality and rear-cue questions apply unchanged.
+
+Provenance: slew words, sensor rows, HUD module, art spec-derived (retail); the radar and jammer assignments, the eye and the scenarios fitted, agent decisions 2026-11-16. No retail bytes committed.
+
+## Tu-26 Backfire-C flight review (T26-8, 2026-11-16)
+
+Implementation mode. The Tu-26 flies the hybrid adapter's `variety` configuration built from
+`TU26.PT` with BMB-C2's real thrust (66,000 / 110,000 lbf), empty weight (127,868 lb), the
+record's own tank (110,230 lb), flows (10 and 66 lb/s) and maximum takeoff (273,370 lb, the game's
+own Jane's figures), the 1,080 kt and 43,635 ft edges and the record's G rows. None of those
+changed. What changed is two ground-run terms for this aircraft only, the way the B-52's are
+([variety flight](../spec/variety-flight.md#tupolev-tu-26-backfire-c-t26-8-2026-11-16) and the
+[variety flight baseline](../baselines/variety-flight.md#tupolev-tu-26-backfire-c-validation-2026-11-16)).
+Both are **fitted**, agent decisions of 2026-11-16; neither is retail behaviour. Logs and probe
+tables: `.local/m3-aircraft/checks/T26-8/{before,after}/`.
+
+### What was wrong, and what was not
+
+1. **The ground run, both ways.** The shared contact law has no flap, gear or induced drag and
+   no thrust lost with speed, and its wheel brakes stop a heavy from 140 kt in about 1,500 ft.
+   The game's own Jane's text (`TU26.INF`, retail media, quoted as before) gives a take-off run
+   of 2,100 m (6,890 ft) at the 124,000 kg maximum and a landing run of 1,300 m (4,265 ft). The
+   model ran 3,895 ft at 273,370 lb (3,287 ft at the 253,971 lb default load) and rolled 2,202 ft
+   after a 157.6 kt touchdown. That is clearly wrong by half, so both are fitted (below).
+2. **Not wrong (reported, not fitted).** The climb, the cruise burn and range, the sea-level and
+   high-altitude top speeds, the ceiling, the turns and the roll rate all sit near the real
+   figures or have no figure to fit to (table below). The clean-drag shape that the B-52 and
+   the B-1B needed is not needed here: the Tu-26's edges are thrust edges (598 kt at sea level,
+   1,080 kt at 36,000 ft), not placards, so the shared square law already gives 3,475 nautical
+   miles at the Jane's 485 kt cruise against 3,700 published. The shared drag, the thrust lapse,
+   the stall reference and the nose alignment (0.7) are left alone.
+3. **The scripted landing at full fuel.** The probe flies at 0.85 times the record's 330 ft/s
+   landing limit, 166.2 kt, never under 1.05 times the loaded minimum. At the 253,971 lb default
+   load the loaded flapped minimum is 166.3 kt, so the approach is under the speed it can hold
+   and it lands short (the B-1B's open item, the same cause). It lands cleanly at 71,650 lb of
+   fuel (215,391 lb gross) and crashes short at 80,000 lb; the scenario flies 60 percent, 66,138 lb (the
+   scripted flare touches down at 12.1 ft/s at 65 percent, over the battery's 12 ft/s line, and at 10.0
+   ft/s at 60). This is the record's landing limit meeting a heavy aircraft, not a flight term.
+
+### The fitted terms
+
+| Term | Shared value | Tu-26 | Fitted against |
+| --- | --- | --- | --- |
+| Rolling and takeoff-run deceleration | 0.8 ft/s squared | 6.0 | Jane's 6,890 ft at 273,370 lb. Held under the 8.4 that would match it (see below). The model's run at 273,370 lb is 5,479 ft, and 4,402 ft at the default load |
+| Wheel brake deceleration | 18 ft/s squared | 6.0 | Jane's 4,265 ft landing run: the scripted landing at 65 percent fuel rolls 4,213 ft from a 157.6 kt touchdown (4,124 ft at 40,000 lb of fuel) |
+
+Why 6.0 and not 8.4. The 6,890 ft figure needs a deceleration of 8.4 ft/s squared (6,871 ft
+at 273,370 lb measured). At 273,370 lb that is 71,000 lbf of rolling resistance against 66,000
+lbf of military thrust, so the aircraft could not roll or taxi without the afterburner, and the
+AI's taxi law (BMB-AI, `mission::taxi_throttle_of`: the throttle that balances the rolling
+deceleration, then 1.1 times it as a floor) would ask for more than full throttle. 6.0 keeps
+that balance at 0.72 at the default load (0.77 at the maximum), so the floor is 0.79 to 0.85 and a
+player or an AI can still taxi on dry power, and leaves the run 20 percent short of Jane's at
+the maximum weight. The model also lifts off at 1.09 times its flapped stall, 167 to 174 kt, 13
+percent under Jane's 200 kt take-off speed, and the real aircraft's mean acceleration to 173
+kt would cover the same ground in about 5,150 ft, so the fitted 5,479 ft is close to what the
+Jane's acceleration gives at the model's own liftoff speed. A speed-dependent rolling drag
+would remove the compromise; that needs a new field in the shared `Tuning` (see Open for John).
+
+Code: `crates/tore-sim/src/models/variety/tu26.rs` (the two terms and their notes) and its hook in
+`models/variety.rs`. Every other aircraft keeps the shared contact values (the B-52 its own); one
+test checks it. No shared law was touched, so no other aircraft's probe could move: the
+`performance_probe` tables and the thirteen air maneuvers of the Tu-26 are byte for byte the
+same before and after (`cmp`), and only the ground takeoff and landing lines differ.
+
+### Before, after and real
+
+Weights: full is the free-flight and `--headless-flight` start (127,868 + 110,230 = 238,098 lb,
+clean), max is 273,370 lb (the maximum takeoff weight; `--flight-fuel 129629` on the default load
+of 15,873 lb), default is the ground-start load (253,971 lb: full tank and six AS-16), typical is
+197,868 lb (70,000 lb of fuel). Ground figures are from Athens (GRE 1, 12,000 ft). The speed
+rows are at the weights named; real figures are from the game's own Jane's text (`TU26.INF`)
+unless a source is named.
+
+| Figure | Before | After | Real (source) |
+| --- | --- | --- | --- |
+| Takeoff run to liftoff, 273,370 lb | 3,895 ft, 173.7 kt (measured at 272,741 lb) | 5,479 ft, 173.8 kt | 2,100 m (6,890 ft), take-off speed 200 kt (Jane's) |
+| Takeoff run, 253,971 lb default load / 223,741 lb | 3,287 ft, 167.5 kt / 2,937 ft, 170.4 kt | 4,402 ft, 167.3 kt / 3,596 ft, 170.2 kt | none for these weights |
+| Takeoff with `--retail-stall-speeds`, default load | 2,059 ft, 136.4 kt | 2,592 ft, 136.3 kt | none |
+| Landing, 65 percent fuel (71,650 lb, 215,391 lb gross; the scenario flies 60 percent, 157.0 kt and 4,195 ft after): approach, touchdown, roll | 166.2 kt, 157.6 kt, 2,202 ft | 166.2 kt, 157.6 kt, 4,213 ft | landing speed 154 kt, landing run 1,300 m (4,265 ft) (Jane's) |
+| Landing, 40,000 lb of fuel: touchdown, roll | 155.0 kt, 2,157 ft | 155.0 kt, 4,124 ft | the same |
+| Landing at full fuel (238,098 lb or more) | crashes short (approach 166.2 kt is under the 166.3 kt loaded flapped minimum) | the same | not a flight term (finding 3) |
+| Level top speed, afterburner, 36,000 ft (full / typical / max weight) | 962 / 1,000 / 932 kt (Mach 1.68 / 1.74 / 1.62) | the same | Mach 1.88, 1,080 kt at height (Jane's); 1,078 kt at 30,000 ft (Wikipedia). The record's edge is 1,080 kt: the record's loaded drag (30 percent times the loading) holds the aircraft 7 to 14 percent under it |
+| Level top speed, afterburner, sea level | 533 / 554 / 516 kt | the same | Mach 0.86, 567 kt at low altitude (Jane's); the record's edge is 598 kt |
+| Level top speed, military power, 36,000 ft / sea level | 745 to 775 kt (Mach 1.30 to 1.35) / 413 to 429 kt | the same | none found |
+| Ceiling | the climb tops out at 44,400 ft (full thrust, 300 KCAS then Mach 0.90), 44,950 ft (military power, Mach 0.77 schedule) | the same | 13,300 m (43,635 ft) (Jane's, Wikipedia); the record's edge is 43,635 ft |
+| Climb, 238,098 lb, afterburner, 300 KCAS then Mach 0.90: 5,000 / 20,000 / 36,000 ft | 45 / 138 / 264 s (9,440 ft/min at 5,000 ft) | the same | Wikipedia "15 m/s (3,000 ft/min)", no weight, altitude or power stated: not used |
+| Same at 273,370 lb / 197,868 lb | 51 / 165 / 312 s; 39 / 112 / 212 s | the same | none found |
+| Military power, Mach 0.77 schedule, 238,098 lb: 5,000 / 20,000 / 36,000 ft | 60 / 166 / 270 s | the same | none found |
+| Cruise, 485 kt at 36,000 ft, trimmed: burn and range from the 110,230 lb tank | 4.27 lb/s, 3,475 nautical miles | the same | cruise 485 kt (Jane's); range 3,700 nautical miles, 6,800 km (Wikipedia). 6 percent under |
+| Speed brake, 0.5 / 0.9 of the top speed at 1,000 ft | brake adds 0.23 / 0.50 G | the same | none found |
+| Sustained turn, speed held, 197,868 lb: 300 / 400 kt at 1,000 ft; 450 / 550 kt at 30,000 ft | 70 degrees bank, 2.9 to 3.0 G, 10.4 / 7.6 / 6.8 / 5.5 deg/s | the same | +2.5 G (Jane's); the record's rows run to +4 |
+| Instantaneous pull | 3.2 G | the same | +2.5 G (Jane's) |
+| Roll rate (full stick) | 30 deg/s | the same | none found |
+
+Sources (all read 2026-11-16): the game's own Jane's text `TU26.INF` (reference media, as in the
+T26-0 review: Mach 1.88 / 1,080 kt at height, Mach 0.86 / 567 kt low, cruise 485 kt, take-off
+speed 200 kt, landing speed 154 kt, ceiling 13,300 m, +2.5 G, take-off run 2,100 m, landing run
+1,300 m, maximum take-off 124,000 kg); Wikipedia "Tupolev Tu-22M", Tu-22M3 specification (1,997 km/h at
+9,140 m, 1,078 kn; range 6,800 km; ceiling 13,300 m; rate of climb 15 m/s; empty 58,000 kg; maximum
+126,000 kg). Jane's does not say at what weight the run or the speeds apply, or whether the landing
+run includes the brake parachute the Tu-22M uses; the take-off run is read as at maximum weight and
+the landing speed as at a landing weight. Both are plausibility figures, not values to hit exactly.
+
+### The sweep schedule (read, not fitted)
+
+The sweep is a speed schedule read by the rig only (`swing::TU26`, SWING-1; 20 degrees to 300 kt
+and whenever the gear or flaps are out, linear to 65 degrees at 560 kt, the coordinator's first
+pass). No flight term reads it, so the sweep does not change lift, drag or the stall. Read at the
+speeds the flight model gives (new test `the_tu26_flies_spread_for_takeoff_and_approach_and_swept_for_the_dash`):
+
+| Phase | Speed | Sweep |
+| --- | --- | --- |
+| Takeoff roll and liftoff, flaps and gear out | 167 to 174 kt | 20 degrees |
+| Approach and touchdown, flaps and gear out | 166 and 158 kt | 20 degrees |
+| Climb-out, gear up | 222 kt (the AI's 650 ft point) | 20 degrees |
+| Climb at 300 KCAS | 371 kt at 10,000 ft, 393 kt at 20,000 ft | 32 and 36 degrees |
+| Cruise, Mach 0.85 at 36,000 ft | 490 kt | 53 degrees |
+| Low-level dash, sea level | 540 kt | 62 degrees |
+| High-speed dash | 560 kt and up (Mach 1.2 at 36,000 ft is 690 kt) | 65 degrees |
+
+Finding: a subpersonic cruise reads 53 degrees swept, because the schedule is on true airspeed and
+a Mach 0.85 cruise at 36,000 ft is 490 kt. The real wing is selected by hand with no published
+bands; Jane's gives only the 20 and 65 degree limits. A Mach-based law, or a 30 degree detent
+(single-sourced, not used), would keep the wing forward in the cruise. Not changed.
+
+### AI heavy-class laws (BMB-AI)
+
+The Tu-26's flaps-up minimum is above 190.5 kt at its heavy weights, so the BMB-AI flaps law, the
+climb-out wait and the taxi throttle apply to it.
+
+- **Takeoff passes.** `ai-heavy-takeoff-tu26-gre-a1` (new): an AI Tu-26 at the full default load
+  from Athens (12,000 ft) takes the line-up, rolls, lifts off, climbs out with its flaps down,
+  is airborne at 196 s (222 kt at 650 ft) and flies on, 0 anomalies. It rolls 8,800 ft: the AI
+  lights the burner only after half the runway (`BURNER_RUNWAY_FRACTION`) and the dry run is
+  longer than the player's afterburner run (4,402 ft).
+- **Landing does not.** An airborne AI Tu-26 sent home to Simferopol (5,532 ft) with 70,000 lb of
+  fuel turns onto final at 217 kt and 581 ft, 7,200 ft from the touchdown, slows to 166 kt in
+  23 s and touches down about 15 ft off the landable surface, short of the runway, and is
+  destroyed. **It fails the same way on the shared contact values** (rolling 0.8, brake 18: destroyed at
+  257.3 s, identical lines), so the fit did not cause it. The cause is the AI's descent profile on a fast
+  aircraft with a high flaps-up minimum (a flight, not a ground-run, term). No scenario added;
+  handed to T26-9 (AI).
+
+### Tests
+
+`tore-sim`: `models::variety::tests::the_tu26_rolls_and_brakes_to_its_fitted_runs_and_no_fighter_does`
+(the two terms; nothing else of the Tu-26's flight fitted; seven other aircraft on the shared
+values; the taxi balance under 1) and `combat::swing::tests::the_tu26_flies_spread_for_takeoff_and_approach_and_swept_for_the_dash`.
+Battery (`tools/battery_scenarios/flight.py`, `ai.py`, `tools/test_battery_flight.py`, `test_battery_ai.py`):
+`tu26` joins `VARIETY_AIRCRAFT` and `LIFTOFF_AIRCRAFT` (`flight-variety-tu26`, `flight-liftoff-tu26`,
+`flight-liftoff-retail-tu26`, `flight-approach-tu26`) with the windows liftoff 150 to 205 kt (recorded
+167.3, Jane's 200), approach 150 to 175 kt (recorded 166.2, Jane's landing speed 154), a 6,000 tick
+takeoff allowance, Athens, 60 percent fuel (66,138 lb) for the approach (`APPROACH_FUEL_SHARE`), and two new run windows (takeoff run 3,500
+to 5,500 ft, landing roll 3,500 to 5,000 ft: `LIFTOFF_RUN_FT`, `ROLLOUT_FT`); `ai-heavy-takeoff-tu26-gre-a1`.
+
+### Checks
+
+All through `.local/m3-imports/light3.sh`, profile `.local/m3-aircraft/profile-tu26` refreshed first (logs in
+`.local/m3-aircraft/checks/T26-8/`): `cargo fmt --all -- --check` clean; `cargo clippy --workspace --all-targets
+--locked -- -D warnings` clean; `cargo test --locked --workspace --no-fail-fast` 7,876 passed, 0 failed, 108
+ignored (7,874 at T26-6/7, plus the two new tests); `--aircraft tu26 --headless-flight 1200` 423.9 kt level at
+5,000 ft, 0 non-finite, no crash, fuel 110,230 to 110,160 lb; the ground-start takeoff (GRE 1, default load)
+4,402 ft at 167.3 kt, 100 ft at 4,712 ticks; battery (`--jobs 2 --windows 1`) 114 of 114: every `*tu26*` scenario
+(27), every `flight-approach-*` and `flight-liftoff-*` and the `ai-heavy-*` set (7 with the new takeoff; the
+first run was 113 of 114, `flight-approach-tu26` at 65 percent fuel touching down at 12.1 ft/s, fixed by the
+60 percent share and rerun: 4 of 4); `python3 -B -m unittest discover -s tools` 588 tests OK (5 skipped);
+`tools/check_docs.py` passed (382 files). **Not run:** `check_assets`, the mission, net, replay and AI lanes
+beyond the `ai-heavy-*` set, a windowed `--smoke-test`, `--validate-ordnance` (no ordnance, station or catalog
+code was touched).
+
+### Open for John
+
+1. **The ground run is 20 percent short of Jane's at the maximum weight on purpose.** Matching the
+   6,890 ft needs a rolling deceleration of 8.4 ft/s squared, which is more than the 66,000 lbf
+   of dry thrust at that weight and would stop the aircraft taxiing. A speed-dependent rolling
+   drag (a new `Tuning` field, a change to every model's tuning literal and to the checkpoint)
+   would give both; or accept 6.0. Recorded as 6.0.
+2. **Liftoff is 13 percent under Jane's 200 kt take-off speed** (167 to 174 kt at 1.09 times the
+   flapped stall). The landing speed matches (157.6 against 154 kt), so raising the stall
+   reference would spoil the landing. Not changed.
+3. **Top speed.** The loaded aircraft tops out at 962 to 1,000 kt at 36,000 ft (Mach 1.68 to
+   1.74) against the record's and Jane's 1,080 kt (Mach 1.88), and 533 to 554 kt at sea level
+   against 567: the shared loaded-drag law, the same as every other loaded aircraft. Not fitted.
+4. **G limit.** The model pulls 3.2 G against Jane's +2.5 G. The record's rows run to +4 (the +4
+   row repeats the -2 polygon). Trimming `envMax` or the rows is a record change; left.
+5. **The scripted landing at the full 238,098 lb tank crashes short** (the 0.85 times landing-limit
+   cap is under the loaded flapped minimum); a human can fly final faster. Landing at 65 percent
+   fuel or less is clean. Same as the B-1B.
+6. **The AI Tu-26 cannot land at Simferopol** (flies into the ground short at 70,000 lb of fuel,
+   with or without the fit), and its dry takeoff roll is 8,800 ft (afterburner after half the
+   runway), so it needs a long field. Goes to T26-9.
+7. **Sweep schedule on airspeed.** A Mach 0.85 cruise is swept 53 degrees. A Mach law or a
+   30 degree detent would keep it forward. The coordinator's first pass stands.
+8. **Nose alignment** stays 0.7 (the fighters'); the transports and the B-52 use 0.4. One line
+   if wanted; the B-2 and F-117 kept 0.7.
+9. **Climb rate.** Wikipedia's 15 m/s (3,000 ft/min) is far under what 110,000 lbf gives a
+   238,000 lb aircraft (9,400 ft/min at 5,000 ft); no figure at a stated weight and power was
+   found, so the model's climb is reported, not fitted.
+10. **Roll rate** 30 degrees a second has no published figure.
+
+## Tu-26 Backfire-C AI, missions, multiplayer and replay (T26-9, 2026-11-16)
+
+Implementation and verification mode, slice T26-9 (the Tu-26's counterpart of B52-9, B2-9 and F117-9). The AI
+work was asked for by John through the bomber program (AGENTS.md: no AI work unless John asks). Everything here
+is `fitted`, agent decisions of 2026-11-16, except where a number is a record's. The shared heavy-bomber rules of
+[BMB-AI](#ai-fixes-for-the-bombers-bmb-ai-2026-11-16) and the B-52's final and taxi-in laws of
+[B52-9](#b-52-ai-missions-multiplayer-and-replay-b52-9-2026-11-16) came in with the merge of `m3-aircraft`
+(d277aed5) into this branch. **No simulation or AI code changed in this slice**: one unit test, ten scenarios,
+their checks and the docs.
+
+### The AI landing that flew into the ground (T26-8's open item)
+
+T26-8 found the AI Tu-26 at Simferopol (5,532 ft, `--probe-fuel 70000`, 166 kt) flying into the ground short of
+the runway, with or without its ground fit. **The B-52's final law already fixes it, and the merge was all it
+needed.** The B52-9 rule (`airfield.rs`: the final's lateral lookahead is at least 3,000 ft instead of 1,500 ft
+where `Situation::taxi_throttle_floor` is above zero) is gated on the wheels needing over 0.2 throttle to taxi.
+The Tu-26 passes that gate since T26-8: its fitted rolling deceleration is 6.0 ft/s squared against 66,000 lbf
+of dry thrust, so `taxi_throttle_of` returns a floor of about 0.66 at 213,700 lb (balance 0.60 against the 0.5 x
+`TAXI_THROTTLE_MAX` test). With the shared 0.8 ft/s squared the balance would be 0.08 and the gate would stay
+shut, so **the law reaches the Tu-26 only through T26-8's ground fit** (by the formula; not run without it): reverting
+that fit takes the landing's fix with it.
+
+| Run (Simferopol, sent home from 4,500 ft, 70,000 lb of fuel, `--probe-trace 2`) | Final | Wheels over the line | Result |
+| --- | --- | --- | --- |
+| Heavy lookahead on (the merged tree) | 233.8 s | +183 ft at 240 s, -26 ft at 246 s, then within 3 ft of the line from 250 s | touchdown 264.5 s at 166 kt, rollout, clear at 297.6 s, parked 514.0 s; 0 of 40,256 ground samples off the pavement |
+| Heavy lookahead forced off (the 1,500 ft law, one-line experiment, reverted, not committed) | 233.8 s | +183 ft at 240 s, -137 ft at 248 s, +34 ft at 254 s | 38 ft up at z 586,357 (134 ft on the gated final at the same place); flies into the ground at 258 s at z 586,876, about 2,000 ft short of the gated touchdown (z 588,870) |
+
+So the cause is the shared one of B52-9: a heavy that is slow to roll and yaw snakes across the line on the 1,500 ft
+lookahead, and the aircraft ends 100 ft under the path with the swing (inferred from the two traces, not traced
+to a line of code). It is not the glide path, the flare or the heavy-class flaps law: with the 3,000 ft lookahead they
+are unchanged and the aircraft lands. The two runs are identical until the first turn back across the line.
+Landing weights (the same run, `--probe-fuel`; the log names are in `checks/T26-9/land-*.log`):
+
+| Fuel | 30,000 lb | 50,000 lb | 70,000 lb | 75,000 lb | 80,000 lb | 85,000 lb | 90,000 lb |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Result | touchdown 142 kt | 155 kt | 166 kt | 170 kt | into the ground at 266 s, on the line, about 3,600 ft short | into the ground at 274 s | into the ground at 560 s on the approach |
+
+**Limit (recorded, not fixed): the AI cannot land the Tu-26 above about 75,000 lb of fuel (219,000 lb).** From
+80,000 lb it flies the line and sinks about 3,600 ft short, the same family as T26-8's scripted full-fuel landing
+(its 0.85 landing cap sits under the loaded flapped minimum) and BMB-AI's open item 3 (an AI that sheds fuel or
+avoids short fields). The merged Southampton cycle therefore starts at `--probe-fuel 70000`; at the full tank
+(110,230 lb, 253,971 lb) the AI takes off (`ai-heavy-takeoff-tu26-gre-a1`, airborne at 196 s) but cannot land.
+A fix is in the shared approach speed for heavies (`approach_minimum_of` reads the clean stall times 0.75 and
+the loaded-elevator slope, which the Tu-26's loaded flapped minimum exceeds), a separate follow-up for John.
+
+**Baseline comparison.** No airfield law changed in this slice, so the BMB-AI 129-scenario comparison was not
+repeated: the law is the B-52's, proved bit-identical for everyone else in
+[B52-9](#b-52-ai-missions-multiplayer-and-replay-b52-9-2026-11-16). Whether the Tu-26 behaves under that law
+is what `ai-heavy-land-tu26-ukr-a2` and `ai-merged-airfield-tu26-wing2` pin.
+
+### The AI airfield cycle
+
+| Scenario | What it pins | Result |
+| --- | --- | --- |
+| `ai-merged-airfield-tu26-wing2` | An AI Tu-26 at Southampton (FRA ground start 14, 12,000 ft), `--probe-fuel 70000`, takes off, climbs out, lands on the order at 30,000 ticks, clears and parks, all on the pavement, touchdown 175 kt or slower | Taxi 35.0 s, takeoff roll 54.4 s, airborne 153.2 s, final 630.5 s, rollout 660.9 s, parked 1,104.1 s; 0 of 84,357 ground samples off the pavement |
+| `ai-heavy-land-tu26-ukr-a2` | Sent home to Simferopol at 70,000 lb of fuel: touchdown 175 kt or slower, rollout, clear, park, on the pavement | Final 233.8 s, rollout 264.5 s at 166 kt, parked 514.0 s; 0 of 40,256 off |
+| `ai-heavy-takeoff-tu26-gre-a1` (T26-8) | The takeoff and climb-out from Athens at the default load | airborne at 196 s |
+
+The full-fuel Southampton cycle (253,971 lb) takes off, then flies into the ground on the final at 593 s
+(`checks/T26-9/merged-tu26.log`): the same limit as above.
+
+### The AI strike from the bay and the glove pylons
+
+The B-2's stick rules (a heavy's bombs leave as a stick of up to eight, 0.25 s apart, doors opened first) needed
+no change: they read the station rows. The Tu-26's rows are the bay (station 4 of the run, `bays::GRIDS`) and the
+three pylon rows (stations 1, 2 and 3: intake pair, inner glove, outer glove; T26-5). Run with
+`--a2g-run UKR QUCOL --pilot ai --aircraft tu26 --load MK82 --station N --count M`:
+
+| Run | What the log shows |
+| --- | --- |
+| Eight Mk 82 in the bay (`ai-strike-tu26-stick`, T26-6), 20,000 ft, 12 nm | `BAY` open at 76.2 s (0.96), eight releases 76.7 to 78.5 s from the grid's own eight places, shut at 80.4 s, 8 impacts, egress at 22,411 ft, not lost |
+| Six Mk 82 on the inner glove row (`ai-strike-tu26-pylon`, station 2) | six releases 0.25 s apart, `bay=0.00`, no `BAY` line, the left and right glove alternating from the left: right -11.33, 11.33, -12.02, 12.02, -10.64, 10.64 ft, up -4.69 then -4.12, forward 4.33; six impacts, egress, not lost |
+| Quick Mission wing (`ai-strike-tu26-quick-wing`: `--quick-wing`, Ukraine factory, bay row loaded with eight) | `ROLE strike` (the mission's bomber-class default), doors open at 227.8 s, the same stick of eight at 4,949 ft (the 5,000 ft heavy floor), shut at 232.1 s, the factory killed at 246.4 s, egress, not lost |
+| Two AGM-84E on the inner glove row against the Krivak (`ai-strike-tu26-antiship`, `QUSFLT --unit 0x50000003`, 15 nm, 20,000 ft) | both leave at 0.017 s from the reach (a stand-off store), one a glove (right -11.33 and 11.33, up -4.23, forward 4.33), doors untouched, both hit at 29.3 s (96 ft) and the Krivak is destroyed |
+
+The glove rows accept a Harpoon in the run's load (T26-5 refuses it by name only in the bay): it is the one
+anti-ship store besides the AS-16 that the Tu-26 can carry, and the one the AI flies. The stores' own offsets
+differ (a Mk 82 hangs at up -4.69 or -4.12 ft, a Harpoon at -4.23).
+
+**The AS-16 is not flown by the AI at a ship or a vehicle (open, T160-9's).** An AI Tu-26 loaded only with
+AS-16 (the default) at the Krivak from 15 nm, 20,000 ft or 5,000 ft, never releases: at 20,000 ft it flies over
+the ship (closest 1,089 ft) and is destroyed by the fleet's defences at 169 s (`reach_margin_ft=-93377`); at 5,000 ft it ends `Searching` 62,182
+ft away. The same strike code fires the B-52's Harpoon from the same place, so the difference is the AS-16's
+record (the strike driver reads `seeker_lock`'s zone for a `RadarAgm`: `fire_range = max(GUIDED_CLOSE_FT, zone
+maximum / 2)` and the cone `missiles::geometry`), not the Tu-26. T160-9 (the Tu-160's, `m3-tu160`, not committed)
+is working in `ai/strike.rs` and `ai_wings/strike.rs` on exactly this path, so this slice **records the
+dependency and changes no AI**: no fork. When T160-9 lands, an `ai-strike-tu26-as16` scenario (six AS-16 at the
+Krivak from the three pylon rows and from the bay) belongs beside `ai-strike-tu26-antiship`; the human's AS-16 at
+the Krivak from the glove and the bay is `a2g-antiship-tu26` (T26-6).
+
+### Quick Mission
+
+`quick_mission::tests::the_tu26_is_a_quick_mission_player_and_a_wing_choice`: `TU26.PT` is offered as the player's
+aircraft ("Tu- 26 Backfire-C") and in every AI wing field, a draft carries it as the player and in every wing, it is
+distinct from `TU95.PT` and `TU160.PT`, and the night stealth rule (the B-2 and the F-117) does not take it. The
+strike is `ai-strike-tu26-quick-wing`. Two 2 v 2 probes: `ai-tu26-quick-mission-2v2` (all Tu-26) and
+`ai-tu26-vs-su27-2v2`.
+
+### The tail gun in a fight
+
+`ai-tu26-quick-mission-2v2` is the 2 v 2 in which the tail gun engages: all six aircraft are Tu-26s, the AS-16 rows
+are surface radar missiles and are refused against an aircraft (every aircraft still holds all three rows of two),
+so the slewed tail guns (BMB-AI's aim model: 30 degrees a second, 0.2 s lag, 1.0 degree error, 0.35 degree scatter)
+do all the shooting. The recorded run: 189 shots, one round-hit, rounds spent 56, 53 and 80 of 2,006, one
+aircraft damaged (0.8 percent), no crash into the ground, the known `activity flapping` anomaly only. The check
+requires shots, at least one hit and a spent round. `ai-tu26-vs-su27-2v2`: the Tu-26 leader defends itself (jettisons
+its six AS-16, payload 0), 8 shots, hurt to 0.91 damage, none lost; the probe's usual checks hold. The human's
+tail gun is `flight-tu26-tail-gun` (T26-6). **Not covered:** the gun's rounds on a watching client (`tore-bot` has no
+gun role, as in B52-9).
+
+### Multiplayer
+
+`net-a2g-stores-tu26`: both players in Tu-26s (`TU26_STORES_MISSION`). `tore-bot --load` hangs each store on the
+first station after the others that takes it, two of each. The Tu-26's station order is gun, intake pair (row 6),
+inner glove (7), outer glove (8), bay (5), and every pylon row takes a Mk 82, so `AS16.JT,AS16.JT,AS16.JT,MK82.JT`
+fills the three pylon rows with AS-16 and leaves the bay for the Mk 82; `--a2g bomb` takes the Mk 82. The watching client
+draws the bomber's stores, sees the Mk 82 leave plane 0, the bomber's emptied stations and an AI aircraft's, and reads
+plane 0's belly doors at 0.95 or more on its screen (158 s). A first try with `AS16.JT,MK82.JT` put the Mk 82 on the
+inner glove (the first station after the AS-16) and failed only on the doors, which a pylon release leaves shut.
+
+### Replay
+
+`replay-rec-tu26-2v2`: the Tu-26 as the player and in both wings, a 2 v 2 recorded three times; `--verify-render`
+finds nothing missing or differing (2,401 ticks), and the two recordings of the same run read back identical (973 flight and aircraft events each). `replay-a2g-tu26-ripple`: eight Mk 82 from
+the bay row (`--station 4 --count 8 --repeat 10 --gap 0.5`, `--record --verify-render`): 6,315 ticks compared with none
+missing or differing, eight `weapon.release` and `weapon.outcome` events, rounds 8 to 0, and the recorded `bay`
+device shut at the start and the end and open (0.95 or more) at every release. Ten presses are used for eight bombs:
+two presses are lost while the doors open (an eight-press ripple fired six; the B-52's nine-round row got seven or eight).
+
+### Scenarios and tests added
+
+| Name | What it pins |
+| --- | --- |
+| `quick_mission::the_tu26_is_a_quick_mission_player_and_a_wing_choice` | `TU26.PT` as player and wing choice, no stealth night rule |
+| `ai-merged-airfield-tu26-wing2`, `ai-heavy-land-tu26-ukr-a2` | the AI Tu-26's cycle at 70,000 lb of fuel and its Simferopol landing, on the pavement all the way (the AI landing fix is the merged B52-9 law) |
+| `ai-strike-tu26-pylon`, `ai-strike-tu26-quick-wing`, `ai-strike-tu26-antiship` | the glove-row stick, the Quick Mission wing's bay stick, the Harpoons against the Krivak |
+| `ai-tu26-quick-mission-2v2`, `ai-tu26-vs-su27-2v2` | the all-Tu-26 fight (tail guns shoot and hit) and the Su-27 fight |
+| `net-a2g-stores-tu26` | the Tu-26's stores and belly doors on a watching client |
+| `replay-rec-tu26-2v2`, `replay-a2g-tu26-ripple` | the identity through a recording and the bay ripple with the doors |
+| `tools` unit tests (`Tu26Tests`, the scenario lists, `tu26_gun_fight_problems`) | the strike and fight checks |
+
+### Checks
+
+All through `.local/m3-imports/light3.sh`, profile `.local/m3-aircraft/profile-tu26` refreshed first (no write to
+the default profile), logs in `.local/m3-aircraft/checks/T26-9/`. `cargo fmt --all -- --check` clean; `cargo clippy
+--workspace --all-targets --locked -- -D warnings` clean; `cargo test --locked --workspace --no-fail-fast` 7,880
+passed, 0 failed, 108 ignored (the new `the_tu26_is_a_quick_mission_player_and_a_wing_choice` among them);
+`--validate-ordnance` passed with no pin moved (54 aircraft, 23 recovered stations, 5,350 weapon placements, 257
+tank placements, 82 pod placements, 278 Cheat-only; `TU26.PT` 84); `python3 -B -m unittest discover -s tools` 599
+OK (5 skipped); `tools/check_docs.py` passed (382 files); battery (`--jobs 2 --windows 1`, own profile) **94 of
+94**: every `*tu26*` scenario (the T26-2 to T26-8 ones and the ten new), `ai-heavy-*` (8), `ai-strike-*` (37),
+`ai-merged-airfield-*` (8), `net-a2g-*` and `net-ai-strike-*` (8) and `replay-a2g*` (5). The merge of
+`m3-aircraft` is commit 54be1ced (one docs conflict, `lane-ai.md`'s heavy bombers row, both sides kept).
+
+**Not run:** `check_assets`, a windowed `--smoke-test`, the rest of the AI lane (the 862-scenario run) and the
+other lanes, the BMB-AI 129-scenario comparison (no airfield law changed), the human-flown landing at other fields
+(`flight-approach-tu26` only), an AI Tu-26 flying a Quick Mission to the end (landing and parking after a strike),
+the tail gun over the wire.
+
+### Open for John
+
+1. The AI cannot land the Tu-26 above about 75,000 lb of fuel (a shared heavy approach limit); the full-tank
+   cycle takes off and crashes on the final. BMB-AI's open item 3 and T26-8's scripted full-fuel landing.
+2. The AI does not fire the AS-16 at a ship or a vehicle (T160-9's path); `ai-strike-tu26-as16` waits for it.
+3. After a kill the AI keeps searching (B52-9's open item, not traced for the Tu-26 either: the antiship run stops at 60 s).
+4. The stick walks past the aim point as the B-2's and B-52's do.
+5. The tail gun's rounds over the wire are not covered (`tore-bot` has no gun role).

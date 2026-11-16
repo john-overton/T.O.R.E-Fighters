@@ -322,6 +322,13 @@ TU160_STORES_MISSION = STORES_MISSION.replace("wing friendly 1 F16C.PT 2 average
 # on the pylons, see the Mk 82 leave the bay and see the bay doors open for it.
 F111_STORES_MISSION = STORES_MISSION.replace("wing friendly 1 F16C.PT 2 average\n", "wing friendly 1 F111.PT 2 average\n")
 F111_LOAD = "AGM84E.JT,AGM84E.JT,AGM84E.JT,AGM84E.JT,MK82.JT"
+# T26-9 (2026-11-16): the same mission with both players in Tu-26s. `tore-bot --load` hangs each store on the first
+# station after the others that takes it, two of each: the Tu-26's stations run gun, intake pair (row 6), inner
+# glove (7), outer glove (8), belly bay (5), and every pylon row takes the Mk 82, so `AS16.JT,MK82.JT` would hang
+# the bomb on the inner glove with the doors shut. `AS16.JT,AS16.JT,AS16.JT,MK82.JT` fills the three pylon rows
+# with AS-16 first and leaves the bay for the two Mk 82; `--a2g bomb` takes the first bomb, the Mk 82. The
+# watching client must draw the pylon and bay stores, and see a Mk 82 leave the bay with the belly doors open.
+TU26_STORES_MISSION = STORES_MISSION.replace("wing friendly 1 F16C.PT 2 average\n", "wing friendly 1 TU26.PT 2 average\n")
 # The strike handback with a B-2 (the F-117 has no radar to set up a pass with), airborne at 20,000 ft so the heavy needs no climb to its release floor: the human's pass is
 # continued by the AI, whose bay doors must open for the release and be seen to open from the other client.
 B2_STRIKE_MISSION = STRIKE_MISSION.replace(
@@ -466,6 +473,12 @@ def drive_stores_f111(d: Drive) -> None:
     drive_stores(d, F111_STORES_MISSION, F111_LOAD, doors=True, bomb="MK82.JT")
 
 
+def drive_stores_tu26(d: Drive) -> None:
+    """`net-a2g-stores` with both players in Tu-26s (T26-9): a Mk 82 leaves the bomber's belly bay or glove row on
+    the watcher's screen, the watcher sees the stores empty, and the AI's stores still empty."""
+    drive_stores(d, TU26_STORES_MISSION, "AS16.JT,AS16.JT,AS16.JT,MK82.JT", doors=True, bomb="MK82.JT")
+
+
 def scenarios() -> list[Scenario]:
     return [
         Scenario(
@@ -497,6 +510,10 @@ def scenarios() -> list[Scenario]:
         ),
         Scenario(
             name="net-a2g-stores-f111", lane="net", args=[], driver=drive_stores_f111, uses=("server", "bot"),
+            timeout=420,
+        ),
+        Scenario(
+            name="net-a2g-stores-tu26", lane="net", args=[], driver=drive_stores_tu26, uses=("server", "bot"),
             timeout=420,
         ),
         Scenario(

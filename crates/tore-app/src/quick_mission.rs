@@ -3705,6 +3705,46 @@ mod tests {
         assert!(!tore_world::surface::resolve::night_stealth(&night));
     }
 
+    /// T26-9 (2026-11-16): the Tu-26 Backfire-C is offered as the player's
+    /// aircraft and in every AI wing field, by its own selection key
+    /// (`TU26.PT`), and a draft carries it as the player and in every wing. It
+    /// never stands in for the Tu-95 or the Tu-160, the other Russian bombers,
+    /// and it has no stealth night rule.
+    #[test]
+    fn the_tu26_is_a_quick_mission_player_and_a_wing_choice() {
+        let mut q = full_catalog();
+        assert_eq!(AircraftId::Tu26.selection_key(), "TU26.PT");
+        let player = q
+            .aircraft_files
+            .iter()
+            .position(|f| f == AircraftId::Tu26.selection_key())
+            .unwrap();
+        assert_eq!(q.aircraft_names[player], "Tu- 26 Backfire-C");
+        q.apply(6, player);
+        assert_eq!(q.player(), Some(AircraftId::Tu26));
+        for field in AI_AIRCRAFT_FIELDS {
+            let index = q.ai_choice(AircraftId::Tu26).unwrap();
+            assert_eq!(q.values(field)[index], "Tu- 26 Backfire-C");
+            q.apply(field, index);
+            assert_eq!(q.wing_aircraft(field), Some(AircraftId::Tu26));
+        }
+        let spec = q.mission_spec().unwrap();
+        assert_eq!(spec.wings[0].aircraft, AircraftId::Tu26);
+        for wing in spec.wings.iter().skip(1) {
+            assert_eq!(wing.aircraft, AircraftId::Tu26);
+        }
+        assert_ne!(AircraftId::Tu26.pt(), AircraftId::Tu95.pt());
+        assert_ne!(AircraftId::Tu26.pt(), AircraftId::Tu160.pt());
+        // The stealth night rule is the B-2's and the F-117's, not the Tu-26's.
+        assert!(
+            !tore_formats::quick_template::tables::NIGHT_STEALTH_AIRCRAFT
+                .contains(&AircraftId::Tu26.pt())
+        );
+        let mut night = spec;
+        night.condition = tore_world::mission::Condition::Night;
+        assert!(!tore_world::surface::resolve::night_stealth(&night));
+    }
+
     /// Slice GRI-9: the Saab Gripen is offered as the player's aircraft and,
     /// because the AI can fly it, in every AI wing field. The identity the
     /// mission flies is named exactly (`GRIPEN.PT`), never aliased to another

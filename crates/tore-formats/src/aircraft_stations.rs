@@ -333,6 +333,18 @@ pub const TU160_BAY_REFUSED: [&str; 5] =
 /// [`adjust_defaults`] clears the designator bit and sets the active-radar bit
 /// so the bay carries the Kh-15.
 pub const TU26_BAY: usize = 5;
+/// The Tu-26's tail gun row (`TU26.PT` row 3, `T23_1.JT`, slewed aft by B52-6's
+/// mount): [`adjust_defaults`] moves it onto the drawn tail (T26-5).
+pub const TU26_GUN: usize = 3;
+/// Where the Tu-26's tail gun hangs, record units (a third of a foot): on the
+/// centre line at the aft edge of the drawn tail, where the two nozzle
+/// exit planes meet (`TU26.SH` y -29 units at 4/3 ft a unit, 38.7 ft aft, and
+/// z 2 units, 2.7 ft up, the nozzles' top edge on the centre line). The retail
+/// mount (0, 22, -130) is 43.3 ft aft and 7.3 ft up: in the open air 4.6 ft
+/// behind the nozzles and 3.3 ft over the fuselage's top skin. Fitted (agent
+/// decision, T26-5, 2026-11-16, B52-5's precedent); the fire direction stays
+/// astern.
+pub const TU26_GUN_MOUNT: [i32; 3] = [0, 8, -116];
 /// The Tu-26's wing glove rows (`TU26.PT` rows 7 and 8, AS-16 pairs of four and
 /// six) whose capacity, and so default load, [`adjust_defaults`] cuts to two
 /// each (BMB-C2).
@@ -342,6 +354,91 @@ pub const TU26_GLOVE_ROWS: std::ops::RangeInclusive<usize> = 7..=8;
 /// store's capacity is the row's count (`Loadout::capacity`, the mission
 /// validator), so the default cannot be capped without the capacity.
 pub const TU26_GLOVE_CAPACITY: i32 = 2;
+/// The Tu-26's intake-trunk pair (`TU26.PT` row 6, Fuselage, `AS16.JT` x2, flags
+/// `0x1185`) and its two glove rows' numbers (rows 7 and 8, [`TU26_GLOVE_ROWS`]).
+pub const TU26_INTAKE: usize = 6;
+pub const TU26_INNER_GLOVE: usize = 7;
+pub const TU26_OUTER_GLOVE: usize = 8;
+/// Stores the Tu-26's intake pair (row 6) refuses (T26-5, 2026-11-16, John's
+/// F-15E A2 precedent as the Tornado's and the Mirage F1's lists: stores that
+/// enter the airframe by more than about 0.3 ft, measured with the generic clip
+/// report of the CPU stores preview, two stores a row at the record's
+/// position under the intake trunk, docs/formats/aircraft-variety.md, "Tu-26
+/// bay, stations and pylons (T26-5, 2026-11-16)"): `AGM45`, `AGM88` (0.73 ft),
+/// `AGM84E` (0.33), `AS14` (0.48), `AS30` (0.92), `AT12` (0.33), `AT2` (0.36),
+/// the laser bombs `GBU10`, `GBU10A`, `PAVEWAY` (0.96), `GBU12` (0.90),
+/// `GBU16` (0.98), `GBU28` (0.33) and the 5.4 ft finned `GBU29`, `GBU29P`,
+/// `GBU30` and `PAVEWA3` (1.93, which also touch the gear). The default
+/// `AS16.JT` (0.15 ft) stays.
+pub const T26_INTAKE_REFUSED: [&str; 17] = [
+    "AGM45.JT",
+    "AGM84E.JT",
+    "AGM88.JT",
+    "AS14.JT",
+    "AS30.JT",
+    "AT12.JT",
+    "AT2.JT",
+    "GBU10.JT",
+    "GBU10A.JT",
+    "GBU12.JT",
+    "GBU16.JT",
+    "GBU28.JT",
+    "GBU29.JT",
+    "GBU29P.JT",
+    "GBU30.JT",
+    "PAVEWA3.JT",
+    "PAVEWAY.JT",
+];
+/// Stores both Tu-26 glove rows (7 and 8) refuse (T26-5, the same rule): the
+/// 5.4 ft finned `GBU29`, `GBU29P`, `GBU30` and `PAVEWA3` stand 1.10 ft in
+/// the glove and touch the swing panel. Everything else enters it by 0.14 ft
+/// or less.
+pub const T26_GLOVE_REFUSED: [&str; 4] = ["GBU29.JT", "GBU29P.JT", "GBU30.JT", "PAVEWA3.JT"];
+/// What the outer glove row (row 8) refuses besides [`T26_GLOVE_REFUSED`]: the
+/// 19 ft `GBU28.JT`, which touches the swing panel's drooped flap strip
+/// (0.00 ft with the flaps down, T26-5).
+pub const T26_OUTER_GLOVE_REFUSED: [&str; 1] = ["GBU28.JT"];
+/// Stores the Tu-26's bay row (row 5) refuses (T26-5, 2026-11-16, the Tu-26's
+/// own list, as [`B52_BAY_REFUSED`] is the B-52's). The first two, the Harpoon
+/// `AGM84A.JT` and the Exocet class `AM39.JT`, are refused by name, the
+/// coordinator's call in BMB-C1/C2 and a rule, not a fit: the active-radar bit
+/// `0x20` that lets the bay carry the Kh-15 (`AS16.JT`) also admits them, and
+/// the Tu-26 never carried either (the B-52's bay refuses them too). The rest
+/// are refused for fit, with the B-52's rule (under 0.05 ft to a door leaf, a
+/// wall, the roof, the floor, or another store, or through one) measured with
+/// the bay clearance sweep over the open bay at each store's full count on the
+/// shared magazine grid, 5.9 by 22.97 ft under a roof 5.2 ft over the belly
+/// plane, the Kh-15 centred (docs/formats/aircraft-variety.md, "Tu-26 bay,
+/// stations and pylons (T26-5, 2026-11-16)"). Eight stand with their rear row
+/// through the aft wall (`CBU87`, `CBU89`, `FAB1000`, `FAB500`, `GBU38`,
+/// `MK20`, `MK84`, `RBK500`, 0.2 to 4.7 ft), four have their fins touching
+/// their neighbours (`AT2`, `RBK250`, 0.00 ft; `MK82HD`, `MK82P`, the Snakeye
+/// shape, 0.03 ft), three the 5.4 ft finned `GBU29`, `GBU29P` and `GBU30`
+/// through a side wall (1.7 ft) and the roof, and two the HARM class through a
+/// side wall (0.3 ft). Five stay: `AS16`, `FAB250`, `MK82`, `MK82AIR`,
+/// `MK82P3`. The Kh-15's own wings (3.0 ft over a 1.59 ft pitch) touch their
+/// neighbours: kept, the real load (decision 6).
+pub const T26_BAY_REFUSED: [&str; 19] = [
+    "AGM45.JT",
+    "AGM84A.JT",
+    "AGM88.JT",
+    "AM39.JT",
+    "AT2.JT",
+    "CBU87.JT",
+    "CBU89.JT",
+    "FAB1000.JT",
+    "FAB500.JT",
+    "GBU29.JT",
+    "GBU29P.JT",
+    "GBU30.JT",
+    "GBU38.JT",
+    "MK20.JT",
+    "MK82HD.JT",
+    "MK82P.JT",
+    "MK84.JT",
+    "RBK250.JT",
+    "RBK500.JT",
+];
 /// The Tu-95's two Bear-A to F gun turret rows (`TU95.PT` rows 5 and 6,
 /// `T23_1.JT`, flags `0x180a`), whose defaults [`adjust_defaults`] clears
 /// (BMB-C2); row 3, the tail turret, stays.
@@ -534,7 +631,7 @@ pub fn tank_allowed(id: AircraftId, row: usize, name: &str) -> bool {
 /// The B-2's two Mk 82 rows refuse [`B2_MK82_REFUSED`] (B2-5); the B-1B's three
 /// bay rows refuse [`B1B_BAY_REFUSED`] (B1B-5).
 /// The Tu-95's wing pylon row (row 8) refuses everything but `AS16.JT`
-/// (BMB-C2).
+/// (BMB-C2). The Tu-26's bay row refuses [`T26_BAY_REFUSED`] (T26-5).
 pub fn weapon_allowed(id: AircraftId, row: usize, source: &str) -> bool {
     match id.source() {
         AircraftId::F15E => match row {
@@ -563,6 +660,20 @@ pub fn weapon_allowed(id: AircraftId, row: usize, source: &str) -> bool {
             };
             !refused.contains(&source)
         }
+        // The Tu-26's bay refuses [`T26_BAY_REFUSED`] (T26-5): the Harpoon and
+        // AM-39 the Kh-15's active-radar bit admits, and what does not fit the
+        // measured bay; its intake pair and glove rows refuse what enters the
+        // airframe or the swing panel ([`T26_INTAKE_REFUSED`],
+        // [`T26_GLOVE_REFUSED`], [`T26_OUTER_GLOVE_REFUSED`]).
+        AircraftId::Tu26 => match row {
+            TU26_BAY => !T26_BAY_REFUSED.contains(&source),
+            TU26_INTAKE => !T26_INTAKE_REFUSED.contains(&source),
+            TU26_INNER_GLOVE => !T26_GLOVE_REFUSED.contains(&source),
+            TU26_OUTER_GLOVE => {
+                !(T26_GLOVE_REFUSED.contains(&source) || T26_OUTER_GLOVE_REFUSED.contains(&source))
+            }
+            _ => true,
+        },
         // The Tu-95's wing pylons take the AS-16 and nothing else (BMB-C2):
         // the active-radar bit the Kh-15 needs also admits the Harpoon class.
         AircraftId::Tu95 => row != TU95_WING_PYLONS || source == "AS16.JT",
@@ -1169,7 +1280,9 @@ fn default_signature(id: AircraftId) -> &'static [Signature] {
 ///   function changes a count (the Mirage F1's belly was the first): a default
 ///   store's capacity is its row's count, so a default cannot be capped
 ///   alone, and the glove rows' bomb capacity falls with it. Classes 108 and
-///   160, masks and positions stay.
+///   160, masks and positions stay. Update (T26-5, 2026-11-16): the tail
+///   gun's mount (row 3) moves onto the drawn tail ([`TU26_GUN_MOUNT`]), and
+///   the bay row refuses [`T26_BAY_REFUSED`] ([`weapon_allowed`]).
 /// - **Tu-95** (`TU95.PT`; BMB-C2, coordinator first pass 2026-11-15): rows 5
 ///   and 6, the Bear-A to F dorsal and ventral turrets (`T23_1.JT`, the real
 ///   Bear-H has the tail turret alone, Wikipedia "Tupolev Tu-95"), hold
@@ -1268,6 +1381,7 @@ pub fn adjust_defaults(id: AircraftId, rows: &mut Vec<Hardpoint>) {
             }
         }
         AircraftId::Tu26 => {
+            rows[TU26_GUN].position = TU26_GUN_MOUNT;
             let bay = &mut rows[TU26_BAY];
             bay.flags = (bay.flags & !DESIGNATOR_BIT) | ACTIVE_RADAR_BIT;
             for row in &mut rows[TU26_GLOVE_ROWS] {
@@ -2540,7 +2654,16 @@ mod tests {
         // intake pair and every class stay.
         expected[7].4 = 2;
         expected[8].4 = 2;
+        // The tail gun (row 3, T26-5) hangs on the drawn tail; nothing else of
+        // the row moves.
+        expected[TU26_GUN].2 = TU26_GUN_MOUNT;
         assert_eq!(key(&rows), expected);
+        assert_eq!(retail[TU26_GUN].position, [0, 22, -130]);
+        assert_eq!(rows[TU26_GUN].store.as_deref(), Some("T23_1.JT"));
+        assert_eq!(
+            (rows[TU26_GUN].count, rows[TU26_GUN].flags),
+            (2_000, 0x180a)
+        );
         assert_eq!((rows[6].count, rows[7].count, rows[8].count), (2, 2, 2));
         assert_eq!(
             (
@@ -2585,7 +2708,63 @@ mod tests {
             assert!(!weapon_allowed(AircraftId::Tu95, TU95_WING_PYLONS, source));
             assert!(weapon_allowed(AircraftId::Tu95, 7, source), "{source}");
         }
-        assert!(weapon_allowed(AircraftId::Tu26, 8, "AGM84A.JT"));
+        // The Tu-26's bay refuses what its active-radar bit admits beyond the
+        // Kh-15 and what does not fit (T26-5); the Harpoon and the AM-39 are
+        // refused by name on the bay only.
+        for source in T26_BAY_REFUSED {
+            assert!(
+                !weapon_allowed(AircraftId::Tu26, TU26_BAY, source),
+                "{source}"
+            );
+            assert!(
+                weapon_allowed(AircraftId::Tu160, TU26_BAY, source),
+                "{source}"
+            );
+        }
+        for source in ["AGM84A.JT", "AM39.JT"] {
+            for row in [TU26_INTAKE, TU26_INNER_GLOVE, TU26_OUTER_GLOVE] {
+                assert!(weapon_allowed(AircraftId::Tu26, row, source), "{source}");
+            }
+        }
+        // The external rows (T26-5): the intake pair refuses 17, both glove rows
+        // the four 5.4 ft finned laser bombs and the outer row the GBU-28 too;
+        // the default Kh-15 and the 500 lb class are never refused.
+        for source in T26_INTAKE_REFUSED {
+            assert!(
+                !weapon_allowed(AircraftId::Tu26, TU26_INTAKE, source),
+                "{source}"
+            );
+        }
+        for source in T26_GLOVE_REFUSED {
+            for row in [TU26_INNER_GLOVE, TU26_OUTER_GLOVE] {
+                assert!(!weapon_allowed(AircraftId::Tu26, row, source), "{source}");
+            }
+        }
+        assert!(weapon_allowed(
+            AircraftId::Tu26,
+            TU26_INNER_GLOVE,
+            "GBU28.JT"
+        ));
+        assert!(!weapon_allowed(
+            AircraftId::Tu26,
+            TU26_OUTER_GLOVE,
+            "GBU28.JT"
+        ));
+        for row in [TU26_INTAKE, TU26_INNER_GLOVE, TU26_OUTER_GLOVE] {
+            for source in ["AS16.JT", "MK82.JT", "MK82P3.JT", "FAB250.JT", "AGM65G.JT"] {
+                assert!(
+                    weapon_allowed(AircraftId::Tu26, row, source),
+                    "{row} {source}"
+                );
+            }
+        }
+        assert!(weapon_allowed(AircraftId::Tu26, TU26_BAY, "AS16.JT"));
+        for source in ["AGM84A.JT", "AM39.JT"] {
+            assert!(T26_BAY_REFUSED.contains(&source));
+        }
+        for source in ["AS16.JT", "MK82.JT", "MK82P3.JT", "MK82AIR.JT", "FAB250.JT"] {
+            assert!(!T26_BAY_REFUSED.contains(&source), "{source}");
+        }
         // Su-34.
         let retail = default_rows(AircraftId::Su34);
         assert_eq!(retail.len(), 9);

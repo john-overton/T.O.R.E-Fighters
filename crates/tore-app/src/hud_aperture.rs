@@ -1035,6 +1035,9 @@ mod tests {
     /// coverage of them (B2-7).
     const B2_MAIN_WINDOW_PIXELS: usize = 247_572;
     const B2_GLASS_PIXELS: usize = 246_986;
+    /// Transparent pixels of the imported `~AC130H.PIC` (T26-7): the glass of
+    /// the AC-130 family, the B-52 and the Tu-26, in the windows counted below.
+    const AC130_TRANSPARENT_PIXELS: usize = 504_831;
 
     /// Retail-reading (skips without an install): the polygon on the real
     /// `~B2H.PIC` covers the main window almost whole, never an opaque pixel,
@@ -1136,6 +1139,60 @@ mod tests {
                 B2_GLASS_PIXELS,
                 "{id:?}"
             );
+        }
+    }
+    /// T26-7: retail-reading (skips without an install). The Tu-26 flies the
+    /// AC-130's `~AC130H.PIC` by its `bmbroh.HUD` (the B-52's art, John's
+    /// decision 14 for the family). The glass is measured, not failed closed:
+    /// the aperture is the whole 1280 x 490 picture trimmed by the art, so the
+    /// mask is the picture's transparent pixels (the cockpit frame's opaque
+    /// ones stay out; the far column and bottom row are the polygon's open
+    /// edges), the same pixels the B-52's mask covers.
+    #[test]
+    fn the_tu26_glass_is_the_transparent_part_of_the_imported_ac130_art() {
+        let root = std::env::var_os("TORE_GAME_DIR").map_or_else(
+            || {
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../gameassets/fighters-anthology")
+            },
+            std::path::PathBuf::from,
+        );
+        let Ok(media) = tore_import::MediaSource::detect(&root) else {
+            eprintln!("skipped: no retail install at {}", root.display());
+            return;
+        };
+        let Ok(library) = media.archive("FA_1.LIB") else {
+            eprintln!("skipped: no retail FA_1.LIB");
+            return;
+        };
+        let name = AircraftId::Tu26.cockpit();
+        assert_eq!(name, "~AC130H.PIC");
+        let pic = tore_formats::Pic::parse(&library.read(name).unwrap()).unwrap();
+        assert_eq!((pic.width, pic.height), (1280, 490));
+        let source = Sprite {
+            width: pic.width,
+            height: pic.height,
+            rgba: pic.rgba(&[[0; 3]; 256]),
+            glyphs: vec![],
+        };
+        let mask = mask(&source, AircraftId::Tu26);
+        assert_eq!(mask, self::mask(&source, AircraftId::B52));
+        let covered = mask.iter().filter(|v| **v == 1).count();
+        assert_eq!(covered, AC130_TRANSPARENT_PIXELS, "glass area moved");
+        // Every covered pixel is transparent art, and the only transparent
+        // pixels left out are the picture's far column and bottom row (the
+        // whole-picture polygon's open edges).
+        for (at, covered_pixel) in mask.iter().enumerate() {
+            let transparent = source.rgba[at * 4 + 3] == 0;
+            if *covered_pixel == 1 {
+                assert!(transparent, "pixel {at}: the mask covers opaque art");
+            } else if transparent {
+                let (x, y) = (at % 1280, at / 1280);
+                assert!(
+                    x == 1279 || y == 489,
+                    "pixel {at}: transparent art left out"
+                );
+            }
         }
     }
 }

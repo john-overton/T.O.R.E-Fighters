@@ -1636,6 +1636,64 @@ class F111Tests(unittest.TestCase):
             self.assertIn(name, names)
 
 
+class Tu26Tests(unittest.TestCase):
+    """The Tu-26 strike checks (slice T26-9)."""
+
+    def pylon(self, count=6, bay=False, outs=(11.33, 12.02, 10.64), **kwargs):
+        cells = [((-1.0 if n % 2 == 0 else 1.0) * outs[n // 2 % 3], -4.12, 4.33) for n in range(count)]
+        out = b2_run(cells, station=2, **kwargs).replace("aircraft=B2", "aircraft=Tu26")
+        if not bay:
+            out = "\n".join(line for line in out.splitlines() if "BAY t=" not in line).replace("bay=1.00", "bay=0.00")
+        return out
+
+    def test_a_glove_stick_alternates_the_gloves_with_the_doors_shut(self):
+        self.assertEqual(s.tu26_pylon_problems(self.pylon()), [])
+        self.assertTrue(any("doors moved" in p for p in s.tu26_pylon_problems(self.pylon(bay=True))))
+        self.assertTrue(any("want 6" in p for p in s.tu26_pylon_problems(self.pylon(count=2))))
+        self.assertTrue(any("want left" in p for p in s.tu26_pylon_problems(self.pylon(outs=(-11.33, 12.02, 10.64)))))
+        self.assertTrue(any("ft out, want" in p for p in s.tu26_pylon_problems(self.pylon(outs=(11.33, 14.0, 10.64)))))
+        self.assertTrue(any("Tu26" in p for p in s.tu26_pylon_problems(b2_run([(-11.33, -4.12, 4.33)] * 6, station=2))))
+
+    def test_the_quick_wing_flies_the_bay_stick_with_the_strike_role(self):
+        cells = s.TU26_MK82_CELLS
+        stick = b2_run(cells, station=4).replace("aircraft=B2", "aircraft=Tu26")
+        self.assertEqual(s.tu26_stick_problems(stick), [])
+        quick = stick.replace("PROFILE t=0.000 name=none", "ROLE t=0.000 plane=1 role=strike\nai-strike: PROFILE t=0.000 name=none")
+        self.assertEqual(s.tu26_quick_wing_problems(quick), [])
+        self.assertTrue(any("role" in p for p in s.tu26_quick_wing_problems(stick)))
+
+    def test_the_harpoon_run_wants_one_a_glove_and_the_ship_destroyed(self):
+        def harpoon(kill=True, rights=(-11.33, 11.33), bay=False):
+            lines = [
+                "ai-strike: setup aircraft=Tu26 load=AGM84E.JT station=2 count=2 rounds=2 target=0x50000003 name=Krivak "
+                "target_at=1,2,3 hp=500 skill=1 profile=none handback=none order=none mode=none",
+                "ai-strike: PROFILE t=0.000 name=none requested=none note=chosen",
+                "ai-strike: start t=0.000 plane=0 range_ft=91140 alt_ft=20000 speed_kt=450",
+            ]
+            for n, right in enumerate(rights, 1):
+                lines.append(f"ai-strike: ORIGIN t=0.017 n={n} station=2 right={right} up=-4.23 forward=4.33")
+                lines.append(f"ai-strike: RELEASE t=0.017 n={n} weapon=AGM84E.JT station=2 alt_ft=20000 speed_kt=449 "
+                             f"range_ft=91127 pass={n} aim_ft=0 inside=yes lead_ft=0 dive_deg=0 bay={'1.00' if bay else '0.00'}")
+            for n in range(1, len(rights) + 1):
+                lines.append(f"ai-strike: IMPACT t=29.333 n={n} miss_ft=96.3 at=1,2,3")
+            if kill:
+                lines.append("ai-strike: KILL t=29.333 victim=0x50000003 category=0x2000 target=yes")
+            lines.append("ai-strike: summary t=60.000 ran_s=60.0 profile=level releases=2 impacts=2 kills=1 egress=no "
+                         "lost=no activity=Attacking target_hp=0/500 closest_ft=1889 store_rounds_left=0")
+            lines.append("ai-strike: done")
+            return "\n".join(lines)
+
+        self.assertEqual(s.tu26_antiship_problems(harpoon()), [])
+        self.assertTrue(any("not destroyed" in p for p in s.tu26_antiship_problems(harpoon(kill=False))))
+        self.assertTrue(any("want left" in p or "want right" in p for p in s.tu26_antiship_problems(harpoon(rights=(-11.33, -11.33)))))
+        self.assertTrue(any("doors moved" in p for p in s.tu26_antiship_problems(harpoon(bay=True))))
+
+    def test_the_scenarios_exist(self):
+        names = {sc.name for sc in s.scenarios()}
+        for name in ("ai-strike-tu26-stick", "ai-strike-tu26-pylon", "ai-strike-tu26-quick-wing", "ai-strike-tu26-antiship"):
+            self.assertIn(name, names)
+
+
 if __name__ == "__main__":
     unittest.main()
 

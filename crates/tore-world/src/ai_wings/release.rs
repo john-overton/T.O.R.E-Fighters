@@ -562,4 +562,53 @@ mod tests {
             }
         }
     }
+
+    /// T26-5: an AI bomb leaves the Tu-26's one bay row (row 5, a grid magazine on
+    /// the shared grid, the Kh-15 centred) inside the opening, between its ends;
+    /// its doors stay shut (the same release as the B-52's).
+    #[test]
+    fn an_ai_bomb_leaves_the_tu26_bay_grid_inside_the_opening() {
+        use tore_formats::aircraft::{AircraftId, Hardpoint};
+        use tore_sim::combat::{bays, hardpoints};
+        let (mut wings, _) = build(None);
+        let mut state = combat_fixture(false);
+        state.projectiles.clear();
+        let id = wings.mission().actors()[1].id();
+        let mut config = state.own().configuration().clone();
+        config.stations[0].weapon = mk82_pack(config.stations[0].weapon.clone());
+        let row = Hardpoint {
+            location: 3,
+            flags: 0x1120,
+            position: [0, -40, 72],
+            store: None,
+            count: 8,
+            weight_class: 120,
+            slew: [0; 4],
+        };
+        let (mount, rack) = hardpoints::placed_on(AircraftId::Tu26, 5, &row, None);
+        config.stations[0].mount = mount;
+        config.stations[0].rack = rack;
+        config.stations[0].count = 8;
+        wings.configs.insert(id, config.clone());
+        let weapon = config.stations[0].weapon.clone();
+        let ground = |_: f64, _: f64| 0.;
+        let emitted = wings.release(&launch(id, 0x5000_0001), &mut state, &weapon, &[], &ground);
+        assert!(emitted > 0);
+        let launcher = crate::combat::launcher(wings.mission().actor(id).unwrap().flight());
+        let opening = bays::opening(AircraftId::Tu26).unwrap();
+        // The pack record (six stores, 2 ft apart) stages across the grid
+        // point, which only the pack does; its middle stays inside the
+        // opening's width and every round starts within its length.
+        let sides: Vec<f64> = state
+            .projectiles
+            .iter()
+            .map(|p| p.position[0] - launcher.position[0])
+            .collect();
+        let middle = sides.iter().sum::<f64>() / sides.len() as f64;
+        assert!(middle.abs() < opening.outer, "{sides:?}");
+        for p in &state.projectiles {
+            let forward = p.position[2] - launcher.position[2];
+            assert!(forward > opening.aft && forward < opening.fore, "{forward}");
+        }
+    }
 }

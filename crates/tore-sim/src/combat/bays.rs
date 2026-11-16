@@ -226,6 +226,34 @@ pub const F111_PAVE_TACK_BODY: [f64; 2] = [8.0, 1.25];
 /// (the bomb pair is shorter than the span between them).
 pub const F111_CRADLE_POSTS: f64 = 4.6;
 
+/// The Tu-26's one bay (T26-5; Jane's size from `TU26.INF`, 22.97 ft long and
+/// 5.9 ft wide; measured in `TU26.SH`, 4/3 ft a unit). It is one centred
+/// opening in the belly, two doors hinged on the outer edges (the shape's
+/// `788c` plates are the open pose), 24 ft forward (the record's row 5, `z` 72
+/// units of a third of a foot).
+pub const T26_BAY_WIDTH: f64 = 5.9;
+pub const T26_BAY_LENGTH: f64 = 22.97;
+pub const T26_BAY_FORWARD: f64 = 24.0;
+/// The hinge plane of the Tu-26's doors, feet up: the outer belly panel of
+/// `TU26.SH` at z -3 units (the keel strip down the middle is a unit lower, z
+/// -4, and its slope up to the panel: the leaves are cut across both and turn
+/// as one). A store's lowest fin tip hangs on it.
+pub const T26_BELLY: f64 = -4.0;
+/// How deep the Tu-26's recess is above its belly plane, feet (fitted, agent
+/// decision, T26-5, 2026-11-16): about the 5.2 ft drum of the real six-round
+/// launcher and 4.3 ft under the fuselage's top skin (z +4 units over the bay,
+/// 5.3 ft up), so the roof stands inside the fuselage.
+pub const T26_BAY_DEPTH: f64 = 5.2;
+/// How far ahead of the stores' middles the Tu-26's row hangs their origins,
+/// feet (negative: behind): the real bay's load is the Kh-15 (`KIKBK.SH`,
+/// 15.7 ft), whose shape spans -3.47 to +12.23 ft about its origin (measured in
+/// the clearance report, T26-5), so with the row's mount 4.37 ft behind the
+/// bay's middle the missile is centred in the 22.97 ft bay (21.4 to 37.1 ft
+/// forward at the B-52's +0.87 ft offset it would stand 1.6 ft through the fore
+/// wall). The 500 lb class bombs (about origin -4.52 to +2.78 ft) then lie 4.4
+/// ft aft of centre, which the two rows of eight still clear (fitted).
+pub const T26_ORIGIN_AHEAD: f64 = -4.37;
+
 /// Every bay station, in aircraft and row order. Add a row per station.
 pub const STATIONS: &[BayStation] = &[
     BayStation {
@@ -353,6 +381,14 @@ pub const STATIONS: &[BayStation] = &[
         aircraft: AircraftId::F111,
         row: 9,
         mount: [0., F111_BELLY, F111_BAY_MOUNT_FORWARD],
+    },
+    // The Tu-26's one bay row (T26-5): the retail row 5, lifted from 13.3 ft
+    // below the reference point to the belly plane, a grid of [`GRIDS`] over
+    // the whole 22.97 ft by 5.9 ft bay.
+    BayStation {
+        aircraft: AircraftId::Tu26,
+        row: 5,
+        mount: [0., T26_BELLY, T26_BAY_FORWARD + T26_ORIGIN_AHEAD],
     },
 ];
 
@@ -484,6 +520,15 @@ pub const GRIDS: &[BayGrid] = &[
         width: 2. * F111_BAY_HALF,
         length: F111_BAY_FORE - F111_BAY_AFT,
         ceiling: F111_BELLY + F111_BAY_DEPTH,
+    },
+    // The Tu-26's one bay row (T26-5): the whole 5.9 by 22.97 ft floor under a
+    // flat roof 5.2 ft over the belly plane.
+    BayGrid {
+        aircraft: AircraftId::Tu26,
+        row: 5,
+        width: T26_BAY_WIDTH,
+        length: T26_BAY_LENGTH,
+        ceiling: T26_BELLY + T26_BAY_DEPTH,
     },
 ];
 
@@ -718,6 +763,23 @@ pub const OPENINGS: &[Opening] = &[
         belly: F111_BELLY,
         depth: F111_BAY_DEPTH,
         inner_depth: F111_BAY_DEPTH,
+        rail: [0., 0.],
+    },
+    // The Tu-26 (T26-5, Jane's size, measured and fitted): one bay on the
+    // centre line, two doors hinged on the outer edges (drawn by
+    // `bay_doors::centre_doors`), 5.9 ft wide, 22.97 ft long, cut across the
+    // keel strip and the belly panels at the hinge plane -4 ft, under a flat
+    // roof 5.2 ft over it. No rail: the launcher's drum is not drawn.
+    Opening {
+        aircraft: AircraftId::Tu26,
+        centre: 0.,
+        inner: 0.,
+        outer: T26_BAY_WIDTH / 2.,
+        aft: T26_BAY_FORWARD - T26_BAY_LENGTH / 2.,
+        fore: T26_BAY_FORWARD + T26_BAY_LENGTH / 2.,
+        belly: T26_BELLY,
+        depth: T26_BAY_DEPTH,
+        inner_depth: T26_BAY_DEPTH,
         rail: [0., 0.],
     },
 ];
@@ -1014,6 +1076,41 @@ mod tests {
         let body = pod_body(AircraftId::F111).unwrap();
         assert!(body[0] < o.fore - o.aft && pod_body(AircraftId::B2).is_none());
         assert!(F111_CRADLE_POSTS > body[0] / 2.);
+    }
+
+    #[test]
+    fn the_tu26_has_one_centred_bay_row_on_the_shared_grid() {
+        let id = AircraftId::Tu26;
+        assert!(reviewed(id));
+        // Only the retail row 5 is a bay: the glove and intake rows and the
+        // tail gun are not.
+        for row in [0, 3, 4, 6, 7, 8] {
+            assert_eq!(station(id, row), None);
+            assert_eq!(grid(id, row), None);
+        }
+        let o = opening(id).unwrap();
+        // Jane's 22.97 by 5.9 ft, on the centre line, 24 ft forward (the
+        // record's row), two doors and no rail, a flat roof.
+        assert!((o.fore - o.aft - 22.97).abs() < 1e-9);
+        assert!((2. * o.outer - 5.9).abs() < 1e-9);
+        assert!(((o.fore + o.aft) / 2. - 24.).abs() < 1e-9);
+        assert_eq!((o.centre, o.inner, o.rail), (0., 0., [0., 0.]));
+        assert_eq!(o.inner_depth, o.depth);
+        assert_eq!(o.belly, T26_BELLY);
+        // The row hangs on the belly plane, on the centre line, with the
+        // Kh-15's 15.7 ft (about its origin -3.47 to +12.23 ft) between the
+        // end walls and under the roof.
+        let mount = station(id, 5).unwrap();
+        assert_eq!((mount[0], mount[1]), (0., T26_BELLY));
+        assert!(mount[2] - 3.47 >= o.aft && mount[2] + 12.23 <= o.fore);
+        assert!((mount[2] + (12.23 - 3.47) / 2. - (o.fore + o.aft) / 2.).abs() < 0.1);
+        assert_eq!(grid(id, 5), Some([5.9, 22.97, T26_BELLY + T26_BAY_DEPTH]));
+        // One bay, one row: no alternative, and the roof stands inside the
+        // fuselage (its top skin is 5.3 ft up over the bay).
+        assert_eq!(alternative(id, 5), None);
+        assert!(o.belly + o.depth < 5.3);
+        // The Tu-95's and the Tu-160's rows are not this bay's.
+        assert_eq!(station(AircraftId::Tu95, 5), None);
     }
 
     #[test]

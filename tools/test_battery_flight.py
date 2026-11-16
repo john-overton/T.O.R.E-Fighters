@@ -80,7 +80,7 @@ class TakeoffAndLandingTests(unittest.TestCase):
         # MiG-31's and Mirage 2000's liftoff and approach figures (M25-8, M31-8,
         # M2K-8). The F-16A has no per-aircraft speed target: its record equals
         # the F-16C's (F16A-6).
-        self.assertEqual(set(flight.APPROACH_TARGET) | {"x31"}, set(flight.AIRCRAFT) | {"mig25", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc", "b52", "b2", "f117", "b1b", "tu160", "f111"})
+        self.assertEqual(set(flight.APPROACH_TARGET) | {"x31"}, set(flight.AIRCRAFT) | {"mig25", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc", "b52", "b2", "f117", "b1b", "tu160", "f111", "tu26"})
         self.assertIn("mig25", flight.VARIETY_AIRCRAFT)
         self.assertIn("mig25", flight.LIFTOFF_AIRCRAFT)
         self.assertIn("mig25", flight.LIFTOFF_TARGET)
@@ -193,6 +193,30 @@ class TakeoffAndLandingTests(unittest.TestCase):
         self.assertEqual(flight.KNOWN_LIFTOFF["f111"], 171.8)
         self.assertEqual(flight.KNOWN_APPROACH["f111"], 166.2)
         self.assertEqual(flight.approach_fuel("f111"), round(0.65 * 32663))
+        # The Tu-26 Backfire-C (T26-8, 2026-11-16): the long takeoff has its own tick limit and Athens.
+        for key in ("VARIETY_AIRCRAFT", "LIFTOFF_AIRCRAFT"):
+            self.assertIn("tu26", getattr(flight, key))
+        for key in ("LIFTOFF_TARGET", "APPROACH_TARGET", "INTERNAL_FUEL_LB", "KNOWN_LIFTOFF", "KNOWN_APPROACH"):
+            self.assertIn("tu26", getattr(flight, key))
+        self.assertEqual(flight.TAKEOFF_TICKS_MAX["tu26"], 6000)
+        self.assertEqual(flight.THEATER_FOR["tu26"], "GRE")
+        self.assertEqual(flight.KNOWN_LIFTOFF["tu26"], 167.3)
+        self.assertEqual(flight.KNOWN_APPROACH["tu26"], 166.2)
+        self.assertEqual(flight.approach_fuel("tu26"), round(0.60 * 110230))
+        self.assertEqual(flight.approach_fuel("b52"), round(0.65 * 312197))
+
+    def test_the_tu26_ground_runs_are_held_to_the_fitted_windows(self):
+        # T26-8 (2026-11-16): the takeoff run at the default load and the landing roll at 65 percent fuel.
+        takeoff = TAKEOFF.replace("distance_ft=1376", "distance_ft=4402").replace("speed_kt=147.0", "speed_kt=167.3")
+        takeoff = takeoff.replace("min_level_flaps_kt=148.4", "min_level_flaps_kt=166.3").replace("g1_kt=118.5", "g1_kt=145.2")
+        self.assertEqual(flight.check_liftoff_speed(takeoff, "tu26"), [])
+        short = takeoff.replace("distance_ft=4402", "distance_ft=2100")
+        self.assertTrue(any("takeoff run 2100 ft" in p for p in flight.check_liftoff_speed(short, "tu26")))
+        landing = LANDING.replace("runway_length_ft=5532", "runway_length_ft=12000").replace("touchdown_forward_kt=136.8", "touchdown_forward_kt=157.6")
+        landing = landing.replace("touchdown_tick=11742", "touchdown_tick=11742 touchdown_past_threshold_ft=1253").replace("stopped=true", "stopped=true stop_past_threshold_ft=5466 approach_kt=166.2")
+        self.assertEqual(flight.check_approach_speed(landing, "tu26"), [])
+        quick = landing.replace("stop_past_threshold_ft=5466", "stop_past_threshold_ft=3455")
+        self.assertTrue(any("landing roll 2202 ft" in p for p in flight.check_approach_speed(quick, "tu26")))
 
     def test_overweight_and_stuck(self):
         text = TAKEOFF.replace("gross_lb=41838", "gross_lb=50000")

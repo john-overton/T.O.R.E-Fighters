@@ -1015,6 +1015,32 @@ force reads the sweep, as for the Tornado):
 - Every other swing-wing aircraft (the Tornado, the B-1B, the Tu-160, the Tu-26) has no
   rate, and its wing takes the schedule's turn the same tick, bit for bit.
 
+## Tupolev Tu-26 Backfire-C (T26-8, 2026-11-16)
+
+The Tu-26 flies the `variety` configuration built from `TU26.PT` with its BMB-C2 values
+(66,000 / 110,000 lbf, empty 127,868 lb, tank 110,230 lb, 10 / 66 lb/s, 273,370 lb maximum
+takeoff, 1,080 kt and 43,635 ft edges) and the record's own envelopes and G rows. Two terms
+are the aircraft's own and **fitted**; everything else, the clean drag, the thrust lapse, the
+stall reference and the nose alignment, is the shared value
+([review and table](../formats/aircraft-variety.md#tu-26-backfire-c-flight-review-t26-8-2026-11-16)):
+
+- **Rolling deceleration** 6.0 ft/s squared (shared 0.8): the takeoff run is 4,402 ft at the
+  default load (253,971 lb) and 5,479 ft at the 273,370 lb maximum, lifting off at 167 to 174
+  kt; the game's own Jane's text (`TU26.INF`) gives 2,100 m (6,890 ft) to 200 kt. The value is
+  held below the 8.4 that would match the run, because 8.4 ft/s squared at 273,370 lb is more
+  force than the 66,000 lbf of military thrust and the aircraft could not roll or taxi without
+  the afterburner (the AI's taxi law, BMB-AI, reads the same ratio, 0.72 at the default load).
+- **Brake deceleration** 6.0 ft/s squared (shared 18): a landing at 65 percent fuel touches
+  down at 157.6 kt and rolls 4,213 ft (Jane's: 154 kt and 1,300 m, 4,265 ft).
+
+The swing wing keeps the speed schedule of `swing::TU26` (SWING-1, fitted): 20
+degrees to 300 kt and whenever the gear or flaps are out, 65 degrees from 560 kt. It is read
+by the rig only; no flight term depends on the sweep.
+
+Not changed: the top speeds (the record's 1,080 kt and 598 kt edges; the loaded aircraft
+settles at 962 to 1,000 kt at 36,000 ft and 533 to 554 kt at sea level), the 43,635 ft
+ceiling, the G rows (3.2 G at the pull, Jane's +2.5 G) and the roll limit.
+
 ## Unknown evidence
 
 Retail hover power, altitude ceiling, nozzle travel/rate, rotor torque, lift

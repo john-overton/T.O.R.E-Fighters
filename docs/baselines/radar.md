@@ -409,3 +409,19 @@ target camera window's title, the Load Ordnance sensor line and pod card, and th
 (the infrared channel reads FLIR). The RCS page reads `SIG 165` with the doors shut and `SIG 248` with the bay
 open (default load, first GBU-28 released). Laser designation works: `a2g-laser-f111`. See [the F-111F
 section](../formats/aircraft-variety.md#f-111f-ordnance-sensors-hud-and-cockpit-f111-67-2026-11-16).
+
+## Tu-26 sensors: the radar enabled as Transitional, the jammer Early, a fixed laser row, 2026-11-16 (T26-6, T26-7)
+
+`TU26R.SEE` had no preset, so it decoded as `UNREVIEWED (not enabled)` and the Tu-26 flew with no radar (as the
+B-52 did before B52-7). It is now `Preset::Transitional` and `TU26.ECM` `Generation::Early` (the record has no RF mode and
+strength 0.00, like `F4.ECM` and `F104.ECM`; fitted, agent decision). `--sensor-summary` reads `Tu26: radar TU26R.SEE search 100 nmi 60x60
+deg track 100 nmi 45x45 deg look-down 0 TRANSITIONAL; infrared none; visual VIS300.SEE search 10 nmi 150x120 deg track 5 nmi 150x120 deg;
+jammer TU26.ECM EARLY strength 0.00 (no RF mode); signature radar 100 infrared 100` (it read `UNREVIEWED (not enabled)` for both the radar
+and the jammer before). The radar gives the shared air-to-air modes only (RWS search, TWS with a fire-control track, scope 5 to 100 nmi);
+there is no ground-mapping mode, as for the B-52 and the B-2. A surface radar missile uses the A-G designation of a radar contact:
+`a2g-antiship-tu26` designates the Krivak through the Tu-26's radar and hits it with an AS-16 from the glove row and from the bay. The built-in
+`SU37L.SEE` laser row works with no pod body: `a2g-laser-tu26` lases a tank and a GBU-16 from the inner glove pair guides onto it and destroys it.
+`--jammer-on` lights `JAM` on the RWR window (the annunciator follows the command; the record gives no RF noise). Chaff and flares: 99 and 99, five
+and three released leave 94 and 96 (`flight-countermeasures-tu26`). The RCS page reads `SIG 150` closed (the record's 100 plus the stores on
+the stations) and `SIG 225` with the bay open (the open-bay term of 1.5, which reaches only the RCS page). See [the Tu-26
+section](../formats/aircraft-variety.md#tu-26-backfire-c-ordnance-sensors-hud-and-cockpit-t26-67-2026-11-16).

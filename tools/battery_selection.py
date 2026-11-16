@@ -82,7 +82,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
     "flight-combat": (
         "guns, missiles, F-22A/F-22N bays and live fire, jettison, countermeasures, combat smoke and evidence",
         (
-            "flight-fight-*", "flight-b52-tail-gun", "flight-attack-*", "flight-livefire-*", "flight-combatevidence-*",
+            "flight-fight-*", "flight-b52-tail-gun", "flight-tu26-tail-gun", "flight-attack-*", "flight-livefire-*", "flight-combatevidence-*",
             "flight-combatsmoke-*", "flight-missileacceptance-*", "flight-missile-sag", "flight-missile-energy", "flight-missile-defeat", "flight-jettison-*", "flight-bay-*",
             "flight-wreckcontact-*", "flight-ac130-*",
             "flight-countermeasures-*",  # Includes the fixed-tick AI cadence regression.
@@ -112,7 +112,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         "AI against AI, one against one up to fifteen against fifteen, guns, skills, threats",
         (
             "ai-fight-*", "ai-pair-*", "ai-big-*", "ai-guns-*", "ai-separation-*", "ai-skill-*",
-            "ai-mig25-*", "ai-f16a-*", "ai-mig31-*", "ai-m2000-*", "ai-f15e-*", "ai-gripen-*", "ai-f5e-*", "ai-mf1-*", "ai-tornado-*", "ai-tornadoc-*", "ai-b2-*", "ai-b52-*", "ai-b1b-*", "ai-tu160-*", "ai-f111-*", "ai-f117-*", "ai-threat-*", "ai-missile-launch-regression", "ai-missile-envelope-gaps", "ai-missile-player-cue", "ai-missile-turning-cue", "ai-long-1v1", "ai-long-5v5", "ai-long-15v15*", "ai-long-guns-*", "ai-long-hold-*",
+            "ai-mig25-*", "ai-f16a-*", "ai-mig31-*", "ai-m2000-*", "ai-f15e-*", "ai-gripen-*", "ai-f5e-*", "ai-mf1-*", "ai-tornado-*", "ai-tornadoc-*", "ai-b2-*", "ai-b52-*", "ai-b1b-*", "ai-tu160-*", "ai-f111-*", "ai-tu26-*", "ai-f117-*", "ai-threat-*", "ai-missile-launch-regression", "ai-missile-envelope-gaps", "ai-missile-player-cue", "ai-missile-turning-cue", "ai-long-1v1", "ai-long-5v5", "ai-long-15v15*", "ai-long-guns-*", "ai-long-hold-*",
         ),
     ),
     "ai-damage": ("AI with faults and damage", ("ai-damaged-*", "ai-fault-*", "ai-record-fault")),
@@ -185,7 +185,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
     # Replay lane.
     "replay-recording": (
         "recording, reading and corrupting replay files",
-        ("replay-banner-*", "replay-stores-*", "replay-rec-*", "replay-surface", "replay-a2g", "replay-a2g-b2-ripple", "replay-a2g-b52-ripple", "replay-a2g-b1b-ripple", "replay-a2g-tu160-ripple", "replay-a2g-f111-ripple", "replay-a2g-f117", "replay-city-strike", "replay-city-smoke-seek", "replay-taped-views", "replay-weapon-chase", "replay-hud-state", "replay-corrupt-*", "replay-watch-*", "ai-record-*", "ai-determinism-recordings"),
+        ("replay-banner-*", "replay-stores-*", "replay-rec-*", "replay-surface", "replay-a2g", "replay-a2g-b2-ripple", "replay-a2g-b52-ripple", "replay-a2g-b1b-ripple", "replay-a2g-tu160-ripple", "replay-a2g-f111-ripple", "replay-a2g-tu26-ripple", "replay-a2g-f117", "replay-city-strike", "replay-city-smoke-seek", "replay-taped-views", "replay-weapon-chase", "replay-hud-state", "replay-corrupt-*", "replay-watch-*", "ai-record-*", "ai-determinism-recordings"),
     ),
     "replay-cli": (
         "command-line errors, speeds, ticks, small tools",

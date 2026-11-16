@@ -346,3 +346,7 @@ window no `CHAFF` or `FLARE` line (it carries no dispenser).
 The B-1B flies the B-2's cockpit family by its record (coordinator first pass, 2026-11-15; B1B-7): `bmbrcc.HUD` names the panel `~b2_p`, so it draws the `~B2_P.PIC` bezel
 over `~B2H.PIC`, with the B-2's measured glass. Its Systems window shows one engine readout, as every aircraft's does (it has four engines), and its own fuel: `FUEL 243000
 LBS` and `(+ EXT 0 LBS)`; its Weapons window reads `12 MK-82AIR7` with `30 CHAFF` and `30 FLARE` (B1B-7 frames).
+
+The Tu-26 flies the AC-130 cockpit family by its record (coordinator first pass, 2026-11-15; T26-7): `bmbroh.HUD` names the panel `~ac130_p`, so it draws the AC-130's bezel over `~AC130H.PIC`
+(1280 x 490), with the AC-130 family's glass (the picture's transparent pixels, 504,831 of 627,200). Its Systems window shows one engine readout and its own fuel
+(`FUEL 110230 LBS`), and its Weapons window reads `2000 23MMX1`, `6 AS-16` and `99 CHAFF`, `99 FLARE`; the HUD's gun line is `TAIL 2000 23MMX1` (the slewed tail gun, as the B-52's). Frames in `.local/m3-aircraft/frames/T26-6/`.

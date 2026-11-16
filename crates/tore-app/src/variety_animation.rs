@@ -1131,6 +1131,7 @@ impl Rig {
             Some(SpecificRig::B2(rig)) => rig.faces(source, state),
             Some(SpecificRig::B52(rig)) => rig.faces(source, state),
             Some(SpecificRig::B1b(rig)) => rig.faces(source, state),
+            Some(SpecificRig::Tu26(rig)) => rig.faces(source, state),
             Some(SpecificRig::F117(rig)) => rig.faces(source, state),
             Some(SpecificRig::Tu160(rig)) => rig.faces(source, state),
             Some(SpecificRig::F111(rig)) => rig.faces(source, state),

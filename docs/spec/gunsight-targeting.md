@@ -155,3 +155,10 @@ aft mount, the Tu-95 dorsal tilt, the arcs, the muzzle point in the mount's fram
 `a_forward_gun_keeps_the_nose_line_and_its_sight_view`,
 `a_slewed_guns_sight_view_points_astern_from_the_same_muzzle`). `tore-world`: `ai_wings::tail_gun_tests`.
 
+
+## Update (T26-6, 2026-11-16): the Tu-26's tail gun
+
+The Tu-26's `T23_1.JT` row carries the same slew words as the B-52's (heading 32,760, arcs 30 degrees), so it is a slewed mount with no new code: the round, the
+human's sight, the networked client and the AI follow it (`ai_wings::tail_gun_tests::the_retail_tu26_and_tu95_gun_rows_are_slewed_tail_guns_that_fire_astern`). The
+HUD reads `TAIL 2000 23MMX1`; the muzzle is the nozzle exit plane (T26-5). A human's rounds leave astern (frame `tail-gun-external` shows the tracers going
+aft from the tail). `flight-livefire-tu26-slot1` fires it. See [the Tu-26 section](../formats/aircraft-variety.md#tu-26-backfire-c-ordnance-sensors-hud-and-cockpit-t26-67-2026-11-16).

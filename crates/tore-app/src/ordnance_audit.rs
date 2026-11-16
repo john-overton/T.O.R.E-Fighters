@@ -178,7 +178,17 @@ const TANK_RECORDS: usize = 9;
 /// `PAVEWAY`) and row 6 four (the GBU-27 class): 228 + 3 + 14 - 14 = 231.
 /// 5,337 with the F-111F (+3) on top of the B-1B and the Tu-160 (2026-11-16, batch B
 /// integration; the merged total is measured by `--validate-ordnance` at the end of the round).
-const WEAPON_PLACEMENTS: usize = 5337;
+/// 5,350 from 5,395 (T26-5, 2026-11-16, measured by `--validate-ordnance`): the
+/// Tu-26's bay row refuses 19 stores (`T26_BAY_REFUSED`: the Harpoon and AM-39
+/// the active-radar bit admits, by name, and 17 that do not fit the measured
+/// bay), its intake pair 17 (`T26_INTAKE_REFUSED`) and its glove rows four
+/// each and the outer row also the GBU-28 (`T26_GLOVE_REFUSED`,
+/// `T26_OUTER_GLOVE_REFUSED`), so `TU26.PT` goes from 129 to 84 placements
+/// (minus 45: 19 + 17 + 4 + 5). The normal catalog is 31 stores. At the
+/// integration the coordinator recomputes (B4).
+/// 5,292 with the Tu-26 (-45) on top of the B-1B, the Tu-160 and the F-111F (2026-11-16,
+/// batch B and C integration; the merged total is measured by `--validate-ordnance` at the end of the round).
+const WEAPON_PLACEMENTS: usize = 5292;
 /// 188 from 182: the F-16A's centreline tank row (F150.GAS or F250.GAS) plus
 /// the tank selection its two 0x07e5 wing rows accept, 6 tank placements.
 /// 192 from 188: the MiG-31 (M31-1). 201 from 192: the Mirage 2000 (M2K-1).

@@ -272,7 +272,9 @@ rule](../spec/ordnance-presentation.md#novelty-bombs-are-cheat-only)).
 | `a2g-harm-page` | The same F-4G on the HARM page (M), T to the Straight Flush | The designation turns the cue to CUED; the HARM leaves in CUED at the radar and kills it |
 | `a2g-antiship` | Over `~QUSFLT`: an F/A-18D's AGM-84A and a Rafale's AM-39 at the Krivak designated on the A-G page | Launched midcourse at the Krivak, the seeker goes active on it and it is hit |
 | `a2g-antiship-b52` (B52-6, 2026-11-15) | Over `~QUSFLT`: two AGM-84E from the B-52's underwing pylons (`--station 1 --count 2`) at the Krivak designated on the A-G page through the B-52's radar | Designated, launched at the Krivak, the ship is hit |
+| `a2g-antiship-tu26` (T26-6, 2026-11-16) | Over `~QUSFLT`: two AS-16 from the Tu-26's outer glove row (`--station 3`) and two from its belly bay (`--station 4`) at the Krivak designated on the A-G page through the Tu-26's radar | Each designated, launched at the Krivak, the seeker goes active, the ship is hit |
 | `flight-b52-tail-gun` (B52-6, 2026-11-15) | `--aircraft f22 --probe-enemy-aircraft b52 --probe-enemy-skill ace --probe-geometry rear --separation 1 --probe-guns --ai-probe-ticks 3000`: a scripted F-22 closes on two AI B-52s from behind | The debrief's `enemy_gun=hits/shots` shows the B-52's slewed M61 firing astern and reaching the F-22 (shots above zero, hits above zero) |
+| `flight-tu26-tail-gun` (T26-6, 2026-11-16) | The same probe against an AI Tu-26 (`--probe-enemy-aircraft tu26`) | The Tu-26's slewed `T23_1.JT` fires astern at the F-22 (shots above zero, hits under 35 percent of them: 4 of 253) |
 | `a2g-sarh` | Over `~QUCOL`: a MiG-23's AS-7 on a tank designated on the A-G page, then the same with the A-G page turned off two seconds after launch | On the track it kills its tank, never unguided; with the page off it loses its target for good (status Lost, unguided) and the tank is not hit |
 | `a2g-sarh-uncued` | A MiG-23 AS-7 released at 0.5 seconds with no A-G track; the page opens at 3 seconds and designation follows | Initial targetless Search without permanent disablement, then Locked on later illumination; `--attack sarh-uncued` uses ordinary player controls |
 
@@ -421,11 +423,18 @@ adds order kinds.
 | `ai-strike-f111-maverick` (F111-9) | The default load's four AGM-65G on the outer pylon pair (`--station 2 --count 4`) | One AGM-65G from (-16.13, -0.40, -0.08) on the fast high pass, the tank killed, the doors never move, not lost |
 | `ai-strike-f111-antiship` (F111-9) | Two AGM-84E on the outer pair (`--station 2 --count 2`), 15 nm from the Ukraine surface fleet's Krivak at 20,000 ft, 60 s | One Harpoon a wing (right -15.28 and 15.28 ft, forward -0.08), the doors never move, both hit and the Krivak is destroyed |
 | `ai-strike-f111-quick-wing` (F111-9) | A Quick Mission with the Ukraine column as the ground target and an F-111F wing (`--quick-wing`) | `ROLE strike`, the six retarded Mk 82 of station 1 in the laydown, six impacts, the target killed, egress, not lost. The factory is not used: the wingman is lost to its own bombs over a rise on the way (docs/formats/aircraft-variety.md, F111-9) |
+| `ai-strike-tu26-pylon` (T26-9, 2026-11-16) | An AI Tu-26 on `~QUCOL` at 20,000 ft, 12 nm out, six Mk 82 on the inner glove row (`--station 2 --count 6`) | Six releases 0.25 s apart from the two gloves alternating from the left (right -11.33, 11.33, -12.02, 12.02, -10.64, 10.64 ft, up -4.69 to -4.12, forward 4.33), the doors never move, six impacts, egress, not lost |
+| `ai-strike-tu26-quick-wing` (T26-9) | A Quick Mission with the Ukraine factory as the ground target and a Tu-26 wing (`--quick-wing --station 4 --count 8`) | `ROLE strike`, the bay stick of eight (`ai-strike-tu26-stick`'s cells) at 4,949 ft with the belly doors open before and shut after, the factory killed, egress, not lost |
+| `ai-strike-tu26-antiship` (T26-9) | An AI Tu-26 with two AGM-84E on the inner glove row (`--station 2 --count 2`), 15 nm from the Ukraine surface fleet's Krivak at 20,000 ft, 60 s | One Harpoon leaves each glove (right -11.33 and 11.33 ft, up -4.2, forward 4.33), the doors never move, both hit and the Krivak is destroyed (29 s). The Tu-26's own AS-16 is not flown by the AI at a ship (the T160-9 dependency, [AI strike spec](../spec/ai-strike.md)) |
 | `a2g-release-origin-b2` (B2-6) | The human trigger on the B-2's four bay rows (`--a2g-run --attack release`, 12 presses a Mk 82 row, 4 a Paveway row) | Each release leaves where it hangs: outermost first, alternating sides, front row before back, bottom tier first |
 | `ai-strike-tu160-stick` (T160-6, 2026-11-16) | An AI Tu-160 (Heavy) on `~QUCOL` at 20,000 ft, 12 nm out, the forward bay's six Mk 82 (`--aircraft tu160 --load MK82`) | Six releases from the grid's own places (four abreast at 45.73 then 38.18 ft ahead, -1.95 ft up), doors open for the release, an impact, egress, not lost; the cells equal the human's in `a2g-release-origin-tu160` |
 | `a2g-release-origin-tu160` (T160-6, 2026-11-16) | The human trigger on the Tu-160's bays (`--a2g-run --attack release`, 6 AS-16 a bay, 6 Mk 82 of the forward bay) | Each release leaves where it hangs: AS-16 three abreast (-1.59, +1.59, 0), forward row then back (38.61 and 22.66 ft forward, aft bay -12.73 and -28.68); Mk 82 four abreast |
 | `a2g-antiship-tu160` (T160-6, 2026-11-16) | Over `~QUSFLT`: an AS-16 from the forward bay (`--station 0 --count 6 --from 6`) at the Krivak designated on the A-G page through the Tu-160's radar | Launched CUED at the Krivak, midcourse then Pitbull, the ship hit (150 of 500 left) |
 | `flight-countermeasures-tu160` (T160-6, 2026-11-16) | `--live-fire --aircraft tu160 --jammer-on`, five chaff and three flares | The record's 99 chaff and 99 flares, 94 and 96 left |
+| `a2g-release-origin-tu26` (T26-6, 2026-11-16) | The human trigger on the Tu-26's AS-16 rows (intake pair, both glove pairs, the bay, `--a2g-run --attack release`) and the bay loaded with eight Mk 82 | Each release leaves where it hangs: left then right off the rails and pylons; the bay's AS-16 three abreast then the second tier, its Mk 82 four abreast in two rows (the AI's cells, `ai-strike-tu26-stick`) |
+| `ai-strike-tu26-stick` (T26-6) | An AI Tu-26 (Heavy) on `~QUCOL` at 20,000 ft, 12 nm out, eight Mk 82 loaded into the bay (`--station 4`) | Eight releases 0.25 s apart from the grid's own eight places, inside the bay opening, the doors open at every release, an impact, egress, not lost |
+| `a2g-laser-tu26` (T26-6) | A GBU-16 from the Tu-26's inner glove pair (`--station 2`) at 15,000 ft on the spot of its built-in `SU37L.SEE` designator | Lased, released guiding on its own spot, the tank destroyed |
+| `flight-livefire-tu26-slot1` to `slot5`, `flight-jettison-tu26-slot2` to `slot4`, `flight-countermeasures-tu26` (T26-6) | `--live-fire --aircraft tu26`, `STATIONS["tu26"] = [2000, 2, 2, 2, 0]`; slots 2 to 4 are in `REFUSED_SLOTS` (a surface missile against the practice aircraft) | The gun fires astern, the AS-16 slots fire nothing and keep their rounds, the three AS-16 rows jettison, the bay slot stays empty; 99 chaff and 99 flares, five and three released |
 | `a2g-laser-b2` (B2-6) | A GBU-27 from the left bay at 20,000 ft on the B-2's own laser spot | Guides to within a second of the ground, kills the tank |
 | `flight-livefire-b2-slot1` to `slot4`, `flight-countermeasures-b2` (B2-6) | `--live-fire --aircraft b2`, `STATIONS["b2"] = [32, 32, 0, 0]` | One Mk 82 a slot (the empty Paveway slots fall to the sister bay), 30 chaff and 30 flares |
 | `ai-strike-offset` | Level and dive Mk 82 passes at skill 2 starting 1,000 and 3,000 ft off the attack line (`--offset`) | The first release on pass 1 (the sideways law converges on the first pass) |
@@ -1149,3 +1158,21 @@ Update (F111-6, 2026-11-16): three scenarios for the F-111F's sensors and guided
 | `a2g-maverick-f111` | `--attack maverick --load AGM65G --station 2 --count 4` (the outer pylon's four AGM-65G, through the A-G radar channel) | The column's lead truck is killed (`hp 0/200`) |
 | `flight-countermeasures-f111` | `--live-fire --aircraft f111`, five chaff and three flare commands | 30 chaff and 30 flares from the `A6.ECM` row, carried counts fall by the releases (the shared countermeasure check) |
 
+Update (T26-5, 2026-11-16): the Tu-26's bay sweep (`bay` control of `flight-animation-tu26`) now checks the
+fitted bay (17 belly faces whole at 0 with nothing under the keel line and no lining; open, 5 lining
+faces, a vertex on each of the two hinge lines at the outer panels' plane, the lowest leaf point
+`-3 - 2.2125 sin(a) - cos(a)` shape units). New scenarios: `flight-bay-fire-tu26-row5` (windowed, the
+one-press release of eight Mk 82 through the Tu-26's bay: doors open before the bomb leaves, closed
+after), `flight-bay-fire-tu26-pylon-row7` (a Mk 82 from the fixed glove with the doors shut),
+`bay-tu26-0`, `-0.5` and `-1` (the `--flight-bay` frames) and `render-tu26-clearance` (headless: the four
+Kh-15 clear the open bay's doors, walls, roof and floor by 0.05 ft, the six default Kh-15 clear the swing
+panel at every sweep and the gear).
+
+Update (T26-8, 2026-11-16): `tu26` joins `VARIETY_AIRCRAFT` and `LIFTOFF_AIRCRAFT` in `flight.py`
+(`flight-variety-tu26`, `flight-liftoff-tu26`, `flight-liftoff-retail-tu26`, `flight-approach-tu26`) with
+fitted windows (liftoff 150 to 205 kt, recorded 167.3; approach 150 to 175 kt, recorded 166.2; takeoff
+run 3,500 to 5,500 ft and landing roll 3,500 to 5,000 ft through `LIFTOFF_RUN_FT` and `ROLLOUT_FT`), a
+6,000 tick takeoff limit (`TAKEOFF_TICKS_MAX`), Athens (`THEATER_FOR`) and 60 percent fuel (66,138 lb,
+`APPROACH_FUEL_SHARE`; at 65 percent the scripted flare touches down at 12.1 ft/s) for the approach. `ai-heavy-takeoff-tu26-gre-a1` joins the [AI lane](lane-ai.md); the landing twin was
+not added (the AI Tu-26 lands short at Simferopol, see the review). Results: the
+[variety flight baseline](../baselines/variety-flight.md#tupolev-tu-26-backfire-c-validation-2026-11-16).
