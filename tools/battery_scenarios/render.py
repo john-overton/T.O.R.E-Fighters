@@ -521,6 +521,21 @@ def scenarios() -> list[Scenario]:
             notes="B-52H skin from above and below with the gear down, at its header scale (2/3 ft a unit, true size, no per-axis factor): no underside shape shows through the top and the 12 double-sided panels do not z-fight. The shape's two E0 wing-marking decal slots stay omitted rather than filled with skin (docs/formats/aircraft-variety.md, B-52 shape, size and looks). The zoom is 0.5 so the 185 ft span fits.",
         ),
         Scenario(
+            name="render-tu95-skin",
+            lane="flight",
+            args=["--free-flight", "--aircraft", "tu95", "--flight-view", "2", "--flight-look", "0,60", "--flight-zoom", "0.5", "--flight-devices", "1,0,0,0,0", "--capture-flight", "{work}/tu95-top.ppm", "--no-audio"],
+            env={"TORE_WEATHER_TIME": "12:00"},
+            window=True,
+            outputs=["tu95-top.ppm", "tu95-under.ppm"],
+            expect=["Scene capture:"],
+            check=skin_capture_problems,
+            then=[
+                Step(["--free-flight", "--aircraft", "tu95", "--flight-view", "2", "--flight-look", "0,-60", "--flight-zoom", "0.5", "--flight-devices", "1,0,0,0,0", "--capture-flight", "{work}/tu95-under.ppm", "--no-audio"], window=True, timeout=180),
+            ],
+            timeout=180,
+            notes="Tu-95 skin from above and below with the gear down, at its header scale (2/3 ft a unit, true size, no per-axis factor): no underside shape shows through the top and the double-sided panels do not z-fight. The shape's two E0 wing decal slots (slot 3 on the left upper wing, slot 4 under the right wing) stay omitted rather than filled with skin (docs/formats/aircraft-variety.md, Tu-95 shape and rig). The zoom is 0.5 so the 165 ft span fits.",
+        ),
+        Scenario(
             name="render-b2-skin",
             lane="flight",
             args=["--free-flight", "--aircraft", "b2", "--flight-view", "2", "--flight-look", "0,60", "--flight-zoom", "1.4", "--flight-devices", "1,0,0,0,0", "--capture-flight", "{work}/b2-top.ppm", "--no-audio"],

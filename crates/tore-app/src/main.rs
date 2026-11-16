@@ -189,6 +189,7 @@ mod terrain_seams;
 mod tornado_animation;
 mod tu160_animation;
 mod tu26_animation;
+mod tu95_animation;
 mod ui_text;
 mod ui_text_renderer;
 mod updates;

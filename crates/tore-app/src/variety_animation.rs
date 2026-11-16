@@ -428,7 +428,10 @@ fn specification(id: Id) -> Option<Spec> {
             ),
             // TU95.SH: one word (gear 0x33b0, six wheel plates; the four
             // propeller discs are not a state word); header exponent 9, so
-            // 2/3 ft a unit.
+            // 2/3 ft a unit. Update (T95-2 and T95-3, 2026-11-15): the Tu-95
+            // loads through its own `tu95_animation` rig (tailplane, rudder,
+            // gear); the discs spin through `variety_rotors`. This row pins the
+            // layout, the scale and `supported`.
             Id::Tu95 => (9148, 155, &[0x33b0], &[(0x33b0, Part::Gear, 6)], 2. / 3.),
             // SU34.SH: five words (afterburner plume 0x67c0, airbrake 0x67c6,
             // gear 0x67cc, flaps 0x67d8 and 0x67de, the Su-35's layout), gear
@@ -526,6 +529,9 @@ enum SpecificRig {
     Tornado(crate::tornado_animation::Rig),
     /// B52-3 and B52-4: the stabilizer, flaps, rudder, gear and the interim bay.
     B52(crate::b52_animation::Rig),
+    /// T95-2 and T95-3: the tailplane, the rudder and the gear plates (the
+    /// propeller discs turn through `variety_rotors`).
+    Tu95(crate::tu95_animation::Rig),
     /// B2-3 and B2-4: the elevons, the drag rudders and speed brake, the gear
     /// and the fitted bays (B2-5).
     B2(crate::b2_animation::Rig),
@@ -913,6 +919,15 @@ impl Rig {
                     shape,
                 ));
             }
+            Id::Tu95 => {
+                let (rig, shape) = crate::tu95_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::Tu95(rig),
+                    shape,
+                ));
+            }
             Id::F117 => {
                 let (rig, shape) = crate::f117_animation::Rig::load(bytes, shape)?;
                 return Ok(Self::with_specific(
@@ -1086,6 +1101,7 @@ impl Rig {
                 SpecificRig::Tu160(_) => crate::tu160_animation::flame(address),
                 SpecificRig::F111(_) => crate::f111_animation::flame(address),
                 SpecificRig::Tu26(_) => crate::tu26_animation::flame(address),
+                SpecificRig::Tu95(_) => crate::tu95_animation::flame(address),
             };
         }
         self.groups
@@ -1161,6 +1177,7 @@ impl Rig {
                 SpecificRig::Tu160(rig) => rig.animate(source, state),
                 SpecificRig::F111(rig) => rig.animate(source, state),
                 SpecificRig::Tu26(rig) => rig.animate(source, state),
+                SpecificRig::Tu95(rig) => rig.animate(source, state),
             };
         }
         let mut face = source.clone();
@@ -1310,6 +1327,7 @@ mod tests {
         // T160-2: the Tu-160 draws at its header scale, 8/3 ft a unit (eight
         // times the 1/3 ft default).
         assert_eq!(specification(Id::Tu160).unwrap().scale, 8. / 3.);
+        assert_eq!(specification(Id::Tu95).unwrap().scale, 2. / 3.);
     }
     fn spread(a: &[[f32; 3]], b: &[[f32; 3]]) -> f32 {
         let d =
