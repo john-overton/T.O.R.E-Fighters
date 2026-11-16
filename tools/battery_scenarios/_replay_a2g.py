@@ -579,9 +579,9 @@ def scenarios() -> list[Scenario]:
         rows = events(work, "b52-ripple")
         for name in ("weapon.release", "weapon.outcome"):
             got = len(kind(rows, name))
-            if not 7 <= got <= 8:
-                problems.append(f"{got} {name} events for a ripple of 8 presses")
-        if len(kind(rows, "stores.items")) < 7:
+            if got != 8:
+                problems.append(f"{got} {name} events for a ripple of 8 presses (BMB-AI2: the first press is held, not lost)")
+        if len(kind(rows, "stores.items")) < 8:
             problems.append("fewer stores.items entries than releases")
         # The recorded bay device (five samples a second): shut at the start, open through the ripple, shut after.
         path = work / "log-b52-ripple" / "log.jsonl"

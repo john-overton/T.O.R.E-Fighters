@@ -538,3 +538,20 @@ B-52 at every weight, nobody else in the roster), so every other aircraft's law 
 Evidence is in the [aircraft variety](../formats/aircraft-variety.md#b-52-ai-missions-multiplayer-and-replay-b52-9-2026-11-16)
 B52-9 section: the full Southampton cycle is on the pavement from takeoff to parking (743 ticks off before, none
 after), the 80,000 lb landing at Simferopol is on it from the touchdown (1,201 ticks off before, none after).
+
+**Update (BMB-AI2, 2026-11-16): the heavy airfield laws follow the aircraft.** **Fitted**, agent decision. B52-9's
+two laws (the final's 3,000 ft lookahead and the taxi coast) were gated on `Situation::taxi_throttle_floor` above
+zero. That floor is a per-aircraft ground fit, so T26-8's rolling fit would have switched them on for the Tu-26 and a
+refit could switch them off. They now ask `airfield::heavy_airfield(&Situation)`, one predicate a third law can
+reuse, set from `is_heavy_airfield_aircraft(AircraftId)`:
+
+| Aircraft | Heavy airfield laws |
+| --- | --- |
+| B-52, Tu-26, Tu-95 (named by id; the Tu-26 and Tu-95 arms are ahead of their branches merging) | on |
+| B-1B, Tu-160, B-2, F-117, F-111F, Su-34, every transport and fighter | off (the shared laws) |
+
+`taxi_throttle_floor` still adds its throttle to the taxi law; only the coast and the lookahead moved to the flag.
+The B-52 is bit-identical (floor above zero at every weight, so the same aircraft). The B-1B and the Tu-160 are kept
+out because they pass `ai-heavy-*` and `ai-merged-airfield-*` on the shared laws (B1B-9, T160-8); a later aircraft
+gets the laws by an arm in `is_heavy_airfield_aircraft`, not by its ground fit.
+

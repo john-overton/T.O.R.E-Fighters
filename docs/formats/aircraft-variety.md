@@ -15868,3 +15868,97 @@ astern with no further change; the Tu-95's dorsal and ventral rows (5 and 6, cle
 BMB-C2) stay empty and are not stations. Pinned by
 `the_retail_tu26_and_tu95_gun_rows_are_slewed_tail_guns_that_fire_astern` in
 `ai_wings/tail_gun_tests.rs`. The "rear-facing mount lands later" caveats above are met.
+
+## BMB-AI2 shared AI follow-ups (2026-11-16)
+
+Implementation and verification mode, on `m3-aircraft` (1699a86f), in the main worktree. Three shared follow-ups to
+BMB-AI, B52-9, B1B-9, T26-9 and F111-9, asked for by John through the bomber program. Everything here is `fitted`,
+agent decisions. Commits: 4f82f36d (laydown), 4efcde6d and 4e1a3730 (heavy airfield), a3a60f2c (held presses),
+4fc0e9ba (clippy), b4285e4e (scenario). Logs are in `.local/m3-aircraft/checks/BMB-AI2/`. The baseline binary was
+built from 1699a86f before the first change (`bin-base/`) and the same 287 scenarios were run on both
+(`--jobs 2 --windows 1`, through `light3.sh`).
+
+### 1. Laydown over rising ground: done as asked, but it is not the F-111F loss
+
+`strike::laydown_ground_ft` reads the ground at 33 points over the last 8,000 ft of the run-in to the aim, and the
+laydown's hold height is raised, never lowered, to that ground plus the fitted height. Flat ground, a lower run-in and
+a host with no terrain query fly as before. **It changes no baseline log**: every `ai-strike-*` laydown run-in is
+level with or below its target. A unit test (`the_laydown_ground_is_the_highest_on_the_run_in`) pins the rule.
+
+**The F111-9 diagnosis does not hold, so the F-111F quick wing at `QUFACT` still loses its aircraft.** There is no
+730 ft rise. `--terrain-map` reads 0 ft for 12,000 ft round the target, the striker's lowest height above the ground
+is 826 ft, the ground the new rule samples under the run-in is 0 ft, and every bomb of the pack is in the air at the
+bursts (ground 0 under each). A trace of the two aircraft and the pack (a temporary driver print, removed) reads:
+
+| t | What |
+| --- | --- |
+| 50.38 s | The lead (actor 1) releases the six retarded Mk 82 at 826 ft, level, 404 kt; the wingman (actor 2) is 450 ft behind it and 147 ft to the side, 4 ft lower |
+| 53.18 s (2.8 s later) | The fuze arms. The pack has fallen about 95 ft and trails the lead by 190 ft. The Mk 82's proximity fuze (300 ft, with the aircraft's 28 ft, 328 ft) fires on the wingman 330 ft away; the blast destroys it and the lead (`HURT hp=0/125`, `LOST reason=destroyed`) |
+
+The `IMPACT ... at=906482,731,881105` lines are the burst height in the air, which F111-9 read as ground. The same pass
+from the standard start at the factory (one aircraft) is clean, as is the quick wing at the column `QUCOL`
+(released at 1,308 ft in a 5 degree dive, so the pack is 300 ft or more below the wingman at arming). The shared sight
+rules clear the aircraft of a burst on the ground, not of an armed pack in the air, and a friendly wingman in trail at
+the same height is inside the fuze. **Open, for John:** a release rule or a larger trail for a laydown pair; and the AI
+F-111F is held at 826 ft over the factory where the laydown asks for 534 ft (some height floor, not traced). The
+scenario the brief asked for (the F-111F quick wing at the factory) is therefore **not added**: it fails by design, and
+`ai-strike-f111-quick-wing` itself lives on `m3-f111`, not here (the same strike with `--aircraft f111` runs here and
+reproduces the loss: `checks/BMB-AI2/f111-qufact-base.log`).
+
+### 2. The heavy airfield laws are named by aircraft
+
+`Situation::heavy_airfield`, set from `airfield::is_heavy_airfield_aircraft(AircraftId)`, replaces
+`taxi_throttle_floor > 0` as the gate of B52-9's 3,000 ft final lookahead and taxi coast. Every law asks the one
+predicate `airfield::heavy_airfield(&Situation)` (the T95-9 stop-at-anchor law joins it at integration). On: the
+B-52, the Tu-26 and the Tu-95, by id; the Tu-26 and Tu-95 arms are ahead of their branches merging, and the
+integration round proves them with `ai-heavy-*` and `ai-merged-airfield-*` for each. Off: the B-1B and the Tu-160
+(kept out: they pass on the shared laws, B1B-9 and T160-8), the B-2, F-117, F-111F, Su-34 and everything else. The
+floor still adds its throttle. A unit test names every `AircraftId::ALL` entry.
+
+**The B-52 is bit-identical:** all 129 baseline airfield logs (takeoff, ground, theater, records-land,
+merged-airfield, ils-terrain, taxi, lost-lead) and the six `ai-heavy-*`, seven `ai-merged-airfield-*` logs
+(`b52`, `b2`, `f117`, `c130`, `f18`) read the same on both binaries.
+
+### 3. Presses made while the bay doors open are held
+
+**Cause.** A press that waits for the doors sets `bay_release` and the readiness shows `BayClosed`. The next press is
+tested with `player_missile_may_fire`, which `BayClosed` fails, so it is **dropped, not held**: it does not even
+refresh the 3-second lapse. Only the press made after the doors are open fires. The doors take about 0.8 s: taps 0.5 s apart lose one press (7 of 8 on the B-52's replay
+ripple) and the loss grows as the taps come faster.
+
+**Fitted behaviour (recorded).** A real stores computer waits for the doors, so each press behind the first is kept
+(up to 32) and fires one store a tick once the doors are open, from whichever bay is selected (the B-2's sister bay
+takes over, so its ripple still alternates). The 3-second lapse drops every held press. Only a station inside a bay
+waits, so no other aircraft changes, and the AI's bay hold (BMB-AI) is untouched. The count is a checkpoint field
+(`bay_presses`) inside the combat section, which needs no version (checkpoint.md, Versioning); no wire or recording
+byte changes, since a press is still the trigger bit. A recording of a fast tap ripple made on an older build
+replays with the new behaviour and may differ (the cycle is unreleased).
+
+| Run (`--a2g-run UKR QUCOL --attack release`, B-52 forward row, 9 Mk 82) | Before | After |
+| --- | --- | --- |
+| 8 one-tick presses 0.2 s apart | 4 releases | 8 |
+| 0.1 s apart | 1 | 8 |
+| 0.05 s apart | 1 | 8 |
+| `replay-a2g-b52-ripple` (8 presses 0.5 s apart) | 7 | 8 (the check now wants exactly 8) |
+| `a2g-release-origin-b2`, the Paveway row (4 presses 0.5 s apart) | 3 | 4 |
+
+The B-2 is reproduced in `presses_made_while_the_bay_doors_open_are_held_and_fire_one_a_tick` (two bays, 8 taps 0.1 s
+apart with the doors shut for 0.8 s: eight stores, one a tick, from tick 100) and in the existing ripple test. The
+`--a2g-run` driver re-selects its one loaded station every tick, so it cannot show the B-2's alternation and
+`replay-a2g-b2-ripple` still reads 11 of 12; the B-1B's (8 presses gave 5) and the Tu-26's (10 for 8) figures are from
+B1B-9 and T26-9, on other branches, and are the same mechanism. The new scenario `a2g-ripple-taps` (flight lane)
+fails on the old binary (4, 1 and 1 releases) and passes on the new.
+
+### Checks
+
+`cargo fmt --all -- --check` clean; clippy `--workspace --all-targets --locked -- -D warnings` clean;
+`cargo test --locked --workspace --no-fail-fast` 7,874 passed, 0 failed, 108 ignored (7,870 before, plus the laydown,
+heavy-airfield and two held-press tests); `--validate-ordnance` passed; `python3 -B -m unittest discover -s tools` OK
+(skipped 5); `tools/check_docs.py` passed. Battery, 287 scenarios on each binary: base 283 passed, new 284 passed.
+The same three fail on both (`a2g-terrain-mask`, `a2g-harm-bore`, `ai-ils-terrain-fra-a9`, all pre-existing);
+`a2g-ripple-taps` fails on the old binary and passes on the new. Log comparison: 278 identical, 9 differ, 3 of them
+real (`a2g-ripple-taps`, `replay-a2g-b52-ripple`, `a2g-release-origin-b2`, the held presses above) and the rest
+timestamps, commit hashes, ports and stall notes (`replay-a2g`, `replay-rec-b2-2v2`, `replay-rec-b52-2v2` recorded
+times; the three `net-*` logs). Not run: the Tu-26 and Tu-95 (their branches are not merged), the F-111F scenarios of
+`m3-f111`, a `--headless-flight` pass (no flight-model change).
+
