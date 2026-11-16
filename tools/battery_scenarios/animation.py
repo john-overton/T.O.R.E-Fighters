@@ -74,8 +74,9 @@ def check_report(work: Path, _output: str) -> list[str]:
         "F5E.PT": {"dense-gear.csv": 203, "pitch-roll-combinations.csv": 26},
         "MF1.PT": {"dense-gear.csv": 203, "pitch-roll-combinations.csv": 26},
         # B-2 (B2-3, B2-4): the elevons, the drag rudders against the speed brake, the gear.
+        # B2-5 adds the bay sweep (8 values) for the fitted bay doors.
         "B2.PT": {"dense-gear.csv": 203, "pitch-roll-combinations.csv": 26,
-                  "yaw-brake-combinations.csv": 26},
+                  "yaw-brake-combinations.csv": 26, "bay-sweep.csv": 9},
         "TOR.PT": {"dense-gear.csv": 203, "pitch-roll-combinations-25deg.csv": 26,
                    "pitch-roll-combinations-67deg.csv": 26, "sweep-flap-combinations.csv": 36,
                    "brake-sweep.csv": 8, "exhaust-sweep.csv": 8},

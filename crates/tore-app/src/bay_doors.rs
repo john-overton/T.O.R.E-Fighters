@@ -15,29 +15,49 @@ pub(crate) fn units(feet: f64) -> f32 {
     (feet * 3.) as f32
 }
 
+/// The four door rectangles of `o` (left edge, right edge, hinge x, turn
+/// sign), shape units: a door hinged on its left edge swings its free right
+/// edge down with a positive turn about the forward axis. Each bay has two,
+/// hinged at its inner and outer edges.
+fn door_rectangles(o: &Opening) -> [(f32, f32, f32, f64); 4] {
+    let (inner, outer) = (units(o.inner), units(o.outer));
+    let middle = (inner + outer) / 2.;
+    let c = units(o.centre);
+    [
+        (c - outer, c - middle, c - outer, 1.),
+        (c - middle, c - inner, c - inner, -1.),
+        (c + inner, c + middle, c + inner, 1.),
+        (c + middle, c + outer, c + outer, -1.),
+    ]
+}
+
 /// The leaves of the belly skin `face` at door travel `fraction` (0 shut, 1
 /// open): both bays' two doors cut from it and turned about their hinge
 /// lines, the rest of the skin kept whole.
 pub(crate) fn belly_doors(face: &Face, fraction: f64, o: &Opening) -> Vec<Face> {
-    let (inner, outer) = (units(o.inner), units(o.outer));
-    let middle = (inner + outer) / 2.;
-    // (left edge, right edge, hinge x, turn sign): a door hinged on its left
-    // edge swings its free right edge down with a positive turn about the
-    // forward axis.
-    let doors = [
-        (-outer, -middle, -outer, 1.),
-        (-middle, -inner, -inner, -1.),
-        (inner, middle, inner, 1.),
-        (middle, outer, outer, -1.),
-    ];
     crate::roster_animation::cut_doors(
         face,
         fraction,
-        doors,
+        door_rectangles(o),
         units(o.aft),
         units(o.fore),
         units(o.belly),
     )
+}
+
+/// The skin `face` with both bays' openings cut out of it and nothing drawn
+/// in them (the B-2's belly polygon, whose doors are the separate panels laid
+/// under it, B2-5).
+pub(crate) fn belly_hole(face: &Face, o: &Opening) -> Vec<Face> {
+    crate::roster_animation::cut_door_parts(
+        face,
+        0.,
+        door_rectangles(o),
+        units(o.aft),
+        units(o.fore),
+        units(o.belly),
+    )
+    .1
 }
 
 /// A flat panel cut from `template`'s material: four corners, one stored
@@ -62,72 +82,93 @@ const RAIL: u8 = 148;
 /// cut-out leaves no hole into the sky. `template` supplies the material (a
 /// flat grey face of the shape).
 pub(crate) fn lining(template: &Face, o: &Opening) -> Vec<Face> {
+    lining_in(template, o, [WALL, CEILING, RAIL])
+}
+
+/// [`lining`] with the palette indices of the walls, the ceiling and the rail
+/// chosen by the aircraft (the B-2's recess is its own bay grey, 147).
+pub(crate) fn lining_in(template: &Face, o: &Opening, [wall, ceiling, rail]: [u8; 3]) -> Vec<Face> {
     const N: f32 = 32765.;
     let (aft, fore) = (units(o.aft), units(o.fore));
-    let (floor, roof) = (units(o.belly), units(o.belly + o.depth));
+    let floor = units(o.belly);
+    let (outer_roof, inner_roof) = (units(o.belly + o.depth), units(o.belly + o.inner_depth));
+    let c = units(o.centre);
     let mut faces = Vec::new();
     for sign in [-1f32, 1.] {
-        let (a, b) = (sign * units(o.inner), sign * units(o.outer));
+        let (a, b) = (c + sign * units(o.inner), c + sign * units(o.outer));
         let (x0, x1) = (a.min(b), a.max(b));
+        // The roof is a plane under the skin: `outer_roof` over the outer
+        // wall, `inner_roof` over the inner, level when they are equal.
+        let roof = |x: f32| {
+            let t = (x - b) / (a - b);
+            outer_roof + (inner_roof - outer_roof) * t
+        };
+        let slope = (roof(x1) - roof(x0)) / (x1 - x0);
+        let tilt = (1. + slope * slope).sqrt();
         // The inner wall faces outboard, the outer wall inboard.
         let (inner_normal, outer_normal) = (sign * N, -sign * N);
         faces.push(panel(
             template,
             [
-                [x0, aft, roof],
-                [x1, aft, roof],
-                [x1, fore, roof],
-                [x0, fore, roof],
+                [x0, aft, roof(x0)],
+                [x1, aft, roof(x1)],
+                [x1, fore, roof(x1)],
+                [x0, fore, roof(x0)],
             ],
-            [0., -N, 0.],
-            CEILING,
+            [slope * N / tilt, -N / tilt, 0.],
+            ceiling,
         ));
         faces.push(panel(
             template,
             [
                 [a, aft, floor],
                 [a, fore, floor],
-                [a, fore, roof],
-                [a, aft, roof],
+                [a, fore, roof(a)],
+                [a, aft, roof(a)],
             ],
             [inner_normal, 0., 0.],
-            WALL,
+            wall,
         ));
         faces.push(panel(
             template,
             [
                 [b, aft, floor],
                 [b, fore, floor],
-                [b, fore, roof],
-                [b, aft, roof],
+                [b, fore, roof(b)],
+                [b, aft, roof(b)],
             ],
             [outer_normal, 0., 0.],
-            WALL,
+            wall,
         ));
         faces.push(panel(
             template,
             [
                 [x0, aft, floor],
                 [x1, aft, floor],
-                [x1, aft, roof],
-                [x0, aft, roof],
+                [x1, aft, roof(x1)],
+                [x0, aft, roof(x0)],
             ],
             [0., 0., N],
-            WALL,
+            wall,
         ));
         faces.push(panel(
             template,
             [
                 [x0, fore, floor],
                 [x1, fore, floor],
-                [x1, fore, roof],
-                [x0, fore, roof],
+                [x1, fore, roof(x1)],
+                [x0, fore, roof(x0)],
             ],
             [0., 0., -N],
-            WALL,
+            wall,
         ));
-        // The trapeze rail: a box hung from the ceiling on the centre line.
+        // The trapeze rail: a box hung from the ceiling on the centre line
+        // (none where the opening has no rail).
+        if o.rail[0] == o.rail[1] {
+            continue;
+        }
         let centre = (a + b) / 2.;
+        let roof = roof(centre);
         let (r0, r1) = (centre - units(RAIL_HALF), centre + units(RAIL_HALF));
         let (y0, y1) = (units(o.rail[0]), units(o.rail[1]));
         let low = roof - units(RAIL_DROP);
@@ -135,14 +176,14 @@ pub(crate) fn lining(template: &Face, o: &Opening) -> Vec<Face> {
             template,
             [[r0, y0, low], [r1, y0, low], [r1, y1, low], [r0, y1, low]],
             [0., -N, 0.],
-            RAIL,
+            rail,
         ));
         for (x, normal) in [(r0, -N), (r1, N)] {
             faces.push(panel(
                 template,
                 [[x, y0, low], [x, y1, low], [x, y1, roof], [x, y0, roof]],
                 [normal, 0., 0.],
-                RAIL,
+                rail,
             ));
         }
         for (y, normal) in [(y0, -N), (y1, N)] {
@@ -150,7 +191,7 @@ pub(crate) fn lining(template: &Face, o: &Opening) -> Vec<Face> {
                 template,
                 [[r0, y, low], [r1, y, low], [r1, y, roof], [r0, y, roof]],
                 [0., 0., normal],
-                RAIL,
+                rail,
             ));
         }
     }

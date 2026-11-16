@@ -997,3 +997,16 @@ Run both with `python3 tools/battery.py --scenario '*target-select' --jobs 4
 --windows 1 --profile <private-import> --keep-data`. The battery wraps windows
 with `tools/agent-run.sh`. See the
 [target-selection specification](../spec/radar.md#target-selection-keys).
+
+Update (B2-5, 2026-11-15): the B-2's bay sweep (`bay-sweep.csv`, 8 values) joins `flight-animation-b2`
+(the fitted doors: the belly polygon cut open and no lining at 0, 10 lining faces, a vertex on each
+of the four hinge lines, free edges `leaf * sin(90 degrees * value)` below the door plane). New scenarios:
+`flight-bay-fire-b2-row5` and `-row6` (the one-press release through the B-2's two Mk 82 bays),
+`flight-bay-ripple-b2` (16 presses: the bays alternate, each empties its bottom tier first, front to
+back; `TORE_STORES_PREVIEW_PRESSES`), `bay-b2-0`, `-0.5` and `-1` (the `--flight-bay` frames) and
+`render-b2-bay-clearance` (headless: the default 64 Mk 82 clear the doors, ends, sloped roof and top skin by
+at least 0.05 ft with the doors open, and no two touch).
+
+Update (B2-5, 2026-11-15): the B-2's default load is the two Mk 82 bays alone (64 bombs, 32,000 lb), so
+`flight-liftoff-b2` records 155.2 kt after 7,232 ft (was 158.1 kt) and `flight-approach-b2` 167.5 kt (was 166.2 kt);
+the windows (140 to 165 kt and 140 to 170 kt) are unchanged.

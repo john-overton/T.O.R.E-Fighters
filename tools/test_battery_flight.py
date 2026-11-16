@@ -132,8 +132,8 @@ class TakeoffAndLandingTests(unittest.TestCase):
             self.assertIn("b2", getattr(flight, key))
         for key in ("LIFTOFF_TARGET", "APPROACH_TARGET", "INTERNAL_FUEL_LB", "KNOWN_LIFTOFF", "KNOWN_APPROACH"):
             self.assertIn("b2", getattr(flight, key))
-        self.assertEqual(flight.KNOWN_LIFTOFF["b2"], 158.1)
-        self.assertEqual(flight.KNOWN_APPROACH["b2"], 166.2)
+        self.assertEqual(flight.KNOWN_LIFTOFF["b2"], 155.2)
+        self.assertEqual(flight.KNOWN_APPROACH["b2"], 167.5)
         self.assertLessEqual(flight.approach_fuel("b2"), 100000)
         self.assertEqual(flight.approach_fuel("b52"), round(0.65 * 312197))
         for key in ("VARIETY_AIRCRAFT", "LIFTOFF_AIRCRAFT"):

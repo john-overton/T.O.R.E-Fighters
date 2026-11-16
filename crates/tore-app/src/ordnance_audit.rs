@@ -94,7 +94,14 @@ const TANK_RECORDS: usize = 9;
 /// `GBU10A.JT`, `PAVEWAY.JT` and `GBU12.JT`, one a row; `GBU16.JT` refused by
 /// name), so `F117.PT` goes from 38 to 46 placements (the normal catalog from
 /// 19 to 23 stores).
-const WEAPON_PLACEMENTS: usize = 4784;
+/// 4,776 from 4,784: the B-2's two Mk 82 bay rows (rows 5 and 6) refuse four
+/// stores that do not fit their grid (B2-5, 2026-11-15, fitted, the F-117's
+/// 0.3 ft rule: `GBU29.JT`, `GBU29P.JT`, `GBU30.JT` and `MK20.JT`, measured
+/// with the doors open), so `B2.PT` goes from 86 to 78 placements. The bays'
+/// capacities also fall to what fits under the roof (four tiers of Mk 82, one
+/// tier of Paveway III); that moves no placement. The audit caps a gridded
+/// row's expected count the same way.
+const WEAPON_PLACEMENTS: usize = 4776;
 /// 188 from 182: the F-16A's centreline tank row (F150.GAS or F250.GAS) plus
 /// the tank selection its two 0x07e5 wing rows accept, 6 tank placements.
 /// 192 from 188: the MiG-31 (M31-1). 201 from 192: the Mirage 2000 (M2K-1).
@@ -430,6 +437,20 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                         .map_or(0, |slot| standard.capacity(slot, weapon))
                 } else {
                     expected
+                };
+                // The B-2's gridded bays hold no more than fits under their roof
+                // (B2-5): the retail count capped by `grid_capacity`.
+                let expected = match tore_sim::combat::bays::grid(id, hardpoint)
+                    .zip(tore_sim::combat::bays::station(id, hardpoint))
+                {
+                    Some(([width, length, ceiling], mount)) => {
+                        expected.min(i32::from(tore_sim::combat::hardpoints::grid_capacity(
+                            tore_sim::combat::store_sizes::StoreSize::of_weapon(weapon),
+                            [width, length],
+                            ceiling - mount[1],
+                        )))
+                    }
+                    None => expected,
                 };
                 // John, 2026-11-10 (F15E-5): the F-15E's bomb pair and wing pair
                 // refuse the stores that clip; normal loading must offer none.

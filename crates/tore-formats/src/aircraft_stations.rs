@@ -51,8 +51,27 @@ pub const B52_GUN: usize = 4;
 /// number.
 pub const B52_GUN_ROUNDS: i32 = 1_242;
 /// The B-2's four internal bay rows (`B2.PT` rows 5 to 8, flags `0x1504`):
-/// [`adjust_defaults`] clears the designator bit `0x400` on them.
+/// [`adjust_defaults`] clears the designator bit `0x400` on them (BMB-A2) and
+/// the pair flag `0x4` (B2-5).
 pub const B2_BAY_ROWS: std::ops::Range<usize> = 5..9;
+/// The B-2's two Mk 82 rows (`B2.PT` rows 5 and 6, one a bay) and its two
+/// Paveway III rows (rows 7 and 8): the rows of one bay are alternatives
+/// ([`tore_sim::combat::bays::alternative`]).
+pub const B2_MK82_ROWS: std::ops::Range<usize> = 5..7;
+pub const B2_PAVEWAY_ROWS: std::ops::Range<usize> = 7..9;
+/// The stores the B-2's two Mk 82 rows (rows 5 and 6) refuse (B2-5, fitted,
+/// the 0.3 ft rule of the F-117's bays, measured with the doors open at each
+/// store's full count under the grid's ceiling): the three Paveway III class
+/// laser and JDAM bombs, whose 5.4 ft fins stand 0.9 to 1.2 ft through the roof
+/// and skin and 0.65 ft through the door planes on a row that is not hung
+/// low (they are the Paveway rows' stores), and the Mk 20 Rockeye (0.42 ft
+/// through the roof). The Paveway rows (7 and 8) refuse nothing: every store
+/// there clears the doors and the ends by 0.5 ft or more, bar the GBU-27
+/// class, whose fin tips stand 0.65 ft past the door planes on every row.
+pub const B2_MK82_REFUSED: [&str; 4] = ["GBU29.JT", "GBU29P.JT", "GBU30.JT", "MK20.JT"];
+/// A station's pair flag (`0x4`): a record at x mirrors to -x and its stores
+/// alternate sides.
+pub const PAIRED_BIT: i32 = 0x4;
 /// The designator bit of a station's flags (a targeting or laser pod may sit
 /// there, and a multi-store pod: `loading.rs`).
 pub const DESIGNATOR_BIT: i32 = 0x400;
@@ -193,6 +212,7 @@ pub fn tank_allowed(id: AircraftId, row: usize, name: &str) -> bool {
 /// mask (0x85) admits, as the F-14's glove-pylon rail does). The F-117's two bay
 /// rows refuse only [`F117_BAY_REFUSED`] (F117-5: the measured bay clearances
 /// leave every store the mask and [`extra_weapon`] admit clear of the doors).
+/// The B-2's two Mk 82 rows refuse [`B2_MK82_REFUSED`] (B2-5).
 pub fn weapon_allowed(id: AircraftId, row: usize, source: &str) -> bool {
     match id.source() {
         AircraftId::F15E => match row {
@@ -206,6 +226,7 @@ pub fn weapon_allowed(id: AircraftId, row: usize, source: &str) -> bool {
             _ => true,
         },
         AircraftId::F117 => !(F117_BAY_ROWS.contains(&row) && F117_BAY_REFUSED.contains(&source)),
+        AircraftId::B2 => !(B2_MK82_ROWS.contains(&row) && B2_MK82_REFUSED.contains(&source)),
         AircraftId::Tornado => match row {
             TORNADO_SHOULDER => !TORNADO_SHOULDER_REFUSED.contains(&source),
             TORNADO_INNER_WING => !TORNADO_INNER_WING_REFUSED.contains(&source),
@@ -669,7 +690,12 @@ fn default_signature(id: AircraftId) -> &'static [Signature] {
 ///   laser pod and no multi-store pod is offered on a bomb bay (B7: the real
 ///   jet has no pod station). **Fitted** (agent decision 2026-11-15). The
 ///   default stores, counts, classes and positions stay; every other bit stays.
-///   This is the one place the function changes a row's flags.
+///   Update (B2-5, 2026-11-15, John's decision 21, as the F-22N's bay rows
+///   were corrected): the pair flag `0x4` is cleared too (`0x1100`), so a row
+///   is one bay, not a pair that mirrors to the other bay. The counts (32 Mk 82
+///   and 4 Paveway III a bay, the record's 64 and 8) and the weight classes
+///   stay: the real 80 Mk 82 does not fit the bay (docs/formats/aircraft-variety.md,
+///   "B-2 weapon bays").
 /// - **F-117** (`F117.PT` row 2): no default `F18.ECM`. The real F-117
 ///   carried no jammer (docs/formats/aircraft-variety.md, "F-117 sensors,
 ///   jammer and pods"), and the record's row also carried 30 chaff and 30
@@ -693,7 +719,7 @@ pub fn adjust_defaults(id: AircraftId, rows: &mut [Hardpoint]) {
         AircraftId::B52 => rows[B52_GUN].count = B52_GUN_ROUNDS,
         AircraftId::B2 => {
             for row in &mut rows[B2_BAY_ROWS] {
-                row.flags &= !DESIGNATOR_BIT;
+                row.flags &= !(DESIGNATOR_BIT | PAIRED_BIT);
             }
         }
         AircraftId::F117 => rows[F117_JAMMER].store = None,
@@ -717,6 +743,23 @@ pub const TORNADO_CENTRELINE: usize = 5;
 /// record keeps its own default) and on the identity; repeated application
 /// is a no-op. Applied by `tore_sim::combat::hardpoints::default_records`.
 pub fn default_counts(id: AircraftId, rows: &mut [Hardpoint]) {
+    if id == AircraftId::B2 {
+        // The B-2's two Paveway III rows start empty (B2-5, John's decision
+        // 21): a bay holds the Mk 82 or the Paveway III, not both, and the
+        // Mk 82 rows are the default. The rows keep their store (the mask
+        // admits the GBU-27 only as the row's own default), capacity and
+        // position, so Load Ordnance still offers the Paveway III.
+        for row in B2_PAVEWAY_ROWS {
+            if let Some(row) = rows.get_mut(row)
+                && row.store.as_deref() == Some("PAVEWA3.JT")
+                && row.location == 3
+                && row.flags == 0x1100
+            {
+                row.count = 0;
+            }
+        }
+        return;
+    }
     if id.source() != AircraftId::Tornado {
         return;
     }
@@ -1597,18 +1640,28 @@ mod tests {
         assert_eq!(rows[B52_GUN].store.as_deref(), Some("M61.JT"));
         adjust_defaults(AircraftId::B52, &mut rows);
         assert_eq!(key(&rows), expected);
-        // B-2: the four bay rows lose only the designator bit (0x1504 to
-        // 0x1104); the sensor rows and every other field stay.
+        // B-2: the four bay rows lose the designator bit and the pair flag
+        // (0x1504 to 0x1100); the sensor rows and every other field stay.
         let retail = default_rows(AircraftId::B2);
         let mut rows = retail.clone();
         adjust_defaults(AircraftId::B2, &mut rows);
         let mut expected = key(&retail);
         for row in &mut expected[5..9] {
-            row.1 = 0x1104;
+            row.1 = 0x1100;
         }
         assert_eq!(key(&rows), expected);
         assert!(rows[5..9].iter().all(|h| h.flags & DESIGNATOR_BIT == 0));
         assert!(rows[..5].iter().all(|h| h.flags == 0x1008));
+        // B2-5: the Paveway III rows start empty (a bay holds the Mk 82 or the
+        // Paveway III); the Mk 82 rows and every other field stay.
+        let mut defaults = rows.clone();
+        default_counts(AircraftId::B2, &mut defaults);
+        let mut expected = key(&rows);
+        expected[7].4 = 0;
+        expected[8].4 = 0;
+        assert_eq!(key(&defaults), expected);
+        default_counts(AircraftId::B2, &mut defaults);
+        assert_eq!(key(&defaults), expected);
         // F-117: the jammer row holds nothing, in its place with its mask.
         let retail = default_rows(AircraftId::F117);
         assert_eq!(retail[F117_JAMMER].store.as_deref(), Some("F18.ECM"));

@@ -1,10 +1,14 @@
 //! B-2 Spirit (`B2.SH`) own-source rig (B2-3 and B2-4): the two elevon wedges, the
-//! split drag rudders (yaw and speed brake), the seven gear plates, and the
-//! interim bay plates.
-//! See docs/formats/aircraft-variety.md "B-2 rig (B2-3, 2026-11-15)".
+//! split drag rudders (yaw and speed brake), the seven gear plates, and the two
+//! fitted weapon bays (B2-5: the belly polygon cut open and the two door panels
+//! of each bay turned down as two doors, a lined recess, drawn through
+//! [`crate::bay_doors`]).
+//! See docs/formats/aircraft-variety.md "B-2 rig (B2-3, 2026-11-15)" and
+//! "B-2 weapon bays (B2-5, 2026-11-15)".
 //!
 //! `B2.SH` ships three state words: 0x6486 the bay (four hanging plates, two
-//! windings each), 0x648c the gear (seven plates, two windings each) and 0x6498,
+//! windings each; the shape's own open pose, no longer drawn: B2-5 replaced it
+//! with the fitted doors and the lined recess), 0x648c the gear (seven plates, two windings each) and 0x6498,
 //! a signed drag-rudder word (+1 swaps the right closed pair for six faces, -1
 //! the left; any value of magnitude 2 or more removes a pair and adds nothing,
 //! so the rig never sets a magnitude above 1). The elevons are one four-face
@@ -145,11 +149,27 @@ const NOSE_STRUT_HINGE: [f32; 3] = [0., 96., -5.];
 const NOSE_STEER: [f32; 3] = [0., 92., 0.];
 
 /// Bay word 0x6486: four vertical plates hanging from the belly (z -12) to
-/// z -25 at x -27, -3, 1 and 26. Interim until the B2-5 doors.
+/// z -25 at x -27, -3, 1 and 26. Reviewed only (B2-5 draws the fitted doors
+/// and the lined recess instead; one plate is the material of the lining).
 pub(crate) const BAY: [usize; 8] = [
     0x4209, 0x4220, 0x4264, 0x427b, 0x431a, 0x4331, 0x42bf, 0x42d6,
 ];
-const BAY_TOP_Z: f32 = -12.;
+/// The belly polygon the openings are cut from (one 7-vertex face, z -11 units
+/// over the bays) and the two door panels laid on it, one a bay, left then
+/// right (z -12 units, normal down, with the bay-door art): the panels are
+/// cut into the two doors of each bay.
+pub(crate) const BELLY: usize = 0x396d;
+pub(crate) const PANELS: [usize; 2] = [0x3c84, 0x3c65];
+/// The fitted lining faces get addresses from here (no face of the shape is
+/// near it).
+pub(crate) const LINING_BASE: usize = 0x7000;
+/// The bay lining's palette index (the shape's own bay plate, inside).
+const LINING_GREY: u8 = 147;
+
+/// Whether `address` is one of the fitted lining faces.
+pub(crate) fn lining(address: usize) -> bool {
+    address >= LINING_BASE
+}
 
 /// Whole-piece gear motion. Gear down (1) is the source pose; nothing is
 /// drawn at 0 (the caller hides it). The nose strut also steers.
@@ -257,6 +277,7 @@ fn open_angle(a: [f32; 3], b: [f32; 3], closed: &Face, open: &Face) -> AppResult
 
 pub struct Rig {
     plates: Vec<Plate>,
+    opening: tore_sim::combat::bays::Opening,
 }
 impl Plate {
     fn new(spec: &PlateSpec, closed: &Face, open_front: &Face) -> AppResult<Self> {
@@ -389,9 +410,70 @@ impl Rig {
             }
         }
         extra.extend(gear.faces.into_iter().filter(|f| GEAR.contains(&f.address)));
-        extra.extend(bay.faces.into_iter().filter(|f| BAY.contains(&f.address)));
+        // The fitted bays (B2-5): the belly polygon lies at z -11 units over
+        // both openings and faces down, each door panel is exactly its
+        // bay's opening one unit lower, and the recess takes the shape's own
+        // bay plate as its material.
+        let opening = tore_sim::combat::bays::opening(ID).ok_or("B2 bay opening missing")?;
+        let belly = one(&shape, BELLY)?;
+        if !belly.normal.is_some_and(|n| n[1] < -32000.) || belly.positions.len() != 7 {
+            return Err("unreviewed B2.SH belly polygon".into());
+        }
+        let units = crate::bay_doors::units;
+        let c = units(opening.centre);
+        for (address, sign) in PANELS.into_iter().zip([-1f32, 1.]) {
+            let face = one(&shape, address)?;
+            let (a, b) = (
+                c + sign * units(opening.inner),
+                c + sign * units(opening.outer),
+            );
+            let near = |value: f32, want: f32| (value - want).abs() < 1e-3;
+            let corners = face.positions.len() == 4
+                && face.positions.iter().all(|p| {
+                    let u = [p[0] / axis[0], p[1] / axis[1], p[2] / axis[2]];
+                    (near(u[0], a) || near(u[0], b))
+                        && (near(u[1], units(opening.aft)) || near(u[1], units(opening.fore)))
+                        && near(u[2], units(opening.belly))
+                });
+            if !corners || !face.normal.is_some_and(|n| n[1] < -32000.) {
+                return Err(format!("unreviewed B2.SH bay door panel {address:x}").into());
+            }
+        }
+        let template = one(&bay, 0x4220)?.clone();
+        extra.extend(
+            crate::bay_doors::lining_in(&template, &opening, [LINING_GREY; 3])
+                .into_iter()
+                .enumerate()
+                .map(|(k, mut f)| {
+                    f.address = LINING_BASE + k;
+                    f
+                }),
+        );
         shape.faces.extend(extra);
-        Ok((Self { plates }, shape))
+        Ok((Self { plates, opening }, shape))
+    }
+    /// The faces a source face becomes: with the bay doors off their seat the
+    /// belly polygon has both openings cut out of it and each door panel is
+    /// cut into the bay's two doors, turned down about their hinges by
+    /// `state.bay` (the doors' 1 second travel is the flight's); the lining
+    /// draws only then.
+    pub fn faces(&self, source: &Face, state: &State) -> Vec<Face> {
+        let a = source.address;
+        if state.bay > 0. {
+            if a == BELLY {
+                return crate::bay_doors::belly_hole(source, &self.opening);
+            }
+            if PANELS.contains(&a) {
+                return crate::bay_doors::belly_doors(
+                    source,
+                    state.bay.clamp(0., 1.),
+                    &self.opening,
+                );
+            }
+        } else if lining(a) {
+            return Vec::new();
+        }
+        vec![source.clone()]
     }
     pub fn animate(&self, source: &Face, state: &State) -> Option<Face> {
         let a = source.address;
@@ -436,19 +518,8 @@ impl Rig {
             gear_positions(&mut result, state.gear, state.nosewheel_angle());
             return Some(result);
         }
-        if BAY.contains(&a) {
-            let bay = state.bay.clamp(0., 1.) as f32;
-            if bay <= 0. {
-                return None;
-            }
-            // The plates drop out of the belly as the bay opens (interim,
-            // fitted): their top edge stays on the belly line.
-            let top = scale_point(ID, [0., 0., BAY_TOP_Z])[2];
-            let mut result = source.clone();
-            for p in &mut result.positions {
-                p[2] = top + (p[2] - top) * bay;
-            }
-            return Some(result);
+        if lining(a) && state.bay <= 0. {
+            return None;
         }
         Some(source.clone())
     }
@@ -527,7 +598,10 @@ mod tests {
             ),
         ];
         let mut s = state();
-        let rig = Rig { plates: Vec::new() };
+        let rig = Rig {
+            plates: Vec::new(),
+            opening: tore_sim::combat::bays::opening(ID).unwrap(),
+        };
         let trailing = |s: &State, address: usize, edge: [f32; 3]| {
             let out = rig.animate(&face(address, &[edge]), s).unwrap();
             out.positions[0][2] - scale_point(ID, edge)[2]
@@ -662,7 +736,10 @@ mod tests {
         }
 
         // Gear: hidden at 0, the source pose at 1, whole pieces between.
-        let rig = Rig { plates: Vec::new() };
+        let rig = Rig {
+            plates: Vec::new(),
+            opening: tore_sim::combat::bays::opening(ID).unwrap(),
+        };
         let wheel = face(
             0x452c,
             &[
@@ -711,24 +788,48 @@ mod tests {
                 .iter()
                 .all(|p| (p[2] - hinge_z).abs() < 1e-2 && p[0] < wheel.positions[0][0] + 1e-3)
         );
-        // The bay plates drop from the belly line as the bay opens.
-        let plate = face(
-            0x4209,
+        // The fitted bays: shut, the belly polygon and the left door panel are
+        // whole and the lining is gone; open, the belly polygon has the
+        // openings cut out of it, the panel is two doors hanging on its edges
+        // and the lining draws.
+        let belly = face(
+            BELLY,
             &[
-                [-27., -10., -12.],
-                [-27., -10., -25.],
-                [-27., 48., -25.],
-                [-27., 48., -12.],
+                [88., 30., -11.],
+                [0., 69., -11.],
+                [-89., 30., -11.],
+                [-68., -10., -11.],
+                [-37., -28., -11.],
+                [36., -28., -11.],
+                [67., -10., -11.],
             ],
         );
+        let panel = face(
+            PANELS[0],
+            &[
+                [-28., 49., -12.],
+                [-28., -9., -12.],
+                [-4., -9., -12.],
+                [-4., 49., -12.],
+            ],
+        );
+        let ceiling = face(LINING_BASE, &[[0.; 3]; 4]);
         let mut s = state();
         s.bay = 0.;
-        assert!(rig.animate(&plate, &s).is_none());
+        assert_eq!(rig.faces(&belly, &s).len(), 1);
+        assert_eq!(rig.faces(&panel, &s).len(), 1);
+        assert!(rig.faces(&ceiling, &s).is_empty() && rig.animate(&ceiling, &s).is_none());
         s.bay = 1.;
-        assert_eq!(rig.animate(&plate, &s).unwrap().positions, plate.positions);
-        s.bay = 0.5;
-        let half = rig.animate(&plate, &s).unwrap();
-        assert!((half.positions[1][2] - scale_point(ID, [0., 0., -18.5])[2]).abs() < 1e-3);
-        assert_eq!(half.positions[0][2], plate.positions[0][2]);
+        let hole = rig.faces(&belly, &s);
+        let inside = |p: &[f32; 3]| p[0] > -27.9 && p[0] < -4.1 && p[1] > -8.9 && p[1] < 48.9;
+        assert!(hole.len() > 1 && hole.iter().all(|f| !f.positions.iter().all(inside)));
+        let doors = rig.faces(&panel, &s);
+        assert_eq!(doors.len(), 2);
+        let low = |f: &Face| f.positions.iter().map(|p| p[2]).fold(f32::MAX, f32::min);
+        // Two doors, each half the 24 unit panel, hang 12 units below it.
+        for door in &doors {
+            assert!((low(door) - scale_point(ID, [0., 0., -24.])[2]).abs() < 1e-3);
+        }
+        assert_eq!(rig.faces(&ceiling, &s).len(), 1);
     }
 }
