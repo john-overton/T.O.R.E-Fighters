@@ -16,6 +16,7 @@
 use super::controller::Activity;
 use crate::airport::{ApproachEnd, Runway};
 use crate::runway_wind::FEET_PER_SECOND_PER_KNOT as KNOT;
+use tore_formats::aircraft::AircraftId;
 
 /// A copyable view of one runway, enough for an AI aircraft to line up, take
 /// off from and land on it. Built from the host's [`Runway`].
@@ -483,12 +484,29 @@ pub const WINGS_LEVEL_HEIGHT_FT: f64 = 50.0;
 pub const FINAL_LOOKAHEAD_MIN_FT: f64 = 1500.0;
 pub const FINAL_LOOKAHEAD_MAX_FT: f64 = 8000.0;
 /// Fitted (B52-9, 2026-11-16): the shortest lookahead for an aircraft whose
-/// wheels need over 0.2 throttle to taxi ([`Situation::taxi_throttle_floor`]
-/// above zero, the B-52 at every weight). The 80,000 lb B-52 snaked 190 ft
+/// wheels need over 0.2 throttle to taxi ([`Situation::heavy_airfield`], the
+/// B-52 at every weight). The 80,000 lb B-52 snaked 190 ft
 /// right and 150 ft left of the line down the final with the shared 1,500 ft
 /// and touched down 140 ft off the centre line, on the grass; at 3,000 ft it
 /// touches down within 5 ft of it.
 pub const HEAVY_FINAL_LOOKAHEAD_MIN_FT: f64 = 3000.0;
+
+/// Fitted (BMB-AI2, 2026-11-16): the aircraft that fly the heavy airfield laws
+/// of B52-9, the final's [`HEAVY_FINAL_LOOKAHEAD_MIN_FT`] and the taxi coast
+/// ([`Situation::heavy_airfield`]). B52-9 gated them on
+/// [`Situation::taxi_throttle_floor`] above zero, which a per-aircraft ground
+/// fit (the Tu-26's rolling deceleration, T26-8) could switch on or off. They
+/// are named instead: the B-52, the Tu-26 and the Tu-95, the three whose
+/// wheels need power to taxi and whose long, slow-turning bodies snaked on
+/// the final. The B-1B and the Tu-160 are kept out: both fly the shared laws
+/// and pass the heavy airfield scenarios (B1B-9, BMB-AI2). A new aircraft gets
+/// the laws by an arm here, never by its ground fit.
+pub fn heavy_airfield(aircraft: AircraftId) -> bool {
+    matches!(
+        aircraft.source(),
+        AircraftId::B52 | AircraftId::Tu26 | AircraftId::Tu95
+    )
+}
 pub const FINAL_INTERCEPT_LIMIT_DEG: f64 = 60.0;
 /// Fitted: aim point a quarter of the way down the runway when the airport
 /// has no landing anchor (manual p.65-68).
@@ -664,6 +682,9 @@ pub struct Situation {
     /// 0 for every aircraft but one whose rolling resistance needs more than
     /// 0.2 throttle (BMB-AI, the B-52).
     pub taxi_throttle_floor: f64,
+    /// The aircraft flies the heavy airfield laws (BMB-AI2): the final's
+    /// 3,000 ft lookahead and the taxi coast, by [`heavy_airfield`].
+    pub heavy_airfield: bool,
     pub maximum_speed_fps: f64,
     pub corner_speed_fps: f64,
     /// B48 cruise speed.
@@ -1876,7 +1897,7 @@ impl Sequence {
                 // (the B-52) is slow to roll and yaw, and the shared lookahead
                 // let it snake across the line (190 ft right, then 150 ft
                 // left of it at the touchdown, off the runway's edge).
-                let lookahead_min = if s.taxi_throttle_floor > 0.0 {
+                let lookahead_min = if s.heavy_airfield {
                     HEAVY_FINAL_LOOKAHEAD_MIN_FT
                 } else {
                     FINAL_LOOKAHEAD_MIN_FT
@@ -2167,14 +2188,14 @@ fn taxi_speed(heading_error_deg: f64) -> f64 {
 
 /// Fitted taxi speed control: gentle power below the target, brakes well
 /// above it. An aircraft whose wheels need power to taxi
-/// ([`Situation::taxi_throttle_floor`], the B-52) coasts when it is over the
+/// ([`Situation::heavy_airfield`], the B-52) coasts when it is over the
 /// target (B52-9): its rolling deceleration, 4.8 ft/s squared, does the
 /// slowing, where the floor held the throttle on and it ran past the anchor
 /// it stops at, turned back for it and swung 30 ft off the taxiway.
 fn taxi_throttle(speed: f64, target: f64, s: &Situation) -> (f64, bool) {
     if speed > target + 8.0 {
         (0.0, true)
-    } else if s.taxi_throttle_floor > 0.0 && speed > target {
+    } else if s.heavy_airfield && speed > target {
         (0.0, false)
     } else {
         (
@@ -2313,6 +2334,7 @@ mod tests {
             clean_minimum_fps: 170.,
             taxi_throttle_max: TAXI_THROTTLE_MAX,
             taxi_throttle_floor: 0.,
+            heavy_airfield: false,
             maximum_speed_fps: 1500.,
             corner_speed_fps: 400.,
             cruise_speed_fps: 440.,
@@ -2595,6 +2617,7 @@ mod tests {
             clean_minimum_fps: 170.,
             taxi_throttle_max: TAXI_THROTTLE_MAX,
             taxi_throttle_floor: 0.,
+            heavy_airfield: false,
             maximum_speed_fps: 1500.,
             corner_speed_fps: 400.,
             cruise_speed_fps: 440.,
@@ -3009,13 +3032,16 @@ mod tests {
         assert_eq!(taxi_throttle(0., 50., &s), (0.4, false));
         assert_eq!(taxi_throttle(48., 50., &s), (0.05 + 2. * 0.02, false));
         assert_eq!(taxi_throttle(60., 50., &s), (0., true));
-        // The B-52: 0.58 floor, all the throttle there is.
+        // The B-52: 0.58 floor, all the throttle there is. The floor alone
+        // adds throttle; the coast is the heavy airfield's (BMB-AI2).
         s.taxi_throttle_floor = 0.58;
         s.taxi_throttle_max = 1.0;
         assert_eq!(taxi_throttle(0., 50., &s), (1.0, false));
         let (throttle, _) = taxi_throttle(48., 50., &s);
         assert!((throttle - (0.58 + 0.05 + 0.04)).abs() < 1e-12);
         assert_eq!(taxi_throttle(60., 50., &s), (0., true));
+        // BMB-AI2: a ground fit that needs the floor does not coast by it.
+        assert_eq!(taxi_throttle(50.5, 50., &s), (0.58 + 0.05 - 0.01, false));
     }
 
     /// B52-9: a taxiing aircraft whose wheels need power (the B-52) stops
@@ -3029,6 +3055,7 @@ mod tests {
         assert_eq!(taxi_throttle(50., 50., &s), (0.05, false));
         s.taxi_throttle_floor = 0.58;
         s.taxi_throttle_max = 1.0;
+        s.heavy_airfield = true;
         // The B-52 at the same speeds: over the target it coasts (its wheels
         // slow it), 8 ft/s over it brakes, under it the floor applies.
         assert_eq!(taxi_throttle(50.5, 50., &s), (0.0, false));
@@ -3042,19 +3069,21 @@ mod tests {
     /// 150 ft off the line and 6,000 ft out it asks for a gentler intercept.
     #[test]
     fn a_heavy_final_closes_on_the_line_more_gently_than_a_fighter() {
-        let heading = |floor: f64| {
+        let heading = |heavy: bool| {
             let mut seq = landing();
             seq.phase = Phase::Final;
             let mut s = on_final(&seq, 6000., 330., 240.);
             s.position[0] += 150.;
-            s.taxi_throttle_floor = floor;
+            // The floor alone does not lengthen it (BMB-AI2); the flag does.
+            s.taxi_throttle_floor = 0.58;
+            s.heavy_airfield = heavy;
             match seq.step(&s).command.control {
                 Control::Air(g) => wrap_deg(g.heading_deg - seq.course().to_degrees()),
                 other => panic!("{other:?}"),
             }
         };
-        let fighter = heading(0.);
-        let heavy = heading(0.58);
+        let fighter = heading(false);
+        let heavy = heading(true);
         assert!(
             (fighter + (150f64).atan2(FINAL_LOOKAHEAD_MIN_FT).to_degrees()).abs() < 0.01,
             "{fighter}"
@@ -3064,6 +3093,34 @@ mod tests {
             "{heavy}"
         );
         assert!(heavy.abs() < fighter.abs());
+    }
+
+    /// BMB-AI2: the heavy airfield laws are named by aircraft, the B-52, the
+    /// Tu-26 and the Tu-95, not by a ground fit's taxi floor.
+    #[test]
+    fn the_heavy_airfield_laws_are_named_by_aircraft() {
+        for id in [AircraftId::B52, AircraftId::Tu26, AircraftId::Tu95] {
+            assert!(heavy_airfield(id), "{id:?}");
+        }
+        for id in AircraftId::ALL {
+            let named = matches!(id, AircraftId::B52 | AircraftId::Tu26 | AircraftId::Tu95);
+            assert_eq!(heavy_airfield(id), named, "{id:?}");
+        }
+        for id in [
+            AircraftId::B1b,
+            AircraftId::Tu160,
+            AircraftId::B2,
+            AircraftId::F111,
+            AircraftId::F117,
+            AircraftId::Su34,
+            AircraftId::E3,
+            AircraftId::C130,
+            AircraftId::B747,
+            AircraftId::Il76,
+            AircraftId::F18,
+        ] {
+            assert!(!heavy_airfield(id), "{id:?}");
+        }
     }
 
     fn vertical_landing(lift: Lift) -> Sequence {

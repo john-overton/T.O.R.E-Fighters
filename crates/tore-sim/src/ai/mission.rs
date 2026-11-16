@@ -1429,6 +1429,7 @@ impl AiActor {
             approach_minimum_fps: self.approach_minimum_fps(),
             clean_minimum_fps: speed_limits_with_flaps(&self.flight, 0.0).minimum.0,
             taxi_throttle_floor: taxi_throttle_of(&self.flight).0,
+            heavy_airfield: super::airfield::heavy_airfield(self.identity.aircraft),
             taxi_throttle_max: taxi_throttle_of(&self.flight).1,
             maximum_speed_fps: own.limits.maximum.0,
             corner_speed_fps: own.limits.corner.0,
