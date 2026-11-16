@@ -352,6 +352,20 @@ class HeavyBomberTests(unittest.TestCase):
         ):
             self.assertIn(name, names)
 
+    def test_the_b52_mission_scenarios_exist_and_the_gun_fight_check_reads_harpoons_and_shots(self):
+        names = {s.name for s in ai.scenarios()}
+        self.assertIn("ai-b52-quick-mission-2v2", names)
+        self.assertIn("ai-b52-vs-su27-2v2", names)
+        stores = "\n".join(
+            f"AI stores: actor={n} tanks=0 external_fuel=0 payload=16588 stations=[M61 x1200, AGM-84E x{h}, MK-82 x0]"
+            for n, h in ((1, 12), (2, 12), (3, 12))
+        )
+        text = stores + "\nAI probe totals: wings=3 ticks=7200 shots=251 dropped=0 warnings=0\n"
+        problems = ai.b52_gun_fight_problems(text)
+        self.assertFalse([p for p in problems if "Harpoon" in p or "shot" in p or "stores" in p], problems)
+        self.assertTrue(any("Harpoons" in p for p in ai.b52_gun_fight_problems(text.replace("AGM-84E x12", "AGM-84E x11", 1))))
+        self.assertTrue(any("never fired" in p for p in ai.b52_gun_fight_problems(text.replace("shots=251", "shots=0"))))
+
 
 if __name__ == "__main__":
     unittest.main()

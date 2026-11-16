@@ -412,7 +412,7 @@ def run_driver(s: Scenario, opts: argparse.Namespace, work: Path, data: Path, en
     output, timed_out, problems, why = run_driver_once(s, opts, work, data, env)
     if not why or timed_out:
         return output, timed_out, problems
-    clone_profile(Path(opts.profile), data)
+    refresh_data(opts, data)
     again, timed_out, problems, why_again = run_driver_once(s, opts, work, data, env)
     output += f"\n[driver] RETRY: the first run was inconclusive ({why}); running the driver once more\n" + again
     if why_again and problems:
@@ -463,14 +463,32 @@ def load_scenarios() -> list[Scenario]:
     return found
 
 
-def clone_profile(source: Path, dest: Path) -> None:
+# The game's terrain caches. With --shared-caches every scenario links these to
+# the source profile's own folders instead of copying them: each entry is keyed
+# by its inputs and written to a temporary file renamed into place, so
+# concurrent scenarios read and add entries safely and each is built once,
+# rather than every scenario rebuilding gigabytes of cache in its own copy.
+SHARED_CACHES = ("vegetation-cache", "city-cache")
+
+
+def clone_profile(source: Path, dest: Path, shared_caches: bool = False) -> None:
     if dest.exists():
         shutil.rmtree(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     # Scenarios own their recordings. Inherited finished/partial files can
     # satisfy readiness waits or contaminate exact counts and newest-file checks.
-    entries = [path for path in source.iterdir() if path.name != "replays"]
+    skipped = {"replays", *(SHARED_CACHES if shared_caches else ())}
+    entries = [path for path in source.iterdir() if path.name not in skipped]
     dest.mkdir()
+    copy_entries(source, dest, entries, skipped)
+    if shared_caches:
+        for name in SHARED_CACHES:
+            target = (source / name).resolve()
+            target.mkdir(exist_ok=True)
+            (dest / name).symlink_to(target, target_is_directory=True)
+
+
+def copy_entries(source: Path, dest: Path, entries: list[Path], skipped: set[str]) -> None:
     # A reflink copy is near free on Linux; elsewhere copy the same entries.
     try:
         copied = not entries or subprocess.run(
@@ -481,8 +499,48 @@ def clone_profile(source: Path, dest: Path) -> None:
     if not copied:
         shutil.rmtree(dest)
         shutil.copytree(source, dest, ignore=lambda folder, names: (
-            ["replays"] if Path(folder) == source and "replays" in names else []
+            [n for n in names if n in skipped] if Path(folder) == source else []
         ))
+
+
+def scenario_data(opts: argparse.Namespace, run_dir: Path, work: Path, name: str) -> Path:
+    """The scenario's data folder, `{work}/data`, holding a fresh copy of the profile.
+
+    With --data-root (a RAM disk, say) the copy lives under that folder and `{work}/data` is a link to it, so the
+    profile copy and everything the game writes into it stay off the disk while every path a scenario names still
+    works. Logs and the scenario's own outputs stay under --out."""
+    data = work / "data"
+    if data.is_symlink():
+        data.unlink()
+    root = getattr(opts, "data_root", None)
+    if root:
+        real = Path(root) / run_dir.name / name
+        if data.exists():
+            shutil.rmtree(data)
+        real.parent.mkdir(parents=True, exist_ok=True)
+        data.symlink_to(real.resolve(), target_is_directory=True)
+    refresh_data(opts, data)
+    return data
+
+
+def refresh_data(opts: argparse.Namespace, data: Path) -> None:
+    """Puts a fresh copy of the profile in `data` (through its link, with --data-root)."""
+    target = data.resolve() if data.is_symlink() else data
+    clone_profile(Path(opts.profile), target, getattr(opts, "shared_caches", False))
+
+
+def finish_data(opts: argparse.Namespace, data: Path, passed: bool) -> None:
+    """Removes the scenario's data folder, or keeps it under `{work}/data` on disk with --keep-data, or with
+    --keep-failed-data when the scenario failed. A kept folder keeps its shared-cache links as links."""
+    keep = getattr(opts, "keep_data", False) or (getattr(opts, "keep_failed_data", False) and not passed)
+    if data.is_symlink():
+        real = data.resolve()
+        data.unlink()
+        if keep and real.exists():
+            shutil.copytree(real, data, symlinks=True)
+        shutil.rmtree(real, ignore_errors=True)
+    elif not keep:
+        shutil.rmtree(data, ignore_errors=True)
 
 
 def judge(s: Scenario, output: str, code: Optional[int], timed_out: bool, work: Path) -> list[str]:
@@ -557,8 +615,7 @@ def run_steps(
 def run_one(s: Scenario, opts: argparse.Namespace, run_dir: Path, window_slots: threading.Semaphore) -> Result:
     work = run_dir / "work" / s.name
     work.mkdir(parents=True, exist_ok=True)
-    data = work / "data"
-    clone_profile(Path(opts.profile), data)
+    data = scenario_data(opts, run_dir, work, s.name)
     resolved = [a.replace("{work}", str(work)) for a in s.args]
     cmd = [opts.bin, *resolved]
     if s.driver:
@@ -615,8 +672,7 @@ def run_one(s: Scenario, opts: argparse.Namespace, run_dir: Path, window_slots: 
             passed = False
     else:
         passed = not problems
-    if not opts.keep_data:
-        shutil.rmtree(data, ignore_errors=True)
+    finish_data(opts, data, passed)
     return Result(s.name, s.lane, passed, seconds, None if timed_out else returncode, problems, cmd, str(log.relative_to(run_dir)))
 
 
@@ -675,6 +731,19 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--out", default=str(ROOT / ".local" / "battery"), help="folder that receives one subfolder per run")
     ap.add_argument("--timeout-scale", type=float, default=1.0)
     ap.add_argument("--keep-data", action="store_true", help="keep each scenario's data folder (replays, logs)")
+    ap.add_argument("--keep-failed-data", action="store_true", help="keep the data folder of failing scenarios only")
+    ap.add_argument(
+        "--data-root", default=os.environ.get("TORE_BATTERY_DATA_ROOT") or None,
+        help="make each scenario's data folder (the profile copy) under this folder, for example a RAM disk such as "
+        "/dev/shm/tore-battery, with {work}/data a link to it; logs and outputs stay under --out "
+        "(default: $TORE_BATTERY_DATA_ROOT)",
+    )
+    ap.add_argument(
+        "--shared-caches", action=argparse.BooleanOptionalAction,
+        default=os.environ.get("TORE_BATTERY_SHARED_CACHES") == "1",
+        help="link each scenario's terrain caches to the source profile's instead of copying them, so each cache "
+        "entry is built once (default: on when $TORE_BATTERY_SHARED_CACHES is 1)",
+    )
     ap.add_argument("--tag", default="", help="suffix for the run folder name")
     ap.add_argument(
         "--changed", nargs="?", const="auto", metavar="REF",
@@ -754,6 +823,8 @@ def main(argv: list[str]) -> int:
                 print(f"     {p}", flush=True)
             write_summary(run_dir, results, started)
     write_summary(run_dir, results, started)
+    if opts.data_root:
+        shutil.rmtree(Path(opts.data_root) / run_dir.name, ignore_errors=True)
     failed = sum(1 for r in results if not r.ok)
     print(f"\n{len(results) - failed}/{len(results)} passed. Results: {run_dir}/summary.md")
     return 1 if failed else 0
