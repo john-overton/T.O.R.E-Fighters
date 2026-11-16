@@ -10406,6 +10406,158 @@ stores. See [ordnance availability](../baselines/ordnance-availability.md).
 3. The pylon weight class is 170, not 200 (the saved-load rule). Accept, or widen that rule?
 4. Two door leaves are drawn; the real bay has six sections.
 
+
+## B-2 ordnance, missions, multiplayer and replay (B2-6/9, 2026-11-15)
+
+Implementation and verification mode, by an agent (Claude Sonnet). The AI work below was
+asked for by the coordinator for this slice (AGENTS.md: no AI work unless John asks; the
+bomber plan's standing decision 1 and the B2-9 brief ask for it). Earlier sections stay as
+written. Logs: `.local/m3-aircraft/checks/B2-6/`, frames `.local/m3-aircraft/frames/B2-6/`.
+
+**Fuel flow and range (opinionated, coordinator first pass, held for John).** The record's
+`fuelConsumption` 6 lb/s (the B-1B's) becomes 7 lb/s through a `CORRECTIONS` row
+(`aircraft_corrections.rs`, `B2_FUEL_LB_PER_S`): 69,200 lbf x 0.375 lb/(lbf h) / 3,600 = 7.2,
+the F118-GE-100 figure BMB-A2 and the decisions list cite. The page that gives 0.375 was not
+recorded (Wikipedia's F118 page lists thrust only, 19,000 lbf per engine); it stays a
+cited-by-the-plan figure until someone finds the source. Range, `performance_probe` with
+`PROBE_ONLY=fuel`: the trimmed cruise (65 percent of the top speed at 20,000 ft, 308 kt) burns
+2.99 lb/s, so 167,000 lb lasts 930 minutes, **4,779 nm** (5,486 nm at 6 lb/s). The published
+unrefuelled range is about 6,000 nm (Air Force fact sheet), so the model is 20 percent short,
+which is the right side to be on for a probe that flies at constant weight. Full military power
+burns 7.0 lb/s at 445 kt, 2,951 nm; Mach 0.7 at 36,000 ft burns about 6.9 lb/s (the model's drag
+rises with the square of the speed over the envelope's edge, so a fast cruise is dear).
+Pinned loosely by `the_b2_climbs_at_a_bombers_rate_and_its_speed_brake_is_a_modest_one`
+(ten seconds at full throttle burn 70 lb; the 0.4 throttle cruise gives 3,500 to 6,500 nm) and
+the record test (`fuelConsumption` reads 7). Logs: `fuel-after.txt`.
+
+**Load Ordnance (B2-5's rows, checked).** Four rows, all "Internal Bay": rows 5 and 6 the left
+and right Mk 82 bays, rows 7 and 8 the Paveway III bays. Default: 32 Mk 82 in each Mk 82 row,
+Paveway rows empty, 32,000 lb of stores, vehicle weight 357,000 of 376,000 lb (167,000 lb of
+fuel, 100 percent), the sensor note "Aircraft laser pod equipped" (frame `load-ordnance.png`).
+What the rows offer (`catalog.txt`; the Mk 82 rows 17 stores each, the Paveway rows 22): the Mk
+82 rows take `MK82` 32, `MK82HD` 32, `AT2` 32, `RBK250` 32, `FAB250` 29, `GBU38` 24, `CBU87`,
+`CBU89` and `RBK500` 18, `FAB500` 14, `MK84`, `AGM88` and `AGM45` 8, `FAB1000` 7, `MK82P3` 10,
+`MK82P` 5, `MK82AIR` 4. The Paveway rows take 4 of every store (a row is one bay's one-row
+grid), `PAVEWA3`, `GBU29`, `GBU29P` and `GBU30` among them, and `MK20`; the Mk 82 rows refuse
+those four (B2-5). A bay holds one row or the other: loading one empties its alternative
+(`bays::alternative`, `Loadout::clear_bay_alternative`, covered by the loadout audit in
+`--validate-ordnance`: "defaults and restart passed", catalog 22 normal, 83 Cheat). Pins are
+unchanged (4,776 weapon placements). An odd point worth a decision: the Paveway rows offer a Mk
+82 at only 4 (their grid is one row), so the way to carry more than 32 bombs of one kind a bay
+does not exist; 32 is the most a bay holds.
+
+**Live fire.** Every slot of `--live-fire --aircraft b2` fires (`flight-livefire-b2-slot1` to
+`slot4`, `STATIONS["b2"] = [32, 32, 0, 0]`): slot 1 leaves 31 in the left bay, slot 2 31 in the
+right, and the empty Paveway slots 3 and 4 fall through to the sister bay's Mk 82 (the F-22's
+alternation). The ripple across both bays is B2-5's `flight-bay-ripple-b2`; its places are now
+a scenario of their own, `a2g-release-origin-b2` (`--a2g-run --attack release`, 12 presses a Mk 82
+row, the human trigger): each bomb leaves where it hangs, the left bay at x -7.28, -3.38, -5.98 and
+-4.68 ft (outermost first, alternating), the front row at 10.44 ft forward then the back row at
+2.89, the bottom tier at -2.95 ft up and the next at -1.65; the right bay the same about x
++4.667; a Paveway III row at one row, 6.67 ft forward, -1.79 ft up. A GBU-27 with laser
+designation: `a2g-laser-b2` drops one from the left bay at 20,000 ft, 350 kt, on the spot of the
+B-2's own designator (the `PAVESPK.SEE` row, no pod body), it guides to within a second of the
+ground (time to impact counting down 36 s), misses the tank by 19 ft and destroys it.
+
+**Countermeasures (the retail `F18.ECM` row, decision 18).** It gives the B-2 a radar jammer, 30
+chaff and 30 flares (`capacity_chaff=30 capacity_flares=30`; five chaff and three flares leave
+25 and 27, `flight-countermeasures-b2`). The weapons window reads `25 CHAFF`, `27 FLARE` and
+`64 MK-82`; the HUD reads `LVL`, `32 MK-82` (the selected bay); the RWR page and the systems
+page draw (`cockpit-systems-after-release.png`, `external-chaff-flares.png`). Both are the
+fleet's convention, not B-2 figures (no source for a B-2 dispenser count was found).
+
+**AI: three bugs found and fixed.** The B-2 is the first aircraft in the Heavy strike class
+(BMB-A1, no override) that carries bombs of its own bay, so the Heavy rules in
+[AI strike](../spec/ai-strike.md#heavy-bombers) met a real bomber for the first time. Run:
+`--a2g-run UKR QUCOL --pilot ai --aircraft b2 --load MK82`.
+1. **It never released.** `strike.rs` held every unguided bomb to the weapon record's zone 1
+   maximum range (the Mk 82's 20,000 ft slant). A Heavy releases from its threat floor (5,000 ft
+   plus 5,000 under guns, 10,000 under missiles, John 2026-10-11); a 15,000 ft release is a slant
+   of 22,500 ft, 20,000 ft one 27,900 ft. The cue crossed the aim, `due` was true for six ticks, and the
+   pass left with the bombs on board. Fixed: a Heavy's bomb has no maximum range
+   (`heavy_bomb` in `attack()`, unit test `a_heavys_bomb_is_not_held_back_by_the_zone_maximum`;
+   a fighter's pass is still held back, the same test).
+2. **One bomb a pass.** Every pass ended at the first release, so a B-2 would have needed 32
+   passes. The spec's "stick" had no code. Now a Heavy's bombs leave as a stick: up to eight
+   (`HEAVY_STICK_BOMBS`, fitted), one every 0.25 s (the record's cadence), starting on the aim and
+   walking on beyond it; the pass is not ended by the cue passing the aim while the stick goes,
+   and exits after the last bomb (or two seconds without the next). Unit test
+   `a_heavys_bombs_leave_as_a_stick_at_the_records_cadence` (eight, three with three bombs).
+   Not centred on the aim: centring needs the aim shifted by half the stick, which is a new
+   checkpointed field; left for John (the stick walks about 900 ft past the aim at 300 kt).
+3. **It sank to the ground on the way in.** The level run flies at `SpeedRequest::Corner`,
+   the slow edge of the best G row: for the B-2 316 ft/s at 5,000 ft against a minimum level-flight
+   speed of 378 ft/s (limits 378 / 316 / 729). At 233 kt it wallowed in 50 degree banks and descended
+   to 168 ft above the ground on the way to a target 30 nm off. Now a Heavy whose corner speed is
+   under its minimum flies the run at 1.3 times that minimum (`level_speed`, `HEAVY_BELOW_MINIMUM_MARGIN`,
+   fitted); the C-130 (256 against 227 ft/s) is unchanged, which `ai-strike-heavy-level` still
+   shows (its stick of eight now lands within the circle).
+
+What an AI B-2 does now (`ai-strike-b2-stick`, `-climb`, `-paveway`, all passing; the first two print
+the new `ai-strike: ORIGIN` line, the release point against the aircraft):
+- At 20,000 ft, 12 nm out: eight Mk 82 from the **left bay's grid**, the first eight places of the human's
+  list above (the same cells, in the same order), 0.25 s apart, the doors stay shut (coordinator
+  decision), 103 to 479 ft misses, the target killed, egress, no loss.
+- From 5,000 ft, 30 nm out (5,000 ft is one of the four Quick Mission altitudes): climbs at about 300 kt to 10,057
+  ft, levels off, releases the stick at 304 kt, 595 ft closest, egress. The climb has the old wobble
+  (banks of 55 degrees for the first minutes; they settle once it is level).
+- A Paveway III: the first place of the left Paveway row (-7.28, -1.79, 6.67), kills the tank, egress.
+- The release origins are **the same** whether a human or the AI presses (B2-5's grid is shared;
+  the TOR-9 class of bug, an AI releasing from the wrong places, is absent): `a2g-release-origin-b2` and
+  `ai-strike-b2-stick` check the same cells, and the AI wing release has its own unit test (B2-5,
+  `an_ai_bomb_leaves_a_b2_bay_grid_from_its_first_place`).
+- Quick Mission strike (`--quick-wing` on `~QUFACT`): `ROLE plane=1 role=strike`, the Heavy path, a
+  stick of eight at 5,086 ft over an undefended factory, impacts 66 to 684 ft from the aim.
+- No air-to-air: the record has no gun and no air-to-air store (`rounds=0`, stations only Mk 82 and
+  GBU-27). `ai-b2-vs-su27-2v2`: against two Su-27s the B-2s fire nothing, defend, fly toward their
+  marshal and its stores read empty at the end (probably the jettison rule of John's 2026-10-20
+  revision, which drops the load to save the aircraft; not traced); `ai-b2-quick-mission-2v2` all B-2s.
+- Night rule: `NIGHT_STEALTH_AIRCRAFT = ["F117.PT", "B2.PT"]` is retail-derived data, so a friendly
+  B-2 at night turns the manned AAA into the night set as the F-117 does (F117-6/7 pinned it);
+  `--surface-dump UKR QUCOL --defenses 3 3 --surface-seed 5` shows 3 `ZSU23` by day and 10 with
+  `--night-stealth`. The rule keys on wings, not on a lobby's per-plane choice (decision kept).
+
+**AI: open, not fixed (for John and the flight slice).**
+- **The AI B-2 does not land.** An airborne B-2 sent home (`--probe-wing-order 600:bug-out`) arrives at
+  the marshal, starts its approach and flies the whole runway at 219 to 232 kt, 80 to 100 ft up, then
+  goes around and hits the ground (Mikonos 7,246 ft, Khasab 4,060 ft; Florennes never arrived in 108,000
+  ticks). Cause: `final_speed` is 1.1 times the AI's minimum level-flight speed, which the loaded-elevator
+  rule drives to 378 ft/s (224 kt) for the B-2 with its 357,000 lb (the scripted approach is 167 kt).
+  A bomber-specific cap or a loaded-elevator fit would shorten it; it changes every aircraft's law, so it
+  is not done here. Logs `ai-b2-land-home-mikonos.log`, `land-PGU.txt`, `land-FRA.txt`.
+- **The AI B-2 wingman cannot take off on its own.** Ground start at Athens (12,000 ft): rolls 55 s,
+  lifts at 156 kt, climbs to 650 ft at 154 kt and flies into the ground 10 s later (`ai-b2-land-pair.log`);
+  at Simferopol (5,532 ft) it runs off the pavement first. The player's B-2 on the autopilot climbs away
+  from the same field. Not registered as a scenario (it would fail).
+- The AI empties one bay at a time with its doors shut (unchanged, coordinator).
+- Bank wobble (up to 55 degrees) while the B-2 climbs at about 300 kt with a bomb load.
+
+**Quick Mission.** `the_b2_is_a_quick_mission_player_and_a_wing_choice` (`quick_mission.rs`): `B2.PT`
+is offered as the player's aircraft and in every AI wing field, the mission spec carries it exactly, never
+the F-117. The Load Ordnance page opens on the default above (frame `load-ordnance.png`). Lobby notes:
+`menus-snap-quick-lobby-ordnance-laser-notes-b2`: no laser warning, the pod helper shown. The strike
+mission itself works (above).
+
+**Multiplayer.** Two clients in one B-2 wing: `net-a2g-stores-b2` (the `net-a2g-stores` drive with the
+two players in B-2s): the watcher draws the bomber's stores and sees the bomber's Mk 82 station and the AI
+MiG-29s' empty as they release; the largest Stores event is 16 bytes (the grid rides in the rack the clients
+already hold). Not checked on the wire: the bay doors' drawn position (the `bay` fraction is a state field the
+snapshots carry as for the F-22; no scenario reads it) and the ripple's per-bomb cell (the clients draw the
+store count, not the cell). `tore-server` and `tore-bot` were rebuilt first (the lesson from M2K-9).
+
+**Replay.** `replay-rec-b2-2v2` (the B-2 as the player and in both wings, recorded three times, identical, and
+`--verify-render` clean) and `replay-a2g-b2-ripple` (twelve Mk 82 from the left bay, recorded with
+`--a2g-run --record --verify-render`: 6,459 ticks compared, 0 missing, 0 differing, and read back as 11
+releases and outcomes). The stores comparison already ignored nothing it should not; no replay code
+changed. The human run drives no bay doors (the door device ticks were 0), so the doors in a replay are
+covered by the B2-5 render scenarios, not here.
+
+**Provenance and open for John.** Fuel flow 7 lb/s opinionated (coordinator first pass; source page
+not recorded). The Heavy fixes and the stick are agent decisions (fitted constants: 8 bombs, 0.25 s from the
+record, 1.3 times the minimum speed). Questions: keep a stick of eight or tie it to the load; centre the stick
+(a checkpointed field); who fixes AI landing and takeoff for the heavy bombers (the B-52 will meet the
+same laws); whether the Paveway rows should offer a Mk 82 at 4 at all.
+
 ## F-117A in missions, multiplayer and replay (F117-9, 2026-11-15)
 
 Implementation and verification, slice F117-9 of the F-117A port (bomber batch A), with

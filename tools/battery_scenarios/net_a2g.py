@@ -279,6 +279,10 @@ STORES_MISSION = STRIKE_MISSION.replace(
     "wing friendly 1 F16C.PT 2 average\n", "wing friendly 1 F16C.PT 2 average\nwing enemy 1 MIG29.PT 2 average\n"
 ).replace("cheats easy-targeting\n", "cheats easy-targeting damage=invulnerable\n")
 
+# B2-9: the same two-player stores mission with both players in B-2s (one wing of two), so each client
+# must draw the other's bay stores (a gridded magazine: 32 Mk 82 a bay) and see them leave.
+B2_STORES_MISSION = STORES_MISSION.replace("wing friendly 1 F16C.PT 2 average\n", "wing friendly 1 B2.PT 2 average\n")
+
 STORES_LINE = re.compile(
     r"^(?P<name>\w+): stores: told (?P<told>\d+), bytes (?P<bytes>\d+), largest (?P<largest>\d+), "
     r"drawn (?P<drawn>\d+), emptied \[(?P<emptied>[\d ]*)\]$",
@@ -318,10 +322,10 @@ def stores_problems(text: str, players: tuple[int, ...]) -> list[str]:
     return problems
 
 
-def drive_stores(d: Drive) -> None:
+def drive_stores(d: Drive, mission: str = STORES_MISSION) -> None:
     """Another player's and an AI's stores empty on a client's screen as they release (protocol 27)."""
     port = d.port()
-    server = start_server(d, port, STORES_MISSION, king="first-player", loadouts="any")
+    server = start_server(d, port, mission, king="first-player", loadouts="any")
     bomber = start_bots(
         d, port, "bomber", 120, "--callsign", "Bomber", "--slot", "0", "--a2g", "bomb", "--load", "MK82.JT",
         "--king", "loadouts=any", "--players", "2",
@@ -343,6 +347,12 @@ def drive_stores(d: Drive) -> None:
     log_must(d, server_log(d), r"joined as Bomber", r"joined as Watch", forbid=r"protocol error|bad packets|\bfault\b")
 
 
+def drive_stores_b2(d: Drive) -> None:
+    """`net-a2g-stores` with both players in B-2s: the same Mk 82 leaves the bomber's left bay on the watcher's
+    screen, and the AI's stores still empty."""
+    drive_stores(d, B2_STORES_MISSION)
+
+
 def scenarios() -> list[Scenario]:
     return [
         Scenario(
@@ -355,5 +365,9 @@ def scenarios() -> list[Scenario]:
         ),
         Scenario(
             name="net-a2g-stores", lane="net", args=[], driver=drive_stores, uses=("server", "bot"), timeout=420,
+        ),
+        Scenario(
+            name="net-a2g-stores-b2", lane="net", args=[], driver=drive_stores_b2, uses=("server", "bot"),
+            timeout=420,
         ),
     ]

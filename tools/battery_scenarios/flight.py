@@ -111,6 +111,10 @@ STATIONS = {
     # a fourth weapon slot.
     "tornado": [360, 4, 2, 2],
 }
+# The B-2 carries no gun: its four weapon rows are the bays', row 5 and 6 the Mk 82 (32 a bay), rows 7
+# and 8 the Paveway III rows, empty by default (a bay holds one or the other, B2-5), so they end the
+# list at 0 as the F-22's empty row does (B2-6, 2026-11-15).
+STATIONS["b2"] = [32, 32, 0, 0]
 STATIONS["tornadoc"] = STATIONS["tornado"]
 STATIONS["f22n"] = [750, 2, 2, 4, 0]
 STATIONS["faxx"] = STATIONS["f22n"]
@@ -1510,6 +1514,13 @@ def countermeasure_scenarios() -> list[Scenario]:
         args += ["--combat-command", "flare"] * 3
         args += ["--countermeasure-preview", "240", "--capture-flight", "{work}/cm.ppm", "--no-audio"]
         out.append(Scenario(name=f"flight-countermeasures-{ac}", lane="flight", args=args, window=True, check=check_countermeasures, timeout=180))
+    # B2-6: the B-2 keeps the retail F18.ECM row (decision 18): 30 chaff and 30 flares, a jammer.
+    args = ["--live-fire", "--aircraft", "b2"] + ["--combat-command", "chaff"] * 5
+    args += ["--combat-command", "flare"] * 3
+    args += ["--countermeasure-preview", "240", "--capture-flight", "{work}/cm.ppm", "--no-audio"]
+    out.append(Scenario(name="flight-countermeasures-b2", lane="flight", args=args, window=True,
+                        check=check_countermeasures, timeout=180,
+                        notes="The B-2's retail F18.ECM row: 30 chaff and 30 flares, five and three released (B2-6)."))
     out.extend(tornado_countermeasure_scenarios())
     return out
 

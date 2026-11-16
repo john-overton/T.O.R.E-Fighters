@@ -509,6 +509,17 @@ pub const B2_THRUST_LBF: i32 = 69_200;
 pub const B2_EMPTY_LB: i32 = 158_000;
 pub const B2_INTERNAL_FUEL_LB: i32 = 167_000;
 pub const B2_MAX_TAKEOFF_LB: i32 = 376_000;
+/// B-2A fuel flow (B2-6, **opinionated**, coordinator first pass 2026-11-15,
+/// held for John): the record's `fuelConsumption` 6 lb/s (whole pounds a
+/// second for all four engines at full military power,
+/// [`TORNADO_FUEL_LB_PER_S`]) is the B-1B's, not a B-2 figure. It implies 0.312
+/// lb/(lbf h) at the corrected thrust. The corrected flow is 69,200 lbf x 0.375
+/// lb/(lbf h) / 3,600 s = 7.2, so 7 lb/s (2.8 percent under): the F118-GE-100
+/// thrust-specific fuel consumption of 0.375 at 69,200 lbf that BMB-A2 and the
+/// coordinator's first pass cite (the page for that figure was not recorded,
+/// and Wikipedia's "General Electric F118" lists none). The B-2 has no
+/// afterburner, so the dry flow is the only one.
+pub const B2_FUEL_LB_PER_S: i32 = 7;
 /// B-2A ceiling (B2-8, **opinionated**, agent decision 2026-11-15; the
 /// figure is the real one): 50,000 ft. `maxAlt` carries 49,000 ft in the
 /// record. The game's own Jane's text (`B2.INF`, "Service ceiling: 15,240 m
@@ -1333,7 +1344,7 @@ pub const CORRECTIONS: &[Correction] = &[
         retail: 18,
         corrected: B52_FUEL_LB_PER_S,
     },
-    // B-2A: real thrust, weights and fuel (the flow stays, see the docs).
+    // B-2A: real thrust, weights and fuel, and the F118 flow (B2-6).
     Correction {
         id: AircraftId::B2,
         block: Block::Object,
@@ -1361,6 +1372,13 @@ pub const CORRECTIONS: &[Correction] = &[
         key: "maxTakeoffWeight",
         retail: 400_000,
         corrected: B2_MAX_TAKEOFF_LB,
+    },
+    Correction {
+        id: AircraftId::B2,
+        block: Block::Plane,
+        key: "fuelConsumption",
+        retail: 6,
+        corrected: B2_FUEL_LB_PER_S,
     },
     // B2-8: the real ceiling and a speed brake sized from the drawn plates.
     Correction {
@@ -2583,7 +2601,7 @@ mod tests {
     fn the_batch_fuel_flows_are_the_corrected_thrust_times_the_cited_sfc_to_the_whole_pound() {
         // (flow, thrust lbf, SFC lb/(lbf h)), each within the rounding of one
         // whole pound a second, which is the record's unit.
-        let rows: [(i32, i32, f64); 8] = [
+        let rows: [(i32, i32, f64); 10] = [
             (F15E_FUEL_LB_PER_S, 32_558, 0.73),
             (F15E_AB_FUEL_LB_PER_S, 47_860, 1.94),
             (GRIPEN_FUEL_LB_PER_S, 12_140, 0.844),
@@ -2592,6 +2610,8 @@ mod tests {
             (TORNADO_FUEL_LB_PER_S, TORNADO_THRUST_LBF, 0.598),
             (TORNADO_AB_FUEL_LB_PER_S, TORNADO_AFT_THRUST_LBF, 2.5),
             (F5E_AB_FUEL_LB_PER_S, 10_000, 2.13),
+            (B52_FUEL_LB_PER_S, B52_THRUST_LBF, 0.52),
+            (B2_FUEL_LB_PER_S, B2_THRUST_LBF, 0.375),
         ];
         for (flow, thrust, sfc) in rows {
             let exact = f64::from(thrust) * sfc / 3600.;
