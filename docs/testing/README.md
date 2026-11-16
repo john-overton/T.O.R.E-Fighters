@@ -231,7 +231,22 @@ Scenarios that need existing recordings create their own fixtures.
 Results land in `.local/battery/<timestamp>/`: `summary.md` first, then
 `logs/<scenario>.log` for the full output of each run and `results.json` for
 tools. `--keep-data` keeps each run's data folder (replays, logs) for a
-closer look.
+closer look; `--keep-failed-data` keeps it for failing scenarios only.
+
+Update (2026-11-16): two options keep a run's writes off the disk.
+`--data-root DIR` (or `TORE_BATTERY_DATA_ROOT`) makes each scenario's profile
+copy under `DIR`, for example the RAM disk `/dev/shm/tore-battery`, with
+`{work}/data` a link to it, so every path a scenario names still works; logs,
+`summary.md` and the scenarios' own outputs stay under `--out`, and the copy is
+removed when the scenario ends (moved back under `{work}/data` when kept).
+`--shared-caches` (or `TORE_BATTERY_SHARED_CACHES=1`) links each scenario's
+`vegetation-cache/` and `city-cache/` to the source profile's instead of
+copying them. Cache entries are keyed by their inputs and written to a
+temporary file renamed into place, so concurrent scenarios share them safely and
+each entry is built once into the source profile, where a fresh copy used to
+rebuild up to 9 GB of vegetation cache per scenario. The source profile's caches
+grow to the union of the theaters the runs visit. `vegetation-cache-roundtrip`
+uses its own cache folder and is unaffected.
 
 Scenarios that open a window go through [`tools/agent-run.sh`](../../tools/agent-run.sh)
 so they never cover your active workspace. `--windows N` limits how many are open

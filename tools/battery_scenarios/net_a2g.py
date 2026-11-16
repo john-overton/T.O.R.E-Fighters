@@ -299,6 +299,12 @@ B2_STORES_MISSION = STORES_MISSION.replace("wing friendly 1 F16C.PT 2 average\n"
 # whose bomb is a GBU-27 (`tore-bot --a2g bomb` takes the first bomb of its load, not the Mk 82 by
 # name). Each client must see the other's bay doors open for the release.
 F117_STORES_MISSION = STORES_MISSION.replace("wing friendly 1 F16C.PT 2 average\n", "wing friendly 1 F117.PT 2 average\n")
+# B52-9 (2026-11-16): the same mission with both players in B-52s. `tore-bot --load` hangs each store on the first
+# station after the others that takes it, two of each: `AGM84E.JT,MK82.JT` puts two Harpoons on the wing pylons
+# (row 7, station 1) and two Mk 82 in the forward bay row (station 2), and `--a2g bomb` takes the first bomb, the
+# Mk 82 (a Harpoon is not on the bomb equation). The watching client must draw the pylon Harpoons and the bay
+# stores, and see a Mk 82 leave with the bay doors open.
+B52_STORES_MISSION = STORES_MISSION.replace("wing friendly 1 F16C.PT 2 average\n", "wing friendly 1 B52.PT 2 average\n")
 # The strike handback with a B-2 (the F-117 has no radar to set up a pass with), airborne at 20,000 ft so the heavy needs no climb to its release floor: the human's pass is
 # continued by the AI, whose bay doors must open for the release and be seen to open from the other client.
 B2_STRIKE_MISSION = STRIKE_MISSION.replace(
@@ -374,9 +380,12 @@ def drive_strike_handback_b2(d: Drive) -> None:
     drive_strike_handback(d, B2_STRIKE_MISSION, "MK82.JT", doors=True)
 
 
-def drive_stores(d: Drive, mission: str = STORES_MISSION, load: str = "MK82.JT", doors: bool = False) -> None:
+def drive_stores(d: Drive, mission: str = STORES_MISSION, load: str = "MK82.JT", doors: bool = False,
+                 bomb: str | None = None) -> None:
     """Another player's and an AI's stores empty on a client's screen as they release (protocol 27). With
-    `doors` (a bay aircraft) the watching client also sees the bomber's bay doors open (BMB-AI)."""
+    `doors` (a bay aircraft) the watching client also sees the bomber's bay doors open (BMB-AI). `bomb` is the
+    store the watcher must see leave when it is not the whole `load` (a comma list of stores)."""
+    bomb = bomb or load
     port = d.port()
     server = start_server(d, port, mission, king="first-player", loadouts="any")
     bomber = start_bots(
@@ -392,7 +401,7 @@ def drive_stores(d: Drive, mission: str = STORES_MISSION, load: str = "MK82.JT",
     server.finish(40, 0)
     bomber.expect(r"^Bomber: seat \d+, plane 0, at tick \d+$", "plane 0")
     watch.expect(r"^Watch: seat \d+, plane 1, at tick \d+$", "plane 1")
-    watch.expect(rf"^Watch: a2g: saw {re.escape(load)} \d+ from plane 0 ", f"a {load} leaving plane 0")
+    watch.expect(rf"^Watch: a2g: saw {re.escape(bomb)} \d+ from plane 0 ", f"a {bomb} leaving plane 0")
     for bot in (bomber, watch):
         bot.forbid(NET_BAD, "a network problem")
     for problem in stores_problems(bomber.text() + watch.text(), (0, 1)):
@@ -416,6 +425,12 @@ def drive_stores_b2(d: Drive) -> None:
     drive_stores(d, B2_STORES_MISSION)
 
 
+def drive_stores_b52(d: Drive) -> None:
+    """`net-a2g-stores` with both players in B-52s (B52-9): a Mk 82 leaves the bomber's bay on the watcher's
+    screen, the watcher sees the bomber's bay doors open for it, and the AI's stores still empty."""
+    drive_stores(d, B52_STORES_MISSION, "AGM84E.JT,MK82.JT", doors=True, bomb="MK82.JT")
+
+
 def scenarios() -> list[Scenario]:
     return [
         Scenario(
@@ -431,6 +446,10 @@ def scenarios() -> list[Scenario]:
         ),
         Scenario(
             name="net-a2g-stores-b2", lane="net", args=[], driver=drive_stores_b2, uses=("server", "bot"),
+            timeout=420,
+        ),
+        Scenario(
+            name="net-a2g-stores-b52", lane="net", args=[], driver=drive_stores_b52, uses=("server", "bot"),
             timeout=420,
         ),
         Scenario(

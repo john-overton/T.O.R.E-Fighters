@@ -281,6 +281,23 @@ STORES_LINE = re.compile(r"^AI stores: actor=(\d+) .*? stations=\[(.*)\]$", re.M
 SHOT_AT_STATION = re.compile(r"^AI probe attack: .* missiles=(\d+) gun_bursts=(\d+) gun_rounds=(\d+) ", re.M)
 
 
+def b52_gun_fight_problems(output: str) -> list[str]:
+    """`ai-b52-quick-mission-2v2` (slice B52-9): the probe's usual checks, every B-52 still holds all twelve
+    Harpoons (a surface missile is refused against an aircraft, so nothing fires one), and the tail guns did
+    shoot (the fight has shots in it)."""
+    problems = probe_problems(output)
+    lines = STORES_LINE.findall(output)
+    if len(lines) < 3:
+        problems.append(f"{len(lines)} AI stores lines, want one per B-52")
+    for actor, stations in lines:
+        if "AGM-84E x12" not in stations:
+            problems.append(f"actor {actor} lost Harpoons: {stations}")
+    total = SHOTS.search(output)
+    if total is None or int(total.group(1)) == 0:
+        problems.append("no shot in an all-B-52 fight: the tail guns never fired")
+    return problems
+
+
 def b2_no_air_to_air_checker() -> Callable[[str], list[str]]:
     """The B-2 wing in a fight (slice B2-9): the probe's usual checks, and the B-2s carry no gun (rounds=0) and
     nothing but Mk 82 and GBU-27 on their stations, so they fire no air-to-air shot; the player's own run
@@ -947,8 +964,8 @@ def touchdown_problems(output: str, max_kt: int) -> list[str]:
 def heavy_cycle(max_touchdown_kt: int, *, taxi_in: bool = True) -> Callable[[str], list[str]]:
     """A full cycle at a 12,000 ft field (takeoff, climb-out, land order, approach, final, rollout,
     taxi, park), all on the pavement, touching down no faster than `max_touchdown_kt`. Without
-    `taxi_in` (the B-52, whose taxi-in leaves the pavement and has not parked by the end: known,
-    open) it ends at the rollout."""
+    `taxi_in` the check ends at the rollout and allows the taxi-in to leave the pavement (the B-52 before
+    B52-9, whose taxi-in swung 30 ft off a taxiway corner; every aircraft now stays on it)."""
 
     def check(output: str) -> list[str]:
         problems = checker(
@@ -1687,7 +1704,7 @@ def scenarios() -> list[Scenario]:
     # full takeoff weights, and every one of the three flies the pieces at the field lengths of the
     # retail missions (docs/spec/ai-airfield.md, "Heavy bombers"). The land order comes after the
     # climb-out (a B-2 is airborne at 205 s, a B-52 at 200 s).
-    for aircraft, order, ticks, kt, pavement in (("b2", 30000, 150000, 175, True), ("b52", 36000, 150000, 175, False)):
+    for aircraft, order, ticks, kt, pavement in (("b2", 30000, 150000, 175, True), ("b52", 36000, 150000, 175, True)):
         out.append(probe(f"merged-airfield-{aircraft}-wing2", [
             "--theater", "FRA", "--ground-start", "14",
             "--aircraft", aircraft, "--probe-friendly-aircraft", aircraft,
@@ -1697,8 +1714,8 @@ def scenarios() -> list[Scenario]:
             ticks=ticks, timeout=3000,
             check=heavy_cycle(kt, taxi_in=pavement),
             notes=f"An AI {aircraft.upper()} at Southampton at its full weight: it taxis, takes off, climbs out with its "
-                  "flaps down until it can raise them, lands on the order at 175 kt or slower and parks. The B-52's "
-                  "taxi-in leaves the pavement for a few seconds (known, open)."))
+                  "flaps down until it can raise them, lands on the order at 175 kt or slower and parks, all on the "
+                  "pavement (B52-9: the B-52's taxi-in used to leave it for six seconds at a corner)."))
     # Takeoff alone: the B-2 and B-52 from Athens (GRE 1, 12,000 ft; at their full weights they need about
     # 7,200 ft and the scripted player's own B-2 runs off the end of Mikonos' 7,246 ft), the F-117 from
     # Mikonos (GRE 2, 7,246 ft). Each leaves the ground, climbs out and flies on.
@@ -1719,9 +1736,10 @@ def scenarios() -> list[Scenario]:
             "--probe-wing-size", "2", "--probe-wing-order", "600:bug-out", "--probe-fuel", str(fuel),
             "--separation", "200", "--probe-wing-only", "--probe-pavement"],
             ticks=90000 if aircraft == "tu95" else 72000, timeout=2400,
-            check=heavy_landing(kt, pavement=aircraft not in ("b52", "tu95")),
+            check=heavy_landing(kt, pavement=aircraft != "tu95"),
             notes=f"BMB-AI: an airborne {aircraft.upper()} sent home lands at Simferopol (5,532 ft) at {kt} kt or slower "
-                  f"with {fuel} lb of fuel, rolls out, clears and parks."))
+                  f"with {fuel} lb of fuel, rolls out, clears and parks, on the pavement all the way (the B-52's "
+                  "touchdown used to be 140 ft left of the runway's edge: B52-9)."))
     # An enemy ground start in single player (slice CL-R): Enemy Wing 1 parks
     # at Kharkiv (UKR 6, a Redfor field) while the player's wing leaves Odesa;
     # the AI pair must start on the ground and be flying at the end.
@@ -2086,6 +2104,25 @@ def scenarios() -> list[Scenario]:
                                               "--separation", "5", *attack), ticks=7200,
                      check=b2_no_air_to_air_checker(),
                      notes="The B-2 wing against Su-27s: the B-2s fire nothing (no air-to-air store, no gun)."))
+    # 13k. The B-52 Stratofortress in a mission (slice B52-9, 2026-11-16): the strike class is Heavy by the
+    # rule, the record's tail gun is a slewed mount (it fires astern, with BMB-AI's aim error), and the pylon
+    # Harpoons are refused against an aircraft. In an all-B-52 fight the tail guns are the only weapons: the
+    # probe's usual checks (no crash into the ground, no stall) must hold and the guns must have been used.
+    # The strike itself is `ai-strike-b52-*` (ai_strike.py).
+    out.append(probe("b52-quick-mission-2v2", fight(2, 2, "--aircraft", "b52",
+                                                    "--probe-friendly-aircraft", "b52",
+                                                    "--probe-enemy-aircraft", "b52",
+                                                    "--separation", "5", *attack), ticks=7200,
+                     check=b52_gun_fight_problems,
+                     notes="All B-52: the player's wing and the enemy wing fly the B52.PT identity (eight engines "
+                           "as four, tail gun, 12 Harpoons on the pylons, an empty bay) in a 2 v 2. The Harpoons "
+                           "are refused against aircraft; the tail guns do the shooting."))
+    out.append(probe("b52-vs-su27-2v2", fight(2, 2, "--aircraft", "b52",
+                                              "--probe-friendly-aircraft", "b52",
+                                              "--probe-enemy-aircraft", "su27",
+                                              "--separation", "5", *attack), ticks=7200,
+                     notes="The B-52 wing against Su-27s: the probe's usual checks hold for the B-52s and the "
+                           "Su-27s, whoever wins."))
     # 14. The fixed acceptance probes.
     out.append(Scenario(name="ai-roster-probe", lane="ai", args=["--ai-roster-probe-ticks", "3600", "--no-audio"], timeout=1800))
     out.append(Scenario(name="ai-probe-matrix", lane="ai",
