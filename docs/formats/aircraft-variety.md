@@ -11204,8 +11204,8 @@ cap of 1 for an aircraft whose wheels need over 0.2 throttle (`mission::taxi_thr
 | B-2 land order after takeoff, Southampton, full weight: touchdown | (could not fly) | 160 kt, rolled out, parked, 0 ticks off the pavement |
 | B-2 airborne to Simferopol (5,532 ft), 60,000 lb fuel: touchdown | 219 to 232 kt, go-around, crash | 139 kt, parked on the pavement |
 | B-52 at Southampton, Athens or Mikonos: takeoff | never left its spot | airborne at 197 to 200 s |
-| B-52 land order at Southampton, 488,000 lb: touchdown | (could not fly) | 162 kt, stops on the runway, 743 ticks off the pavement in the taxi-in |
-| B-52 to Simferopol, 80,000 lb fuel: touchdown | (could not fly) | 131 kt, parked; 1,201 ticks off the pavement (touched down about 650 ft short) |
+| B-52 land order at Southampton, 488,000 lb: touchdown | (could not fly) | 162 kt, stops on the runway, 743 ticks off the pavement in the taxi-in (B52-9, 2026-11-16: 0, [fixed](#b-52-ai-missions-multiplayer-and-replay-b52-9-2026-11-16)) |
+| B-52 to Simferopol, 80,000 lb fuel: touchdown | (could not fly) | 131 kt, parked; 1,201 ticks off the pavement (it touched down 144 ft left of the centre line, on the grass: B52-9, 2026-11-16, [fixed](#b-52-ai-missions-multiplayer-and-replay-b52-9-2026-11-16), 0 ticks off) |
 | F-117 to Simferopol, 7,000 lb fuel | 224 kt | 174 kt, parked on the pavement |
 | B-2 takeoff, Simferopol (5,532 ft), full weight | ran off the pavement | rolls off the end for 9 s (1,081 ticks) and is airborne at 202 s |
 
@@ -11220,7 +11220,7 @@ C-130 also sit on it). At Khasab (4,060 ft) the F-117 still overruns and is dest
 weight needs about 7,200 ft to lift off: Mikonos (7,246 ft) and the 12,000 ft fields are fine, Simferopol
 is not; a B-52 at 488,000 lb rolls about 5,450 ft after touchdown and runs about 1,000 ft past the end of
 a 5,532 ft runway. These are the model's weights and fitted brakes, not the AI law: they land at a landing
-weight. (3) The B-52's taxi-in leaves the pavement for a few seconds (known, not traced).
+weight. (3) The B-52's taxi-in left the pavement for a few seconds (traced and fixed in B52-9, 2026-11-16).
 
 **Unchanged for the others (evidence).** The same 124 scenarios (`ai-takeoff-*` 56, `ai-ground-*`,
 `ai-theater-*-takeoff|land-pair`, `ai-records-land-*`, `ai-merged-airfield-{f18,c130,f117}-*`, `ai-ils-terrain-*`,
@@ -11293,7 +11293,7 @@ so the handback drive uses the B-2.
    a 5,532 ft runway and a B-2 at 357,000 lb cannot take off from one. Offer these only where they fit, or let
    the AI shed fuel?
 3. **Radar rows** carry no gear, flap or bay deployment (the open-bay RCS term shows only on the RCS page).
-4. **B-52 taxi** leaves the pavement for seconds after landing and parking.
+4. ~~**B-52 taxi** leaves the pavement for seconds after landing and parking.~~ Fixed in B52-9 (2026-11-16): the taxi-in corner and the 80,000 lb touchdown are on the pavement.
 
 ### Checks (BMB-AI)
 
@@ -11313,3 +11313,142 @@ passes except five that fail on the pre-slice binary too (`ai-ils-terrain-fra-a9
 (below). `net-a2g-stores-f117` and `net-ai-strike-handback`, `-b2` pass. Faults of mine found by the run: a
 module-level regex named `TOUCHDOWN` shadowed the vertical landing checks' (renamed), and `replay-a2g-f117` still
 asserted shut doors for the AI.
+
+
+## B-52 AI, missions, multiplayer and replay (B52-9, 2026-11-16)
+
+Implementation and verification mode, slice B52-9 (the B-52's counterpart of B2-9 and F117-9). The AI work
+was asked for by the coordinator on John's program (AGENTS.md: no AI work unless John asks). Everything
+here is `fitted`, agent decisions of 2026-11-16, except where a number is a record's. The shared
+heavy-bomber rules of [BMB-AI](#ai-fixes-for-the-bombers-bmb-ai-2026-11-16) (flaps law, climb-out wait, taxi
+throttle floor, AI bay doors, tail-gun aim, tore-bot) carry the B-52 unchanged; this slice adds scenarios, one
+unit test and two B-52-only airfield laws that close BMB-AI's open item 5.
+
+### The AI strike from the bay and the pylons
+
+The B-2's stick rules (a heavy's bombs leave as a stick of up to eight, with no zone maximum, at 1.3 times the
+minimum speed) needed no change: they read the station rows, and the B-52's rows are the shared bay grid
+(rows 3, 5 and 6, station numbers 2, 3 and 4 of the run) and the pylon beam (row 7, station 1). Run with
+`--a2g-run UKR QUCOL --pilot ai --aircraft b52 --load MK82 --station N --count M` (the default station, 2,
+holds nothing until `--count` loads it):
+
+| Run | What the log shows |
+| --- | --- |
+| Nine Mk 82 in the forward bay row, 20,000 ft, 12 nm | `BAY` open at 67.8 s (0.96), eight releases 68.35 to 70.10 s, 0.25 s apart, each `bay=1.00`, from right -1.95, 1.95, -0.65, 0.65 ft then the second tier (up -5.29, then -3.98), forward 13.87; doors read shut 1.9 s after the last; impacts 333 to 1,224 ft from the aim (the stick walks on beyond it, as the B-2's; centring is a checkpointed field, John's call); the tank at 145 of 200; egress; not lost |
+| Six Mk 82 on the wing pylons | six releases 0.25 s apart, `bay=0.00`, no `BAY` line, from the two beams alternating (right -15.96, 15.96, -18.70, 18.70, -17.33, 17.33 ft, up 2.43, forward 10.33) |
+| Quick Mission wing (`--quick-wing`, Ukraine factory) | `ROLE strike`, the same bay stick of eight at 5,248 ft (the 5,000 ft heavy floor), doors open before and shut after, egress, not lost |
+| Two AGM-84E on the pylons against the Krivak (`QUSFLT`, `--unit`, 15 nm, 20,000 ft) | both leave at 0.017 s (a stand-off store from the reach), one a wing (right -17.33 and 17.33, up 2.32, forward 10.33), doors untouched, both hit at 29.3 s (96 ft), the Krivak destroyed |
+
+The Harpoon goes against a ship through the target designation the AI makes (`SELECTION kind=Seeker`), as a
+human's A-G page does in `a2g-antiship-b52`; the B-52's Transitional radar (B52-6/7) is what makes a ship a
+target. **Open:** after the kill the AI searches for a new target (91 s), is hurt from 107 s and is lost at 137 s,
+7,970 ft from the area it was sent to. The only armed units there are the fleet's other ships, so most likely
+their defences; the cause was not traced and the shared AI does not leave the area after its last target. The
+scenario stops at 60 s.
+
+### Quick Mission
+
+`quick_mission::tests::the_b52_is_a_quick_mission_player_and_a_wing_choice`: `B52.PT` is offered as the
+player's aircraft ("B-52 Stratofortress") and in every AI wing field, a draft carries it as the player and in every
+wing, and the night stealth rule (the B-2 and the F-117) does not take it. The strike is `ai-strike-b52-quick-wing`.
+Two 2 v 2 probes: `ai-b52-quick-mission-2v2` (all B-52: the tail guns do the shooting, 251 shots in the recorded
+run; every B-52 still holds its twelve Harpoons, which a surface missile never fires at an aircraft) and
+`ai-b52-vs-su27-2v2` (the probe's usual checks hold).
+
+### Multiplayer
+
+`net-a2g-stores-b52`: both players in B-52s (`B52_STORES_MISSION`, one wing of two). `tore-bot --load` hangs each
+store on the first station after the others that takes it, two of each, so `AGM84E.JT,MK82.JT` puts two Harpoons
+on the pylons (station 1) and two Mk 82 in the forward bay row (station 2), and `--a2g bomb` takes the Mk 82.
+The watching client draws the bomber's stores (a Stores event of 16 bytes at most, 7 events and 76 bytes in
+all), sees a Mk 82 leave plane 0 and the bomber's emptied stations (0 2 3: the Mk 82 row and the AI's), and reads
+plane 0's bay doors at 1.00 on its screen. (A bare `--load MK82.JT` bombs from the pylon, the first station that
+takes it, with the doors shut.) **Not covered:** the tail gun's rounds on a watching client. `tore-bot` has no gun
+role (lase, buddy, strike, bomb and watch only), so no existing net scenario fires a gun; the client's rounds
+come from `net/guns.rs` (B52-6/7) and are read by its unit tests only.
+
+### Replay
+
+`replay-rec-b52-2v2`: the B-52 as the player and in both wings, a 2 v 2 recorded three times; `--verify-render`
+passes and two runs record the same, so the `B52.PT` identity (checkpoint code 47) and the slewed tail gun's rounds
+round-trip. `replay-a2g-b52-ripple`: a human ripple of eight presses from the forward bay row (`--attack
+release --station 2 --count 9`), recorded and replayed with `--verify-render` (6,280 ticks, none missing or
+differing), read back as seven releases and outcomes of the eight presses (the B-2's ripple likewise gives 11 of 12; not
+traced), the recorded bay device shut at the start and the end and at 0.95 or more at every release.
+
+### The B-52's final and taxi-in (BMB-AI's open item 5)
+
+Both problems were traced, neither was the flight model. They are closed by two rules that apply only to an
+aircraft whose wheels need power to taxi (`Situation::taxi_throttle_floor` above zero: the B-52 at every weight,
+nothing else in the roster), so no other aircraft changes
+([spec](../spec/ai-airfield.md#heavy-bombers-and-aircraft-that-cannot-fly-slow-clean-bmb-ai-2026-11-16)).
+
+1. **The "650 ft short" touchdown was a sideways one.** The 80,000 lb B-52 (`ai-heavy-land-b52-ukr-a2`) snaked
+   down the final across a centre line at x 1,107,332: 45 ft left of it when the final began (245.7 s), 148 ft
+   right at 253 s, 161 ft left at 259 s, 190 ft right at 267 s and 144 ft left at the touchdown (x 1,107,188, the
+   first Rollout sample, 560 ft past the threshold). The pavement's edge is about 100 ft from the centre line, so
+   it touched down on the grass beside the runway, drifted back and was on the pavement 330 ft later (1,201 ticks
+   of `off the pavement`). The shared lateral law (aim a quarter of the way to the aim point ahead, at least 1,500
+   ft) is too brisk for a heavy's slow roll and yaw. With a 3,000 ft minimum (`HEAVY_FINAL_LOOKAHEAD_MIN_FT`) it
+   touches down at x 1,107,334, 2 ft off the line, at 130 kt (131 before), 0 ticks off the pavement. At 40,000 lb
+   (no snake before) the result is the same either way (113 kt, x 1,107,330).
+2. **The taxi-in corner.** The taxiway legs from the runway end are straight 90 degree corners at a few
+   hundred feet, and the B-52 stops at each anchor. With the BMB-AI floor the throttle never fell below 0.63 even
+   when it was over the speed it wanted, so it ran 3 ft past the anchor at 15 ft/s, the next target was behind
+   it, it turned back 116 degrees right, stopped, and turned 140 degrees left at 7 to 11 ft/s, swinging 30 ft out
+   of the corner for 743 ticks. Now an aircraft with the floor coasts over its target speed (its rolling deceleration,
+   4.8 ft/s squared, slows it; 8 ft/s over, the brakes come on as before). The full cycle at Southampton
+   (`ai-merged-airfield-b52-wing2`): off the pavement 743 of 81,126 ground samples before, 0 of 80,914 after;
+   parked at 1,177 s (1,149 s before: it now stops at each anchor instead of overshooting and turning back); the
+   takeoff roll starts 0.8 s earlier (90.5 s against 91.3 s), as the same law governs the taxi-out stops.
+
+Both scenarios now demand the pavement all the way (`ai-merged-airfield-b52-wing2`, `ai-heavy-land-b52-ukr-a2`);
+BMB-AI had waived it for the B-52 only. Unit tests in `airfield.rs`:
+`a_heavy_coasts_over_its_taxi_speed_and_a_fighter_keeps_its_law` and
+`a_heavy_final_closes_on_the_line_more_gently_than_a_fighter`.
+
+**Everyone else is bit-identical.** The BMB-AI comparison was repeated on the binary before this slice (HEAD f629fd59, built apart) and after:
+the same 129 scenarios (`ai-takeoff-*` 56, `ai-ground-*`, `ai-theater-*-takeoff|land-pair`, `ai-records-land-*`,
+`ai-merged-airfield-*`, `ai-ils-terrain-*`, `ai-airfield-taxi-*`, `ai-lost-lead-*`), `--jobs 5`, logs in
+`checks/B52-9/base-all` and `new-battery`. Their `AI probe phases`, final actor lines and `AI probe totals` (which carry
+the run's checksum) are **identical in 128 of 129 logs, bit for bit** (`BMB-AI/compare.py`); the one that differs is the
+B-52's own cycle, the intended change. The only failure on both binaries is `ai-ils-terrain-fra-a9`, the pre-existing
+launch error (the base binary also fails `ai-merged-airfield-b52-wing2`, because the scenario now demands the
+pavement). Ground-started takeoffs with a land order from Southampton, on both binaries, for the C-130, IL-76, E-3,
+B747, A310, AC-130, B-2, F-117, B-1B, Tu-160 and F-111F (100,000 ticks, `checks/B52-9/tx`): phases, actor lines and
+totals identical in all eleven.
+
+### Scenarios and tests added
+
+| Name | What it pins |
+| --- | --- |
+| `quick_mission::the_b52_is_a_quick_mission_player_and_a_wing_choice` | B52.PT as player and wing choice, no stealth night rule |
+| `airfield::a_heavy_coasts_over_its_taxi_speed_and_a_fighter_keeps_its_law`, `airfield::a_heavy_final_closes_on_the_line_more_gently_than_a_fighter` | the two B-52-only laws, the fighter's untouched |
+| `ai-strike-b52-stick`, `ai-strike-b52-pylon`, `ai-strike-b52-quick-wing`, `ai-strike-b52-antiship` | the heavy stick from the bay row and the pylon beams, doors, the Quick Mission wing, the Harpoons against a ship |
+| `ai-b52-quick-mission-2v2`, `ai-b52-vs-su27-2v2` | the B-52 in both wings, tail guns firing, Harpoons held |
+| `net-a2g-stores-b52` | pylon and bay stores, the Mk 82 leaving, the doors, on a watching client |
+| `replay-rec-b52-2v2`, `replay-a2g-b52-ripple` | the identity in a recording, the bay ripple and its door device, verify-render clean |
+| `ai-merged-airfield-b52-wing2`, `ai-heavy-land-b52-ukr-a2` | now demand the pavement all the way |
+| `tools/test_battery_ai_strike.py` (`B52Tests`), `tools/test_battery_ai.py` | the new checks, on synthetic logs, including the failing cases |
+
+### Open for John
+
+1. **The AI B-52 after a ship kill** searches on and is lost to what is probably the fleet's defences (137 s);
+   the shared strike does not leave after its last target. Not traced.
+2. **The tail gun over the wire** is not covered by a scenario (no gun role in `tore-bot`).
+3. **The stick walks on beyond the aim** (impacts 330 to 1,220 ft), as the B-2's; a load-sized, centred stick needs a
+   checkpointed field.
+4. **The airfield gate is the taxi throttle floor**, which today is the B-52 alone. The B-1B and Tu-160 (batch
+   B) may need the same laws and will take them if their wheels need over 0.2 throttle; a B-2 does not (about 0.13).
+5. **Landing weight** (BMB-AI's open item 2) is unchanged: a B-52 at 488,000 lb still rolls about 5,450 ft after
+   touchdown and overruns a 5,532 ft runway.
+
+### Checks (B52-9)
+
+All through `.local/m3-imports/light3.sh` (away mode on, so full speed), profile `.local/m3-aircraft/profile-b52`
+refreshed first, logs in `.local/m3-aircraft/checks/B52-9/`. `cargo fmt --all -- --check` clean; `cargo clippy
+--workspace --all-targets --locked -- -D warnings` clean; `cargo test --locked --workspace --no-fail-fast` 7,829
+passed, 0 failed, 108 ignored (three new tests); `--validate-ordnance` passed (51 aircraft, 21 recovered weapon
+stations, 5,093 weapon placements, 249 tank placements, 80 pod placements, 260 Cheat-only: no pin moved);
+`python3 -B -m unittest discover -s tools` OK (skipped 5); `tools/check_docs.py` passed. Battery, `--jobs 2
+--windows 1`: 77 of 77 pass: every `*b52*` scenario (the existing flight, bay, live-fire, animation, render, `flight-b52-tail-gun`, `a2g-antiship-b52` ones and the new ones), every `ai-heavy-*` and `ai-strike-*`, `net-a2g-*` and `net-ai-strike-*` (`net-a2g-stores-b52`, 165 s), `replay-a2g*` and `replay-rec-b52-2v2`, `replay-a2g-b52-ripple` (verify-render clean). The AI airfield and merged-airfield set is the comparison below: 128 of 129 pass (the pre-existing `ai-ils-terrain-fra-a9` launch error fails on both binaries).

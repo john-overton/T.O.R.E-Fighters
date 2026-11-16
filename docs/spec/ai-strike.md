@@ -497,6 +497,8 @@ The pass types, the line flown and the 5 s commitment are unchanged.
 | Update (B2-9): a heavy whose corner speed is under its minimum level-flight speed flies its level run and the legs round it at 1.3 times that minimum, not at the corner speed (the B-2: 316 against 378 ft/s at 5,000 ft; it wallowed and sank to the ground). A heavy whose corner speed is above its minimum (the C-130) is unchanged | fitted (agent) |
 | Exit climbs toward 50,000 ft (never above the ceiling), then turns back | retail |
 | Stand-off missiles are fired from level flight at the reach | opinionated (agent) |
+| Update (B52-9, 2026-11-16, the B-52): the heavy stick works from the B-52's bay rows and its pylon row with no further rule. Nine Mk 82 in the forward bay row leave as a stick of eight from the grid's first eight places (4 abreast, outermost first, bottom tier first) after the doors open (BMB-AI); six on the wing pylons leave from the two beams, left and right alternating, with the doors untouched; a Quick Mission B-52 wing takes the Strike role and flies the same stick from the 5,000 ft heavy floor | fitted (agent) |
+| Update (B52-9): two AGM-84E on the pylons go against a ship by the stand-off rule above: both leave at once from 15 nm (91,000 ft), one a wing, and sink the Krivak 29 s later (96 ft). After the kill the AI starts searching (91 s), is hurt from 107 s and is lost at about 137 s, within 8,000 ft of the fleet it was sent to: it does not leave the area after its last target, most likely the fleet's other ships (not traced) | fitted (agent), open |
 
 ## Egress, re-attack and going home
 
