@@ -22,6 +22,14 @@ pub fn keep_face(id: AircraftId, address: usize) -> bool {
         AircraftId::E2 => &[
             0x46cc, 0x46ef, 0x473c, 0x475f, 0x48e1, 0x4904, 0x49b4, 0x49d7,
         ],
+        // TU95.SH (T95-3): four blur discs of eight coincident faces (four image
+        // phases, both windings), the left outboard one drawn as two half panels
+        // of eight faces each. The first phase of each winding stays.
+        AircraftId::Tu95 => &[
+            0x1ac1, 0x1ae0, 0x1aff, 0x1b46, 0x1b65, 0x1b84, 0x1d3f, 0x1d5e, 0x1d7d, 0x1dc4, 0x1de3,
+            0x1e02, 0x245e, 0x247d, 0x249c, 0x24e3, 0x2502, 0x2521, 0x262f, 0x264e, 0x266d, 0x26b3,
+            0x26d2, 0x26f1, 0x286f, 0x288e, 0x28ad, 0x28f4, 0x2913, 0x2932,
+        ],
         AircraftId::V22 => &[
             0x3567, 0x358e, 0x369c, 0x36c3, 0x2fe7, 0x300e, 0x311c, 0x3143,
         ],
@@ -108,6 +116,16 @@ fn angle(revolutions_per_second: f64, turns: f64) -> f64 {
 fn of(face: &Face, faces: &[usize]) -> bool {
     faces.contains(&face.address)
 }
+
+/// TU95.SH's four propeller discs (the kept faces) and their hubs: the centre of
+/// each drawn quad, right inboard, right outboard, left inboard, left outboard
+/// (the last is two half panels, one hub). T95-3, from the shape.
+const TU95_DISCS: [(&[usize], [f32; 3]); 4] = [
+    (&[0x1aa2, 0x1b27], [35.25, 47.5, -1.5]),
+    (&[0x1d20, 0x1da5], [65.5, 30., -2.5]),
+    (&[0x243f, 0x24c4], [-34., 47.5, -1.5]),
+    (&[0x2610, 0x2694, 0x2850, 0x28d5], [-64., 30., -2.5]),
+];
 
 /// The V-22's nacelle and proprotor groups, left then right.
 const V22_PROPROTORS: [[usize; 6]; 2] = [
@@ -266,6 +284,16 @@ pub fn animate(id: AircraftId, face: &mut Face, state: &flight::State) {
             .contains(&face.address)
             {
                 turn(face, [52., 14., 2.5], [0., 1., 0.], phase * 1.);
+            }
+        }
+        AircraftId::Tu95 => {
+            // One disc per engine, all four turning the same way at the shared
+            // rate (the art cannot show contra-rotation). The split left outboard
+            // disc turns as one: both halves share the hub and the angle.
+            for (faces, hub) in TU95_DISCS {
+                if of(face, faces) {
+                    turn(face, hub, [0., 1., 0.], phase);
+                }
             }
         }
         AircraftId::E2 => {

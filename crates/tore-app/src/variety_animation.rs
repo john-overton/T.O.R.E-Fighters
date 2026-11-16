@@ -369,6 +369,10 @@ fn specification(id: Id) -> Option<Spec> {
             // B1.SH: seven words (flames 0x7b10, bay walls 0x7b16, spoilers
             // 0x7b1c, gear 0x7b22, flaps 0x7b2e and 0x7b34, rudder 0x7b3a),
             // gear adds 12 faces; header exponent 10, so 4/3 ft a unit.
+            // Update (B1B-3, 2026-11-15): the B-1B loads through its own
+            // `b1b_animation` rig (swing wing, tailerons, rudder, spoilers,
+            // gear, interim bay walls, plumes); this row pins the layout, the
+            // scale and `supported`.
             Id::B1b => (
                 27468,
                 314,
@@ -378,7 +382,11 @@ fn specification(id: Id) -> Option<Spec> {
             ),
             // TU160.SH: six words (flames 0x7ff0, keel plates 0x7ffc, gear
             // 0x8002, flaps 0x800e and 0x8014, rudder strip 0x801a), gear
-            // adds 12 faces; header exponent 11, so 8/3 ft a unit.
+            // adds 12 faces; header exponent 11, so 8/3 ft a unit. Update
+            // (T160-3, 2026-11-15): the Tu-160 loads through its own
+            // `tu160_animation` rig (swing wing, tailplane, rudder strip,
+            // flap strips, keel plates, gear, plumes); this row pins the
+            // layout, the scale and `supported`.
             Id::Tu160 => (
                 28716,
                 316,
@@ -390,13 +398,53 @@ fn specification(id: Id) -> Option<Spec> {
             // 0x724c, flaps 0x7258 and 0x725e, rudder 0x7264), gear adds 22
             // faces (nose 6, mains 16); header exponent 9, so 2/3 ft a unit
             // (the per-axis real-size fit applies through the shape's axis
-            // scale, not here).
+            // scale, not here). Update (F111-3, 2026-11-15): the F-111F loads
+            // through its own `f111_animation` rig (swing wing, tailerons,
+            // flap strips, rudder, gear, dorsal speed brake, plumes); this row
+            // pins the layout, the scale and `supported`.
             Id::F111 => (
                 25206,
                 254,
                 &[0x7240, 0x7246, 0x724c, 0x7258, 0x725e, 0x7264],
                 &[(0x724c, Part::Gear, 22)],
                 2. / 3.,
+            ),
+            // Bomber batch C interim rig specs (BMB-C1, 2026-11-15): each
+            // shape's exact CODE size, runtime face count and state words
+            // from the source reviews (docs/formats/aircraft-variety.md, the
+            // three 2026-11-15 batch C reviews). Only the gear word is
+            // mapped; the other words are pinned and unmapped, so each
+            // aircraft loads with the shared fitted gear law until its own
+            // rig slice.
+            // TU26.SH: six words (flames 0x7880, plates 0x788c, gear 0x7892,
+            // flap strips 0x789e and 0x78a4, rudder 0x78aa), gear adds 12
+            // faces; header exponent 10, so 4/3 ft a unit.
+            Id::Tu26 => (
+                26812,
+                310,
+                &[0x7880, 0x788c, 0x7892, 0x789e, 0x78a4, 0x78aa],
+                &[(0x7892, Part::Gear, 12)],
+                4. / 3.,
+            ),
+            // TU95.SH: one word (gear 0x33b0, six wheel plates; the four
+            // propeller discs are not a state word); header exponent 9, so
+            // 2/3 ft a unit. Update (T95-2 and T95-3, 2026-11-15): the Tu-95
+            // loads through its own `tu95_animation` rig (tailplane, rudder,
+            // gear); the discs spin through `variety_rotors`. This row pins the
+            // layout, the scale and `supported`.
+            Id::Tu95 => (9148, 155, &[0x33b0], &[(0x33b0, Part::Gear, 6)], 2. / 3.),
+            // SU34.SH: five words (afterburner plume 0x67c0, airbrake 0x67c6,
+            // gear 0x67cc, flaps 0x67d8 and 0x67de, the Su-35's layout), gear
+            // adds 8 faces; header exponent 8, so 1/3 ft a unit. Update
+            // (SU34-3, 2026-11-15): the Su-34 loads through its own
+            // `su34_animation` rig (the Su-35's laws on its own faces); this
+            // row pins the layout, the scale and `supported`.
+            Id::Su34 => (
+                22506,
+                321,
+                &[0x67c0, 0x67c6, 0x67cc, 0x67d8, 0x67de],
+                &[(0x67cc, Part::Gear, 8)],
+                1. / 3.,
             ),
             _ => return None,
         };
@@ -484,11 +532,29 @@ enum SpecificRig {
     Tornado(crate::tornado_animation::Rig),
     /// B52-3 and B52-4: the stabilizer, flaps, rudder, gear and the interim bay.
     B52(crate::b52_animation::Rig),
+    /// T95-2 and T95-3: the tailplane, the rudder and the gear plates (the
+    /// propeller discs turn through `variety_rotors`).
+    Tu95(crate::tu95_animation::Rig),
     /// B2-3 and B2-4: the elevons, the drag rudders and speed brake, the gear
     /// and the fitted bays (B2-5).
     B2(crate::b2_animation::Rig),
+    /// B1B-3: the swing wing, tailerons, rudder, spoilers, gear, interim bay
+    /// walls and plumes.
+    B1b(crate::b1b_animation::Rig),
     /// F117-3 and F117-4: the ruddervators, the gear and the interim bay pose.
     F117(crate::f117_animation::Rig),
+    /// T160-3: the swing wing, the tailplane, the rudder strip, the flap
+    /// strips, the keel plates, the gear and the plumes.
+    Tu160(crate::tu160_animation::Rig),
+    /// F111-3: the swing wing, tailerons, rudder, gear, dorsal speed brake and
+    /// the plumes.
+    F111(crate::f111_animation::Rig),
+    /// T26-3: the swing wing, tailplane, rudder, flaps, gear, plume and the
+    /// interim bay-door plates.
+    Tu26(crate::tu26_animation::Rig),
+    /// SU34-3: the canards, tailerons, outer ailerons, flap morph, airbrake,
+    /// gear and plume (the Su-35's laws on the Su-34's own faces).
+    Su34(crate::su34_animation::Rig),
 }
 pub struct Rig {
     id: Id,
@@ -841,6 +907,15 @@ impl Rig {
                     shape,
                 ));
             }
+            Id::B1b => {
+                let (rig, shape) = crate::b1b_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::B1b(rig),
+                    shape,
+                ));
+            }
             Id::B2 => {
                 let (rig, shape) = crate::b2_animation::Rig::load(bytes, shape)?;
                 return Ok(Self::with_specific(
@@ -850,12 +925,57 @@ impl Rig {
                     shape,
                 ));
             }
+            Id::Tu95 => {
+                let (rig, shape) = crate::tu95_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::Tu95(rig),
+                    shape,
+                ));
+            }
+            Id::Su34 => {
+                let (rig, shape) = crate::su34_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::Su34(rig),
+                    shape,
+                ));
+            }
             Id::F117 => {
                 let (rig, shape) = crate::f117_animation::Rig::load(bytes, shape)?;
                 return Ok(Self::with_specific(
                     id,
                     spec.scale,
                     SpecificRig::F117(rig),
+                    shape,
+                ));
+            }
+            Id::Tu160 => {
+                let (rig, shape) = crate::tu160_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::Tu160(rig),
+                    shape,
+                ));
+            }
+            Id::F111 => {
+                let (rig, shape) = crate::f111_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::F111(rig),
+                    shape,
+                ));
+            }
+            Id::Tu26 => {
+                let (rig, shape) = crate::tu26_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::Tu26(rig),
                     shape,
                 ));
             }
@@ -968,6 +1088,7 @@ impl Rig {
                 SpecificRig::Su25(_) => crate::su25_animation::flame(address),
                 SpecificRig::Su27(_) => crate::su27_animation::flame(address),
                 SpecificRig::Su35(_) => crate::su35_animation::flame(address),
+                SpecificRig::Su34(_) => crate::su34_animation::flame(address),
                 SpecificRig::Yak141(_) => crate::yak141_animation::flame(address),
                 SpecificRig::V22(_) => crate::v22_animation::flame(address),
                 SpecificRig::A310(_)
@@ -991,7 +1112,12 @@ impl Rig {
                 SpecificRig::Tornado(_) => crate::tornado_animation::flame(address),
                 SpecificRig::B52(_) => crate::b52_animation::flame(address),
                 SpecificRig::B2(_) => crate::b2_animation::flame(address),
+                SpecificRig::B1b(_) => crate::b1b_animation::flame(address),
                 SpecificRig::F117(_) => crate::f117_animation::flame(address),
+                SpecificRig::Tu160(_) => crate::tu160_animation::flame(address),
+                SpecificRig::F111(_) => crate::f111_animation::flame(address),
+                SpecificRig::Tu26(_) => crate::tu26_animation::flame(address),
+                SpecificRig::Tu95(_) => crate::tu95_animation::flame(address),
             };
         }
         self.groups
@@ -1041,6 +1167,7 @@ impl Rig {
                 SpecificRig::Su25(rig) => rig.animate(source, state),
                 SpecificRig::Su27(rig) => rig.animate(source, state),
                 SpecificRig::Su35(rig) => rig.animate(source, state),
+                SpecificRig::Su34(rig) => rig.animate(source, state),
                 SpecificRig::A310(rig) => rig.animate(source, state),
                 SpecificRig::C130(rig) => rig.animate(source, state),
                 SpecificRig::Ac130(rig) => rig.animate(source, state),
@@ -1062,7 +1189,12 @@ impl Rig {
                 SpecificRig::Tornado(rig) => rig.animate(source, state),
                 SpecificRig::B52(rig) => rig.animate(source, state),
                 SpecificRig::B2(rig) => rig.animate(source, state),
+                SpecificRig::B1b(rig) => rig.animate(source, state),
                 SpecificRig::F117(rig) => rig.animate(source, state),
+                SpecificRig::Tu160(rig) => rig.animate(source, state),
+                SpecificRig::F111(rig) => rig.animate(source, state),
+                SpecificRig::Tu26(rig) => rig.animate(source, state),
+                SpecificRig::Tu95(rig) => rig.animate(source, state),
             };
         }
         let mut face = source.clone();
@@ -1207,6 +1339,12 @@ mod tests {
         assert_eq!(specification(Id::Tornado).unwrap().scale, 2. / 3.);
         // B52-2: the B-52 draws at its header scale too (true size).
         assert_eq!(specification(Id::B52).unwrap().scale, 2. / 3.);
+        // B1B-2: the B-1B draws at its header scale too (true size).
+        assert_eq!(specification(Id::B1b).unwrap().scale, 4. / 3.);
+        // T160-2: the Tu-160 draws at its header scale, 8/3 ft a unit (eight
+        // times the 1/3 ft default).
+        assert_eq!(specification(Id::Tu160).unwrap().scale, 8. / 3.);
+        assert_eq!(specification(Id::Tu95).unwrap().scale, 2. / 3.);
     }
     fn spread(a: &[[f32; 3]], b: &[[f32; 3]]) -> f32 {
         let d =

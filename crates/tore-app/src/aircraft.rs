@@ -357,6 +357,23 @@ impl Airframe {
                 })
             }));
         }
+        if self.profile.id == tore_formats::aircraft::AircraftId::F111 {
+            // The F-111F's swing wing carries its vapor point with the tip
+            // (F111-3), as the Tornado's.
+            let turn = crate::f111_animation::sweep_turn(s);
+            let basis = tore_sim::attitude::Basis::new(s.yaw, s.pitch, s.bank);
+            let mut points = [[0.; 3]; 2];
+            for (side, out) in points.iter_mut().enumerate() {
+                let p = crate::f111_animation::streamer_point(side, turn);
+                *out = std::array::from_fn(|i| {
+                    s.position[i]
+                        + basis.right[i] * p[0]
+                        + basis.up[i] * p[1]
+                        + basis.forward[i] * p[2]
+                });
+            }
+            return Some(points);
+        }
         if self.profile.id.source() == tore_formats::aircraft::AircraftId::Tornado {
             // The swing wing carries its vapor point with the tip (TOR-3).
             let turn = crate::tornado_animation::sweep_turn(s);
@@ -364,6 +381,55 @@ impl Airframe {
             let mut points = [[0.; 3]; 2];
             for (side, out) in points.iter_mut().enumerate() {
                 let p = crate::tornado_animation::streamer_point(def, side, turn)?;
+                *out = std::array::from_fn(|i| {
+                    s.position[i]
+                        + basis.right[i] * p[0]
+                        + basis.up[i] * p[1]
+                        + basis.forward[i] * p[2]
+                });
+            }
+            return Some(points);
+        }
+        if self.profile.id == tore_formats::aircraft::AircraftId::B1b {
+            // The B-1B's record is a valid swing-wing streamer: the vapour
+            // leaves the swept tip (B1B-2/3).
+            let turn = crate::b1b_animation::sweep_turn(s);
+            let basis = tore_sim::attitude::Basis::new(s.yaw, s.pitch, s.bank);
+            let mut points = [[0.; 3]; 2];
+            for (side, out) in points.iter_mut().enumerate() {
+                let p = crate::b1b_animation::streamer_point(def, side, turn)?;
+                *out = std::array::from_fn(|i| {
+                    s.position[i]
+                        + basis.right[i] * p[0]
+                        + basis.up[i] * p[1]
+                        + basis.forward[i] * p[2]
+                });
+            }
+            return Some(points);
+        }
+        if self.profile.id == tore_formats::aircraft::AircraftId::Tu160 {
+            // The swing wing carries its vapor point with the tip (T160-2).
+            let turn = crate::tu160_animation::sweep_turn(s);
+            let basis = tore_sim::attitude::Basis::new(s.yaw, s.pitch, s.bank);
+            let mut points = [[0.; 3]; 2];
+            for (side, out) in points.iter_mut().enumerate() {
+                let p = crate::tu160_animation::streamer_point(def, side, turn)?;
+                *out = std::array::from_fn(|i| {
+                    s.position[i]
+                        + basis.right[i] * p[0]
+                        + basis.up[i] * p[1]
+                        + basis.forward[i] * p[2]
+                });
+            }
+            return Some(points);
+        }
+        if self.profile.id == tore_formats::aircraft::AircraftId::Tu26 {
+            // The swing wing carries its vapor point with the drawn tip (T26-3).
+            let turn = crate::tu26_animation::sweep_turn(s);
+            let basis = tore_sim::attitude::Basis::new(s.yaw, s.pitch, s.bank);
+            let mut points = [[0.; 3]; 2];
+            for (side, out) in points.iter_mut().enumerate() {
+                let p = crate::tu26_animation::streamer_point(def, side, turn)?;
                 *out = std::array::from_fn(|i| {
                     s.position[i]
                         + basis.right[i] * p[0]
@@ -488,15 +554,25 @@ impl Airframe {
         turn: f64,
     ) -> Option<std::sync::Arc<tore_sim::combat::hardpoints::Underside>> {
         let quarters = (turn.to_degrees() * 4.).round() as i64;
-        if quarters == 0 || self.profile.id.source() != tore_formats::aircraft::AircraftId::Tornado
+        let id = self.profile.id.source();
+        if quarters == 0
+            || !matches!(
+                id,
+                tore_formats::aircraft::AircraftId::Tornado
+                    | tore_formats::aircraft::AircraftId::F111
+            )
         {
             return None;
         }
         let base = self.poses.first()?;
         let scale = f64::from(self.animation_scale());
         Some(self.mounts.swept(quarters, || {
-            let shape =
-                crate::tornado_animation::swept_shape(base, (quarters as f64 / 4.).to_radians());
+            let angle = (quarters as f64 / 4.).to_radians();
+            let shape = if id == tore_formats::aircraft::AircraftId::F111 {
+                crate::f111_animation::swept_shape(base, angle)
+            } else {
+                crate::tornado_animation::swept_shape(base, angle)
+            };
             tore_sim::combat::hardpoints::Underside::of(&shape, scale)
         }))
     }
@@ -828,6 +904,31 @@ impl Airframe {
     }
 }
 
+/// The B-1B's four engine contrails (B1B-3, 2026-11-15, **fitted**), in feet
+/// as (lateral, up, aft), left outer to right outer: the centres of the four
+/// nozzle exit discs of `B1.SH` at y -17 (x -8, -5, 5, 8, z -2.5), two a
+/// nacelle, 2 ft behind the exit plane as the reviewed aircraft's. The
+/// engine-art mapping is not used: it holds two outlets, the B-1B has four, so
+/// the discs keep the retail nozzle look and the generic fallback (which would
+/// spread four outlets over 0.15 of the span) is replaced by these.
+fn b1b_contrail_offsets(neutral: &Shape, scale: f64) -> Vec<[f64; 3]> {
+    crate::b1b_animation::NOZZLE
+        .iter()
+        .map(|&address| {
+            let face = neutral
+                .faces
+                .iter()
+                .find(|f| f.address == address)
+                .expect("B1.SH nozzle disc");
+            let n = face.positions.len() as f64;
+            let centre: [f64; 3] = std::array::from_fn(|k| {
+                face.positions.iter().map(|p| f64::from(p[k])).sum::<f64>() / n
+            });
+            [centre[0] * scale, centre[2] * scale, centre[1] * scale - 2.]
+        })
+        .collect()
+}
+
 /// The B-52H's eight engine contrails (B52-8, 2026-11-15, **fitted**), in
 /// feet as (lateral, up, aft): two a pod, four pods. The bounds-based
 /// fallback below spreads eight outlets to plus and minus 1.05 half-spans,
@@ -865,6 +966,9 @@ fn contrail_offsets(
         return b52_contrail_offsets();
     }
     let scale = f64::from(rig.map_or(1. / 3., |r| r.scale()));
+    if id == tore_formats::aircraft::AircraftId::B1b && count == 4 {
+        return b1b_contrail_offsets(neutral, scale);
+    }
     (0..count)
         .map(|group| {
             let positions: Vec<_> = neutral

@@ -88,7 +88,11 @@ pub fn mask(source: &Sprite, id: AircraftId) -> Vec<u8> {
                 (465, 185),
             ],
         ),
-        AircraftId::Mig29 | AircraftId::Su25 | AircraftId::Mig23 => (
+        // The Su-34's su33cc.HUD is the Su-33 family's, the same module and the
+        // same ~SU33H.PIC the MiG-29, Su-25 and MiG-23 fly, so it takes the
+        // glass already measured for them (BMB-C1, 2026-11-15; coordinator
+        // first pass, Su-34 item 7). The pilot eye is SU34-7's.
+        AircraftId::Mig29 | AircraftId::Su25 | AircraftId::Mig23 | AircraftId::Su34 => (
             (1280, 490),
             &[(511, 100), (770, 100), (752, 388), (528, 388)],
         ),
@@ -199,7 +203,12 @@ pub fn mask(source: &Sprite, id: AircraftId) -> Vec<u8> {
         // The F-111F flies the same ~AC130H.PIC its AC130.HUD names (BMB-B1,
         // 2026-11-15; coordinator first pass, F111 item 8): the whole picture,
         // as the B-52.
-        | AircraftId::F111 => ((1280, 490), &[(0, 0), (1279, 0), (1279, 489), (0, 489)]),
+        | AircraftId::F111
+        // The Tu-26 and Tu-95 fly the same ~AC130H.PIC their bmbroh.HUD names
+        // (BMB-C1, 2026-11-15; coordinator first pass, Tu-26 item 10 and
+        // Tu-95 item 10): the whole picture, as the B-52.
+        | AircraftId::Tu26
+        | AircraftId::Tu95 => ((1280, 490), &[(0, 0), (1279, 0), (1279, 489), (0, 489)]),
         // F-117 (F117-7, 2026-11-15): `F117.HUD` and the cockpit art
         // `~F117H.PIC` (1673 x 508, John decision 28, opinionated). BMB-A1
         // left this arm failing closed. The art has no combiner: its

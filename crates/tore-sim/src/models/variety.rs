@@ -68,6 +68,9 @@ impl VarietyFlightModel {
             B1b => ("B-1B", "B1.SH"),
             Tu160 => ("Tu-160", "TU160.SH"),
             F111 => ("F-111F", "F111.SH"),
+            Tu26 => ("Tu-26", "TU26.SH"),
+            Tu95 => ("Tu-95", "TU95.SH"),
+            Su34 => ("Su-34", "SU34.SH"),
             _ => return None,
         })
     }
@@ -156,6 +159,14 @@ impl VarietyFlightModel {
             B1b => 8. * 4. / 3.,
             Tu160 => 5. * 8. / 3.,
             F111 => 11. * 2. / 3. * tore_formats::aircraft::scale::shape_axis_scale(a.id)[2],
+            // Bomber batch C (BMB-C1, 2026-11-15): deployed gear low points
+            // from the source reviews, in shape units at each shape's own
+            // header scale. TU26.SH -11 at 4/3 ft a unit, TU95.SH -14 at 2/3
+            // ft and SU34.SH -26 (the nose plate; the mains reach -25) at 1/3
+            // ft; no real-size fit applies to any of the three.
+            Tu26 => 11. * 4. / 3.,
+            Tu95 => 14. * 2. / 3.,
+            Su34 => 26. / 3.,
             _ => unreachable!("registered variety identity"),
         };
         let mut tuning = Tuning {
@@ -501,6 +512,20 @@ pub(crate) mod tests {
                 AircraftId::F111,
                 22. / 3. * tore_formats::aircraft::scale::F111_SHAPE_SCALE[2],
             ),
+        ] {
+            let model = AircraftModel::for_aircraft(&synthetic(id)).unwrap();
+            let clearance = model.configuration().equipment.ground_clearance_ft;
+            assert!((clearance - feet).abs() < 1e-12, "{id:?}");
+        }
+    }
+    /// BMB-C1: batch C's deployed gear low points (TU26.SH -11 at 4/3 ft a
+    /// unit, TU95.SH -14 at 2/3 ft, SU34.SH -26 at 1/3 ft).
+    #[test]
+    fn the_bomber_batch_c_gear_low_points_follow_their_source_reviews() {
+        for (id, feet) in [
+            (AircraftId::Tu26, 44. / 3.),
+            (AircraftId::Tu95, 28. / 3.),
+            (AircraftId::Su34, 26. / 3.),
         ] {
             let model = AircraftModel::for_aircraft(&synthetic(id)).unwrap();
             let clearance = model.configuration().equipment.ground_clearance_ft;

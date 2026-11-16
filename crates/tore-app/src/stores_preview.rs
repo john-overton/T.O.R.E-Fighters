@@ -27,7 +27,7 @@ use tore_sim::{
 const HEIGHT_FT: f64 = 4000.;
 
 /// The aircraft drawn, with a short file name each.
-const AIRCRAFT: [(AircraftId, &str); 38] = [
+const AIRCRAFT: [(AircraftId, &str); 41] = [
     (AircraftId::F18, "f18d"),
     (AircraftId::F16C, "f16c"),
     (AircraftId::F14, "f14"),
@@ -66,6 +66,9 @@ const AIRCRAFT: [(AircraftId, &str); 38] = [
     (AircraftId::B1b, "b1b"),
     (AircraftId::Tu160, "tu160"),
     (AircraftId::F111, "f111"),
+    (AircraftId::Tu26, "tu26"),
+    (AircraftId::Tu95, "tu95"),
+    (AircraftId::Su34, "su34"),
 ];
 
 /// Camera eye and look point, feet right, up and forward of the aircraft,
@@ -334,12 +337,13 @@ pub fn run() -> AppResult<()> {
         let sweep = std::env::var("TORE_STORES_PREVIEW_SWEEP")
             .ok()
             .and_then(|v| v.parse::<f64>().ok());
-        let turn = sweep.map_or(0., |degrees| {
-            tore_sim::combat::swing::wing_turn(
-                tore_sim::combat::swing::speed_for_sweep(degrees),
-                0.,
-            )
-        });
+        // Update (F111-3, 2026-11-15): the swing wing is the aircraft's own
+        // (`swing::spec`), so the F-111F is posed 16 to 72.5 degrees.
+        let turn = sweep
+            .zip(tore_sim::combat::swing::spec(id))
+            .map_or(0., |(degrees, spec)| {
+                spec.turn(spec.speed_for_sweep(degrees), 0., 0.)
+            });
         config.set_wing_turn(turn);
         // `TORE_STORES_PREVIEW_COUNTS=f18d:2=8,a10:1=6` loads those
         // stations with that many stores (a rack close-up); the output
@@ -491,8 +495,8 @@ pub fn run() -> AppResult<()> {
         if std::env::var_os("TORE_STORES_PREVIEW_GEAR").is_some() {
             state.gear = 1.;
         }
-        if let Some(degrees) = sweep {
-            state.speed = tore_sim::combat::swing::speed_for_sweep(degrees);
+        if let Some((degrees, spec)) = sweep.zip(tore_sim::combat::swing::spec(id)) {
+            state.speed = spec.speed_for_sweep(degrees);
         }
         state.yaw = 0.;
         state.pitch = 0.;

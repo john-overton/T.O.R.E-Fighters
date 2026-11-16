@@ -10,12 +10,14 @@ mod a4e;
 mod ac130;
 mod av8;
 mod awacs;
+mod b1b;
 mod b2;
 mod b52;
 mod b747;
 mod c130;
 mod e2;
 mod f104;
+mod f111;
 mod f117;
 mod f14;
 mod f15;
@@ -40,8 +42,12 @@ mod rafale;
 mod rotorcraft;
 mod su25;
 mod su27;
+mod su34;
 mod su35;
 mod tornado;
+mod tu160;
+mod tu26;
+mod tu95;
 mod v22;
 mod x31;
 mod yak141;
@@ -183,6 +189,11 @@ impl Control {
             // the fin is one fixed plate), so the pedals must not move anything.
             // Its stabilators, ailerons and flaps are `Required` below.
             Self::Rudder if id == Id::F15E => Expectation::Unsupported,
+            // SU34-3 (coordinator decision 2026-11-15, the F-15E's precedent):
+            // the Su-34's fins are one plate a side with no rudder face and no
+            // state word, so the pedals must not move anything. Its canards,
+            // tailerons, outer ailerons and flaps are `Required` below.
+            Self::Rudder if id == Id::Su34 => Expectation::Unsupported,
             // MF1-3: the Mirage F1's source has no flap panel (its one
             // trailing-edge panel per wing is the aileron), so the flap lever
             // moves nothing and the probe requires that it stays that way.
@@ -193,12 +204,22 @@ impl Control {
             // way. The stabilizer is the elevator, the rudder and the two inboard
             // flap wedges are `Required` below.
             Self::Aileron if id == Id::B52 => Expectation::Unsupported,
+            // T95-3 (coordinator decision, 2026-11-15): the Tu-95 shape has no
+            // whole aileron or flap surface (the wing is one large facet a
+            // side), so those levers move nothing and the probe requires that
+            // they stay that way, as for the B-52's roll. The whole tailplane
+            // is the elevator and the rudder strip is the rudder, both
+            // `Required` below.
+            Self::Aileron | Self::Flaps if id == Id::Tu95 => Expectation::Unsupported,
             // B2-3: the flying wing has no flap panel (its elevons are the
             // pitch and roll surfaces and the drag rudders the yaw and speed
             // brake), so the flap lever moves nothing and the probe requires
             // that it stays that way. The elevator and aileron are the
             // elevons and the rudder is the drag rudders, all `Required`.
             Self::Flaps if id == Id::B2 => Expectation::Unsupported,
+            // B1B-3: the B-1B's flap strips droop (words 7b2e and 7b34's drooped
+            // poses), its tailerons are the elevator and (with the spoilers)
+            // the aileron, its rudder quad the rudder: all `Required` below.
             // F117-3 (decision 27, John 2026-11-15): the F-117's source has no
             // elevon, flap or aileron faces (the trailing edge is the aft edge
             // of whole wing facets), so those levers draw nothing and the probe
@@ -219,7 +240,18 @@ impl Control {
             // spoilers, which the shape does not draw), no afterburner and no
             // flame word, so brake and exhaust move nothing and must stay so.
             Self::Brake | Self::Exhaust if id == Id::B52 => Expectation::Unsupported,
+            // T95-3: the Tu-95 draws no airbrake, no afterburner and no flame
+            // word (the shape has one state word, the gear).
+            Self::Brake | Self::Exhaust if id == Id::Tu95 => Expectation::Unsupported,
             Self::Brake | Self::Exhaust if id == Id::F117 => Expectation::Unsupported,
+            // B1B-3: the spoilers (word 7b1c) are the speed brake and the roll
+            // spoilers; the four plumes (word 7b10) are the afterburner.
+            Self::Brake | Self::Exhaust if id == Id::B1b => Expectation::Required,
+            // T26-3 (decision 5): the Tu-26's two belly plates are the bay
+            // doors, not an airbrake, so the brake moves nothing; its plumes
+            // (word 7880) are the exhaust below.
+            Self::Brake if id == Id::Tu26 => Expectation::Unsupported,
+            Self::Exhaust if id == Id::Tu26 => Expectation::Required,
             Self::Brake | Self::Exhaust
                 if matches!(
                     id,
@@ -234,6 +266,7 @@ impl Control {
                         | Id::Mig29
                         | Id::Su27
                         | Id::Su35
+                        | Id::Su34
                         | Id::Mig21
                 ) =>
             {
@@ -264,6 +297,10 @@ impl Control {
                         | Id::Tornado
                         | Id::TornadoClean
                         | Id::B2
+                        // T160-3: the Tu-160's keel plates (word 7ffc) are drawn
+                        // plates the brake lever drops, not an airbrake.
+                        | Id::Tu160
+                        | Id::F111
                 ) =>
             {
                 Expectation::Required
@@ -278,11 +315,21 @@ impl Control {
             Self::Bay
                 if matches!(
                     id,
-                    Id::F22 | Id::F22n | Id::Faxx | Id::F117 | Id::B2 | Id::B52
+                    Id::F22
+                        | Id::F22n
+                        | Id::Faxx
+                        | Id::F117
+                        | Id::B2
+                        | Id::B52
+                        | Id::B1b
+                        | Id::Tu26
                 ) =>
             {
                 Expectation::Required
             }
+            // T95-3: the Tu-95 shape has no bay word; T95-5 adds the fitted
+            // belly bay and its doors.
+            Self::Bay if id == Id::Tu95 => Expectation::Unsupported,
             Self::Bay => Expectation::Unknown,
             Self::VectorPitch if matches!(id, Id::Av8 | Id::Yak141) => Expectation::Required,
             Self::VectorPitch | Self::VectorYaw if id == Id::X31 => Expectation::Required,
@@ -296,13 +343,32 @@ impl Control {
             Self::Rotor
                 if matches!(
                     id,
-                    Id::C130 | Id::Ac130 | Id::E2 | Id::V22 | Id::Ah64 | Id::Mi24 | Id::Ch47
+                    Id::C130
+                        | Id::Ac130
+                        | Id::E2
+                        | Id::Tu95
+                        | Id::V22
+                        | Id::Ah64
+                        | Id::Mi24
+                        | Id::Ch47
                 ) =>
             {
                 Expectation::Required
             }
             Self::Rotor => Expectation::Unknown,
-            Self::Sweep if matches!(id, Id::F14 | Id::Mig23 | Id::Tornado | Id::TornadoClean) => {
+            Self::Sweep
+                if matches!(
+                    id,
+                    Id::F14
+                        | Id::Mig23
+                        | Id::Tornado
+                        | Id::TornadoClean
+                        | Id::B1b
+                        | Id::Tu160
+                        | Id::F111
+                        | Id::Tu26
+                ) =>
+            {
                 Expectation::Required
             }
             Self::Sweep => Expectation::Unknown,
@@ -330,6 +396,8 @@ impl Control {
                         | Id::Mf1
                         | Id::Tornado
                         | Id::TornadoClean
+                        | Id::Tu160
+                        | Id::F111
                 ) =>
             {
                 Expectation::Required
@@ -493,7 +561,15 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     // The Tornado's wing sweeps with speed (TOR-3), so its controls are isolated
     // below the 250 knot sweep threshold; the sweep schedule and the coupled
     // sweep/flap grid cover that interaction explicitly.
-    if id.source() == AircraftId::Tornado {
+    if id.source() == AircraftId::Tornado || id == AircraftId::F111 || id == AircraftId::Tu26 {
+        neutral.speed = 200. * 1.68781;
+    }
+    // The Tu-26's wing sweeps from 300 knots (T26-3), so its controls are
+    // isolated at 200 knots too (with the F-111F's, F111-3).
+    // The B-1B's wing sweeps with speed from 280 knots (B1B-3) and the
+    // Tu-160's too (T160-3, the 250 knot detent), so their controls are
+    // isolated below that; the sweep grids cover the interaction.
+    if matches!(id, AircraftId::B1b | AircraftId::Tu160) {
         neutral.speed = 200. * 1.68781;
     }
     neutral.engine = false;
@@ -685,7 +761,13 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
             | AircraftId::TornadoClean
             | AircraftId::B52
             | AircraftId::B2
+            | AircraftId::B1b
             | AircraftId::F117
+            | AircraftId::Tu160
+            | AircraftId::F111
+            | AircraftId::Tu26
+            | AircraftId::Tu95
+            | AircraftId::Su34
     ) {
         "reviewed-controls-and-attachments"
     } else {
@@ -839,6 +921,17 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
         if id == AircraftId::Su35 {
             for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
                 su35::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
+        if id == AircraftId::Su34 {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                su34::check(
                     control,
                     *value,
                     (&raw.faces, reference, pose),
@@ -1200,6 +1293,17 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
                 );
             }
         }
+        if id == AircraftId::F111 {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                f111::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
         if id == AircraftId::B52 {
             for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
                 b52::check(
@@ -1211,9 +1315,53 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
                 );
             }
         }
+        if id == AircraftId::B1b {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                b1b::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
         if id == AircraftId::B2 {
             for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
                 b2::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
+        if id == AircraftId::Tu160 {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                tu160::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
+        if id == AircraftId::Tu26 {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                tu26::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
+        if id == AircraftId::Tu95 {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                tu95::check(
                     control,
                     *value,
                     (&raw.faces, reference, pose),
@@ -1328,6 +1476,9 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     if id == AircraftId::Su27 {
         failures.extend(su27::combinations(&airframe, &neutral, out)?);
     }
+    if id == AircraftId::Su34 {
+        failures.extend(su34::combinations(&airframe, &neutral, out)?);
+    }
     if let Some(source) = &a4e_sources {
         failures.extend(a4e::combinations(source, &airframe, &neutral, out)?);
     }
@@ -1381,6 +1532,9 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     if id == AircraftId::B52 {
         failures.extend(b52::combinations(&airframe, &neutral, out)?);
     }
+    if id == AircraftId::Tu95 {
+        failures.extend(tu95::combinations(&airframe, &neutral, out)?);
+    }
     if id == AircraftId::Mig31 {
         failures.extend(mig31::combinations(&airframe, &neutral, out)?);
     }
@@ -1407,6 +1561,18 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     }
     if id == AircraftId::B2 {
         failures.extend(b2::combinations(&airframe, &neutral, out)?);
+    }
+    if id == AircraftId::B1b {
+        failures.extend(b1b::combinations(&airframe, &neutral, out)?);
+    }
+    if id == AircraftId::Tu160 {
+        failures.extend(tu160::combinations(&airframe, &neutral, out)?);
+    }
+    if id == AircraftId::F111 {
+        failures.extend(f111::combinations(&airframe, &neutral, out)?);
+    }
+    if id == AircraftId::Tu26 {
+        failures.extend(tu26::combinations(&airframe, &neutral, out)?);
     }
     failures.extend(rotorcraft::combinations(&airframe, &neutral, out)?);
     moving_parts(&airframe, &neutral, out)?;

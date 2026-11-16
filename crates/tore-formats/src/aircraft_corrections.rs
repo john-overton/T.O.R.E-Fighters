@@ -772,6 +772,145 @@ pub const F111_AFT_THRUST_LBF: i32 = 50_200;
 pub const F111_FUEL_LB_PER_S: i32 = 5;
 pub const F111_AB_FUEL_LB_PER_S: i32 = 35;
 
+/// Tu-26 Backfire-C (BMB-C2, **opinionated**, coordinator first pass
+/// 2026-11-15, BOMBERS-DECISIONS-C Tu-26 item 1, pending John). `TU26.PT` is
+/// the game's own record (170 of its 207 statements equal the Tu-95's, so the
+/// tuning is the shared large-aircraft block, not a Backfire measurement;
+/// docs/formats/aircraft-variety.md, "Tu-26 source review"). Empty weight
+/// 127,868 lb (58,000 kg, Wikipedia "Tupolev Tu-22M", Tu-22M3 specification,
+/// read 2026-11-15; the game's own Jane's text `TU26.INF` gives none): the
+/// record's 110,230 is derived (maximum takeoff 273,370 minus fuel 110,230
+/// minus the Jane's 52,910 lb weapon load), not the airframe's. Thrust: two
+/// NK-25 at 33,000 lbf dry (145 kN) and 55,000 lbf with afterburner (245 kN)
+/// each, 66,000 and 110,000 lbf totals (Wikipedia "Kuznetsov NK-25", read
+/// 2026-11-15; Wikipedia's Tu-22M3 page gives 55,700 each, the decision takes
+/// 110,000); the record's 59,986 and 88,180 are 9 and 20 percent low. The
+/// fuel flows (10 and 66 lb/s) already match the NK-25's cited specific fuel
+/// consumption at the real thrust (0.58 and 2.1 kg/(kgf h): 10.5 and 64.3
+/// lb/s), the maximum takeoff 273,370 lb and internal fuel 110,230 lb are
+/// the game's own Jane's figures (`TU26.INF`): all kept. The corrected empty
+/// plus full fuel is 238,098 lb, under the maximum.
+pub const TU26_EMPTY_LB: i32 = 127_868;
+pub const TU26_THRUST_LBF: i32 = 66_000;
+pub const TU26_AFT_THRUST_LBF: i32 = 110_000;
+/// The Tu-26's ceiling (BMB-C2, **opinionated**): 43,635 ft (13,300 m,
+/// `TU26.INF` and Wikipedia "Tupolev Tu-22M", read 2026-11-15). The record
+/// carries 60,000 ft in `maxAlt` and the top edge of its 1 G polygon (0 G
+/// polygon 65,500 ft; the G rows run to 41,000 to 54,000 ft). It is lowered
+/// by [`lower_ceiling`], the Tornado's, F-15E's and Gripen's way: each polygon
+/// is cut off at the new ceiling (the F-117's way of moving the top vertices
+/// cannot lower a ceiling 16,365 ft past the vertices below it), the 0 G
+/// polygon 5,500 ft higher, its record step.
+pub const TU26_CEILING_FT: i32 = 43_635;
+const TU26_RETAIL_CEILING_FT: i32 = 60_000;
+const TU26_RETAIL_ZERO_G_TOP_FT: i32 = 65_500;
+/// The Tu-26's high-altitude top speed (BMB-C2, decision "trim to about 1,080
+/// kt"; the figure is the real one, Mach 1.88, 1,080 kt, `TU26.INF`; the fit
+/// is **fitted**): the record's 1 G fast edge reaches 1,933 ft/s (1,145 kt)
+/// at 36,000 ft. 1,080 kt is 1,823 ft/s. Every fast-edge vertex of the 1 G
+/// polygon at or above 36,000 ft that is faster becomes 1,823 (after the
+/// ceiling cut, the 36,000 ft vertex only: the cut vertex at 43,635 ft is
+/// 1,812); the 0 G polygon keeps its 151 ft/s step over it (2,084 to 1,933).
+/// Sea level (1,010 ft/s, 598 kt against the cited Mach 0.86, 567 kt) stays.
+/// Every other row's fast side is held to the new 1 G edge
+/// ([`hold_to_one_g`]).
+const TU26_TOP_FPS: f64 = 1_823.;
+const TU26_ZERO_G_STEP_FPS: f64 = 151.;
+const TU26_TRIM_ALTITUDE_FT: f64 = 36_000.;
+const TU26_RETAIL_ONE_G_TOP_FPS: f64 = 1_933.;
+const TU26_RETAIL_ZERO_G_TOP_FPS: f64 = 2_084.;
+
+/// Tu-95 Bear-H (BMB-C2, **opinionated**, coordinator first pass 2026-11-15,
+/// BOMBERS-DECISIONS-C Tu-95 items 1 and 2, pending John). `TU95.PT` has no
+/// template (it equals `C130.PT` in 173 of 207 statements, the shared
+/// large-aircraft block; docs/formats/aircraft-variety.md, "Tu-95 source
+/// review"). Thrust: the record's 355,080 is 4 x 14,795 shp x 6 exactly (the
+/// NK-12MV's 11,033 kW, 14,795 ehp in the game's own Jane's text `TU95.INF`;
+/// Wikipedia "Kuznetsov NK-12"), the rule that gave the C-130 108,192 before
+/// John's 2026-10-13 fix ([`C130_THRUST_LBF`]). The corrected thrust is
+/// **fitted**: 4 x 14,795 shp x 2.18 lbf per shp, the AC-130U's authored
+/// ratio for the same kind of engine (40,000 lbf over 4 x 4,591 shp) is
+/// 129,012, so 129,000 lbf. Cross-check: the review's at-speed estimate (eta
+/// 0.8, an assumption, no cited static thrust was found) is 43,500 lbf at
+/// 355 kt; 2.8 times that, the factor the C-130's accepted correction has over
+/// the same estimate, is 121,500, within 6 percent of 129,000. Takeoff
+/// thrust-to-weight at the maximum is 0.31. No afterburner, fuel flow 4 lb/s
+/// stays (full power burns 5.9 lb/s at 0.36 lb/(hp h)); T95-8 may change the
+/// thrust after probing takeoff and climb. Empty weight 198,415 lb (90,000
+/// kg, `TU95.INF` Bear-H; Wikipedia "Tupolev Tu-95" Tu-95MS 198,416; the
+/// record's 264,550 matches neither), internal fuel 148,150 lb (67,200 kg,
+/// Wikipedia "Tupolev Tu-95" Tu-95MS; the record's 100,000), maximum takeoff
+/// 414,470 lb (188,000 kg, `TU95.INF` Bear-H and Wikipedia; the record's
+/// 407,850 is Jane's Bear-F). Ceiling and speeds stay (the 1 G row's 462 kt
+/// agrees with Jane's within 3 percent, the ceiling 40,750 ft is between the
+/// cited 39,370 and 45,000). The corrected empty plus full fuel is 346,565
+/// lb, under the maximum.
+pub const TU95_THRUST_LBF: i32 = 129_000;
+pub const TU95_EMPTY_LB: i32 = 198_415;
+pub const TU95_INTERNAL_FUEL_LB: i32 = 148_150;
+pub const TU95_MAX_TAKEOFF_LB: i32 = 414_470;
+
+/// Su-34 Platypus (BMB-C2, **opinionated**, coordinator first pass
+/// 2026-11-15, BOMBERS-DECISIONS-C Su-34 item 1, pending John). `SU34.PT` is
+/// the Su-27's record with 21 statements changed (198 of 219 equal
+/// `SU27.PT`'s; docs/formats/aircraft-variety.md, "Su-34 source review"):
+/// empty weight, both thrusts and the flows are the Su-27's. Empty weight
+/// 49,604 lb (22,500 kg) and internal fuel 26,676 lb (12,100 kg), both
+/// Wikipedia "Sukhoi Su-34" (read 2026-11-15; the record carries the Su-27's
+/// 36,000 lb empty weight and 20,000 lb of fuel). Dry thrust 33,800 lbf: two AL-31F at about
+/// 16,900 lbf each (the Su-27 comparison in `docs/formats/aircraft.md`, "dry
+/// thrust 21 percent high, shared with SU33, SU34, SU35"; the Su-34's own
+/// Wikipedia page lists no dry thrust); the record's 40,755 is the Su-27's.
+/// The afterburner 59,510 lbf (two AL-31FM1 at 132 kN, 29,700 lbf each, 59,400
+/// lbf, within 0.2 percent), maximum takeoff 97,000 lb (real 99,428), G
+/// -4/+9, ceiling 55,000 ft and the sea-level edge stay. The corrected empty
+/// plus full fuel is 76,280 lb, under the maximum.
+pub const SU34_EMPTY_LB: i32 = 49_604;
+pub const SU34_INTERNAL_FUEL_LB: i32 = 26_676;
+pub const SU34_THRUST_LBF: i32 = 33_800;
+/// The Su-34's high-altitude top speed (BMB-C2, decision "trim the
+/// high-altitude edge to Mach 1.8"; the Mach number is the real one,
+/// Wikipedia "Sukhoi Su-34", 1,900 km/h at altitude, about 1,030 kt; the
+/// figure is **fitted**): the record's 1 G fast edge reaches 2,473 ft/s
+/// (1,465 kt, Mach 2.55) at 36,000 ft. Mach 1.8 above the tropopause (36,089
+/// ft; sound 968.08 ft/s, standard atmosphere) is 1,742 ft/s (1,032 kt). The
+/// two 1 G vertices at or above 36,000 ft that are faster (2,308 at 49,500 ft
+/// and 2,473 at 36,000 ft) become 1,742; the 55,000 ft vertex (1,704) is
+/// already under it, and the 18,000 ft vertex (1,731 ft/s, Mach 1.66 there)
+/// and sea level (1,250 ft/s, 741 kt against the real 775 kt) stay. The 0 G
+/// polygon keeps its 127 ft/s step over the 1 G edge at 36,000 ft (2,600 to
+/// 2,473); every other row's fast side is held to the new 1 G edge
+/// ([`hold_to_one_g`]).
+const SU34_TOP_FPS: f64 = 1_742.;
+const SU34_ZERO_G_STEP_FPS: f64 = 127.;
+const SU34_TRIM_ALTITUDE_FT: f64 = 36_000.;
+const SU34_RETAIL_ZERO_G: [[f64; 2]; 11] = [
+    [120., 0.],
+    [160., 13_000.],
+    [225., 27_000.],
+    [313., 39_000.],
+    [501., 50_000.],
+    [870., 58_000.],
+    [1_725., 58_000.],
+    [2_417., 52_000.],
+    [2_600., 36_000.],
+    [1_835., 18_000.],
+    [1_280., 0.],
+];
+const SU34_RETAIL_ONE_G: [[f64; 2]; 11] = [
+    [180., 0.],
+    [225., 13_000.],
+    [307., 26_000.],
+    [433., 39_000.],
+    [601., 48_000.],
+    [870., 55_000.],
+    [1_704., 55_000.],
+    [2_308., 49_500.],
+    [2_473., 36_000.],
+    [1_731., 18_000.],
+    [1_250., 0.],
+];
+
 fn top_altitude(e: &Envelope) -> f64 {
     e.points.iter().map(|p| p[1]).fold(f64::MIN, f64::max)
 }
@@ -1107,6 +1246,71 @@ pub(crate) fn fit_envelopes(
             hold_to_one_g(envelopes);
             true
         }
+        AircraftId::Tu26 => {
+            // BMB-C2: the ceiling and the top-speed trim follow the corrected
+            // `maxAlt` and need the retail 1 G and 0 G top speeds and top
+            // altitudes (both are checked before anything moves).
+            let zero = envelopes.iter().position(|e| e.g == 0);
+            let one = envelopes.iter().position(|e| e.g == 1);
+            let (Some(zero), Some(one)) = (zero, one) else {
+                return false;
+            };
+            if top_speed_of(&envelopes[one]) != TU26_RETAIL_ONE_G_TOP_FPS
+                || top_speed_of(&envelopes[zero]) != TU26_RETAIL_ZERO_G_TOP_FPS
+                || !lower_ceiling(
+                    object,
+                    envelopes,
+                    TU26_CEILING_FT,
+                    TU26_RETAIL_CEILING_FT,
+                    TU26_RETAIL_ZERO_G_TOP_FT,
+                )
+            {
+                return false;
+            }
+            for (g, cap) in [(0, TU26_TOP_FPS + TU26_ZERO_G_STEP_FPS), (1, TU26_TOP_FPS)] {
+                if let Some(row) = envelopes.iter_mut().find(|e| e.g == g) {
+                    let top = top_index(&row.points);
+                    for p in row.points.iter_mut().skip(top + 1) {
+                        if p[1] >= TU26_TRIM_ALTITUDE_FT && p[0] > cap {
+                            p[0] = cap;
+                        }
+                    }
+                }
+            }
+            hold_to_one_g(envelopes);
+            true
+        }
+        AircraftId::Su34 => {
+            // BMB-C2: the Mach 1.8 trim follows the corrected `thrust` (the
+            // signal that the corrections ran) and needs the retail 0 G and
+            // 1 G polygons, like the B-1B's.
+            let corrected =
+                plane.get("thrust").and_then(|t| t.number().ok()) == Some(SU34_THRUST_LBF);
+            let zero = envelopes.iter().position(|e| e.g == 0);
+            let one = envelopes.iter().position(|e| e.g == 1);
+            let (Some(zero), Some(one)) = (zero, one) else {
+                return false;
+            };
+            if !corrected
+                || envelopes[zero].points != SU34_RETAIL_ZERO_G
+                || envelopes[one].points != SU34_RETAIL_ONE_G
+            {
+                return false;
+            }
+            for (row, cap) in [
+                (zero, SU34_TOP_FPS + SU34_ZERO_G_STEP_FPS),
+                (one, SU34_TOP_FPS),
+            ] {
+                let top = top_index(&envelopes[row].points);
+                for p in envelopes[row].points.iter_mut().skip(top + 1) {
+                    if p[1] >= SU34_TRIM_ALTITUDE_FT && p[0] > cap {
+                        p[0] = cap;
+                    }
+                }
+            }
+            hold_to_one_g(envelopes);
+            true
+        }
         AircraftId::B2 => {
             // B2-8: the ceiling follows the corrected `maxAlt` and needs the
             // retail 0 G and 1 G polygons, like the F-117's.
@@ -1175,6 +1379,13 @@ const _: () = assert!(SU25_EMPTY_LB + SU25_INTERNAL_FUEL_LB < SU25_MAX_TAKEOFF_L
 const _: () = assert!(192_000 + B1B_INTERNAL_FUEL_LB < B1B_MAX_TAKEOFF_LB);
 const _: () = assert!(T160_EMPTY_LB + T160_INTERNAL_FUEL_LB < 606_260);
 const _: () = assert!(47_481 + F111_INTERNAL_FUEL_LB < 100_000);
+// Batch C (BMB-C2): each real empty weight plus full fuel fits under the
+// maximum takeoff weight (the Tu-26's record maximum 273,370 lb, the Tu-95's
+// real 414,470 lb, the Su-34's record 97,000 lb), so none needs the loadout's
+// fuel cap.
+const _: () = assert!(TU26_EMPTY_LB + 110_230 < 273_370);
+const _: () = assert!(TU95_EMPTY_LB + TU95_INTERNAL_FUEL_LB < TU95_MAX_TAKEOFF_LB);
+const _: () = assert!(SU34_EMPTY_LB + SU34_INTERNAL_FUEL_LB < 97_000);
 // The Tornado's retail internal fuel (11,221 lb) fits under the real maximum.
 const _: () = assert!(TORNADO_EMPTY_LB + 11_221 < TORNADO_MAX_TAKEOFF_LB);
 
@@ -1679,6 +1890,89 @@ pub const CORRECTIONS: &[Correction] = &[
         key: "aftFuelConsumption",
         retail: 6,
         corrected: F111_AB_FUEL_LB_PER_S,
+    },
+    // BMB-C2 (opinionated, coordinator first pass, 2026-11-15): the bomber
+    // batch C records. Tu-26: real empty weight, NK-25 thrust and ceiling (the
+    // polygons and the top-speed trim are `fit_envelopes`).
+    Correction {
+        id: AircraftId::Tu26,
+        block: Block::Object,
+        key: "weight",
+        retail: 110_230,
+        corrected: TU26_EMPTY_LB,
+    },
+    Correction {
+        id: AircraftId::Tu26,
+        block: Block::Plane,
+        key: "thrust",
+        retail: 59_986,
+        corrected: TU26_THRUST_LBF,
+    },
+    Correction {
+        id: AircraftId::Tu26,
+        block: Block::Plane,
+        key: "aftThrust",
+        retail: 88_180,
+        corrected: TU26_AFT_THRUST_LBF,
+    },
+    Correction {
+        id: AircraftId::Tu26,
+        block: Block::Object,
+        key: "maxAlt",
+        retail: TU26_RETAIL_CEILING_FT,
+        corrected: TU26_CEILING_FT,
+    },
+    // Tu-95: fitted turboprop thrust, real weights, fuel and maximum takeoff.
+    Correction {
+        id: AircraftId::Tu95,
+        block: Block::Plane,
+        key: "thrust",
+        retail: 355_080,
+        corrected: TU95_THRUST_LBF,
+    },
+    Correction {
+        id: AircraftId::Tu95,
+        block: Block::Object,
+        key: "weight",
+        retail: 264_550,
+        corrected: TU95_EMPTY_LB,
+    },
+    Correction {
+        id: AircraftId::Tu95,
+        block: Block::Plane,
+        key: "internalFuel",
+        retail: 100_000,
+        corrected: TU95_INTERNAL_FUEL_LB,
+    },
+    Correction {
+        id: AircraftId::Tu95,
+        block: Block::Plane,
+        key: "maxTakeoffWeight",
+        retail: 407_850,
+        corrected: TU95_MAX_TAKEOFF_LB,
+    },
+    // Su-34: real empty weight, fuel and dry thrust (the Mach 1.8 trim is
+    // `fit_envelopes`, the gun rounds `aircraft_stations`).
+    Correction {
+        id: AircraftId::Su34,
+        block: Block::Object,
+        key: "weight",
+        retail: 36_000,
+        corrected: SU34_EMPTY_LB,
+    },
+    Correction {
+        id: AircraftId::Su34,
+        block: Block::Plane,
+        key: "internalFuel",
+        retail: 20_000,
+        corrected: SU34_INTERNAL_FUEL_LB,
+    },
+    Correction {
+        id: AircraftId::Su34,
+        block: Block::Plane,
+        key: "thrust",
+        retail: 40_755,
+        corrected: SU34_THRUST_LBF,
     },
 ];
 

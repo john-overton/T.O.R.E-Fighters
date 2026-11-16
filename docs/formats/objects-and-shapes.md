@@ -2147,3 +2147,11 @@ windscreen between two bow posts under a thin bar and two side panes, no combine
 the record's HUD field is null and `F117.HUD` is bound by name; John, 2026-11-15, opinionated). Its HUD glass
 aperture is measured on that art (the windscreen, 56,562 of 56,572 pixels) and its pilot's eye is a
 per-aircraft table entry; see [the F-117 ordnance, sensors and cockpit section](aircraft-variety.md#f-117-ordnance-sensors-and-cockpit-f117-67-2026-11-15). No retail art is committed.
+
+Update (F111-2, 2026-11-15): `F111.SH` draws at its header scale (2/3 ft a unit) times the per-axis
+scale `[0.859, 1.0, 0.827]` (BMB-B1), 63.0 by 73.3 by 17.1 ft with the gear down, from 62.99, 73.33
+and 17.09 ft measured on the drawn shape. It has 254 runtime faces (258 with the rig's four fixed glove
+plates) with one texture `_F111.PIC`, 19 exact-vertex twin groups (all pairs, all with opposite windings)
+and no `E0` decal faces, so nothing is omitted. `F111_A.SH` to `F111_D.SH` load at the same scale; no
+whole-body damage variant is registered. The `render-f111-skin` scenario pins the look. Details:
+[F-111F shape and rig](aircraft-variety.md#f-111f-shape-and-rig-f111-23-2026-11-15).

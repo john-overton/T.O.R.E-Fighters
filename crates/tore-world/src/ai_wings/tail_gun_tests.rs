@@ -282,3 +282,58 @@ fn the_retail_b52_gun_row_is_a_slewed_tail_gun_in_the_configuration_and_the_ai_s
         assert!((got + nose).abs() < 1e-9);
     }
 }
+
+/// BMB-C1 and BMB-C2, with B52-6/7's mount: the Tu-26's and Tu-95's tail
+/// gun (`T23_1.JT`, row 3 of each record) reads 180 degrees in the combat
+/// configuration and fires astern, and the Tu-95's dorsal and ventral rows
+/// (5 and 6, cleared by BMB-C2) are not stations at all (read from the user's
+/// install).
+#[test]
+fn the_retail_tu26_and_tu95_gun_rows_are_slewed_tail_guns_that_fire_astern() {
+    let Ok(media) = MediaSource::detect(&install()) else {
+        eprintln!("skipped: no retail install at {}", install().display());
+        return;
+    };
+    let archives: Vec<_> = ["FA_1.LIB", "FA_2.LIB", "FA_4B.LIB", "FA_4D.LIB"]
+        .iter()
+        .filter_map(|name| media.archive(name).ok())
+        .collect();
+    let read = |name: &str| -> std::io::Result<Vec<u8>> {
+        archives
+            .iter()
+            .find_map(|library| library.read(name).ok())
+            .ok_or_else(|| std::io::Error::other(format!("missing {name}")))
+    };
+    for id in [AircraftId::Tu26, AircraftId::Tu95] {
+        let bytes = read(id.pt()).expect("the record");
+        let aircraft = Aircraft::parse_as(&bytes, id).expect("the record parses");
+        let config = live::Configuration::from_source(&aircraft, &read).expect("the record loads");
+        let guns: Vec<usize> = config
+            .stations
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.weapon.source.eq_ignore_ascii_case("T23_1.JT"))
+            .map(|(i, _)| i)
+            .collect();
+        // One tail gun each: the Tu-95's dorsal and ventral turrets are
+        // cleared and the Tu-26 never had them.
+        assert_eq!(guns.len(), 1, "{id:?}: the tail gun alone");
+        let slew = config.stations[guns[0]].slew;
+        assert!(slew.is_slewed(), "{id:?}");
+        assert!((slew.rest[0] - std::f64::consts::PI).abs() < 1e-9, "{id:?}");
+        for (index, station) in config.stations.iter().enumerate() {
+            if index != guns[0] {
+                assert!(
+                    !station.slew.is_slewed(),
+                    "{id:?}: {}",
+                    station.weapon.source
+                );
+            }
+        }
+        let basis = tore_sim::attitude::Basis::new(0.4, 0.1, 0.0);
+        let direction = config.stations[guns[0]].fire_direction(basis);
+        for (got, nose) in direction.iter().zip(basis.forward) {
+            assert!((got + nose).abs() < 1e-9, "{id:?} fires astern");
+        }
+    }
+}

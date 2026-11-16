@@ -29,6 +29,11 @@
 //! have specs ([`B1B`], [`TU160`], [`F111F`], [`TU26`]) but no
 //! [`AircraftId`] yet, so [`spec`] does not return them: wiring one is one
 //! match arm there (batch B's identity slices).
+//! Update (F111-3, 2026-11-15): the F-111F is wired ([`spec`] returns
+//! [`F111F`] for [`AircraftId::F111`]), and the Tu-26 (BMB-C1) is wired with its
+//! identity too. A swivelling station carries its own aircraft's spec
+//! ([`rack_spec`]), so the F-111F's rows 5 and 6 swivel about the F-111F's
+//! pivot and the Tornado's stay on the Tornado's.
 use tore_formats::aircraft::AircraftId;
 
 /// Shape units to feet at the Tornado's header scale 2 (2/3 ft a unit).
@@ -539,9 +544,11 @@ pub const TU160: SwingSpec = SwingSpec {
 /// trailing edge at y -5); the outer pylons, rows 7 and 8, are fixed, and
 /// while they carry stores the sweep is held to 26 degrees or less (fitted,
 /// matching the real limit). The pylon length is the Tornado's (3.3 ft, which
-/// the review judged to fit). No placement offsets: the root seam treatment
-/// (4.7 ft at full sweep: a root shift or a glove plate) is the rig slice's
-/// call.
+/// the review judged to fit). No placement offsets. Update (F111-3,
+/// 2026-11-15): the root seam (4.7 ft at full sweep) showed in the frames and
+/// is closed by a fixed glove plate the rig adds (`f111_animation`, the
+/// Tornado's TOR-5b precedent), not by a root shift; the drawn panel is the
+/// review's, uncut, so the swept span is 40.3 ft against the real 32.
 pub const F111F: SwingSpec = SwingSpec {
     name: "F-111F",
     sweep_min: 16.,
@@ -618,10 +625,20 @@ pub fn spec(id: AircraftId) -> Option<&'static SwingSpec> {
         AircraftId::Tornado => Some(&TORNADO),
         AircraftId::B1b => Some(&B1B),
         AircraftId::Tu160 => Some(&TU160),
-        // AircraftId::F111F => Some(&F111F),
-        // AircraftId::Tu26 => Some(&TU26),
+        // F111-3 (2026-11-15): the F-111F's swing wing is wired.
+        AircraftId::F111 => Some(&F111F),
+        // BMB-C1 (2026-11-15): the Tu-26's identity exists, so it is wired.
+        AircraftId::Tu26 => Some(&TU26),
         _ => None,
     }
+}
+
+/// The spec a swivelling station's rack must carry to turn about aircraft
+/// `id`'s own pivot (F111-3, 2026-11-15): `None` for the Tornado, whose spec
+/// is what a rack without one uses (so every Tornado rack, test and pin is
+/// as it was), and for an aircraft with no swivelling station.
+pub fn rack_spec(id: AircraftId) -> Option<&'static SwingSpec> {
+    spec(id).filter(|spec| spec.has_swivel() && spec.name != TORNADO.name)
 }
 
 /// How far aircraft `id`'s wing has turned from its drawn pose, radians, at
@@ -1120,14 +1137,38 @@ mod tests {
             assert_eq!(spec.placement, Placement::NONE);
         }
         // Update (coordinator, 2026-11-15): the B-1B and Tu-160 are wired
-        // with their identities (BMB-B1); the F-111F and Tu-26 are not yet.
+        // with their identities (BMB-B1), the F-111F with its rig (F111-3);
+        // the Tu-26 (BMB-C1) with its identity.
         assert!(AircraftId::ALL.iter().all(|id| match spec(*id) {
             None => true,
             Some(s) => {
                 (id.source() == AircraftId::Tornado && s.name == TORNADO.name)
                     || (*id == AircraftId::B1b && s.name == B1B.name)
                     || (*id == AircraftId::Tu160 && s.name == TU160.name)
+                    || (*id == AircraftId::Tu26 && s.name == TU26.name)
+                    || (*id == AircraftId::F111 && s.name == F111F.name)
             }
         }));
+        // The wired list: the Tornado (both versions), B-1B, Tu-160, F-111F and Tu-26.
+        let wired: Vec<AircraftId> = AircraftId::ALL
+            .into_iter()
+            .filter(|id| spec(*id).is_some())
+            .collect();
+        assert_eq!(
+            wired,
+            [
+                AircraftId::Tornado,
+                AircraftId::B1b,
+                AircraftId::Tu160,
+                AircraftId::F111,
+                AircraftId::Tu26
+            ]
+        );
+        // F111-3: the F-111F's racks carry its spec, the Tornado's carry none.
+        assert_eq!(rack_spec(AircraftId::F111), Some(&F111F));
+        assert_eq!(rack_spec(AircraftId::Tornado), None);
+        assert_eq!(rack_spec(AircraftId::B1b), None);
+        assert!(has_swivel(AircraftId::F111) && swivels(AircraftId::F111, 6));
+        assert!(!swivels(AircraftId::F111, 7));
     }
 }

@@ -1079,3 +1079,72 @@ The `menus-ordnance-availability` expected line reads 5,093 weapon placements, 2
 and 21 recovered stations; `a2g-catalog` matches any weapon count and carries 51, 21, 249 and 260;
 `test_battery_a2g.py` carries 51, 21 (any count) and 249. Earlier sections quoting 4,776, 4,746,
 4,784, 4,732 or 5,145 stay as written for their own states.
+
+## Bomber batch C identities join the roster, with their station corrections (BMB-C1 and BMB-C2, 2026-11-15)
+
+`TU26.PT`, `TU95.PT` and `SU34.PT` joined `AircraftId` at the end (checkpoint codes 53 to 55,
+after the F-111F's 52), so the audit now checks 54 aircraft. The pins in `ordnance_audit.rs`
+moved on purpose (each carries a dated note):
+
+| Pin | From | To | Why |
+| --- | ---: | ---: | --- |
+| Aircraft | 51 | 54 | The three identities |
+| Recovered (optional) weapon stations | 20 | 22 | The Tu-26's empty bay row (5) and the Tu-95's empty pylon row (8): each keeps an empty AS-16 selection (the default store of another row), which the Tu-26's `0x20` bit and the Tu-95's `0x1025` mask now admit |
+| Weapon placements | 5,145 | 5,447 | Tu-26 129, Tu-95 36, Su-34 137 |
+| Tank placements | 249 | 257 | The Su-34's two `0x07e5` rows take 8 (the Tu-26 and Tu-95 have none; the Tu-95's pylon row loses the tank bit) |
+| Cheat-only novelty placements | 258 | 276 | 18 more on the batch C rows |
+| Designator-pod placements | 80 | 82 | The Su-34's rows 6 and 7 keep the retail designator bit `0x400`, one pod each; the Tu-26's bay row and the Tu-95's pylon row lose it (BMB-C2) |
+| Weapon records, tank records | 82, 9 | 82, 9 | No record added |
+
+Unlike batch B, the retail rows were not measured separately: the Tu-26's bay row has no
+compatible default selection without the active-radar bit, so the audit stops at
+"TU26.PT source station 6 hides compatible AGM45.JT" on the retail rows. The Tu-26's bay
+(`0x1500` to `0x1120`) takes the AS-16 (and the Harpoon and AM-39 the same bit admits, as on
+the B-52); its glove pairs hold two each (4 and 6 before). The Tu-95's pylon row goes from
+the F-16C wing mask `0x17e5` to the AS-16 alone (`weapon_allowed`), one placement, ten
+stores, no weight class; its Bear-A to F turret rows (5 and 6) hold nothing.
+
+```text
+ordnance TU26.PT: 5 source rows, 1 optional weapon rows, 129 compatible weapon placements, 0 tank placements; defaults and restart passed; catalog 37 normal, 83 Cheat
+ordnance TU95.PT: 3 source rows, 1 optional weapon rows, 36 compatible weapon placements, 0 tank placements; defaults and restart passed; catalog 35 normal, 83 Cheat
+ordnance SU34.PT: 4 source rows, 0 optional weapon rows, 137 compatible weapon placements, 8 tank placements; defaults and restart passed; catalog 62 normal, 83 Cheat
+ordnance audit: 54 aircraft, 22 recovered weapon stations, 5447 weapon placements, 257 tank placements, 82 weapon and 9 tank records; passed
+ordnance audit: 1 designator pods, 82 pod placements, one to an aircraft, loaded and restored through the saved mission; passed
+ordnance audit: 2 novelty records, 276 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
+```
+
+The `menus-ordnance-availability` battery expected line reads 54 aircraft, 22 recovered
+stations, 5,447 weapon and 257 tank placements; the `a2g-catalog` expected lines (the
+Cheat-only count, stale at 240 since BMB-A1, now 276) and `tools/test_battery_a2g.py` read
+54 aircraft, 22 recovered stations and 257 tank placements (and match any weapon count).
+Earlier sections that quote 51 aircraft, 5,145 weapon placements and 249 tank placements
+stay as written for their own states.
+
+## Batches A, B and C integration: the pins recomputed (2026-11-16)
+
+Batch C (BMB-C1 and BMB-C2) was built from batch B's base (5,145 weapon placements, 249 tank
+placements, 20 recovered stations), before round 2 moved the B-2 and B-52 bays onto the
+shared grid. The pins were not added: every total below is measured by `--validate-ordnance`
+on the merged tree (profile refreshed from the retail media first). Batch C moves no row of
+batches A or B, so no placement moves twice. B52-6/7 moves none.
+
+| Pin | Batches A and B | Batch C alone | Merged | Why |
+| --- | ---: | ---: | ---: | --- |
+| Aircraft | 51 | 54 (from 51) | 54 | the Tu-26, Tu-95 and Su-34 join |
+| Weapon placements | 5,093 | 5,447 (from 5,145) | 5,395 | 5,093 plus 302: Tu-26 129, Tu-95 36, Su-34 137 |
+| Tank placements | 249 | 257 | 257 | the Su-34's two `0x07e5` rows take 8 |
+| Recovered weapon stations | 21 | 22 (from 20) | 23 | 21 plus the Tu-26's bay row and the Tu-95's pylon row |
+| Cheat-only placements | 260 | 276 (from 258) | 278 | 260 plus the 18 pairs on the batch C rows |
+| Designator pod placements | 80 | 82 | 82 | the Su-34's rows 6 and 7 keep the retail designator bit |
+| Weapon and tank records | 82 / 9 | 82 / 9 | 82 / 9 | |
+
+```text
+ordnance audit: 54 aircraft, 23 recovered weapon stations, 5395 weapon placements, 257 tank placements, 82 weapon and 9 tank records; passed
+ordnance audit: 1 designator pods, 82 pod placements, one to an aircraft, loaded and restored through the saved mission; passed
+ordnance audit: 2 novelty records, 278 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
+```
+
+The `menus-ordnance-availability` expected line reads 54 aircraft, 23 recovered stations,
+5,395 weapon and 257 tank placements; `a2g-catalog` carries 54, 23, 257 and 278;
+`test_battery_a2g.py` carries 54, 23 and 257. Earlier sections quoting 22 recovered stations,
+5,447 weapon placements or 276 Cheat-only placements stay as written for their own states.

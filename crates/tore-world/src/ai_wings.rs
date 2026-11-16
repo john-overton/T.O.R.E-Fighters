@@ -1230,9 +1230,14 @@ impl AiWings {
                     .weapons
                     .insert((actor.id(), index as u8), station.weapon.clone());
             }
-            actor
-                .flight_mut()
-                .set_payload(payload_lbs(&config, &stores))?;
+            // A default load the full tank would put over the maximum takeoff
+            // weight (the B-1B, F-111F and B-52H) starts with the tank the
+            // maximum leaves room for, as the player's default load does.
+            let payload = payload_lbs(&config, &stores);
+            if loaded.is_none() {
+                actor.flight_mut().fit_fuel_to_payload(payload);
+            }
+            actor.flight_mut().set_payload(payload)?;
             actor.set_stations(stores);
             actor.set_guns(
                 config
@@ -1748,7 +1753,12 @@ impl AiWings {
         flight.fuel = fuel_lbs;
         flight.systems =
             tore_sim::aircraft_systems::Systems::new(config.engines, config.external_fuel_lbs);
-        flight.set_payload(payload_lbs(&config, &stations))?;
+        // A revived aircraft's full tank is capped to what the maximum takeoff
+        // weight leaves with its stores aboard (the B-1B, F-111F and B-52H);
+        // a validated lobby loadout already fits and is untouched.
+        let payload = payload_lbs(&config, &stations);
+        flight.fit_fuel_to_payload(payload);
+        flight.set_payload(payload)?;
         let own = experience
             .or_else(|| self.experience_for(id, side, wing))
             .unwrap_or(tore_sim::ai::experience::ResolvedExperience {

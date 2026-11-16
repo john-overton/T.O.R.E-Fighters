@@ -39,6 +39,7 @@ pub fn store_pose(record: &StoreRecord) -> StorePose {
             over: record.over.map(|h| h.map(|h| h as f32)),
             tip: record.tip.map(|t| t.map(|v| v as f32)),
             turn: 0.,
+            swing: None,
         },
         shape: record.shape.clone(),
         look: match record.look {
@@ -116,6 +117,7 @@ mod tests {
                 over: [Some(-0.75), Some(-0.5), None, None, Some(-1.25)],
                 tip: Some([18.5, 0.75]),
                 turn: 0.,
+                swing: None,
             },
             shape: Some("AGM65.3".into()),
             look: snapshot::StoreLook::Pod,

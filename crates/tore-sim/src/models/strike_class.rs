@@ -307,6 +307,15 @@ mod tests {
             (AircraftId::B1b, Heavy),
             (AircraftId::Tu160, Heavy),
             (AircraftId::F111, Fighter),
+            // Bomber batch C (BMB-C1, 2026-11-15; coordinator first pass): the
+            // rule gives the Tu-26 (273,370 lb) and the Tu-95 (407,850 lb)
+            // Heavy, and the Su-34 (97,000 lb, +9 G, 1,465 kt in the record,
+            // about 1,030 kt at the real Mach 1.8) Fighter, the class its
+            // Flanker family has; no override (a Flanker strike variant keeps
+            // the fighter passes plus the level run).
+            (AircraftId::Tu26, Heavy),
+            (AircraftId::Tu95, Heavy),
+            (AircraftId::Su34, Fighter),
         ];
         assert_eq!(expected.len(), AircraftId::SELECTABLE.len());
         for (id, class) in expected {
@@ -323,6 +332,9 @@ mod tests {
         assert_eq!(class_of("B1.PT"), Heavy);
         assert_eq!(class_of("TU160.PT"), Heavy);
         assert_eq!(class_of("F117.PT"), Attack);
+        assert_eq!(class_of("TU26.PT"), Heavy);
+        assert_eq!(class_of("TU95.PT"), Heavy);
+        assert_eq!(class_of("SU34.PT"), Fighter);
         // Table entries that share a record or are not imported.
         assert_eq!(row(&rows, "TU95.PT"), Heavy);
         assert_eq!(row(&rows, "B52.PT"), Heavy);

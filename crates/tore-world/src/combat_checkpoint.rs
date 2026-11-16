@@ -13,7 +13,7 @@
 //!
 //! - setup, fixed when the mission is built and the same in the fresh world:
 //!   `contrail_offsets`, `range`, `clean_recording`, `open`, `initial_ammo`,
-//!   `dummies`, `mission_spawns`, `mission_layout`, `dummy_types`,
+//!   `initial_fuel_lbs`, `dummies`, `mission_spawns`, `mission_layout`, `dummy_types`,
 //!   `dummy_configs`, `airport_objects`, `ground_sides`, `ground_looks`,
 //!   `surface_targets`;
 //! - local, one machine's: `tape` (the recorder's list, which the app owns),
@@ -121,6 +121,7 @@ impl Combat {
             // Setup.
             open: _,
             initial_ammo: _,
+            initial_fuel_lbs: _,
             render,
             dummies: _,
             mission_spawns: _,
@@ -190,6 +191,7 @@ impl Combat {
             clean_recording: _,
             open: _,
             initial_ammo: _,
+            initial_fuel_lbs: _,
             render: render_slot,
             dummies: _,
             mission_spawns: _,

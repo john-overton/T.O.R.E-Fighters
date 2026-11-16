@@ -258,6 +258,11 @@ pub enum AircraftId {
     B1b,
     Tu160,
     F111,
+    /// Bomber batch C (BMB-C1, 2026-11-15): appended after the F-111F in batch
+    /// order, each its own retail record and never an alias.
+    Tu26,
+    Tu95,
+    Su34,
 }
 /// An aircraft's own names for its targeting sight (the target camera's
 /// title, the Load Ordnance sensor line, the replay's Sensor View) and for
@@ -285,7 +290,7 @@ impl AircraftId {
             other => other.pt(),
         }
     }
-    pub const SELECTABLE: [Self; 53] = [
+    pub const SELECTABLE: [Self; 56] = [
         Self::F18,
         Self::Rafale,
         Self::F14,
@@ -339,6 +344,9 @@ impl AircraftId {
         Self::B1b,
         Self::Tu160,
         Self::F111,
+        Self::Tu26,
+        Self::Tu95,
+        Self::Su34,
     ];
     /// Whether the AI can fly this aircraft in a mission (`opinionated`, agent
     /// decision 2026-10-08, revised 2026-10-12). Every selectable aircraft is
@@ -367,7 +375,7 @@ impl AircraftId {
         matches!(self, Self::Ah64 | Self::Mi24 | Self::Ch47)
     }
     /// Retail import identities. Runtime variants reuse these dependencies.
-    pub const ALL: [Self; 51] = [
+    pub const ALL: [Self; 54] = [
         Self::F18,
         Self::Rafale,
         Self::F14,
@@ -419,6 +427,9 @@ impl AircraftId {
         Self::B1b,
         Self::Tu160,
         Self::F111,
+        Self::Tu26,
+        Self::Tu95,
+        Self::Su34,
     ];
     pub fn parse(name: &str) -> Result<Self> {
         match name.to_ascii_lowercase().as_str() {
@@ -475,8 +486,11 @@ impl AircraftId {
             "b1b" | "b1.pt" => Ok(Self::B1b),
             "tu160" | "tu160.pt" => Ok(Self::Tu160),
             "f111" | "f111.pt" => Ok(Self::F111),
+            "tu26" | "tu26.pt" => Ok(Self::Tu26),
+            "tu95" | "tu95.pt" => Ok(Self::Tu95),
+            "su34" | "su34.pt" => Ok(Self::Su34),
             _ => Err(invalid(
-                "supported aircraft: f18, rafale, f14, a4e, x31, mig29, su27, mig21, su25, mig23, su35, f22, f22n, faxx, c130, ac130, e3, il76, e2, av8, yak141, v22, ah64, mi24, ch47, mig17, f4b, f4j, f4e, f4g, a7, f15, f16c, f16a, f104, a10, b747, a310, mig25, mig31, m2000, f15e, gripen, f5e, tornado, tornadoc (the Tornado IDS Clean), mf1, b52, b2, f117, b1b, tu160, f111",
+                "supported aircraft: f18, rafale, f14, a4e, x31, mig29, su27, mig21, su25, mig23, su35, f22, f22n, faxx, c130, ac130, e3, il76, e2, av8, yak141, v22, ah64, mi24, ch47, mig17, f4b, f4j, f4e, f4g, a7, f15, f16c, f16a, f104, a10, b747, a310, mig25, mig31, m2000, f15e, gripen, f5e, tornado, tornadoc (the Tornado IDS Clean), mf1, b52, b2, f117, b1b, tu160, f111, tu26, tu95, su34",
             )),
         }
     }
@@ -533,6 +547,9 @@ impl AircraftId {
             Self::B1b => "B1.PT",
             Self::Tu160 => "TU160.PT",
             Self::F111 => "F111.PT",
+            Self::Tu26 => "TU26.PT",
+            Self::Tu95 => "TU95.PT",
+            Self::Su34 => "SU34.PT",
         }
     }
     pub fn hud(self) -> &'static str {
@@ -612,6 +629,13 @@ impl AircraftId {
             Self::B1b => "BMBRCC.HUD",
             Self::Tu160 => "B2.HUD",
             Self::F111 => "AC130.HUD",
+            // Bomber batch C (BMB-C1, 2026-11-15; coordinator first pass,
+            // BOMBERS-DECISIONS-C): each follows its record. TU26.PT and
+            // TU95.PT name bmbroh.HUD (the B-52's, the AC-130 module with
+            // seven bytes changed) and SU34.PT su33cc.HUD (the MiG-29's,
+            // Su-25's and MiG-23's).
+            Self::Tu26 | Self::Tu95 => "BMBROH.HUD",
+            Self::Su34 => "SU33CC.HUD",
         }
     }
     pub fn stem(self) -> &'static str {
@@ -674,6 +698,11 @@ impl AircraftId {
             Self::B1b => "B1",
             Self::Tu160 => "TU160",
             Self::F111 => "F111",
+            // TU26.PT names tu26.SH, TU95.PT tu95.SH and SU34.PT su34.SH, each
+            // with its own _A..D damage looks (BMB-C1).
+            Self::Tu26 => "TU26",
+            Self::Tu95 => "TU95",
+            Self::Su34 => "SU34",
         }
     }
     pub fn cockpit_stem(self) -> &'static str {
@@ -742,6 +771,11 @@ impl AircraftId {
             // records name; BMB-B1).
             Self::B1b | Self::Tu160 => "B2",
             Self::F111 => "AC130",
+            // No Tu-26, Tu-95 or Su-34 cockpit art exists: the two Tupolevs
+            // fly the AC-130's (the family their bmbroh.HUD names, as the
+            // B-52), the Su-34 the Su-33's (su33cc.HUD; BMB-C1).
+            Self::Tu26 | Self::Tu95 => "AC130",
+            Self::Su34 => "SU33",
             _ => self.stem(),
         }
     }
@@ -801,6 +835,8 @@ impl AircraftId {
             Self::F117 => "~F117H.PIC",
             Self::B1b | Self::Tu160 => "~B2H.PIC",
             Self::F111 => "~AC130H.PIC",
+            Self::Tu26 | Self::Tu95 => "~AC130H.PIC",
+            Self::Su34 => "~SU33H.PIC",
         }
     }
     /// Compact identity for lobby columns and server seat logs.
@@ -882,6 +918,10 @@ impl AircraftId {
             Self::B1b => "B- 1B Lancer",
             Self::Tu160 => "Tu-160 Blackjack-A",
             Self::F111 => "F-111F Aardvark",
+            // Retail's own spellings (stray space in the Tu-26's and Tu-95's).
+            Self::Tu26 => "Tu- 26 Backfire-C",
+            Self::Tu95 => "Tu- 95 Bear-H",
+            Self::Su34 => "Su-34 Platypus",
         }
     }
     /// Exact reviewed short/long retail names, absent for the original loose fixtures.
@@ -937,6 +977,9 @@ impl AircraftId {
             Self::B1b => Some(("B-1B", "B- 1B Lancer")),
             Self::Tu160 => Some(("Tu-160", "Tu-160 Blackjack-A")),
             Self::F111 => Some(("F-111F", "F-111F Aardvark")),
+            Self::Tu26 => Some(("Tu-26", "Tu- 26 Backfire-C")),
+            Self::Tu95 => Some(("Tu-95", "Tu- 95 Bear-H")),
+            Self::Su34 => Some(("Su-34", "Su-34 Platypus")),
             _ => None,
         }
     }
@@ -996,6 +1039,9 @@ impl AircraftId {
             Self::B1b => Some("F18R.SEE"),
             Self::Tu160 => Some("TU160R.SEE"),
             Self::F111 => Some("A6R.SEE"),
+            Self::Tu26 => Some("TU26R.SEE"),
+            Self::Tu95 => Some("TU95R.SEE"),
+            Self::Su34 => Some("SU27R.SEE"),
         }
     }
     /// The F-117's own names for the two sensors its record shares with every
@@ -1092,6 +1138,11 @@ impl AircraftId {
             Self::B2 | Self::F117 => &[],
             // The B-1B, Tu-160 and F-111F records carry no gun row.
             Self::B1b | Self::Tu160 | Self::F111 => &[],
+            // Bomber batch C (BMB-C1): the Tu-26 and Tu-95 tail turrets fire
+            // the 23 mm `T23_1.JT` (row 3, and rows 5 and 6 on the Tu-95 until
+            // BMB-C2 clears them); the Su-34 keeps the Su-27's GSh-30-1.
+            Self::Tu26 | Self::Tu95 => &["T23_1.JT"],
+            Self::Su34 => &["GSH301.JT"],
         }
     }
     /// Reviewed optional left, centre and right cockpit overlays.
@@ -1142,6 +1193,9 @@ impl AircraftId {
                 | Self::B1b
                 | Self::Tu160
                 | Self::F111
+                | Self::Tu26
+                | Self::Tu95
+                | Self::Su34
         )
     }
 }
@@ -1238,6 +1292,9 @@ impl Aircraft {
             AircraftId::B1b => 636,
             AircraftId::Tu160 => 588,
             AircraftId::F111 => 660,
+            // Bomber batch C source reviews (2026-11-15): TU26.PT, TU95.PT and
+            // SU34.PT are all 660.
+            AircraftId::Tu26 | AircraftId::Tu95 | AircraftId::Su34 => 660,
             _ => 660,
         };
         if object["structType"].number()? != 5 || object["typeSize"].number()? != size {
@@ -2124,6 +2181,9 @@ mod profile_tests {
             (AircraftId::B1b, "B-1B", "B- 1B Lancer", 636),
             (AircraftId::Tu160, "Tu-160", "Tu-160 Blackjack-A", 588),
             (AircraftId::F111, "F-111F", "F-111F Aardvark", 660),
+            (AircraftId::Tu26, "Tu-26", "Tu- 26 Backfire-C", 660),
+            (AircraftId::Tu95, "Tu-95", "Tu- 95 Bear-H", 660),
+            (AircraftId::Su34, "Su-34", "Su-34 Platypus", 660),
         ] {
             let text = fixture()
                 .replace("F18.PT", id.pt())
@@ -2172,8 +2232,9 @@ mod profile_tests {
         }
         // Update (BMB-A1, 2026-11-15): the bomber batch appends three more.
         // Update (BMB-B1, 2026-11-15): batch B appends three more.
-        assert_eq!(AircraftId::ALL.len(), 51);
-        assert_eq!(AircraftId::SELECTABLE.len(), 53);
+        // Update (BMB-C1, 2026-11-15): batch C appends three more.
+        assert_eq!(AircraftId::ALL.len(), 54);
+        assert_eq!(AircraftId::SELECTABLE.len(), 56);
         assert_eq!(
             AircraftId::ALL[40..45],
             [
@@ -2272,9 +2333,7 @@ mod profile_tests {
             assert_eq!(id.pt(), pt);
         }
         // Separate records: no neighbour key reaches them.
-        for key in [
-            "B1", "B1A", "B1.PTS", "TU26.PT", "Tu-160", "F111A", "F22.PT",
-        ] {
+        for key in ["B1", "B1A", "B1.PTS", "Tu-160", "F111A", "F22.PT"] {
             assert!(
                 !matches!(
                     AircraftId::parse(key),
@@ -2284,11 +2343,11 @@ mod profile_tests {
             );
         }
         assert_eq!(
-            AircraftId::ALL[48..],
+            AircraftId::ALL[48..51],
             [AircraftId::B1b, AircraftId::Tu160, AircraftId::F111]
         );
         assert_eq!(
-            AircraftId::SELECTABLE[50..],
+            AircraftId::SELECTABLE[50..53],
             [AircraftId::B1b, AircraftId::Tu160, AircraftId::F111]
         );
         // The bindings the coordinator's first pass fixed (BOMBERS-DECISIONS-B).
@@ -2312,6 +2371,77 @@ mod profile_tests {
             // No gun row, no overlay pictures, no PTS companion.
             assert_eq!(id.gun(), None, "{id:?}");
             assert_eq!(id.cockpit_overlays(), [None, None, None], "{id:?}");
+            assert!(!id.has_pts(), "{id:?}");
+        }
+    }
+    #[test]
+    fn the_bomber_batch_c_aircraft_parse_by_key_and_follow_their_records() {
+        // BMB-C1 (2026-11-15): checkpoint codes 53 to 55, in batch order.
+        for (key, id, pt) in [
+            ("tu26", AircraftId::Tu26, "TU26.PT"),
+            ("TU26.PT", AircraftId::Tu26, "TU26.PT"),
+            ("tu95", AircraftId::Tu95, "TU95.PT"),
+            ("TU95.PT", AircraftId::Tu95, "TU95.PT"),
+            ("su34", AircraftId::Su34, "SU34.PT"),
+            ("SU34.PT", AircraftId::Su34, "SU34.PT"),
+        ] {
+            assert_eq!(AircraftId::parse(key).unwrap(), id, "{key}");
+            assert_eq!(id.source(), id);
+            assert_eq!(id.pt(), pt);
+        }
+        // Separate records: no neighbour key reaches them.
+        for key in [
+            "TU26A.PT", "Tu-26", "TU22", "TU95A", "TU95.PTS", "Tu-95", "SU34M", "SU33.PT",
+            "SU35B.PT",
+        ] {
+            assert!(
+                !matches!(
+                    AircraftId::parse(key),
+                    Ok(AircraftId::Tu26 | AircraftId::Tu95 | AircraftId::Su34)
+                ),
+                "{key}"
+            );
+        }
+        assert_eq!(
+            AircraftId::ALL[51..],
+            [AircraftId::Tu26, AircraftId::Tu95, AircraftId::Su34]
+        );
+        assert_eq!(
+            AircraftId::SELECTABLE[53..],
+            [AircraftId::Tu26, AircraftId::Tu95, AircraftId::Su34]
+        );
+        // The bindings the coordinator's first pass fixed (BOMBERS-DECISIONS-C).
+        for id in [AircraftId::Tu26, AircraftId::Tu95] {
+            assert_eq!(id.hud(), "BMBROH.HUD", "{id:?}");
+            assert_eq!(id.cockpit_stem(), "AC130", "{id:?}");
+            assert_eq!(id.cockpit(), "~AC130H.PIC", "{id:?}");
+            assert_eq!(id.gun(), Some("T23_1.JT"), "{id:?}");
+            assert_eq!(id.cockpit_overlays(), [None, None, None], "{id:?}");
+        }
+        assert_eq!(AircraftId::Tu26.stem(), "TU26");
+        assert_eq!(AircraftId::Tu26.label(), "Tu- 26 Backfire-C");
+        assert_eq!(AircraftId::Tu26.radar(), Some("TU26R.SEE"));
+        assert_eq!(AircraftId::Tu95.stem(), "TU95");
+        assert_eq!(AircraftId::Tu95.label(), "Tu- 95 Bear-H");
+        assert_eq!(AircraftId::Tu95.radar(), Some("TU95R.SEE"));
+        assert_eq!(AircraftId::Su34.hud(), "SU33CC.HUD");
+        assert_eq!(AircraftId::Su34.stem(), "SU34");
+        assert_eq!(AircraftId::Su34.cockpit_stem(), "SU33");
+        assert_eq!(AircraftId::Su34.cockpit(), "~SU33H.PIC");
+        assert_eq!(AircraftId::Su34.instrument_panel(), "~SU33_P.PIC");
+        assert_eq!(AircraftId::Su34.label(), "Su-34 Platypus");
+        assert_eq!(AircraftId::Su34.radar(), Some("SU27R.SEE"));
+        assert_eq!(AircraftId::Su34.gun(), Some("GSH301.JT"));
+        // The Su-33 cockpit family has left and right overlays and no centre.
+        assert_eq!(
+            AircraftId::Su34.cockpit_overlays(),
+            [
+                Some("~SU33_LH.PIC".to_string()),
+                None,
+                Some("~SU33_RH.PIC".to_string())
+            ]
+        );
+        for id in [AircraftId::Tu26, AircraftId::Tu95, AircraftId::Su34] {
             assert!(!id.has_pts(), "{id:?}");
         }
     }
@@ -2959,6 +3089,261 @@ mod profile_tests {
             (a.number("thrust"), a.number("fuelConsumption")),
             (50_200., 3.)
         );
+    }
+    #[test]
+    fn the_tu26_tu95_and_su34_read_their_real_figures_only_while_retail() {
+        // BMB-C2 (coordinator first pass, 2026-11-15).
+        let row = |p: &[[i32; 2]]| p.to_vec();
+        // Tu-26: empty 127,868, thrust 66,000 / 110,000, ceiling 43,635 ft
+        // (every polygon cut there, the 0 G one 5,500 ft higher) and the
+        // 1,080 kt (1,823 ft/s) high-altitude edge.
+        let mut rows = plain_rows(-2, 4);
+        rows[2].1 = row(&[
+            [180, 0],
+            [225, 18_000],
+            [313, 39_000],
+            [521, 54_000],
+            [870, 65_000],
+            [1_337, 65_500],
+            [1_840, 52_750],
+            [2_084, 36_000],
+            [1_040, 0],
+        ]);
+        rows[3].1 = row(&[
+            [245, 0],
+            [309, 19_500],
+            [423, 38_000],
+            [591, 50_000],
+            [870, 60_000],
+            [1_302, 60_000],
+            [1_712, 50_000],
+            [1_933, 36_000],
+            [1_010, 0],
+        ]);
+        let tu26 = [
+            ("engines", 2),
+            ("weight", 110_230),
+            ("maxAlt", 60_000),
+            ("thrust", 59_986),
+            ("aftThrust", 88_180),
+            ("maxTakeoffWeight", 273_370),
+            ("internalFuel", 110_230),
+            ("fuelConsumption", 10),
+            ("aftFuelConsumption", 66),
+        ];
+        let text = batch_text(
+            "TU26.PT",
+            "Tu-26",
+            "Tu- 26 Backfire-C",
+            660,
+            (-2, 4),
+            &rows,
+            &tu26,
+        );
+        let a = Aircraft::parse(text.as_bytes()).unwrap();
+        assert_eq!(a.id, AircraftId::Tu26);
+        assert_eq!(
+            (a.number("weight"), a.number("maxAlt")),
+            (127_868., 43_635.)
+        );
+        assert_eq!(
+            (a.number("thrust"), a.number("aftThrust")),
+            (66_000., 110_000.)
+        );
+        // Kept: the maximum, the fuel and its flows.
+        assert_eq!(
+            (a.number("maxTakeoffWeight"), a.number("internalFuel")),
+            (273_370., 110_230.)
+        );
+        assert_eq!(
+            (a.number("fuelConsumption"), a.number("aftFuelConsumption")),
+            (10., 66.)
+        );
+        assert!(a.number("weight") + a.number("internalFuel") < a.number("maxTakeoffWeight"));
+        let env = |a: &Aircraft, g: i32| a.envelopes.iter().find(|e| e.g == g).unwrap().clone();
+        assert_eq!(
+            env(&a, 1).points,
+            [
+                [245., 0.],
+                [309., 19_500.],
+                [423., 38_000.],
+                [502., 43_635.],
+                [1_812., 43_635.],
+                [1_823., 36_000.],
+                [1_010., 0.]
+            ]
+        );
+        assert_eq!(
+            env(&a, 0).points,
+            [
+                [180., 0.],
+                [225., 18_000.],
+                [313., 39_000.],
+                [454., 49_135.],
+                [1_893., 49_135.],
+                [1_974., 36_000.],
+                [1_040., 0.]
+            ]
+        );
+        // One changed number keeps the whole record retail, polygons too.
+        let edited = tu26.map(|(k, v)| if k == "thrust" { (k, 60_000) } else { (k, v) });
+        let text = batch_text(
+            "TU26.PT",
+            "Tu-26",
+            "Tu- 26 Backfire-C",
+            660,
+            (-2, 4),
+            &rows,
+            &edited,
+        );
+        let a = Aircraft::parse(text.as_bytes()).unwrap();
+        assert_eq!(
+            (a.number("weight"), a.number("maxAlt")),
+            (110_230., 60_000.)
+        );
+        assert_eq!(env(&a, 1).points[7], [1_933., 36_000.]);
+        // Tu-95: thrust 129,000, empty 198,415, fuel 148,150, maximum 414,470.
+        let tu95 = [
+            ("engines", 4),
+            ("weight", 264_550),
+            ("thrust", 355_080),
+            ("aftThrust", 0),
+            ("maxTakeoffWeight", 407_850),
+            ("internalFuel", 100_000),
+            ("fuelConsumption", 4),
+        ];
+        let text = batch_text(
+            "TU95.PT",
+            "Tu-95",
+            "Tu- 95 Bear-H",
+            660,
+            (-2, 5),
+            &plain_rows(-2, 5),
+            &tu95,
+        );
+        let a = Aircraft::parse(text.as_bytes()).unwrap();
+        assert_eq!(a.id, AircraftId::Tu95);
+        assert_eq!(
+            (a.number("weight"), a.number("internalFuel")),
+            (198_415., 148_150.)
+        );
+        assert_eq!(
+            (a.number("thrust"), a.number("maxTakeoffWeight")),
+            (129_000., 414_470.)
+        );
+        assert_eq!(a.number("fuelConsumption"), 4.);
+        assert!(a.number("weight") + a.number("internalFuel") < a.number("maxTakeoffWeight"));
+        let edited = tu95.map(|(k, v)| if k == "weight" { (k, 264_551) } else { (k, v) });
+        let text = batch_text(
+            "TU95.PT",
+            "Tu-95",
+            "Tu- 95 Bear-H",
+            660,
+            (-2, 5),
+            &plain_rows(-2, 5),
+            &edited,
+        );
+        let a = Aircraft::parse(text.as_bytes()).unwrap();
+        assert_eq!(
+            (a.number("thrust"), a.number("maxTakeoffWeight")),
+            (355_080., 407_850.)
+        );
+        // Su-34: empty 49,604, fuel 26,676, dry thrust 33,800 and the Mach
+        // 1.8 edge (1,742 ft/s above 36,000 ft).
+        let mut rows = plain_rows(-2, 4);
+        rows[2].1 = row(&[
+            [120, 0],
+            [160, 13_000],
+            [225, 27_000],
+            [313, 39_000],
+            [501, 50_000],
+            [870, 58_000],
+            [1_725, 58_000],
+            [2_417, 52_000],
+            [2_600, 36_000],
+            [1_835, 18_000],
+            [1_280, 0],
+        ]);
+        rows[3].1 = row(&[
+            [180, 0],
+            [225, 13_000],
+            [307, 26_000],
+            [433, 39_000],
+            [601, 48_000],
+            [870, 55_000],
+            [1_704, 55_000],
+            [2_308, 49_500],
+            [2_473, 36_000],
+            [1_731, 18_000],
+            [1_250, 0],
+        ]);
+        let su34 = [
+            ("engines", 2),
+            ("weight", 36_000),
+            ("maxAlt", 55_000),
+            ("thrust", 40_755),
+            ("aftThrust", 59_510),
+            ("maxTakeoffWeight", 97_000),
+            ("internalFuel", 20_000),
+        ];
+        let text = batch_text(
+            "SU34.PT",
+            "Su-34",
+            "Su-34 Platypus",
+            660,
+            (-2, 4),
+            &rows,
+            &su34,
+        );
+        let a = Aircraft::parse(text.as_bytes()).unwrap();
+        assert_eq!(a.id, AircraftId::Su34);
+        assert_eq!(
+            (a.number("weight"), a.number("internalFuel")),
+            (49_604., 26_676.)
+        );
+        assert_eq!(
+            (a.number("thrust"), a.number("aftThrust")),
+            (33_800., 59_510.)
+        );
+        assert_eq!(
+            (a.number("maxTakeoffWeight"), a.number("maxAlt")),
+            (97_000., 55_000.)
+        );
+        assert!(a.number("weight") + a.number("internalFuel") < a.number("maxTakeoffWeight"));
+        assert_eq!(
+            env(&a, 1).points[6..],
+            [
+                [1_704., 55_000.],
+                [1_742., 49_500.],
+                [1_742., 36_000.],
+                [1_731., 18_000.],
+                [1_250., 0.]
+            ]
+        );
+        // The 0 G polygon keeps its 127 ft/s step over the 1 G edge.
+        assert_eq!(
+            env(&a, 0).points[6..],
+            [
+                [1_725., 58_000.],
+                [1_869., 52_000.],
+                [1_869., 36_000.],
+                [1_835., 18_000.],
+                [1_280., 0.]
+            ]
+        );
+        let edited = su34.map(|(k, v)| if k == "thrust" { (k, 40_756) } else { (k, v) });
+        let text = batch_text(
+            "SU34.PT",
+            "Su-34",
+            "Su-34 Platypus",
+            660,
+            (-2, 4),
+            &rows,
+            &edited,
+        );
+        let a = Aircraft::parse(text.as_bytes()).unwrap();
+        assert_eq!(a.number("weight"), 36_000.);
+        assert_eq!(env(&a, 1).points[8], [2_473., 36_000.]);
     }
     #[test]
     fn the_mirage_f1_reads_one_atar_9k_50_and_the_f5e_its_real_fuel_g_and_ceiling() {

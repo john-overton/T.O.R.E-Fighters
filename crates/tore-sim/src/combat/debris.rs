@@ -39,7 +39,8 @@ pub fn scale(id: AircraftId) -> f64 {
     match id.source() {
         // The B-1B's shape header scale is 4 (BMB-B1, 2026-11-15, B1B-0
         // review), like the F-14's; the Tu-160's is 8 (below).
-        AircraftId::F14 | AircraftId::B1b => 4. / 3.,
+        // The Tu-26's is 10, so 4/3 ft a unit too (BMB-C1, T26-0 review).
+        AircraftId::F14 | AircraftId::B1b | AircraftId::Tu26 => 4. / 3.,
         AircraftId::Tu160 => 8. / 3.,
         // The Tornado's shape header scale is 2 (B5-1, 2026-11-10, TOR-0
         // review), like the MiG-23's.
@@ -51,6 +52,9 @@ pub fn scale(id: AircraftId) -> f64 {
         // The F-111F's header scale is 2 as well (BMB-B1, F111-0 review);
         // its per-axis real-size fit is `aircraft_scale::F111_SHAPE_SCALE`.
         | AircraftId::F111
+        // The Tu-95's header scale is 2 (BMB-C1, T95-0 review); the Su-34's is
+        // exponent 8, the default 1/3 ft a unit (SU34-0 review).
+        | AircraftId::Tu95
         | AircraftId::C130
         | AircraftId::Ac130
         | AircraftId::E3
@@ -258,6 +262,19 @@ mod tests {
         assert_eq!(scale(AircraftId::Tu160), 8. / 3.);
         assert_eq!(scale(AircraftId::F111), 2. / 3.);
         assert_eq!(scale(AircraftId::F111), scale(AircraftId::Tornado));
+    }
+
+    /// BMB-C1: batch C draws at its shape headers: the Tu-26 4/3 ft a unit (as
+    /// the F-14 and B-1B), the Tu-95 2/3 (as the B-52) and the Su-34 the
+    /// default 1/3 (as the Su-27).
+    #[test]
+    fn the_batch_c_bombers_are_drawn_at_their_header_scales() {
+        assert_eq!(scale(AircraftId::Tu26), 4. / 3.);
+        assert_eq!(scale(AircraftId::Tu26), scale(AircraftId::B1b));
+        assert_eq!(scale(AircraftId::Tu95), 2. / 3.);
+        assert_eq!(scale(AircraftId::Tu95), scale(AircraftId::B52));
+        assert_eq!(scale(AircraftId::Su34), 1. / 3.);
+        assert_eq!(scale(AircraftId::Su34), scale(AircraftId::Su27));
     }
 }
 

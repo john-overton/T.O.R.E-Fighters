@@ -236,6 +236,113 @@ fn a_full_tank_over_the_maximum_starts_at_what_the_maximum_allows() {
     assert!(capped.validate().is_err());
 }
 
+/// The two ways a default load can pass its maximum takeoff weight with a full
+/// tank, as the synthetic F/A-18D with its maximum changed: the B-1B and
+/// F-111F (empty plus full tank fits, the default stores then push it over)
+/// and the B-52H (empty plus full tank is over the maximum alone). The flight
+/// model is rebuilt from the record, so it carries the same maximum.
+fn heavy_default_load_types(
+    map: &std::collections::BTreeMap<String, Vec<u8>>,
+) -> [(&'static str, aircraft_type::AircraftType); 2] {
+    use tore_sim::{combat::loadout::Loadout, models::AircraftModel};
+    let build = |maximum: fn(&Loadout) -> f64| {
+        let mut player = aircraft_type::AircraftType::load(map, AircraftId::F18).unwrap();
+        let full = Loadout::new(&player.profile, |name| Ok(map[name].clone())).unwrap();
+        player
+            .profile
+            .fields
+            .get_mut("maxTakeoffWeight")
+            .unwrap()
+            .value = format!("{}", maximum(&full) as i64);
+        let model = AircraftModel::for_aircraft(&player.profile).unwrap();
+        aircraft_type::AircraftType::new(player.profile, model, player.sensors, Vec::new())
+    };
+    [
+        (
+            "stores push a fitting tank over",
+            build(|full| full.empty_lbs + full.internal_capacity_lbs + 100.),
+        ),
+        (
+            "full tank alone is over",
+            build(|full| full.empty_lbs + full.internal_capacity_lbs / 2.),
+        ),
+    ]
+}
+
+#[test]
+fn a_default_load_over_the_maximum_with_a_full_tank_starts_with_the_loadouts_fuel() {
+    // Found on the B-1B and F-111F (2026-11-16): the loadout capped its own
+    // tank, but the flight state kept the model's full tank, and set_payload
+    // refused the start ("payload outside aircraft mass limits"), in free
+    // flight and on a ground start. Combat now hands the flight the load's
+    // fuel when it resets, for the default load and for a given loadout.
+    use tore_sim::combat::loadout::Loadout;
+    let map = resources();
+    let terrain = crate::test_support::terrain();
+    for (kind, player) in heavy_default_load_types(&map) {
+        let load = Loadout::new(&player.profile, |name| Ok(map[name].clone())).unwrap();
+        assert!(load.fuel_lbs < load.internal_capacity_lbs, "{kind}");
+        for (name, combat) in [
+            ("default", crate::combat::Combat::new(&player, &map, false)),
+            (
+                "loadout",
+                crate::combat::Combat::with_loadout(&player, &load),
+            ),
+        ] {
+            let mut combat = combat.unwrap();
+            let payload = combat.state.own().payload_lbs();
+            let mut flight = player.start(&terrain);
+            assert_eq!(flight.fuel, load.internal_capacity_lbs, "{kind} {name}");
+            if kind.starts_with("stores") {
+                // The bug: the full tank and the load are over the maximum,
+                // and set_payload refuses (the B-52H's own cap, 78086f7e, only
+                // covers a record that is over alone).
+                assert!(flight.set_payload(payload).is_err(), "{kind} {name}");
+            }
+            combat.reset(&mut flight).unwrap();
+            assert_eq!(flight.fuel, load.fuel_lbs, "{kind} {name}");
+            assert_eq!(flight.payload_lbs, payload, "{kind} {name}");
+            // A payload over the maximum is still refused.
+            assert!(
+                flight.set_payload(payload + 5_000.).is_err(),
+                "{kind} {name}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_load_that_fits_with_a_full_tank_keeps_its_tank() {
+    let map = resources();
+    let player = aircraft_type::AircraftType::load(&map, AircraftId::F18).unwrap();
+    let mut flight = player.start(&crate::test_support::terrain());
+    let full = flight.fuel;
+    let mut combat = crate::combat::Combat::new(&player, &map, false).unwrap();
+    combat.reset(&mut flight).unwrap();
+    assert_eq!(flight.fuel, full);
+}
+
+#[test]
+fn an_ai_aircraft_with_a_default_load_over_the_maximum_starts_with_the_capped_tank() {
+    use tore_sim::combat::loadout::Loadout;
+    let map = resources();
+    for (kind, player) in heavy_default_load_types(&map) {
+        let load = Loadout::new(&player.profile, |name| Ok(map[name].clone())).unwrap();
+        let payload = crate::combat::Combat::new(&player, &map, false)
+            .unwrap()
+            .state
+            .own()
+            .payload_lbs();
+        // A revived or default-loaded AI aircraft: the full tank is fitted to
+        // the load before the payload check, to the whole pound the loadout
+        // caps at.
+        let mut flight = player.start(&crate::test_support::terrain());
+        flight.fit_fuel_to_payload(payload);
+        assert_eq!(flight.fuel, load.fuel_lbs, "{kind}");
+        flight.set_payload(payload).unwrap();
+    }
+}
+
 #[test]
 fn a_lobby_request_names_pairing_only_when_an_odd_paired_count_is_the_cause() {
     let map = resources();
