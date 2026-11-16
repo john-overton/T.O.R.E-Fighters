@@ -933,6 +933,31 @@ Not changed: the top-speed edges (515 kt at 36,000 ft against a published 560 to
 the 55,000 ft ceiling (published 50,000), the G rows and the roll limit. Engines stay
 clamped to four in the live configuration (see the review).
 
+## Sukhoi Su-34 (SU34-8, 2026-11-16)
+
+The Su-34 flies the `variety` configuration built from `SU34.PT` with the BMB-C2 values
+(empty 49,604 lb, tank 26,676 lb, dry thrust 33,800 lbf, the 1 G fast edge at 36,000 ft and
+above trimmed to Mach 1.8, 97,000 lb maximum takeoff, afterburner 59,510 lbf) and the shared
+fighter law: **no per-aircraft term** (no drag shape, lapse height, rolling or brake
+deceleration, stall reference fraction or level-speed fraction), which a test pins. Measured
+with the shared law ([review and table](../formats/aircraft-variety.md#su-34-flight-review-su34-8-2026-11-16)):
+
+- Level top speed at full afterburner is 0.887 of the 1 G edge at every altitude (Mach 0.99 at
+  sea level, 1.60 at 36,000 ft), as the Su-27's is 0.885. The published figures are Mach 1.14
+  to 1.2 and 1.8. The 55,000 ft ceiling and the +9 G row are the record's. Thrust to weight is
+  0.69 at the published 85,980 lb normal weight (published 0.68).
+- Takeoff at the 83,091 lb default load lifts off at 121.5 kt after 913 ft (GRE 1) and 985 ft
+  (UKR 1); at 96,415 lb 135.8 kt after 1,357 ft. The scripted landing approaches at 134.6 kt
+  at the default load (145.0 kt at 96,415 lb) and rolls 1,617 ft (1,849 ft). The published
+  takeoff and landing runs (4,134 ft and 3,600 ft, weights unstated) are longer by the same
+  factor as the Su-27's; nothing was fitted.
+- The AI heavy-class airfield laws (BMB-AI) do not apply: the flaps-up minimum is 119.8 kt
+  against the 190.5 kt threshold. An AI Su-34 takes off, climbs out, lands at 125 kt with 26,000
+  lb of fuel and parks on the pavement under the ordinary laws.
+
+Not changed, listed for John in the review: the top-speed edge, the takeoff and landing runs,
+the ceiling, the dry fuel flow and the range.
+
 ## Unknown evidence
 
 Retail hover power, altitude ceiling, nozzle travel/rate, rotor torque, lift

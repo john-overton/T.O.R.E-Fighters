@@ -1702,7 +1702,10 @@ def scenarios() -> list[Scenario]:
     # Takeoff alone: the B-2 and B-52 from Athens (GRE 1, 12,000 ft; at their full weights they need about
     # 7,200 ft and the scripted player's own B-2 runs off the end of Mikonos' 7,246 ft), the F-117 from
     # Mikonos (GRE 2, 7,246 ft). Each leaves the ground, climbs out and flies on.
-    for aircraft, field in (("b2", 1), ("b52", 1), ("f117", 2)):
+    # SU34-8 (2026-11-16): the Su-34 flies the same takeoff from Athens at its default load (83,091 lb). Its
+    # flaps-up minimum is far under the heavy-class threshold (190.5 kt), so no heavy law engages; the
+    # scenario records that it takes off and climbs out cleanly at its default ground-start weight.
+    for aircraft, field in (("b2", 1), ("b52", 1), ("f117", 2), ("su34", 1)):
         out.append(probe(f"heavy-takeoff-{aircraft}-gre-a{field}", [
             "--theater", "GRE", "--ground-start", str(field),
             "--aircraft", aircraft, "--probe-friendly-aircraft", aircraft,
@@ -1711,7 +1714,9 @@ def scenarios() -> list[Scenario]:
             notes="BMB-AI: the heavy takeoff (flaps and gear kept until the speed is there) at its full weight."))
     # Landing at Simferopol (UKR 2, 5,532 ft, the Ukraine's default field), sent home from the air, at a
     # landing weight: B-2 60,000 lb of fuel, B-52 80,000 lb, F-117 7,000 lb.
-    for aircraft, fuel, kt in (("b2", 60000, 150), ("b52", 80000, 145), ("f117", 7000, 190)):
+    # The Su-34 (SU34-8): 26,000 of its 26,676 lb of fuel, about 82,000 lb at the touchdown (it touched down at
+    # 125 kt in the probe; the bound is 135 kt).
+    for aircraft, fuel, kt in (("b2", 60000, 150), ("b52", 80000, 145), ("f117", 7000, 190), ("su34", 26000, 135)):
         out.append(probe(f"heavy-land-{aircraft}-ukr-a2", [
             "--theater", "UKR", "--aircraft", aircraft, "--probe-friendly-aircraft", aircraft,
             "--probe-wing-size", "2", "--probe-wing-order", "600:bug-out", "--probe-fuel", str(fuel),

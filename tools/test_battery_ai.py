@@ -347,6 +347,8 @@ class HeavyBomberTests(unittest.TestCase):
             "ai-merged-airfield-b2-wing2", "ai-merged-airfield-b52-wing2",
             "ai-heavy-takeoff-b2-gre-a1", "ai-heavy-takeoff-b52-gre-a1", "ai-heavy-takeoff-f117-gre-a2",
             "ai-heavy-land-b2-ukr-a2", "ai-heavy-land-b52-ukr-a2", "ai-heavy-land-f117-ukr-a2",
+            # SU34-8 (2026-11-16): the Su-34 takes off and lands under the ordinary laws and passes cleanly.
+            "ai-heavy-takeoff-su34-gre-a1", "ai-heavy-land-su34-ukr-a2",
         ):
             self.assertIn(name, names)
 

@@ -826,6 +826,42 @@ pub(crate) mod tests {
         let rate = (thrust - drag) * 370. * KT / weight * 60.;
         assert!((3_000. ..11_000.).contains(&rate), "{rate} ft/min");
     }
+    /// SU34-8: the Su-34 flies the shared fighter law with no per-aircraft
+    /// term of its own (no drag shape, stall fraction, lapse height or heavy
+    /// level-speed fraction), at its corrected weights and thrust: the thrust
+    /// to weight at the published normal takeoff weight is the published 0.68
+    /// (Wikipedia: 85,980 lb, 0.68; the record's afterburner 59,510 lbf gives
+    /// 0.69) and the dry thrust and flows leave a military cruise of two
+    /// engines. Loose pins (docs/formats/aircraft-variety.md, "Su-34 flight
+    /// review").
+    #[test]
+    fn the_su34_flies_the_shared_fighter_law_at_its_published_thrust_to_weight() {
+        let mut a = synthetic(AircraftId::Su34);
+        for (key, value) in [
+            ("weight", 49_604),
+            ("internalFuel", 26_676),
+            ("thrust", 33_800),
+            ("aftThrust", 59_510),
+            ("maxTakeoffWeight", 97_000),
+        ] {
+            a.fields.get_mut(key).unwrap().value = value.to_string();
+        }
+        let model = AircraftModel::for_aircraft(&a).unwrap();
+        let c = model.configuration();
+        assert_eq!(c.mass.empty_lbs, 49_604.);
+        assert_eq!(c.mass.internal_fuel_lbs, 26_676.);
+        assert_eq!(c.propulsion.military_thrust_lbf, 33_800.);
+        assert_eq!(c.propulsion.afterburner_thrust_lbf, 59_510.);
+        assert!(c.aerodynamics.drag_shape.is_none());
+        assert_eq!(c.aerodynamics.level_speed_fraction, 1.);
+        assert_eq!(c.tuning.thrust_lapse_feet, 70_000.);
+        assert_eq!(model.stall_reference_fraction(), 1.);
+        let normal = 85_980.;
+        assert!((c.propulsion.afterburner_thrust_lbf / normal - 0.68_f64).abs() < 0.02);
+        // Clean and full of fuel the jet is 76,280 lb, under the 97,000 lb
+        // maximum with 20,720 lb to spare for stores.
+        assert_eq!(c.mass.empty_lbs + c.mass.internal_fuel_lbs, 76_280.);
+    }
     /// The B-52H's flight terms (B52-8, 2026-11-15): a B-52 built from
     /// synthetic values near the corrected record (real thrust, weights and
     /// fuel, a placard-like 1 G top edge of 385 kt at sea level and 515 kt at

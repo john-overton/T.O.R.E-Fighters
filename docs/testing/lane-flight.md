@@ -1056,3 +1056,10 @@ rails, LAU-61 rocket pods on the outer pylon, each from the cell it hangs at, le
 egress) and `flight-countermeasures-su34` (the retail `SU27.ECM` row, five chaff and three flare
 releases). `menus-ordnance-availability` expects 5,361 weapon placements (the four rocket pods back on
 row 7).
+
+Update (SU34-8, 2026-11-16): `su34` joins `flight-variety`, `flight-liftoff`, `flight-liftoff-retail` and
+`flight-approach` (liftoff window 110 to 140 kt, recorded 121.5 kt; approach window 115 to 145 kt, recorded
+126.8 kt at 17,339 lb of fuel, 65 percent; the ordinary takeoff tick allowance; Simferopol), and
+`ai-heavy-takeoff-su34-gre-a1` and `ai-heavy-land-su34-ukr-a2` join the AI lane (the heavy-class airfield
+laws do not apply to the Su-34, whose flaps-up minimum is 119.8 kt; the scenarios pin that it takes off,
+lands at 125 kt and parks cleanly). The windows are fitted agent decisions on no published speed.

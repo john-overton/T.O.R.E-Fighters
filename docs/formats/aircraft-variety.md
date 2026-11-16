@@ -15969,3 +15969,204 @@ passed (54 / 23 / **5,361** / 257 / 80 pods / 278 Cheat-only); `--aircraft su34 
 4. The eye is fitted (7 ft up, 17 ft ahead); the single-seat look means it sits where the drawn
    canopy is, not at the real side-by-side cabin.
 5. Chaff and flares are the record's 60 each; the real jet's figures were not sought.
+
+## Su-34 flight review (SU34-8, 2026-11-16)
+
+Validation mode, slice SU34-8 (bomber batch C), Claude Sonnet (sonnet-high). The Su-34
+flies the hybrid adapter's `variety` configuration built from `SU34.PT` with BMB-C2's
+corrections (empty 49,604 lb, tank 26,676 lb, dry thrust 33,800 lbf, the 1 G fast edge at
+or above 36,000 ft trimmed to Mach 1.8 / 1,742 ft/s, 180 gun rounds). Kept as the record
+has them (coordinator first pass): afterburner 59,510 lbf, maximum takeoff 97,000 lb, G -4
+to +9, the 55,000 ft ceiling, the 741 kt sea-level edge. **No fit was made in this slice**:
+every difference found is either inside the published scatter, rests on a source too
+weak to fit to, or is the shared fighter law the Su-27 shows to the same degree. The
+slice's product is the measurement, the scenarios and the open list below. Raw probe
+output is local: `.local/m3-aircraft/checks/SU34-8/` (`before/`, `after/`, `run_perf.sh`,
+`run_probes.sh`, `ai/`). "Before" and "after" are the same code (nothing was changed in
+the model), so the two directories agree line for line.
+
+### Real figures and their sources
+
+Read 2026-11-16. Weights, thrust, ceiling, speed and range are the Wikipedia "Sukhoi
+Su-34" specification block (through a fetch tool that paraphrases) and the migflug.com
+"Su-34 Fullback" page, which says its figures are mostly the maker's and nominal. The
+engines are the Saturn AL-31FM1; the AL-31F's dry and afterburning fuel consumption is
+from Wikipedia "Saturn AL-31".
+
+| Figure | Real (source) |
+| --- | --- |
+| Empty / normal takeoff / maximum takeoff | 49,604 / 85,980 / 99,428 lb (Wikipedia, migflug); the record's 97,000 maximum is kept |
+| Internal fuel | 26,676 lb (12,100 kg) |
+| Thrust | 2 x 29,700 lbf with afterburner (AL-31FM1, 132 kN); dry 2 x 16,750 lbf (migflug, AL-31F; no dry figure is published for the FM1); thrust to weight 0.68 at normal takeoff weight |
+| Top speed | Mach 1.8 at altitude, 1,900 km/h (1,030 kt); 1,400 to 1,435 km/h (Mach 1.14 to 1.2, 756 to 775 kt) at sea level (migflug, Wikipedia); aerospaceweb gives the altitude speed and "sea level unknown" |
+| Service ceiling | 15,000 m (49,200 ft, migflug), 17,000 m (56,000 ft, Wikipedia and a second figure on migflug), 14,000 m (45,900 ft, aerospaceweb) |
+| Rate of climb | none published (migflug: the maker has published neither a climb rate nor a takeoff run); two databases quote 180 m/s and 13,800 m/min, with no source |
+| Takeoff and landing runs | takeoff 1,260 m (4,134 ft), landing 1,100 m (3,600 ft), weights and surface not stated (an armsnet and a globalmilitary spec sheet through a search summary); migflug: "roughly 2,000 m of runway for takeoff and landing roll at heavy weights" |
+| Takeoff, approach and landing speeds | not found in any source |
+| Range | 4,000 km typical (2,160 nmi, aerospaceweb), ferry 4,500 km (migflug; 7,000 km at aerospaceweb), combat radius about 1,100 km with a war load |
+| G limit | +9 quoted (Wikipedia, migflug); aerospaceweb +7; migflug says the practical limit at working weights is far lower |
+| Roll rate | none found |
+| AL-31F fuel consumption | 0.78 lb/lbf/h dry, 1.96 lb/lbf/h afterburning (Wikipedia, the AL-31F) |
+
+### What the model gives, and the Su-27 beside it
+
+All probes use `performance_probe` and `tore-app --headless-flight` on the corrected record,
+clean at the 76,280 lb full tank unless a row says otherwise ("default" is the Load Ordnance
+default of 6,811 lb of stores, 83,091 lb gross; "normal" is 85,980 lb). The Su-27 (56,000 lb
+clean at its 20,000 lb tank, 57,932 lb at its default load) is the same airframe family and
+the same drag law, run the same way.
+
+| Figure | Su-34 (before = after) | Su-27 (model) | Real Su-34 (source above) |
+| --- | --- | --- | --- |
+| Thrust to weight, afterburner, at 76,280 / 85,980 / 97,000 lb | 0.78 / 0.69 / 0.61 | 1.06 at 56,000 lb | 0.68 at normal takeoff weight |
+| Level top speed, afterburner, sea level | 657 kt (Mach 0.99); edge 741 kt (Mach 1.12) | 655 kt (Mach 0.99) | 756 to 775 kt (Mach 1.14 to 1.2) |
+| Level top speed, afterburner, 15,000 / 30,000 / 36,000 ft | 868 / 914 / 916 kt (Mach 1.39 / 1.55 / 1.60) | 848 / 1,159 / 1,296 kt (Mach 1.35 / 1.97 / 2.26) | Mach 1.8 at altitude (1,030 kt) |
+| Same at the default load, sea level and 36,000 ft | 640 kt, 892 kt (Mach 1.55) | n/a | n/a |
+| Level top speed, military power, sea level / 36,000 ft | 495 kt (Mach 0.75) / 690 kt (Mach 1.20) | 542 kt / 1,072 kt (Mach 1.87) | none (no dry figure published) |
+| Share of the edge reached in level flight at full afterburner | 0.887 at sea level, 15,000 ft and 36,000 ft (868 of about 978 kt at 15,000 ft) | 0.885 | not applicable (the real Mach 1.8 is the limit) |
+| Climb, 350 KEAS then Mach 0.8, full thrust, 76,280 lb: 5,000 / 10,000 / 20,000 / 36,000 / 45,000 ft | 28 / 45 / 75 / 124 / 155 s; highest 49,800 ft on that schedule | 23 / 37 / 60 / 95 / 115 s | none |
+| Climb rate, first 5,000 ft average, and the best band rate | about 10,700 ft/min, 19,900 ft/min at 30,000 ft | about 13,000, 28,300 | none (180 m/s is 35,400 ft/min, unsourced) |
+| Afterburner zoom ceiling on the fighter schedule | 64,600 ft (Mach 0.8 schedule, full tank), 63,500 ft at 57,604 lb | 70,100 ft | 49,200 to 56,000 ft |
+| Sustained turn, speed held, full tank: 300 / 400 / 500 kt at 1,000 ft | 4.07 G (14.6 deg/s) / 4.77 G (12.9) / 3.63 G (7.6) | 4.65 / 5.72 / 4.13 G | none |
+| Sustained turn, 15,000 ft, 350 / 450 / 550 kt | 4.07 / 4.12 / 3.63 G | 4.05 / 4.79 / 4.82 G | none |
+| Instantaneous pull at 400 / 500 kt, 1,000 ft (full tank) | 6.96 / 6.97 G | 7.81 / 7.83 G | +9 G listed, +7 in one source |
+| Limit G at 76,280 lb, 425 to 625 kt at 5,000 ft | 6.89 G (the +9 row divided by 1 + 0.3 x loading 0.675 = 1.31) | not run (its instantaneous pull is 7.8 G) | +9 listed |
+| Roll rate, full stick | 225 deg/s (the Su-27's block) | 225 | none found |
+| Speed brake, extra deceleration at 378 / 530 / 681 kt at 1,000 ft | 0.32 / 0.50 / 0.64 G | 0.30 / 0.46 / 0.58 G | none |
+| Fuel flows, military / afterburner (record, whole lb/s) | 5 / 30 lb/s: 0.53 / 1.82 lb/lbf/h at the corrected thrust | 5 / 30: 0.44 / 1.82 | 0.78 / 1.96 (AL-31F) |
+| Tank at military / afterburner | 88.9 min / 14.8 min | 66.7 / 11.1 min | none |
+| Cruise Mach 0.8 at 36,000 ft (470 kt), throttle trimmed: burn, range from 26,676 lb | 2.33 lb/s (throttle 0.45), 1,498 nm | 0.97 lb/s, 2,695 nm | 2,160 nmi typical, 2,430 nmi ferry (about 600 nmi radius with a war load) |
+| Takeoff, default load, 83,091 lb, 12,000 ft runway (GRE 1): rotation, liftoff, run | 112.6 kt, 121.5 kt, 913 ft (985 ft on UKR 1) | 120.7 kt, 128.1 kt, 703 ft at 57,932 lb | run 1,260 m (4,134 ft), weight not stated; Su-27 about 650 m |
+| Takeoff, clean 76,280 / 66,415 lb (16,000 lb fuel) | 114.5 kt after 735 ft / 110.6 kt after 647 ft | n/a | n/a |
+| Takeoff, heavier weight: 96,415 lb (the full 40,000 lb of fuel proxy for the 97,000 lb maximum) | 135.8 kt after 1,357 ft | n/a | 1,260 m at an unstated weight |
+| Takeoff, `--retail-stall-speeds`, default load | 95.9 kt after 551 ft (stall scale 1.0) | n/a | n/a |
+| Approach (scripted, 1.3 x flapped stall), 83,091 lb / 66,415 lb / 58,415 lb / 96,415 lb | 134.6 / 125.6 / 118.5 / 145.0 kt; touchdown 127.7 / 119.3 / 112.0 / 137.4 kt | 142.2 kt, touchdown 135.4 kt at 57,932 lb | none |
+| Landing rollout from touchdown (brakes), same four weights | 1,617 / 1,432 / 1,281 / 1,849 ft | 1,750 ft | landing run 1,100 m (3,600 ft), weight unstated |
+| Approach, the battery's 65 percent fuel (17,339 lb) | 126.8 kt, touchdown 125.7 kt, rollout 1,573 ft (UKR 1, 5,532 ft) | n/a | n/a |
+
+Weights for the takeoff rows: `--flight-fuel 40000` sets the internal fuel (it is not clamped
+to the 26,676 lb tank), which is the way the ground start reaches a weight near the 97,000
+lb maximum without a Load Ordnance load that heavy; the printed `loadout:` line still
+shows the default 83,091 lb. All the air maneuvers (`level`, `climb`, `roll`, `pull`, `loop`, `stall`, `stall-recover`,
+`spin-recover`, `sprint`, `dive`, `overspeed`, `rudder`, `gcurve`) and the ground ones
+(`takeoff`, `land`, `land-hard`, `nosewheel`) ran with 0 non-finite samples, no crash, and
+the `overspeed` run ending in the overspeed loss by design.
+
+### Why nothing was fitted
+
+1. **Top speed (10 to 17 percent under).** The model reaches Mach 1.60 at 36,000 ft and
+   Mach 0.99 at sea level against Mach 1.8 and Mach 1.14 to 1.2. The cause is shared:
+   at full afterburner every fighter in the family levels off at 0.885 to 0.887 of its 1 G
+   top-speed edge, because the clean drag is the full thrust at the edge and the loading
+   and G terms add to it (the Su-27 shows the same 0.885, 655 kt at sea level and Mach 2.26
+   at 36,000 ft against a published 2.35). The Mach 1.8 trim set the *edge* at the real
+   Mach, so the level speed sits 11 percent below it where the Su-27's edge (Mach 2.55)
+   sits 8 percent above the real Mach 2.35 and its level speed 4 percent below. The F-15E
+   (8 percent under) and the Gripen (11 percent under at sea level) were left alone in
+   B5-4 as a fleet drag-law decision, and John's one trim was the F-5E's. The decision
+   record binds this slice to the edge trim, so a changed edge (or a per-aircraft
+   `level_speed_fraction`, which would put level flight exactly on the edge and into the
+   overspeed shake) was **not made**; it is the first open question below.
+2. **Takeoff and landing runs (4.5 and 2.2 times short).** The model takes off in 913 ft
+   and rolls 1,617 ft after touchdown against a published 4,134 ft and 3,600 ft. The
+   Su-27 is short the same way (703 ft against about 2,130 ft). The cause is the shared
+   takeoff and landing model (no flap, gear or induced drag, no thrust lost with speed,
+   18 ft/s squared of brakes): a physical estimate for 0.72 thrust to weight and a 205 ft/s
+   liftoff is 910 ft, which the probe reproduces. The B-52's fit (B52-8: rolling
+   deceleration 4.8, brakes 2.6) rested on a pilot's figure for a known weight; the Su-34
+   figures have unstated weights and come from spec-sheet summaries, so they were not
+   fitted. The runs end well inside every field the scenarios use.
+3. **Ceiling (55,000 ft in the record, 49,200 to 56,000 published, zoom 64,600).** Inside
+   the scatter of the published ceiling, and the coordinator kept the record's 55,000 ft.
+   The zoom above the record's polygon (a shared feature of every aircraft, the Su-27
+   reaches 70,100 ft) is not a service ceiling.
+4. **Range (1,498 nm against 2,160 nmi).** The cruise burn is right and the published
+   range is the optimistic one. At Mach 0.8 and 36,000 ft the model needs a throttle of
+   0.45 (9,100 lbf of the lapsed dry thrust against 76,280 lb, a lift to drag of 8.4) and
+   burns 2.33 lb/s, which is a specific fuel consumption of 0.92 lb/lbf/h against the lapsed
+   thrust, a normal cruise figure for the AL-31F. A range of 2,160 nmi from 26,676 lb needs
+   1.6 lb/s at the same speed. A drag shape (the B-52's and B-1B's hook) would have to
+   cut the clean drag by a third, which is not clearly supported by any figure, so none
+   was made. The record's dry flow of 5 lb/s is 31 percent under the AL-31F's sea-level
+   static figure (0.78 lb/lbf/h x 33,800 lbf = 7.3 lb/s); raising it would cut the range to
+   about 1,070 nm, so it was left (the flow is proportional to the throttle at every
+   altitude while the thrust lapses, which already flatters the altitude cruise).
+5. **Climb.** No published rate exists; the model's 0.69 thrust to weight at the normal
+   weight equals the published 0.68, and the first 5,000 ft in 28 s is a plausible figure
+   for that ratio.
+6. **G and roll.** The +9 row stays the record's (the loaded-elevator rule divides it to
+   6.9 G at the full tank); no roll figure exists.
+7. **Brake.** The Su-27's `airBrakesDrag` gives a weight-proportional drag, so the heavier
+   Su-34 slows by the same 0.3 to 0.6 G the Su-27 does; no real figure was found.
+
+### AI heavy-class laws
+
+The BMB-AI laws (flaps down below `max(200 kt, 1.05 x the clean minimum)`, the climb-out
+wait, the taxi throttle) engage only for an aircraft whose flaps-up minimum is above
+190.5 kt. The Su-34's flaps-up minimum level speed at sea level is 119.8 kt at the default
+load (the ground-start probe's `min_level_flaps_kt`; about 129 kt at 96,415 lb by the
+square-root weight scaling), so **none of them applies**: the aircraft flies the ordinary
+fighter laws. Two scenarios were added anyway because they
+pass cleanly and record that fact (`tools/battery_scenarios/ai.py`):
+
+- `ai-heavy-takeoff-su34-gre-a1`: a two-ship takes off from Athens (12,000 ft) at the
+  default load, taxi 18 s, line up, roll at 26.6 s, airborne through the climb-out at
+  73.4 s (205 kt), then flies on; 0 anomalies, 0 ground hazards.
+- `ai-heavy-land-su34-ukr-a2`: an airborne Su-34 with 26,000 lb of fuel sent home lands at
+  Simferopol (5,532 ft), touches down at 125 kt (bound 135 kt), clears the runway and
+  parks at 493 s with 0 off-pavement samples (10,000 lb of fuel: 103 kt).
+
+### Battery windows
+
+`su34` joins `flight-variety`, `flight-liftoff`, `flight-liftoff-retail` and
+`flight-approach` (`tools/battery_scenarios/flight.py`): liftoff 110 to 140 kt (measured
+121.5 kt after 985 ft on UKR 1), approach 115 to 145 kt (measured 126.8 kt at 17,339 lb of
+fuel), the ordinary takeoff tick allowance (1,818 ticks to 100 ft against 4,500) and
+Simferopol, whose 5,532 ft holds the run and the 1,573 ft rollout with 2,322 ft to spare.
+The windows are fitted agent decisions on no published speed (the Su-27's windows, 120 to
+135 kt and measured 128.1 and 142.2 kt, widened for the heavier jet); they pin
+regressions, not the real aircraft. New unit test
+`the_su34_flies_the_shared_fighter_law_at_its_published_thrust_to_weight` (`models/variety.rs`)
+pins the corrected record (weights, thrusts, the absence of any per-aircraft hook) and the
+0.68 thrust to weight.
+
+### Checks
+
+`cargo fmt --all -- --check` and `cargo clippy --workspace --all-targets --locked -- -D warnings`
+clean; `cargo test --locked --workspace --no-fail-fast` 7,875 passed, 0 failed, 108 ignored;
+`--headless-flight 1200 --aircraft su34` 515.9 kt level at 5,009 ft, 0 non-finite; the ground-start
+takeoff (121.5 kt after 985 ft on UKR 1); battery `--jobs 2 --windows 1` 105 of 105 (every `*su34*`
+scenario, every `flight-approach-*` and `flight-liftoff-*`); the tools unittests; `tools/check_docs.py`.
+Logs are in `.local/m3-aircraft/checks/SU34-8/`.
+
+Provenance: weights, thrust, fuel, ceiling edge and trim are BMB-C2's (coordinator first pass); the
+battery windows are fitted agent decisions; every real figure is a public page for comparison
+only; no model term changed. No retail bytes committed.
+
+### Open for John
+
+1. **Top speed.** Keep Mach 1.60 at 36,000 ft and Mach 0.99 at sea level (the Su-27 shows the
+   same 0.885 level fraction), or trim the Su-34's edge so level flight lands on the real
+   figure: at the measured 0.887 level fraction the 1 G fast edge would be Mach 2.03
+   (1,963 ft/s) at 36,000 ft for Mach 1.8, and 835 kt at sea level (a 1,410 ft/s edge,
+   Mach 1.26) for 741 kt (Mach 1.12; computed from the measured ratio, not probed). The
+   edge is also the overspeed limit, so the aircraft could then dive to Mach 2.0, above the
+   real limit. A fleet answer (the F-15E, Gripen and F-5E have the same shortfall) is the
+   alternative.
+2. **Takeoff and landing runs.** 913 ft and 1,617 ft against the published 4,134 ft and
+   3,600 ft (weights unstated), the same as the Su-27's shortfall. A per-aircraft fit with the
+   B-52's rolling and brake terms would need about 18 ft/s squared of added rolling
+   deceleration at the default load (the model's mean acceleration is 23 ft/s squared and the
+   4,134 ft run needs a mean of 5; arithmetic, not probed), against the B-52's 4.8, so the
+   published run is probably a derated or much heavier takeoff and a fit would not be
+   defensible. Leave the shared model alone, or give a firm weight and surface.
+3. **Ceiling.** 55,000 ft (record) between 49,200 and 56,000 ft (published); the zoom reaches
+   64,600 ft.
+4. **Range and fuel flow.** 1,498 nm against 2,160 nmi published; dry flow 5 lb/s against
+   7.3 lb/s from the AL-31F's consumption. The two trade against each other; see item 4
+   above. A drag shape could close the range if a firm figure appears.
+5. **Dry thrust and military top speed.** Mach 1.20 at 36,000 ft and 495 kt at sea level on
+   the corrected 33,800 lbf; no real dry figure was found to check.
+6. **Roll rate and the +9 G row.** The Su-27's 225 deg/s and a +9 row that the loaded-elevator
+   rule divides to 6.9 G at the full tank; no real figure, and one source says +7.
+7. **Windows.** The liftoff and approach windows rest on no published speed.

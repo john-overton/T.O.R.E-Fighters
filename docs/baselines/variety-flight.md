@@ -2420,3 +2420,37 @@ before and after table with its sources is in
   125.4 kt. Landing (`--maneuver land`, GRE 1): 270,000 lb approach 140.3 kt, touchdown
   131.6 kt, rollout 4,131 ft; 404,000 lb approach 166.2 kt (the cap), touchdown 153.7 kt,
   rollout 5,056 ft.
+
+## Sukhoi Su-34 validation, 2026-11-16
+
+SU34-8. Measured with `crates/tore-sim/examples/performance_probe.rs` (the B52-8 and B2-8
+options `PROBE_CLIMB=KEAS,MACH`, `PROBE_SPEEDS_KT`, `PROBE_HOLD_SPEED`, `PROBE_CRUISE`,
+`PROBE_ONLY=brake`) and `tore-app --headless-flight` on the corrected record, at 76,280 lb
+(full tank, clean), 83,091 lb (the default load), 85,980 lb (normal) and 57,604 lb (8,000 lb of
+fuel), with the Su-27 beside it. The scripts are
+`.local/m3-aircraft/checks/SU34-8/run_perf.sh before|after [su27]` and `run_probes.sh before|after`;
+logs are beside them. "Before" and "after" agree because the model was not changed. The table with
+its sources is in
+[the Su-34 flight review](../formats/aircraft-variety.md#su-34-flight-review-su34-8-2026-11-16).
+
+- Level acceleration, full tank, afterburner, settled speed: sea level 657 kt (Mach 0.99), 15,000
+  ft 868 kt (Mach 1.39), 30,000 ft 914 kt (Mach 1.55), 36,000 ft 916 kt (Mach 1.60); military
+  power 495, 654, 689, 690 kt. The Su-27: 655, 848, 1,159, 1,296 kt afterburner.
+- Climb at full thrust, 350 KEAS then Mach 0.8, 76,280 lb: 5,000 / 10,000 / 20,000 / 36,000 /
+  45,000 ft in 28 / 45 / 75 / 124 / 155 s (the Su-27: 23 / 37 / 60 / 95 / 115 s). Afterburner
+  fighter-schedule ceiling 64,600 ft.
+- Sustained turns with the speed held, 76,280 lb: 1,000 ft 300 / 400 / 500 kt 4.07 / 4.77 / 3.63
+  G; 15,000 ft 350 / 450 / 550 kt 4.07 / 4.12 / 3.63 G; 30,000 ft 400 / 500 / 600 kt 3.21 / 3.64 /
+  3.24 G. Instantaneous pull 6.96 G at 400 kt, 1,000 ft.
+- Fuel: military 5 lb/s, afterburner 30 lb/s; cruise Mach 0.8 at 36,000 ft burns 2.33 lb/s
+  (1,498 nm from the tank); the speed brake adds 0.32 / 0.50 / 0.64 G at 378 / 530 / 681 kt.
+- `--headless-flight 1200 --aircraft su34`: 515.9 kt level at 5,009 ft, fuel 26,676 to 26,641 lb,
+  no crash, 0 non-finite; 13 air maneuvers and four ground ones in `run_probes.sh`, 0 non-finite samples.
+- Takeoff (`--maneuver takeoff`, GRE 1, 12,000 ft): default load 121.5 kt after 913 ft; clean
+  114.5 kt after 735 ft; 66,415 lb 110.6 kt after 647 ft; 96,415 lb 135.8 kt after 1,357 ft;
+  `--retail-stall-speeds` 95.9 kt after 551 ft. Landing (`--maneuver land`): 83,091 lb approach
+  134.6 kt, touchdown 127.7 kt, rollout 1,617 ft; 66,415 lb 125.6 / 119.3 kt, 1,432 ft; 58,415
+  lb 118.5 / 112.0 kt, 1,281 ft; 96,415 lb 145.0 / 137.4 kt, 1,849 ft.
+- AI probes (`tools/battery_scenarios/ai.py`): `ai-heavy-takeoff-su34-gre-a1` airborne at 73.4
+  s, 0 anomalies; `ai-heavy-land-su34-ukr-a2` touches down at 125 kt (103 kt at 10,000 lb of
+  fuel), parks at 493 s, 0 off-pavement samples.

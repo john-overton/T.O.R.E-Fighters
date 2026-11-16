@@ -19,7 +19,7 @@ from battery_scenarios._strips import ground_airport
 
 # Original roster covered by the established fixed-wing maneuver battery.
 AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su25", "mig23", "su35", "f22", "f22n", "faxx"]
-VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310", "mig25", "f16a", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc", "b52", "b2", "f117", "f111"]
+VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310", "mig25", "f16a", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc", "b52", "b2", "f117", "f111", "su34"]
 # Aircraft whose PT disables spins (X-31 flag, F-22 family): they never enter one.
 SPIN_IMMUNE = {"x31", "f22", "f22n", "faxx"}
 
@@ -384,6 +384,14 @@ APPROACH_TARGET["b2"] = (140, 170)
 # approach window of 150 to 180 kt.
 LIFTOFF_TARGET["f117"] = (155, 185)
 APPROACH_TARGET["f117"] = (150, 180)
+# The Su-34 (SU34-8, 2026-11-16; agent decisions, fitted windows). No primary takeoff or approach
+# speed was found: the one published takeoff figure is a 1,260 m (4,134 ft) run and a 1,100 m
+# landing run, weights unstated (a spec sheet and a search summary, docs/formats/aircraft-variety.md,
+# "Su-34 flight review"). The windows are the Su-27 family's plausibility band widened for the
+# heavier jet: the scripted runs fly the default load (gross 83,091 lb) and measure a liftoff of
+# 121.5 kt after 985 ft and an approach of 126.8 kt at 65 percent fuel (the Su-27: 128.1 and 142.2 kt).
+LIFTOFF_TARGET["su34"] = (110, 140)
+APPROACH_TARGET["su34"] = (115, 145)
 # The figures the model gives with the fitted per-aircraft stall references
 # (`STALL_REFERENCE_FRACTIONS`, 2026-09-30), for the aircraft whose figure is not
 # exactly inside John's range, kept as a regression window of plus or minus 6
@@ -412,6 +420,9 @@ KNOWN_APPROACH["b2"] = 167.5
 # The F-117A's measured liftoff and approach at its default load (F117-8, 2026-11-15).
 KNOWN_LIFTOFF["f117"] = 177.2
 KNOWN_APPROACH["f117"] = 166.2
+# The Su-34's measured liftoff and approach at its default load (SU34-8, 2026-11-16).
+KNOWN_LIFTOFF["su34"] = 121.5
+KNOWN_APPROACH["su34"] = 126.8
 # TOR-6 (2026-11-11): the Tornado's default load is lighter than TOR-8 measured (one centreline tank, 1,650
 # lb of external fuel, not two): liftoff 146.4 kt (was 150.6), approach 155.1 kt (was 160.1), both inside the
 # windows and the plus or minus 6 percent regression band, so no window was refitted and the known values above
@@ -473,6 +484,8 @@ INTERNAL_FUEL_LB["b52"] = 312197
 INTERNAL_FUEL_LB["b2"] = 167000
 # F117.PT internal fuel, 18,500 lb (the record's own tank; the approach scenario flies 65 percent, 12,025 lb).
 INTERNAL_FUEL_LB["f117"] = 18500
+# SU34.PT internal fuel, 26,676 lb (BMB-C2, the real figure; the approach scenario flies 65 percent, 17,339 lb).
+INTERNAL_FUEL_LB["su34"] = 26676
 APPROACH_FUEL_CAP_LB = 100000
 
 
@@ -588,6 +601,8 @@ LIFTOFF_AIRCRAFT += ["b52"]
 LIFTOFF_AIRCRAFT += ["b2"]
 # The F-117A joins them (F117-8, 2026-11-15).
 LIFTOFF_AIRCRAFT += ["f117"]
+# The Su-34 joins them (SU34-8, 2026-11-16).
+LIFTOFF_AIRCRAFT += ["su34"]
 
 
 def liftoff_scenarios() -> list[Scenario]:
