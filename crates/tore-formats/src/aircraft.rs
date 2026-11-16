@@ -2584,6 +2584,7 @@ mod profile_tests {
             ("thrust", 21_600),
             ("maxTakeoffWeight", 54_000),
             ("internalFuel", 18_500),
+            ("fuelConsumption", 2),
             ("airBrakesDrag", 256),
         ];
         let text = batch_text(
@@ -2604,6 +2605,8 @@ mod profile_tests {
         assert_eq!(a.number("thrust"), 21_600.);
         // F117-8: the real jet has no speed brake, so the record's 256 reads 0.
         assert_eq!(a.number("airBrakesDrag"), 0.);
+        // F117-9: the fuel flow fitted to the published range, 2 to 3 lb/s.
+        assert_eq!(a.number("fuelConsumption"), 3.);
         let env = |g: i32| a.envelopes.iter().find(|e| e.g == g).unwrap();
         assert_eq!(
             env(1).points,

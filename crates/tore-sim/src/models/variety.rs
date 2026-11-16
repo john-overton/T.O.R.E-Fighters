@@ -628,7 +628,7 @@ pub(crate) mod tests {
             ("internalFuel", 18_500),
             ("thrust", 21_600),
             ("maxTakeoffWeight", 52_500),
-            ("fuelConsumption", 2),
+            ("fuelConsumption", 3),
             ("_gpullDrag", 38),
             ("airBrakesDrag", 0),
         ] {

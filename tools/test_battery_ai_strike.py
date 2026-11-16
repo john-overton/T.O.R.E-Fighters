@@ -1187,6 +1187,76 @@ class SelectionTests(unittest.TestCase):
         self.assertTrue(description)
 
 
+def f117_run(plane=0, weapon="PAVEWA3.JT", alt=5000, profile="level", owner=None, role=None,
+             miss=3.4, hp="0/200", egress=True, lost=False, aircraft="F117"):
+    """One AI F-117 driver run (F117-9): a GBU-27 on its own IRADS spot, in the form the driver
+    prints it."""
+    owner = plane if owner is None else owner
+    out = [
+        f"ai-strike: setup aircraft={aircraft} load=PAVEWA3.JT station=0 count=1 rounds=1 target=0x50000001 "
+        "target_at=999570,7,789571 hp=200 skill=1 profile=none handback=none order=none mode=none",
+        "ai-strike: PROFILE t=0.000 name=none requested=none note=chosen",
+        f"ai-strike: start t=0.000 plane={plane} range_ft=24304 alt_ft=5000 speed_kt=450",
+        f"ai-strike: PROFILE t=0.008 name={profile}",
+    ]
+    if role:
+        out.append(f"ai-strike: ROLE t=0.000 plane={plane} role={role}")
+    out.append(
+        f"ai-strike: RELEASE t=3.858 n=1 weapon={weapon} station=0 alt_ft={alt} speed_kt=432 range_ft=21390 "
+        f"pass=1 aim_ft=0 inside=yes lead_ft=0 dive_deg=0 guided=Guiding spot_owner={owner}"
+    )
+    out.append(f"ai-strike: IMPACT t=31.500 n=1 miss_ft={miss} at=1.0,2.0,3.0")
+    out.append("ai-strike: KILL t=31.500 victim=0x50000001 category=0x0400 target=yes")
+    if egress:
+        out.append("ai-strike: EGRESS t=43.942 range_ft=21466 alt_ft=5918")
+    if lost:
+        out.append("ai-strike: LOST t=44.000 reason=destroyed")
+    out.append(
+        f"ai-strike: summary t=51.5 ran_s=51.5 profile={profile} releases=1 impacts=1 kills=1 "
+        f"egress={'yes' if egress else 'no'} lost={'yes' if lost else 'no'} activity=Attacking "
+        f"target_hp={hp} closest_ft=15388 store_rounds_left=0"
+    )
+    out.append("ai-strike: done")
+    return "\n".join(out)
+
+
+class F117StrikeTests(unittest.TestCase):
+    """`ai-strike-f117` (F117-9): the AI F-117A's level pass, own-IRADS lase, bay release and egress."""
+
+    def both(self, own=None, wing=None):
+        return f117_run(**(own or {})) + "\n" + f117_run(**{"plane": 1, "role": "strike", **(wing or {})})
+
+    def test_the_level_pass_on_its_own_spot_passes(self):
+        self.assertEqual(s.f117_strike_problems(self.both()), [])
+
+    def test_two_runs_are_needed(self):
+        self.assertTrue(any("want 2" in p for p in s.f117_strike_problems(f117_run())))
+
+    def test_a_dive_or_popup_pass_or_another_altitude_fails(self):
+        for profile in ("dive", "popup"):
+            out = self.both(own=dict(profile=profile))
+            self.assertTrue(any("level pass only" in p or "5,000 ft" in p for p in s.f117_strike_problems(out)), profile)
+        self.assertTrue(any("5,000 ft" in p for p in s.f117_strike_problems(self.both(own=dict(alt=9000)))))
+
+    def test_another_store_or_another_aircrafts_spot_fails(self):
+        self.assertTrue(any("want a GBU-27" in p for p in s.f117_strike_problems(self.both(own=dict(weapon="MK82.JT")))))
+        self.assertTrue(any("own IRADS spot" in p for p in s.f117_strike_problems(self.both(own=dict(owner=1)))))
+
+    def test_a_missing_egress_or_a_loss_or_a_far_miss_fails(self):
+        self.assertTrue(any("EGRESS" in p for p in s.f117_strike_problems(self.both(own=dict(egress=False)))))
+        self.assertTrue(any("was lost" in p for p in s.f117_strike_problems(self.both(wing=dict(lost=True)))))
+        self.assertTrue(any("from the target" in p for p in s.f117_strike_problems(self.both(own=dict(miss=900.0)))))
+        self.assertTrue(any("unhurt" in p for p in s.f117_strike_problems(self.both(own=dict(hp="200/200")))))
+
+    def test_the_quick_mission_wingman_must_have_the_strike_role(self):
+        out = f117_run() + "\n" + f117_run(plane=1, role="cap")
+        self.assertTrue(any("want strike" in p for p in s.f117_strike_problems(out)))
+
+    def test_the_scenario_exists_and_is_in_the_ai_strike_family(self):
+        self.assertIn("ai-strike-f117", {sc.name for sc in s.scenarios()})
+        self.assertTrue(bs.family_matches("ai-strike", "ai-strike-f117"))
+
+
 if __name__ == "__main__":
     unittest.main()
 

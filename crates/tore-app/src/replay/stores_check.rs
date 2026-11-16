@@ -25,6 +25,9 @@ pub(crate) fn run() -> AppResult<()> {
         AircraftId::F16C,
         AircraftId::F22,
         AircraftId::F22n,
+        // The F-117's two fitted bay stations (F117-9): the drawn origins, the live
+        // vertices and the release origins agree for them as for the F-22's.
+        AircraftId::F117,
         AircraftId::Mig29,
         AircraftId::Rafale,
         AircraftId::Mi24,

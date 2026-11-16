@@ -3666,6 +3666,58 @@ mod tests {
             assert_eq!(wing.aircraft, AircraftId::Tornado);
         }
     }
+    /// F117-9 (2026-11-15): the F-117A is offered as the player's aircraft and
+    /// in every AI wing field, by its own selection key, and a draft carries it
+    /// as the player and in every wing. It never stands in for another
+    /// aircraft, and the stealth night rule keys on the same `F117.PT`.
+    #[test]
+    fn the_f117_is_a_quick_mission_player_and_a_wing_choice() {
+        let mut q = full_catalog();
+        assert_eq!(AircraftId::F117.selection_key(), "F117.PT");
+        let player = q
+            .aircraft_files
+            .iter()
+            .position(|f| f == AircraftId::F117.selection_key())
+            .unwrap();
+        assert_eq!(q.aircraft_names[player], "F-117A Nighthawk");
+        q.apply(6, player);
+        assert_eq!(q.player(), Some(AircraftId::F117));
+        for field in AI_AIRCRAFT_FIELDS {
+            let index = q.ai_choice(AircraftId::F117).unwrap();
+            assert_eq!(q.values(field)[index], "F-117A Nighthawk");
+            q.apply(field, index);
+            assert_eq!(q.wing_aircraft(field), Some(AircraftId::F117));
+        }
+        let spec = q.mission_spec().unwrap();
+        assert_eq!(spec.wings[0].aircraft, AircraftId::F117);
+        for wing in spec.wings.iter().skip(1) {
+            assert_eq!(wing.aircraft, AircraftId::F117);
+        }
+        // The retail night rule's pair is the F-117 and the B-2, by file name,
+        // and the draft's spec wakes it at night whether the F-117 is the
+        // player's or only a friendly AI wing's (the enemy's never counts).
+        assert!(
+            tore_formats::quick_template::tables::NIGHT_STEALTH_AIRCRAFT
+                .contains(&AircraftId::F117.pt())
+        );
+        let mut night = spec.clone();
+        night.condition = tore_world::mission::Condition::Night;
+        assert!(tore_world::surface::resolve::night_stealth(&night));
+        night.wings[0].aircraft = AircraftId::F18;
+        night.wings[1].count = 2;
+        assert!(
+            tore_world::surface::resolve::night_stealth(&night),
+            "an AI wing's F-117 counts"
+        );
+        night.wings[1].aircraft = AircraftId::F18;
+        night.wings[2].aircraft = AircraftId::F18;
+        assert!(!tore_world::surface::resolve::night_stealth(&night));
+        night.wings[3].aircraft = AircraftId::F117;
+        assert!(
+            !tore_world::surface::resolve::night_stealth(&night),
+            "the enemy's F-117 does not"
+        );
+    }
     #[test]
     fn the_vertical_lifters_lead_wingmen_in_the_air_and_off_the_ground() {
         // The CH-47, the V-22, the AV-8 and the Yak-141 are offered to the AI
