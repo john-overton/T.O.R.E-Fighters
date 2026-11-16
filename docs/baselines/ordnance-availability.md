@@ -1047,3 +1047,35 @@ The `menus-ordnance-availability` battery expected line reads 51 aircraft, 5,145
 51 aircraft and 249 tank placements (and match any weapon count). Earlier sections that
 quote 48 aircraft, 4,784 weapon placements and 233 tank placements stay as written for
 their own states.
+
+## Batch A and batch B integration: the pins recomputed (2026-11-15)
+
+Batch B (BMB-B1 and BMB-B2) was built from the integration of batch A's first round (4,784 weapon
+placements, 240 Cheat-only, 20 recovered stations), before batch A's second round moved the B-2
+and B-52 bays onto the shared grid. The two sets of pins were not added: every total below is
+measured by `--validate-ordnance` on the merged tree (profile refreshed from the retail media
+first). Batch B moves no row of the B-2, B-52 or F-117, so no placement moves twice.
+
+| Pin | Batch A (round 2) | Batch B alone | Merged | Why |
+| --- | ---: | ---: | ---: | --- |
+| Aircraft | 48 | 51 | 51 | the B-1B, Tu-160 and F-111F join |
+| Weapon placements | 4,732 | 5,145 (from 4,784) | 5,093 | 4,732 plus 361: B-1B 63, Tu-160 70, F-111F 228 |
+| Tank placements | 233 | 249 | 249 | the F-111F's four wing pair rows take 16 |
+| Recovered weapon stations | 21 | 20 | 21 | the B-52's third empty bay row (batch A); batch B adds none |
+| Cheat-only placements | 242 | 258 (from 240) | 260 | 242 plus the 18 pairs on the batch B rows |
+| Designator pod placements | 80 | 80 | 80 | the B-1B bay rows and F-111F wing rows lose the designator bit (BMB-B2) |
+| Weapon and tank records | 82 / 9 | 82 / 9 | 82 / 9 | |
+
+```text
+ordnance B1.PT: 3 source rows, 0 optional weapon rows, 63 compatible weapon placements, 0 tank placements; defaults and restart passed; catalog 21 normal, 83 Cheat
+ordnance TU160.PT: 2 source rows, 0 optional weapon rows, 70 compatible weapon placements, 0 tank placements; defaults and restart passed; catalog 35 normal, 83 Cheat
+ordnance F111.PT: 4 source rows, 0 optional weapon rows, 228 compatible weapon placements, 16 tank placements; defaults and restart passed; catalog 57 normal, 83 Cheat
+ordnance audit: 51 aircraft, 21 recovered weapon stations, 5093 weapon placements, 249 tank placements, 82 weapon and 9 tank records; passed
+ordnance audit: 1 designator pods, 80 pod placements, one to an aircraft, loaded and restored through the saved mission; passed
+ordnance audit: 2 novelty records, 260 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
+```
+
+The `menus-ordnance-availability` expected line reads 5,093 weapon placements, 249 tank placements
+and 21 recovered stations; `a2g-catalog` matches any weapon count and carries 51, 21, 249 and 260;
+`test_battery_a2g.py` carries 51, 21 (any count) and 249. Earlier sections quoting 4,776, 4,746,
+4,784, 4,732 or 5,145 stay as written for their own states.

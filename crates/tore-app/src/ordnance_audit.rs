@@ -122,16 +122,19 @@ const TANK_RECORDS: usize = 9;
 /// alone gave 33). The F-117's F117-6 to F117-9 slices move no placement
 /// (`F117.PT` stays 46). The two slices' separate totals, 4,776 and 4,746,
 /// are not added: 4,784 - 8 - 44 = 4,732.
-/// 5,145 from 4,784: the bomber batch B records join (BMB-B1, 2026-11-15) and
-/// take their station corrections (BMB-B2): B-1B 63, Tu-160 70, F-111F 228.
-/// Measured with the retail rows first (BMB-B1 alone: 5,173, B-1B 75 and
-/// F-111F 244); clearing the designator bit on the B-1B's three bay rows
-/// (`0x1500` to `0x1100`) and the F-111F's four wing rows (`0x07e5` to
-/// `0x03e5`) removes the multi-store pods those rows admitted, 12 on the
-/// B-1B and 16 on the F-111F (BMB-B2, fitted). The F-111F's weight class cap
-/// (70 and 60 to 50) refuses nothing (the heaviest carried store is the
-/// GBU-28 at 4,500 lb).
-const WEAPON_PLACEMENTS: usize = 5145;
+/// 5,093 from 4,732 (batches A and B integration, 2026-11-15, measured by
+/// `--validate-ordnance`): the bomber batch B records join (BMB-B1) and take
+/// their station corrections (BMB-B2): B-1B 63, Tu-160 70, F-111F 228, 361 in
+/// all, on top of batch A's 4,732. The batch's own total, 5,145 from the
+/// pre-round-2 4,784, is not added: 4,732 + 361 = 5,093. BMB-B1 alone gave
+/// 5,173 (B-1B 75 and F-111F 244); clearing the designator bit on the B-1B's
+/// three bay rows (`0x1500` to `0x1100`) and the F-111F's four wing rows
+/// (`0x07e5` to `0x03e5`) removes the multi-store pods those rows admitted, 12
+/// on the B-1B and 16 on the F-111F (BMB-B2, fitted). The F-111F's weight class
+/// cap (70 and 60 to 50) refuses nothing (the heaviest carried store is the
+/// GBU-28 at 4,500 lb). The shared grid and the B-52 rows are not touched by
+/// batch B, so no placement moves twice.
+const WEAPON_PLACEMENTS: usize = 5093;
 /// 188 from 182: the F-16A's centreline tank row (F150.GAS or F250.GAS) plus
 /// the tank selection its two 0x07e5 wing rows accept, 6 tank placements.
 /// 192 from 188: the MiG-31 (M31-1). 201 from 192: the Mirage 2000 (M2K-1).
@@ -159,9 +162,11 @@ const TANK_PLACEMENTS: usize = 249;
 /// Cheat-only pairs on the B-52, B-2 and F-117 bay rows.
 /// 242 from 240: the B-52's new underwing pylon row (row 7) takes the two novelty
 /// bombs under Cheat loading (B52-5, 2026-11-15), as the other bomb rows do.
-/// 258 from 240: the bomber batch B records (BMB-B1, 2026-11-15), 18 more
-/// Cheat-only pairs on the B-1B, Tu-160 and F-111F rows (measured).
-const NOVELTY_PLACEMENTS: usize = 258;
+/// 260 from 242 (batches A and B integration, 2026-11-15): the bomber batch B
+/// records (BMB-B1) add 18 Cheat-only pairs on the B-1B, Tu-160 and F-111F rows
+/// (measured), on top of batch A's 242 (the batch's own 258 was from 240, before
+/// the B-52's pylon row).
+const NOVELTY_PLACEMENTS: usize = 260;
 /// Station and designator-pod pairs the normal rules accept (A2G decision 7).
 /// 67 from 65: the F-16A's two 0x07e5 wing rows carry the decoded designator
 /// bit 0x400, one pod each (slice F16A-4). 68: the MiG-31 (M31-1). 71: the Mirage 2000 (M2K-1).

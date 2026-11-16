@@ -39,7 +39,8 @@ AIRCRAFT = re.compile(
 # Batch A integration (2026-11-15): 4,732 weapon placements measured after the B-2 bay refusals and
 # the B-52 fold onto the shared grid; the recovered (21) and Cheat-only (242) counts are unchanged.
 # BMB-B1 (2026-11-15): 51 aircraft and 249 tank placements after the B-1B, Tu-160 and F-111F joined
-# (the F-111F's wing rows take 16 tank placements). Batch B integration: see ordnance_audit.rs.
+# (the F-111F's wing rows take 16 tank placements). Batches A and B integration (2026-11-15): 5,093
+# weapon placements measured; 260 Cheat-only placements (242 plus batch B's 18); 21 recovered.
 AUDIT = re.compile(r"^ordnance audit: 51 aircraft, 21 recovered weapon stations, \d+ weapon placements, "
                    r"249 tank placements, (\d+) weapon and 9 tank records; passed$", re.M)
 # Aircraft with a bomb or rocket station the A2G records fit; the cargo and
@@ -82,7 +83,7 @@ def scenarios() -> list[Scenario]:
             expect=[
                 r"ordnance audit: 51 aircraft, 21 recovered weapon stations, \d+ weapon placements, 249 tank placements, \d+ weapon and 9 tank records; passed",
                 r"ordnance audit: 1 designator pods, \d+ pod placements, one to an aircraft, loaded and restored through the saved mission; passed",
-                r"ordnance audit: 2 novelty records, 242 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed",
+                r"ordnance audit: 2 novelty records, 260 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed",
             ],
             forbid=[r"PROBLEM"],
             check=catalog_problems,

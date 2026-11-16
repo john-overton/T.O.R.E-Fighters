@@ -502,7 +502,7 @@ def scenarios() -> list[Scenario]:
             # B52-5 (2026-11-15): 4,746 and 21 recovered stations, the B-52's bay rows take five stores and its new pylon row 22 less five (B-52 71 to 33).
             # Batch A integration (2026-11-15): 4,732, measured. The B-2 bays refuse four stores (B-2 86 to 78) and the B-52 bays, folded onto the shared grid, hold three stores (B-52 71 to 27); the slices alone gave 4,776 and 4,746, not added.
             # BMB-B1/B2 (2026-11-15): 51 aircraft and 249 tank placements after the B-1B, Tu-160 and F-111F joined (F-111F 16 tank); the integration of batches A and B is dated in ordnance_audit.rs.
-            expect=[r"ordnance audit: 51 aircraft, 21 recovered weapon stations, WPN weapon placements, 249 tank placements, 82 weapon and 9 tank records; passed"],
+            expect=[r"ordnance audit: 51 aircraft, 21 recovered weapon stations, 5093 weapon placements, 249 tank placements, 82 weapon and 9 tank records; passed"],
             notes="All reviewed source stations, compatible supported weapons/tanks, empty defaults and accepted-load restoration. The audit fails when a supported weapon or tank record is missing or a pinned count moves (ordnance_audit.rs).",
         )
     )
