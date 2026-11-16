@@ -9694,3 +9694,569 @@ press, 0.958 in the actual one-press probe), the doors stay 1 s after the releas
 reads `State::bay` on the RCS page only (no change to a row a radar reads), so it now applies
 to the F-117 at 1.5 times with the doors fully open, and the F-22's values are unchanged.
 Update to [F117-3 bay (interim)](#bay-interim-f117-4-f117-5-replaces-it): replaced.
+
+## F-111F source review (2026-11-15)
+
+Research mode, slice F111-0 (bomber batch B, plan `.local/m3-aircraft/PLAN-F111.md`).
+This reviews `F111.PT` (F-111F Aardvark) and its dependency closure before
+`AircraftId` has an F-111 row. No original module was executed. PT, SEE, ECM and JT are
+read as bounded BRF data with the shared field order in `aircraft_schema.rs`; SH and HUD are
+inspected as data (`shape_inspect`, a word sweep, and a throwaway top, side and front
+line-plot of the face lists). Slice done by Claude Sonnet. Nothing here changes code or
+behaviour. Real-aircraft figures are cited and never establish game behaviour. Questions
+for John are **not decided here**: they are marked "(for John)" and collected in the plan's
+"Questions for John".
+
+Headline findings, each with its evidence below:
+
+1. **The fuel figure is in gallons.** The record's 5,025 "lb" is almost exactly the real
+   F-111's internal capacity of about 5,040 US gallons (about 32,700 lb). The record also
+   carries the real afterburner total (50,200 lbf) in the military field, and an
+   afterburner field (80,000) that matches nothing.
+2. **The record is the A-6E's** (181 of 207 statements equal `A6.PT`), with the weights,
+   thrust, fuel, envelopes, hardpoints and a few wing values rewritten. Hit points 125, the
+   118 signatures and the loaded-control values are the A-6's.
+3. **The shape has no sweep.** One spread pose only, at the real 16 degree leading-edge sweep,
+   six state words (afterburner, dorsal panels, gear, two flap strips, rudder). The wing
+   root edge sits at 8.7 ft, which matches a pivot derived from the real spread and swept
+   spans (8.95 ft). The wing outboard of that is about 17 percent too long, the whole span
+   16 percent too wide.
+4. **The record's four wing rows are the eight pylons** (each row is a left and right pair,
+   x 9.7, 13.7, 18.0 and 21.7 ft). Rows 5 and 6 are the inner pair that swivel in reality
+   (Jane's text in the game's own `F111.INF` says so); rows 7 and 8 are fixed. Rows 7 and 8
+   hang at or behind the spread wing's trailing edge. There is no bay row, no gun row and
+   no pod row.
+
+### F-111F build and extraction
+
+`FA_1.LIB` and `FA_2.LIB` are the same pair as earlier reviews. The closure was extracted
+locally to `.local/m3-imports/scratch/f111` with `tore-extract --include 'F111*'
+--include '*F111*'` plus the sensor, jammer, store and HUD names and `*.PT` for the diffs
+(`--exclude-archive '*swpatch*'`; the patch archive is out of scope for base-FA research).
+The `SETUP.ESA` installer copy of `FA_2.LIB` holds the same F-111 files. The usual five
+unrelated archive errors appear. Unlike the F-117 and B-2, the F-111 has **no cockpit
+art, no `F111.HUD` and no `F111.PTS`**: the record names `ac130.HUD` and `FA_1.LIB` holds
+no `~F111*` or `~A6*` picture. Its extras are `F111_0.PIC`, `F111_1.PIC` and `F111.INF` (the
+game's Jane's text, `disc2/FA_3.LIB`) and the radio callout `^ACF111.5K`. There is no
+`F111.AI` (the record binds `f.BI`).
+
+### F-111F identity and record
+
+| Field | Decoded value |
+| --- | --- |
+| PT | `F111.PT`, 10,941 bytes (decoded), SHA-256 `bc2d0ff7d0dda56f55ff7b1c5fc656f46cbc3a243cdcb634bdf4a8844b4b411a` |
+| Displayed names | `F-111F`, `F-111F Aardvark`, `F111.PT` |
+| Schema | OBJECT + NPC + PLANE; `structType` 5; `typeSize` 660 (the Tornado's and B-2's); `instanceSize` 626 |
+| Object class / year / hit points | `0x4000` (attack) / 1980 / 125; `expType` 30 |
+| PLANE flags | `0x15`: base `0x01`, multi-crew `0x04` (two seats, side by side in reality), seat `0x10`; no hook, no carrier (the A-6's is `0x57`) |
+| Shape | `f111.SH` (29,184 bytes, CODE 25,206; **header exponent 9, so 2/3 ft per unit**, the Tornado's and B-52's convention), shadow `f111_s.SH` |
+| Damage looks | `F111_A.SH`, `_B`, `_C`, `_D` (same exponent 9) |
+| Skins | `_F111.PIC` 122,004 bytes, `_F111_A/B/C/D.PIC` 132,664 / 65,064 / 83,264 / 114,724 |
+| Sounds | `&jet09.11k` loop and second sound (the Tornado's), `&powerup.5k`, `&powerdn.5k` |
+| HUD | `ac130.HUD` (named in the record; the AC-130 panel family) |
+| AI script | `f.BI` (12,800 bytes, the shared fighter script; no `F111.AI`) |
+| Sensors / jammer | `VIS240.SEE`, `A6R.SEE`, `A6.ECM`, `AV8IR.SEE`, `PAVESPK.SEE` (fixed rows 0 to 4) |
+| Weapons | `GBU28.JT`, `MK82P.JT` (rows 6 and 8), `AGM65G.JT`; row 5 to 8 in the station table below |
+| Engines / thrust | 2 / **50,200 lbf military, 80,000 afterburner**; fuel flow 3, afterburner flow 6 |
+| Weights / fuel / ceiling | empty 47,481 lb, maximum takeoff 100,000, **internal fuel 5,025**, ceiling 60,000 ft, minimum altitude 300 ft |
+| G / speeds | -2 / +5; 1 G row top 1,434 kt at 36,000 ft (Mach 2.5); sea level 788 kt (Mach 1.19); `airBrakesDrag` 256, `flapsDrag` 76, `gearDrag` 23, `bayDrag` 0 |
+| Signatures | `sigs` 118 / 118 / 100 / 100 / 0; `maxVisDist` 262; `viewOffset` (0, 20, 60) raw |
+| Checkpoint code / CLI key | assigned by the batch B identity slice |
+
+The decoded record equals the catalog row in [`fa-aircraft.csv`](fa-aircraft.csv) field for
+field. Hashes of the files later slices depend on:
+
+| Resource | SHA-256 |
+| --- | --- |
+| `F111.PT` | `bc2d0ff7d0dda56f55ff7b1c5fc656f46cbc3a243cdcb634bdf4a8844b4b411a` |
+| `F111.SH` | `6c03f4723502a0e8623cd450e083ab266158b55bbe2d293feecebf75507e6590` |
+| `F111_S.SH` | `0b3ecc975f183f6ab3ad20a11501465bb07b5724cf9bd639b658338426d5abc4` |
+| `F111_A.SH` | `c9cb138a5f7db63561cbb31952b653045ae76928f8f8b6c9f04de9d4295bffa4` |
+| `F111_B.SH` | `2d58559d3d6fc1d2f03f5c3734617081d963cd3d8705feea44eae7b864925b88` |
+| `F111_C.SH` | `9effea981c560cb70a042a7fc52e5f2f5e1b6c8dc048e76e0211d39d81a424b8` |
+| `F111_D.SH` | `afa38f0cfe126ae7307f9942e36c520f209f83f361f45b9ab08035fa52774f1b` |
+| `ac130.HUD` | `a22fcb612b3d923879dfa9257af0afbc7446c7e92dc197ccf18a4c6b466ed169` |
+| `f.BI` | `8719314060695f82a0dbf905fc8169576a33f9147ac27db8ca2904fca467b30b` |
+| `VIS240.SEE` | `a3224581abef75e0fe4e6dbb37d2d47d5ab4704bb1043e09dd6aa2e5a4510ee1` |
+| `A6R.SEE` | `1107a19a33e78c5bd0d5669f7f6dfe0cdcac24b1e351860175b994d560344dd4` |
+| `A6.ECM` | `3c1dca63cd4df03c1624ffc64a176c7ceb29800334526bad6f50f13274eb49c3` |
+| `AV8IR.SEE` | `d4791bcb3faf93799cb49472757801834c49c9d0566da6ceb59ef40847ad0f60` |
+| `PAVESPK.SEE` | `7fd9c6d3e909015e8715056e5c0f13ce472cdb7fb70ac10bdcd4a54cb6e53b91` |
+| `GBU28.JT` | `9049cdf54a50268e3f277643eae94a8178da1656fff6257fd7422d99daa036bc` |
+| `MK82P.JT` | `7fc1ea0dbc423585f6104b23e994895235fcb765f6067271cb3e1eb2ac27f8d3` |
+| `AGM65G.JT` | `b94ee0dae96dd2b7fc70a21e430444a1d72b565eec9611ecb749965ece2e5cca` |
+| `F111.INF` | `21ebc6ca4fc0171df747319c48c51f3742634536e74e2002223121ac922af0b1` |
+
+(`PAVESPK.SEE` is the byte-identical file the Tornado and F-117 use.)
+
+### F-111F dependency closure
+
+| Dependency | State | What TORE does |
+| --- | --- | --- |
+| Shape `f111.SH`, shadow, four damage looks, `_F111*.PIC` | all present | Normal shape path; six state words (below), no sweep word |
+| AI script `f.BI` | present (shared), no `F111.AI` | TORE does not run retail scripts. `strike_class.rs` already lists `F111.PT` in its census test as **Fighter** (the rule: not Heavy at 100,000 lb and +5 G, top speed 1,434 kt over the 700 kt Attack limit); the `OVERRIDES` table is empty |
+| Sensors `VIS240.SEE`, `A6R.SEE`, `AV8IR.SEE`, `PAVESPK.SEE`, ECM `A6.ECM` | present | Reviewed below (B7); `A6R.SEE` and `A6.ECM` belong to no roster aircraft today |
+| Stores `GBU28.JT`, `MK82P.JT`, `AGM65G.JT` | present | All three are in the TORE roster already (GBU-28 flown from the F-15 and Rafale C, [air-to-ground baseline](../baselines/air-to-ground.md); `MK82P.JT` is the "MK-82HD 6-Pack" record with the shape `snake.SH`; `AGM65G.JT`, Maverick) |
+| HUD `ac130.HUD` | present | The AC-130 panel family, as the B-52 flies it (below) |
+| Cockpit art | **none for the F-111** | Only `~AC130*.PIC` (the family `ac130.HUD` names) |
+| `F111_0/1.PIC`, `F111.INF`, `^ACF111.5K` | present | Encyclopedia pictures and text, and the radio callout; no gameplay effect |
+| Sounds | present | Shared with other records |
+
+### F-111F record against the other records
+
+Of the 207 non-pointer statements the closest records agree on 181 (`A6.PT`), 172 (`A6V`),
+167 (`A7`), 165 (`MIG21`, `EA6`), 164 (`F4`). **`A6.PT` is the template**: the F-111F record is
+the A-6E record with 26 values rewritten (typeSize and instanceSize 660 and 626 against 612 and
+592, the three debris positions, year, empty weight, ceiling, eye offset, `numHards` 9 against 7,
+PLANE flags, `envMax`, `structure[0..1]`, `_brv.y.acc/dacc`, `stallSeverity`, thrust,
+afterburner thrust, both fuel flows, internal fuel, maximum takeoff). The other 142 equal
+statements are the generic block shared by 100 or more records. Four values are shared with the
+A-6 and almost nothing else: **hit points 125, `maxVisDist` 262, `sigs[0]` and `sigs[1]` 118**
+(no third record shares them). All eight G rows, the
+`structure` pair, the fuel figure, both thrust values, the afterburner flow and maximum
+takeoff weight are shared with **no** record, so the weights and envelope are authored for the
+F-111, not copied. The hardpoint block is the A-6's layout (the same `0x07e5` pair rows, the
+same three-field sensor rows `VIS240` / `A6R` / `A6.ECM` first) rewritten.
+
+### F-111F: the template copy list (for John)
+
+Real figures: Wikipedia "General Dynamics F-111 Aardvark", Specifications (F-111F) (accessed
+2026-11-15: length 73 ft 6 in, span 63 ft spread and 32 ft swept, height 17 ft 1.5 in, wing
+area 657.4 sq ft spread and 525 swept, empty 47,200 lb, maximum takeoff 100,000 lb, two
+TF30-P-100 at 14,560 lbf dry and 25,100 lbf afterburning each, maximum speed 1,434 kn
+(Mach 2.5) at altitude, service ceiling 66,000 ft, +7.33 g, nine hardpoints "8 under-wing,
+1 under-fuselage between engines" plus two attach points in the weapons bay); Wikipedia
+"Pratt & Whitney TF30" (accessed 2026-11-15: TF30-P-100 14,560 lbf dry, 25,100 lbf with
+afterburning, dry weight 3,985 lb); the game's own Jane's text `F111.INF` (span 63 ft spread,
+31 ft 11 in swept, length 73 ft 6 in, height 17 ft 1.4 in, 16 to 72 degrees 30 minutes, the
+F-111A's 46,172 lb empty and 91,500 lb maximum takeoff, Mach 1.2 at sea level, Mach 2.2 at
+height); FAS DoD 101 F-111 page (accessed 2026-11-15: F-111F Mach 1.2 at sea level and Mach
+2.5 at 60,000 ft, wings 16 to 72.5 degrees); American Airpower Museum F-111 page (accessed
+2026-11-15 through a search result: 5,040 gallons internal fuel); a published specification
+list quoted in the same search (5,043 US gallons internal).
+
+| Field | Record | Real | Difference | Verdict |
+| --- | ---: | ---: | ---: | --- |
+| Empty weight, lb | 47,481 | 47,200 (Wikipedia F-111F; Jane's F-111A 46,172) | +0.6% | **Real**, unique to this record |
+| Maximum takeoff, lb | 100,000 | 100,000 | 0 | **Real** (shared with no other record) |
+| **Internal fuel, "lb"** | **5,025** | **about 5,040 US gal (5,043 elsewhere), about 32,700 lb at 6.5 lb/gal** | the figure is **gallons**; read as pounds it is 15% of the real capacity | **Wrong unit.** 5,025 gal at 6.5 lb/gal (JP-4, the usual planning figure; JP-5 is about 6.8) is 32,663 lb. Plan's "about 32,000 real" agrees; a War Thunder wiki figure of 14.83 t (32,700 lb) in the main tanks agrees but is a game source |
+| Engines | 2 | 2 | | Correct; the shape has two exhausts |
+| **Military thrust, lbf (both)** | **50,200** | **29,120 (2 x 14,560 dry)** | +72% | **This is the real afterburner total** (2 x 25,100 = 50,200 exactly). No other record has 50,200 (the Tornado and Su-24 carry 35,270 / 50,700) |
+| **Afterburner thrust, lbf** | **80,000** | **50,200 (2 x 25,100)** | +59% | **Unmatched**: shared with no record; 80,000 is 1.59 times the real figure |
+| Fuel flow, lb/s (dry / afterburner) | 3 / 6 | not found | | The A-6 record has 2 / 0; the F-111's are unique. 3 lb/s dry for two TF30s is low against 29,120 lbf (a TSFC of 0.37), so a 32,663 lb tank would last about 3 hours dry; no cited TF30-P-100 consumption was found. Flight slice item |
+| Ceiling, ft | 60,000 | 66,000 (Wikipedia); Mach 2.5 "at 60,000 ft" (FAS); Jane's F-111A "over 51,000" | -9% | Within the sources' spread; **unique to this record** (retail authored) |
+| Top speed (1 G row top), kt | 1,434 at 36,000 ft | 1,434 kn, Mach 2.5 | 0 | **Real** (2,420 ft/s over 968 ft/s at 36,000 ft is Mach 2.50) |
+| Sea level maximum, kt | 788 | Mach 1.2 at sea level (about 794 kt) | -0.8% | Agrees |
+| G limit (min / max) | -2 / +5 | +7.33 (Wikipedia; no negative limit found) | +5 against 7.33 | **Retail-authored**: the 1 G to 5 G rows are unique. `envMax` 5 is shared with the B-1B, F-104, MiG-25 and Tu-160. Keep or raise (options below) |
+| Hit points | 125 | none | | **Copy** of `A6.PT` (shared with no other) |
+| `sigs` / `maxVisDist` | 118 / 118 / 100 / 100, 262 | none | | **Copy** of the A-6's (`sigs[0]`, `[1]`, `maxVisDist`) |
+| Loaded control (`loadedElevator`, `loadedAileron`, `loadedRudder`) | 41 each | none | | **Copy**: shared only with `A6`, `A6V`, `A7`, `A7V` |
+| `_gpullDrag` 15, `turbulencePercent` 130, `loadedDrag` 60 | | none | | Copies shared with the A-6 and three or six others |
+| `airBrakesDrag` 256, `flapsDrag` 76, `gearDrag` 23, `bayDrag` 0 | | none | | Generic values (`bayDrag` 0 even though the real jet has a bay; the F-111 is not one of the eight records with 25) |
+| Year | 1980 | not fetched (the F-111F entered service in the mid 1970s, from general knowledge, unverified) | | Unique to this record; unverified |
+| Hardpoints | 9 | 9 (8 under-wing, 1 under-fuselage) | | **The count is real by coincidence of layout**: 5 fixed equipment rows plus 4 wing pair rows (8 pylons); the real ninth, the fuselage station between the engines, is the record's jammer row 2 (17 ft aft). The bay is not a row |
+
+Options for John (none chosen):
+
+1. **Keep the record as retail** (documented, audit only; the F-111 then has about 5,000 lb of
+   fuel, 28 minutes of dry flight at the record's 3 lb/s).
+2. **Correct fuel to gallons times density** (32,663 lb), **thrust to 29,120 / 50,200**, and
+   leave the rest. The Tornado and B-52 precedent ("all real" figures when the source is
+   wrong or copied). With 100,000 lb maximum takeoff and 47,481 lb empty, 32,663 lb fuel leaves
+   19,856 lb for stores, a consistent real load; the loadout takes fuel over the maximum
+   only in the B-52 rule (BMB-A2), not here.
+3. **As 2, plus the copied trivia** (hit points, signature) to fitted values. Not
+   recommended: there is no cited real value, the A-6 numbers are of the same class.
+
+Agent note: with the corrections the thrust-to-weight is about 0.36 dry and 0.63 with
+afterburner at 47,481 lb empty plus 32,663 lb of fuel and no stores (80,144 lb), against 0.63
+dry now (50,200 lbf military at the 80,144 lb), so low and medium level acceleration will feel
+different; the Mach 2.5 edge of the 1 G polygon is the record's
+and stays. The afterburner flow (6 lb/s) was probably written for the 80,000 lbf field, so the
+flow and thrust corrections should be taken together (F111-8).
+
+### F-111F shape: state words and the rule 11 fold table
+
+`f111.SH`: 254 runtime faces in the neutral state, 0 lines, 0 billboards, a streamer record
+(pivot (7680, 1536, 6656), hinge scale 40, two points (20992, 0, -9216) and (20480, 0,
+-9216) in raw units; same kind of record as the Tornado's, relation to the mesh
+**unknown**: the point x is 82 and the wingtip is 55 shape units, a ratio of 1.49, the
+Tornado's 48 over 31 is 1.55), **six state words** (`7240`, `7246`, `724c`, `7258`, `725e`,
+`7264`) and **no sweep word, no sweep branch and no swept-wing geometry**. Measured with
+`shape_inspect` and sweeps of values -1, 0, 1 to 8 and a wide range (+/- 400, 1,000 to 32,000):
+
+| Word | Value | Effect | Reading | Status |
+| --- | ---: | --- | --- | --- |
+| `7240` | 1 | +8 faces: two vertical and two horizontal planes behind each exhaust (x -4 and 5 / y -61 to -36), crossed | **Afterburner plumes** (two nozzles, 25 units, 16.7 ft long) | Confirmed by geometry; two vertices sit on the exhaust plane `y -36` |
+| `7246` | 1 | +4 faces: two plates, x -8 to -2 and 2 to 8, hinged on the front edge (y 0, z 4) and rising to z 9 at y -7 | **Dorsal panels (spoilers or an airbrake)** at the wing root, both sides on one word | Confirmed by geometry; no word moves them in the neutral pose |
+| `724c` | 1 | +22 faces (nose 6, main 16) | **Landing gear down** | Confirmed by geometry (lowest point z -11) |
+| `7258` | 0 / -1 / 1 and any other | 0: the neutral flat strip; -1: skins swapped for a drooped strip (+3 / -2 faces); everything else: strip removed (-2 faces) | **Left wing trailing-edge strip, three states** (flap) | Reading by geometry; the sign of "down" is -1 |
+| `725e` | the same | the same, mirrored | **Right wing trailing-edge strip** | As above |
+| `7264` | 0 / 1 / -1 / 2 and other | 0 neutral; 1 and -1 swap the two rudder faces for skewed copies (tail to the right or left, about 34 degrees); other values remove them | **Rudder, three states** | Confirmed by geometry |
+
+There is **no sweep, airbrake, belly brake, door, canopy, hook, slat or roll word**, and no separate geometry for any of them beyond the table. In particular:
+
+- **The belly speed brake and the gear doors are not in the source.** The real jet's main
+  gear door doubles as a speed brake in flight (tailspintopics, "Grumman F-111B", accessed
+  2026-11-15: "the main landing gear door ... also served as a speed brake"; the same
+  description in a Wikipedia mirror). The shape has no door: the gear word adds only plates
+  (nose and main assemblies, no skins). The record carries `airBrakesDrag` 256 (a generic
+  value), so a belly brake panel would be fitted geometry, cut from the belly (see below).
+- The tailerons have **no word**: they are the 6-face plates at z 2 (below).
+
+Both gear and flame words together give 284 faces; `--branches` gives 256 neutral.
+
+**Rule 11 face table** (counted from the word dumps and the neutral face list; "hinge" is
+the front edge of a strip, the spindle of an all-moving panel):
+
+| Piece | Faces | Vertices | Moved | On hinge or spindle | Fixed |
+| --- | ---: | --- | ---: | ---: | ---: |
+| Right wing panel (all faces with x 13 to 55, in neutral; the flap strip `421f`, `4246` turns with it) | 13 | 47 slots, 15 distinct | all 15 about the pivot | 0 exactly on a vertical axis | 0 inside the panel; **5 corners on x 13 are shared with the fixed root fillets** `3f58`, `3f79`, `3f9b`, `40e6`, `4181` |
+| Left wing panel | 14 | 50 slots, 16 distinct | all 16 | 0 | 0; 5 corners shared with `4460`, `4481`, `44a2`, `44c4`, `46a2` (left has one winding more, `4651`, than the right's `4130`) |
+| Right flap strip (`421f`, `4246`), hinge (13, 1) to (53, -2) | 2 | 4 each | 2 each | 2 each | 0 |
+| Left flap strip (`4740`, `4767`), hinge (-12, 1) to (-53, -2) | 2 | 4 each | 2 each | 2 each | 0 (the left root is at x -12, one unit inboard of the panel's -13) |
+| Dorsal panels (`4e8b`, `4ea2` left; `4eb9`, `4ed0` right) | 4 | 4 each | 2 each | 2 each (y 0, z 4) | 0; **no vertex of the four is shared with any neutral face** |
+| Rudder (`491c`, `4943`, two windings) | 2 | 4 each | 2 each | 2 each: (0, -31, 4) and (0, -37, 18) | 0; the trailing top vertex (0, -40, 18) is shared with the fixed fin cap `24bf`, `26b1` (one corner moves off it) |
+| Nose gear (`4997`, `49ae` strut slab; `4d38`, `4d95`, `4d57`, `4d76` crossed plates) | 6 | 4 each | whole assembly | top edge z -5 | 0; **no vertex shared with any neutral face** |
+| Main gear (`4bcd`, `4bec` cross plate; `4c0b`, `4c2a`, `4c49`, `4c68` leg planes; `4c87`, `4ca2`, `4cbd`, `4cd8` triangles; `4aaa`, `4ad1`, `4ae8`, `4b0f`, `4b26`, `4b4d` wheel plates) | 16 | 3 to 4 each | whole assembly | top edge z -3 to -5 | 0; no vertex shared with any neutral face |
+| Afterburner plumes | 8 | 4 each | scaled from the exit plane | the plane y -36 | 0 (two exit vertices (-4, -36, -3), (5, -36, -3) are shared with the nozzle rim) |
+| Taileron right (`2d72`, `2e72` outer; `2d95`, `2e95` root; `2db8`, `2eb8` triangle) | 6 | 3 to 4 | all 6 turn whole | 0 | 0 inside; **two corners (10, -17, 2) and (8, -30, 2) are shared with the fixed root plates** `212c`, `21cb` |
+| Taileron left (`2071`, `20d9`; `1f08`, `1f2b`; `200f`, `202d`) | 6 | 3 to 4 | all 6 | 0 | 0 inside; two corners (-10, -17, 2) and (-8, -30, 2) shared with `1ec2`, `1ee5` |
+
+Fold verdict: no face of a gear piece, flap strip, dorsal panel or rudder has a fixed vertex
+off its hinge, none is selected by a threshold. The wing panel and taileron turn whole, so no
+face folds; the cost is a seam at the shared corners (below).
+
+### F-111F surfaces against the whole-surface gate (for John)
+
+**Wing sweep.** Covered in the swing-wing section: the whole panel (13 and 14 faces) turns
+about a vertical axis; no face folds; the cost is a 4.7 ft seam at the root (options below).
+
+**Tailerons (all-moving, roll).** Each side is one flat plate at z 2: an outer quad (x 10 to
+24, y -17 to -39), a root quad and a root triangle at x 8 to 10 (six faces with the two
+windings), leading edge from (10, -17) to (24, -37), trailing edge (10, -35) to (21, -39),
+a swept trapezoid like the tail of a delta-ish wing. **No vertex of the panel is shared with
+the shape's other faces except the two corners above**, so a whole-panel turn folds nothing
+and opens at most a seam on the fixed root plate edge (10, -17) to (8, -30). A turn about a
+lateral spindle through the root chord midpoint, about (9, -27, 2), moves the leading root
+corner (10, -17) 10 units off the spindle: 3.4 units (2.3 ft) at 20 degrees. The real
+F-111's roll control and sign convention were not re-verified here: the F-111 rolls with
+**differential tailerons and wing spoilers**, in the plan's description and in the general
+literature; rule 12 (elevon pitch plus roll, the Tornado's taileron precedent, TOR-3) covers
+the sign. Options (none chosen): (a) whole panels, pitch plus differential roll, fitted limit;
+(b) pitch only; (c) leave fixed.
+
+**Flaps.** The wing trailing strip (`421f`, `4246` and the left pair) is **one full-span flap
+per wing** (x 13 to 53, taper 6 to 3 units), three source states (neutral, down about 18 to 27
+degrees at the pose, removed). Real: full-span double-slotted flaps (the plan; not
+re-verified). Whole strip with two vertices on the hinge and two moved. The up pose (value 1,
+the strip deleted) is not a pose, as in the B-52's flaps. Options: (a) rig the strip as flaps
+turning about the front edge; (b) leave on the three words.
+
+**Spoilers and the dorsal panels.** The four panels of word `7246` are the only spoiler-like
+geometry; at the wing root fuselage junction they are airbrake or spoiler surfaces. Real wing
+spoilers sit on the outer upper wing; the panels' real name is **unknown here**. Options: (a)
+rig them as one speed brake (both sides together, hinge on the front edge); (b) as roll
+spoilers (differential); (c) leave. Recommended in the plan: (a), fitted.
+
+**Slats.** None in the source. Real: full-span slats. The shape has no slat faces, so none
+(the Tornado left slats the same way).
+
+**Rudder.** Whole panel, hinge from (0, -31, 4) to (0, -37, 18), 34 degrees in the source
+poses; rig the two faces from the neutral pose with a fitted continuous limit (rule 11 gives
+2 moved, 2 on hinge, 0 fixed). The trailing top corner opens 3 units from the fixed cap at
+full lock (2 ft), as the F-117's cap seam.
+
+**Belly speed brake and gear door.** **Not in the source** (see above). Options: (a) leave
+the real brake unrigged (the source has none; the record's `airBrakesDrag` stays); (b) author
+a fitted belly panel, cut from the belly skin and used as the gear door too, as the F-117's
+bay doors were cut (F117-5, fitted, John's call); (c) drive the dorsal panels as the speed
+brake only. Agent note: nothing in the retail source shows a door on the gear, so the "gear
+door that is also the brake" would be wholly authored geometry.
+
+### F-111F gear
+
+All numbers at 2/3 ft per unit (header scale 9), measured on the gear word `724c` = 1
+(lowest point z -11, the neutral belly at z -6):
+
+| Part | Measurement |
+| --- | --- |
+| Nose gear | One strut slab at x -1 (y 38 to 46, z -7 to -5) and crossed plates at x 0 (y 39 to 42) and y 41 (x -1 to 1), reaching z -11. Wheel centre about y 41, 27.3 ft ahead |
+| Main gear | One assembly of 16 faces: two leg planes at **x -8 and x +6** (y -4 to 1, z -10 to -4; **one unit off symmetry**, the nose is at x 0), a cross plate y -1 (x -8 to 6, z -10 to -5), side triangles, and six wheel plates (centre x -3 to 3 and two side plates x -7 to -3 and 3 to 6) at y 1 to 6, z -9 to -4. Wheel centre about y 3.5 |
+| Wheelbase | 37.5 units, **25.0 ft** |
+| Track | leg to leg 14 units, **9.3 ft** (wheel to wheel 8 to 9 ft) |
+| Lowest point | z -11 (nose), -10 (main): 5 and 4 units under the belly, 3.3 and 2.7 ft |
+| Doors | **None.** The plates carry the whole picture; Jane's says the nose unit retracts forward and the main gear is "a triangulated structure with hinged legs which are almost horizontal when the gear is extended" (`F111.INF`), which the shape does not show (the main legs are near vertical) |
+| Retraction | Not in the source. Rigid whole assemblies about the top edge, the shared gear rig family (the Tornado's): none of the 22 faces shares a vertex with a neutral face |
+
+No public wheelbase or track was found for the real jet in this pass. The record holds
+`gearDrag` 23 (the common value) and `gearPitch` 0.
+
+### F-111F real size (spread and swept)
+
+Measured on the neutral state: x -55 to 55, y -41 to 69, z -6 to 20; gear down low z -11.
+Header exponent 9, so **2/3 ft per unit**, the Tornado's and the B-52's convention. TORE's
+generic draw scale is 1/3 ft per unit (`aircraft_scale.rs`); the F-111 must be drawn at the
+header scale, as the Tornado and B-52 are (BMB-A1), or it is half size (36.7 ft long).
+
+| Axis | Units | At 2/3 ft | Real | Verdict |
+| --- | ---: | ---: | ---: | --- |
+| Span, spread (wingtips x +/-55) | 110 | **73.3 ft** | 63 ft | **+16.4%** |
+| Length (nose probe to tail, y -41 to 69) | 110 | **73.3 ft** | 73.5 ft | **-0.2%** |
+| Height, gear down (z -11 to 20) | 31 | **20.7 ft** | 17.1 ft | **+21%** |
+| Height, gear up (z -6 to 20) | 26 | 17.3 ft | | the belly to the fin tip |
+
+The shape is **true length, too wide and too tall**. Leading-edge sweep in the shape: from
+(13, 10) to (53, 0), 14 degrees from lateral (the real minimum is 16 degrees); the wing root
+chord is 15 units (10 ft against Jane's 6 ft 11 in for the real movable root).
+
+**Swept.** The shape cannot be measured swept: it has no sweep. Rotating the whole panel about
+the smallest-circle pivot (13, 2.5) (below) by the real 56.5 degrees (16 to 72.5) puts the
+leading tip at (34.1, -33.9), the trailing tip at (28.8, -35.0): a swept span of **45.5 ft
+at the leading tip, 38.4 ft at the trailing tip (and 41.9 ft at the tip mid-point), against
+the real 32 ft: +20% to +42%**. A wing 17% too long (tip 42 units from the root pivot, 28 ft,
+against the real 23.5 ft derived below) grows into a wider swept span, and the swept
+trailing corner at y -35 reaches the tailerons (y -17 to -39, plate z 2 as the wing): see the
+swing section.
+
+Per-axis factors by the `aircraft_scale.rs` method (`real_ft / (extent_units * 2/3)` here,
+because the base is the header scale): **x 0.859 (63 ft), y 1.002, z 0.827** (height 17.1 over
+20.7). Options for John (none chosen):
+
+1. Keep at identity (a 73-ft wide, 20.7-ft tall F-111).
+2. Per axis to real (the Mirage 2000, Mirage F1 and F-117 precedent, "per axis to real"),
+   factors above. Swept span would then be about 38.7 ft (+21%) and the root pivot at 7.4 ft
+   (0.859 times the 8.7 ft root). The gear low point z -11 becomes -9.1 units (6.1 ft). Moves
+   the stations, gear, the fixed fillets and the rig with it.
+3. Per axis only on height and span to the real gear-down height and spread span, and cut the
+   outer wing panel 17 percent shorter instead (new geometry, fitted): fixes the swept span
+   too. John's call (the Mirage precedent adds geometry only for doors).
+4. Uniform only (one factor cannot fit: 0.859 for span, 1.0 for length, 0.83 for height).
+
+Agent note: 0.859 is near the span, length and height ratio mismatch the F-117 had (31%,
+4%, 13%): the length is the one measure that already matches, so the per-axis table keeps y at
+1.00, as the Mirage 2000 did.
+
+### F-111F stations (survey)
+
+Location byte: 1 Fuselage, 4 Wing. Feet divide the record units by three (right / up /
+forward); at 2/3 ft per shape unit one raw unit is half a shape unit. All nine rows, in order:
+
+| Row | Location | Flags | x / y / z | Feet right / up / fwd | Max items | Weight class | Default | Role |
+| ---: | --- | ---: | --- | --- | ---: | ---: | --- | --- |
+| 0 | Fuselage | `0x0008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `VIS240.SEE` | Fixed visual sensor |
+| 1 | Fuselage | `0x0008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `A6R.SEE` | Fixed radar |
+| 2 | Fuselage | `0x0008` | 0 / 0 / -50 | 0 / 0 / -16.7 | 1 | 0 | `A6.ECM` | Fixed jammer, aft (the real fuselage station between the engines) |
+| 3 | Fuselage | `0x0008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `AV8IR.SEE` | Fixed infrared row |
+| 4 | Fuselage | `0x0008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `PAVESPK.SEE` | Fixed designator row |
+| 5 | Wing | `0x07e5` | 29 / -12 / -4 | 9.7 / -4.0 / -1.3 | 2 | 70 | `GBU28.JT` | Wing pair, pylon 1 (inner) |
+| 6 | Wing | `0x07e5` | 41 / -12 / -8 | 13.7 / -4.0 / -2.7 | 2 | 70 | `MK82P.JT` | Wing pair, pylon 2 (inner) |
+| 7 | Wing | `0x07e5` | 54 / -12 / -13 | 18.0 / -4.0 / -4.3 | 4 | 70 | `AGM65G.JT` | Wing pair, pylon 3 (outer) |
+| 8 | Wing | `0x07e5` | 65 / -12 / -17 | 21.7 / -4.0 / -5.7 | 2 | 60 | `MK82P.JT` | Wing pair, pylon 4 (outer) |
+
+Each wing row carries the pair flag `0x4`: a row is a left and a right pylon, so the four
+rows are **the eight wing pylons**, each pair's "max items" counts both sides (2 is one
+store a pylon, 4 is two a pylon). Mask `0x07e5` admits everything: bombs `0x100`, tanks
+`0x200`, **designator pods `0x400`**, missiles `0x80`, `0x40`, `0x20`. Weight class 70 is
+7,000 lb a store (class times 100 lb, the F-117 and stores-on-pylons reading), above the real
+5,000 lb a pylon (Wikipedia: "each pylon had a capacity of 5,000 lb"); the outer row 8 is 6,000 lb.
+
+**What the rows land on.** At the header scale the rows are at 14.5, 20.5, 27 and 32.5 shape
+units out, inside the wing (x 13 to 55): at 2/3 ft per unit the rows land on the mesh, as the
+Tornado's did, which settles the units question (the rows read as thirds of a foot). The
+**height** -4 ft is exactly the belly plane (z -6 units), 5.3 ft under the wing's lower
+skin (z 2 units = +1.3 ft): the store axis is at the fuselage belly depth, not hung from the
+wing. The **forward** offsets run 20 degrees aft (13 over 36 raw): against the spread
+panel, whose trailing edge is straight at y -5 and mid-chord runs from y 2.3 at row 5's span
+to y 0.1 at row 8's, **row 5 is 4.3 units aft of mid-chord, row 6 5.5, row 7 7.3 and row 8
+8.6, and rows 7 (y -6.5) and 8 (y -8.5) hang 1.5 and 3.5 units behind the trailing edge**
+(1.0 and 2.3 ft). The rows follow a swept line, not the panel's own mid-chord, so the
+TOR-14 move to mid-chord is needed here too (all four rows).
+
+**The real nine.** Real: nine hardpoints (Wikipedia), eight under-wing plus one under the
+fuselage between the engines (ECM or data link pod), plus two attach points in the weapons
+bay. Mapping:
+
+| Real station | Record row |
+| --- | --- |
+| Four pylons under each wing: the **inner two swivel** to align with the fuselage as the wing sweeps; the **outer two are fixed** and jettisonable (Jane's in `F111.INF`; Wikipedia: "the inner two pylons on each wing rotated to align with the fuselage, while the outer two were fixed") | rows 5 and 6 (inner, swivel), rows 7 and 8 (outer, fixed) |
+| Aft fuselage station between the engines (ECM or data link pod) | row 2, `A6.ECM` (no store; the jammer is the equipment) |
+| Weapons bay | **no row** (below) |
+| AIM-9 shoulder rails "on the four inner swiveling pylons" (Wikipedia) | **no row** (authored, below) |
+
+**Internal weapons bay (no row).** Real: Jane's (`F111.INF`): "Tactical fighter versions carry
+one M61 multi-barrel 20 mm gun or two 750 lb bombs in internal weapon bay." Wikipedia: the bay
+holds two 750 lb M117 bombs, one nuclear bomb, practice bombs, a removable M61 cannon or
+auxiliary fuel tanks, and **on the F-111C and F-111F the AN/AVQ-26 Pave Tack pod on a rotating
+carriage that keeps it inside the bay when not in use**. National Museum of the USAF fact
+sheet, Pave Tack (accessed 2026-11-15, via a search result): the pod is in a roll cradle that
+fits the weapons bay, virtually filling it; its turret holds an infrared camera, a laser
+rangefinder and a designator; the pod weighs about 1,385 lb (other sources 1,300 lb).
+
+The shape has **no bay geometry** (no wall or door in any word; the belly is flat plates at z
+-5 and -6, x -3 to 3, y -29 to 56). Real bay size was not found in a public source.
+So a bay is wholly authored, labelled **fitted** (standing decision 2).
+
+**Real loads.** Cited: the F-111Fs "dropped almost 80% of the war's laser-guided bombs,
+including the penetrating bunker-buster GBU-28" in Desert Storm (Wikipedia, accessed
+2026-11-15); "tank plinking" with laser bombs; a pylon rating of 5,000 lb; bay two M117 or Pave
+Tack; AIM-9 for self-defence on shoulder rails. The retail defaults (`GBU28.JT:1`,
+`MK82P.JT:2`, `AGM65G.JT:1`) fit the A-6 pattern, not the F-111F's (the real jet carried no
+Maverick in the sources fetched; the plan's AGM-65 is retail).
+
+**Proposal (none decided, labelled fitted or opinionated), reusing TOR-14 and the shared bay
+code:**
+
+1. **Wing rows 5 to 8.** Keep the four source rows as the eight pylons (source-derived
+   count and layout). Re-place them with `station_move` at the panel's mid-chord, exactly as the
+   Tornado's rows 7, 9 and 10 (`swing::mid_chord`, TOR-14): rows 5 and 6 on the inner part
+   and rows 7 and 8 on the outer. A new mid-chord function reads the F-111's panel edges
+   (leading (13, 10) to (53, 0), trailing y -5 shape units, as `WING_LEADING` and
+   `WING_TRAILING` read the Tornado's) times the 2/3 ft scale.
+2. **Swivel.** Rows 5 and 6 swivel (`swivels(id, row)`; `has_swivel`), rows 7 and 8 do not
+   (Jane's, cited; John decision 19's rule for the Tornado). The fixed outer pylons need a
+   rule (below): they turn with the wing, so a store hung from one points 56 degrees off
+   the fuselage at 72.5 degrees sweep. The fixed pylon length TOR-14 settled (3.3 ft) fits the
+   inner pylons (panel chord 9.7 and 8.7 ft) and the outer (7.7 and 6.7 ft).
+3. **AIM-9 rails.** Two authored rail rows on the inner swivelling pylons (shoulder rails
+   as the Tornado's TOR-6b row 8; the F-14's `Hang::Shoulder`), one on each of rows 5 and 6;
+   fitted, with a mask of the rail missiles only; labelled opinionated (cited: Wikipedia).
+4. **Bay.** One authored `Location::Magazine` row set, appended after row 8 as stations 9
+   and 10 (the batch A rule: not source rows), re-placed by `placed_on` in
+   `tore_sim::combat::bays::STATIONS`, with a `bays::OPENINGS` row and two or four fitted belly
+   door leaves (the F-117's F117-5 mechanism, the B-52's and B-2's grid when they land).
+   Contents: either **one fitted Pave Tack body on its rotating cradle** (a rotation
+   animation, new, about the cradle's lateral axis, out for the pod, in for stowage) or **two
+   Mk 82-class bombs** (the real two M117; there is no M117 record). Default: the pod. The
+   bay row mask clears the designator bit `0x400` for bombs (the B-2 rule, BMB-A2) and the pod
+   uses its own row. Everything inside the bay counts as not an external store for the
+   radar signature (the F-22's rule).
+5. **Masks.** Clear the designator bit `0x400` on the four wing rows (the real jet had no wing
+   designator pod; B7) and cap the weight classes at 50 (5,000 lb a pylon, cited): GBU-28 at
+   4,500 to 4,700 lb still fits the inner rows. Whether a store at a fixed outer pylon is limited
+   is John's call below.
+
+### F-111F swing wing
+
+**Fact (cited).** The wing sweeps from **16 to 72.5 degrees** (the game's Jane's text
+`F111.INF`: "from 16o to 72o 30'"; Wikipedia: "varied between 16 and 72.5 degrees (full
+forward to full sweep)"; FAS DoD 101: 16 to 72.5), a span of 63 ft spread and 31 ft 11 in
+swept. The sweep angle is the leading edge's from the lateral axis (the shape's spread
+leading edge is 14 degrees, the tail end of the 16). The real schedule is chosen by the
+crew, not by speed: takeoff and landing at 16, the dash at 72.5; a **speed schedule would be
+fitted**, as the Tornado's and the MiG-23's are. Real practice: Mach 1.2 at sea level, Mach
+2.5 at height, so the full sweep is also the dash.
+
+**The shape is the 16 degree pose** (above): 13 and 14 faces a side move, plus the 5 fixed
+root fillets a side (the `7258` and `725e` flap strips turn with the panel).
+
+**Pivot, as measured and as derived.** Derived from the real spans: the panel pivot lies
+at x = 31.5 - L cos 16 = 8.95 ft, with L = (31.5 - 15.98)/(cos 16 - cos 72.5) = 23.5 ft the
+distance from pivot to tip along the leading edge. **The shape's root edge is at x 13 =
+8.67 ft**, 0.3 ft from that derived pivot: the mesh already places its root at the real pivot
+span. The panel's root edge runs along x 13 from y -5 to y 10 (15 units, 10 ft), and its
+five corner vertices lie on that line, so **no single vertical axis passes through all of
+them**. The smallest circle round the root corners is centred (13, 2.5) with radius 7.5
+units (as TOR-3 found for the Tornado's glove corners), which opens the root seam by
+**2 R sin(56.5/2) = 7.1 units (4.7 ft) at the full turn**. Options (none chosen):
+
+1. **Whole panel about (13, 2.5)** (fitted, TOR-3's circle rule), accept the 4.7 ft root
+   seam. A root seam this size is visible.
+2. **As 1, plus move the root corners inboard** into the fuselage along the span axis, as
+   TOR-12 did for the Tornado (`ROOT_SHIFT_FT`): the fuselage half-width at the wing is x 9
+   (the root fillets sit between 9 and 13), so a shift of 4 units (2.7 ft) closes the seam
+   to fuselage depth; fitted by measurement in F111-3.
+3. **Author a fixed glove plate** over the root (the Tornado's TOR-5b "glove plate"). New
+   geometry, John's call.
+
+The swept pose: the leading tip lands at (34.1, -33.9) shape units, so the tip is 22.7 ft
+from the centreline and the swept span is 45.5 ft (+42%) against the real 32 ft; the
+trailing corner (28.8, -35.0) crosses the tailerons (x to 24, y -17 to -39) and overlaps
+their plate in plan (both at z 2). Whether the tailplane sits below the swept wing in the real
+aircraft was not re-verified. Options: (a) accept the overlap (the plates are coplanar, with
+a z-fight); (b) lower the wing panel 0.5 ft when swept (opinionated); (c) shorten the
+outer panel by 17% (new geometry, the per-axis option 3 above) which also gives a 32 ft
+swept span; (d) per-axis x factor 0.859 (swept span 38.7 ft, still overlaps).
+
+**How `swing.rs` applies.** `crates/tore-sim/src/combat/swing.rs` is the Tornado's alone:
+`SWEEP_MIN` 25 and `SWEEP_MAX` 67 are module constants, the schedule
+(`SWEEP_FROM_KNOTS` 304, `SWEEP_TO_KNOTS` 600) is a pair of constants, the pivots
+`PIVOT_R`/`PIVOT_L` (6.5, -1.35, 0.465 shape units), the placed-panel outline
+(`WING_LEADING`, `WING_TRAILING`, `ROOT_SHIFT_FT`) and `FEET_PER_UNIT` 2/3 are constants, and
+`swivels` and `has_swivel` test `id.source() == AircraftId::Tornado`. `wing_turn(speed, flaps)`,
+`swept`, `unswept`, `mid_chord`, `pylon_swivel`, `pylon_length` take no aircraft. The
+callers (`tornado_animation.rs`, `pylons.rs`, `stores_preview.rs`, `replay/convert.rs` at
+`devices[9]` for the speed, `pod_clearance.rs`) all use the module constants directly. To reuse it
+for the F-111 (and the B-1B, Tu-160 and Tu-26, standing decision 3), the functions need
+a per-aircraft **`SwingSpec`** (min and max sweep, from and to knots, pivot, panel outline,
+swivelling rows), selected by `AircraftId::source()`, with the Tornado's values the default
+so its tests and the replay conversion stay byte for byte. That refactor is one change shared
+by four aircraft and four agents work in parallel on its callers: it needs **one owner**
+(question below). The F-111 values would be: sweep 16 to 72.5 (cited), pivot (13, 2.5)
+shape units (the rule-11 circle, fitted), rows 5 and 6 swivelling (Jane's), fixed outer
+rows 7 and 8, `FEET_PER_UNIT` 2/3 (shared).
+
+**Schedule.** The wing turn is `(72.5 - 16) = 56.5 degrees` over a speed band, flaps hold
+it out (rig only, no flight tables, the Tornado's and MiG-23's rule). Options (for John):
+(a) the Tornado's 304 to 600 kt, linear (about 0.19 degrees a knot, the schedule John chose
+on 2026-11-12 for the Tornado at "350 mph"); (b) a later band for the heavier, faster jet:
+spread to 250 kt, full at 650 kt (about Mach 1.0 at sea level, Mach 1.1 at 36,000 ft;
+fitted); (c) by Mach rather than speed (a swept wing at supersonic dash). Recommended (b)
+with the flaps rule, all fitted. The real aircraft is flown by a lever, so the schedule is
+a visual approximation.
+
+### F-111F sensors (B7)
+
+All five fixed rows are internal equipment (flag `0x8`). Raw ranges are in the record's units
+(6,076 per nautical mile, so 60,760 is 10 nm):
+
+| Record | Reading | Real F-111F | Verdict |
+| --- | --- | --- | --- |
+| `PAVESPK.SEE` (`si_names` "Pave Spike", "AN/ASQ-153 Pave Spike", 425 lb, flags `0x1`, arcs 32,767 (full), range 60,760 both zones) | the Tornado's and F-117's file, byte for byte | The F-111F carried **Pave Tack (AN/AVQ-26)**, not Pave Spike (Wikipedia, USAF museum): a FLIR, laser rangefinder and designator in a turret, in the bay on a rotating cradle | A **stand-in**. The laser-designator function matches; the name and weight do not (Pave Tack 1,300 to 1,385 lb against 425). The laser bombs need a designator row |
+| `AV8IR.SEE` (no names, arcs 10,920 / 8,190 (about 60 and 45 degrees), range 91,140 (15 nm)) | the AV-8B's infrared row | The Pave Tack's FLIR is the real infrared sensor | Used with the pod as the **FLIR half**; a stand-in |
+| `A6R.SEE` (arcs 10,920 / 8,190, ranges 303,800 (50 nm) and 151,900 (25 nm)) | the A-6's radar row | Real: AN/APQ-146 terrain-following radar and AN/APQ-144 attack radar (general knowledge, not re-fetched) | A stand-in: the A-6's search radar; no real-radar record exists in the media. Keep as retail |
+| `A6.ECM` (30 chaff, 30 flares, 35 percent chance each, radar-deception 30, IR-deception 40, jam power 100) | the A-6's ECM block | Real F-111F: internal jammers and chaff and flare dispensers (not re-fetched) | Keep as retail; the aft row 2 position (-16.7 ft) matches the real aft fuselage station between the engines |
+| `VIS240.SEE` | the visual sensor shared by the A-6, Tornado, B-1B | | Keep |
+
+B7 ("never hang a sensor or designator pod on a station the real aircraft does not have"):
+**the Pave Tack station is real** (the bay), unlike the Tornado's and B-1B's pods, so a fitted
+pod body in the bay is allowed (the F-117's IRADS turret precedent). The wing rows must **not**
+admit designator pods: mask `0x07e5` includes `0x400` on all four rows (a designator pod
+audit placement), and the real F-111F had none on a wing pylon. Options (none chosen):
+
+1. **Keep rows 3 and 4 as the FLIR and the laser, drawn as the fitted Pave Tack** on its
+   bay cradle, relabelled "AN/AVQ-26 Pave Tack" in presentation only (the F-117 relabel
+   precedent, decision 26), the record's files untouched.
+2. As 1, with no drawn pod (the Tornado's B7 precedent: fixed rows, nothing on a station).
+3. Replace the two files (not recommended: a rename of retail data).
+
+### F-111F HUD and cockpit (for John)
+
+**Fact.** `F111.PT` names `ac130.HUD` (4,608 bytes). Its strings are `~ac130`, `~ac130h`,
+`~ac130s`, `~ac130_p`, `~ac130_w`, `hudsym`, `GEAR`, `FLAP`, `BRAKE`, `HOOK`, `winfont`: the
+AC-130 panel family (`~AC130H.PIC` is the cockpit picture, `~AC130S.PIC`, `~AC130_P.PIC`). The
+A-6, EA-6B and Su-24 records name the same file; the B-52 flies it in TORE (BMB-A1). **No F-111
+or A-6 cockpit art exists** in `FA_1.LIB`; so retail flies the F-111F with the AC-130 panel.
+`Aircraft::hud()` is a per-aircraft table, so the F-111 needs one arm (`AC130.HUD`, stem `AC130`,
+`~AC130H.PIC`); `hud_aperture.rs` has the whole-picture aperture for the AC-130 family
+and the B-52 ((1280, 490), the full picture).
+
+Options (none chosen): (1) **follow the record: the AC-130 panel and the whole-picture
+aperture**, as the B-52 (opinionated, John's decision 14, 2026-11-15), the retail binding;
+(2) substitute another panel (`F18.HUD`, no evidence); (3) author an F-111 panel (invented).
+The crew is two side by side; the player is the pilot (standing decision 6). **Eye:** the
+record's `viewOffset` is (0, 20, 60) raw, 6.7 ft up and 20 ft forward; the canopy top is at
+z 6 units (4.0 ft), so the eye sits 2.7 ft above the mesh (20 ft forward is y 30 units,
+inside the canopy's y 13 to 46 range); a fitted per-aircraft eye (as the F-117's) is
+likely needed in F111-7. The bomb sight type of `ac130.HUD` was not read here.
+
+### F-111F unknowns and next steps
+
+- The streamer record's relation to the mesh.
+- The real bay dimensions, the Pave Tack pod's size and the door count (not found).
+- The F-111F's year, fuel flow and TF30-P-100 consumption (not found).
+- Whether the real tailplane sits below the swept wing (not re-verified).
+- The sign of the flap word `7258`/`725e` poses in the rig (the probe will settle it).
+- The outer-pylon rule at sweep: one fetched secondary source says the outer pylons can be loaded
+  only with the wings spread below 26 degrees (conflicting accounts; Wikipedia mirror,
+  forum posts); the primary technical order was not found.
