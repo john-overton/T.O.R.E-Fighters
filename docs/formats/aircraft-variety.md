@@ -10580,3 +10580,176 @@ edge and 1.6 degree rest sweep (T26-3); the Su-34's G limit (+9, the page lists 
 +7), ceiling (55,000 ft, the usual figure is 48,000) and retail designator-pod flag on rows 6
 and 7 (two pod placements); the Tu-26's glove-row bomb capacity (cut with the AS-16 count);
 the Tu-26 bay's admission of the Harpoon and AM-39 with the AS-16 bit.
+
+## Tu-95 shape and rig (T95-2/3, 2026-11-15)
+
+Implementation, slices T95-2 and T95-3 run together (bomber batch C), Claude Sonnet. The
+coordinator's decisions (`BOMBERS-DECISIONS-C.md`, Tu-95 items 3 to 5 and 11, first pass for John
+to review) are applied as written. The Tu-95 now loads through its own rig,
+`crates/tore-app/src/tu95_animation.rs` (the `variety_animation` row keeps the layout, the scale and
+`supported`), with its own probe module (`aircraft_animation_probe/tu95.rs`), the propeller discs in
+`variety_rotors`, a `render-tu95-skin` scenario and a `flight-animation-tu95` battery entry. Nothing
+in the simulation changed. Frames are local only, in `.local/m3-aircraft/frames/T95-2/`.
+
+Provenance: the face lists, corners and hubs are **spec-derived** (retail `TU95.SH`, read at load and
+refused if they differ; no retail bytes are committed). Every limit, hinge line and timing below is
+**fitted** (agent decisions, 2026-11-15) because the shape has no motion words and no source gives
+them.
+
+### Size and scale (T95-2)
+
+BMB-C1 had already put the Tu-95 at 2/3 ft a unit (`debris::scale`, the rig spec, the gear low point
+`14 x 2/3 = 9.33 ft`); every consumer was checked and nothing is still at 1/3. The retail-reading test
+`crates/tore-import/tests/tu95_shape.rs` (skips without media) pins the numbers: code 9,148 bytes,
+header scale 2, neutral x -123 to 124, y -130 to 96, z -12 to 42, gear down low z -14.
+
+| Axis | Units | Feet at 2/3 | Real | Difference |
+| --- | ---: | ---: | ---: | ---: |
+| Span | 247 | 164.7 | 164.4 ft | +0.2% |
+| Length, nose to tailplane tips | 226 | 150.7 | 151.6 ft | -0.6% |
+| Height, fin tip to gear contact | 56 | 37.3 | 39.8 ft | -6.1% |
+
+The gear stays as drawn (no stretch): the ground frames show the wheel plates on the pavement and the
+nacelles clear of it. The eye is still the shared default (10 ft forward, 7 ft up), far behind the
+drawn flight deck (about 59 to 67 ft forward): T95-7 owns it. The hit volume is the shared 28 ft sphere
+on an 82 ft half-span, so gunfire and fuzed weapons only reach the middle of the aircraft (the B-52 and
+the transports are the same; flagged, not changed).
+
+**Skin.** 155 runtime faces, one texture `_TU95.PIC`. Twelve exact-vertex twin pairs (wing, fin, rudder,
+tailplane panels), all with opposite stored normals, so the smooth path pairs them and hides the rear
+member; the five propeller groups (four discs, the left outboard one in two halves) are eight coincident
+faces each. `render-tu95-skin` (top and under, gear down, zoom 0.5) passes.
+
+**Decals.** The export path shows two `E0` runtime decal slots: slot 4 `1f00` under the right wing
+(z -2, one unit under the wing's z -1) and slot 3 `2710` on the left upper wing (z 0). The runtime
+projector omits both, so the wing draws plain with no blank or skin-filled patch, as for the B-52 and
+Tornado. No clipping and no fix needed.
+
+**Damage looks.** `TU95_A.SH` 154 faces, `_B` 33, `_C` 146, `_D` 45 load at the intact shape's header
+scale. Bounds (units): A x -126 to 67, y -141 to 84, z -12 to 42 (the body with the right wing cut at
+x 67; it draws torn geometry 3 units past the left tip and 11 units, 7.3 ft, aft of the intact tail);
+C x -124 to 124, y -93 to 72, z -11 to 10 (the wing section without the fuselage ends or fin); B x -29
+to 64 and D x -34 to 33 are the smaller pieces. No whole-body variant is
+registered (`debris::damage_variant`), so a destroyed Tu-95 draws the intact skin with regional cuts, as
+the B-52 does (coordinator decision: kept).
+
+### Word map and the rule 11 fold table
+
+| Word | Faces | Reading | Rig |
+| --- | ---: | --- | --- |
+| `33b0` | +6 | Gear: left main plate, right main plate, nose plate, two windings each | Appended to the shape, hidden at gear 0 |
+
+That is the only state word. The surfaces and propellers are source faces with no word.
+
+| Surface | Faces | Vertices | Move | On the hinge | Fixed |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Rudder | `2117 2135` (two windings) | 3 each | 1 | 2 (the forward edge, shared with the fin faces `20d3 2154`) | 0 |
+| Tailplane | right `20f1 2104`, left root `2196 21a9`, left outer `23fb 240f` | 4 each | all | 0 (the panels share no vertex with any other face) | 0 |
+| Wheel plates (three) | two windings each | 4 each | 3 | 1 (the forward top corner) | 0 |
+| Propeller discs (four) | kept faces, 2 / 2 / 2 / 4 | 4 each | all | 0 | 0 |
+
+No panel folds: each turns as a whole rigid piece (the probe measures the largest inter-vertex distance
+change at 0 ft).
+
+### Propellers (T95-3)
+
+Each propeller is one blur disc of eight coincident faces (four image phases, both sides). They spin
+through `variety_rotors` exactly as the C-130, AC-130 and E-2C discs do: `keep_face` drops three of the
+four phases of each winding (30 faces) and `animate` turns the kept faces about the disc hub, axis Y,
+at the shared 15 rev/s while the engine runs with fuel (rest at phase 0 otherwise). All four turn the
+same way, one disc per engine; the art cannot show contra-rotation. `with_export_state` (the original
+game's own phase choice) drops exactly the same 30 faces, so the kept first phase matches it.
+
+| Disc | Kept faces | Hub (shape units) |
+| --- | --- | --- |
+| Right inboard | `1aa2 1b27` | (35.25, 47.5, -1.5) |
+| Right outboard | `1d20 1da5` | (65.5, 30, -2.5) |
+| Left inboard | `243f 24c4` | (-34, 47.5, -1.5) |
+| Left outboard | `2610 2694` (upper half), `2850 28d5` (lower half) | (-64, 30, -2.5) |
+
+**The split disc.** The left outboard disc is two coplanar half panels (y 30) along a slanted seam from
+(-75, -2) to (-53, -1). Both halves turn about the one hub by the one angle, so they stay a single rigid
+disc and the seam never opens (the rig test and the probe check the halves' angles are equal).
+
+**Size, left as drawn.** The discs are 22 by 19 units, 14.7 x 12.7 ft, against the real 18.4 ft
+(AV-60, 5.6 m). Not changed (coordinator decision).
+
+**Corners below the ground line.** A turning 22 x 19 quad has its corners 14.2 to 14.7 units from the
+hub, so a corner pointing down at some angle reaches 2.0 to 3.0 units (1.4 to 2.0 ft) under the 9.33 ft
+gear contact line (lowest corner z: right inboard -16.2, right outboard -16.7, left inboard -16.0, left
+outboard -17.0). The blur art draws a ragged circle with transparent corners, and the ground frames
+(engine off, discs at rest, `ground-side`, `ground-side-low`, `ground-front`) show the disc bottoms
+close above the pavement with the wheels on it, and no quad corner shows. The corners at a spinning
+angle were not captured; no fix applied.
+
+### Rudder, tailplane, ailerons and flaps
+
+- **Rudder (fitted).** The triangle turns about its forward edge, (0,-121,3) to (0,-112,42), to +X for a
+  positive command and -X for a negative one. **Travel 25 degrees (0.436 rad) each way**, fitted: there
+  is no rudder word in the shape and no real limit was found. The free vertex (0,-124,42) is 11.69
+  units from the hinge line and moves 4.94 units (3.3 ft) out of the fin plane at full travel.
+- **Tailplane (fitted).** The six panels pitch together about a lateral X axis through the root chord
+  midpoint (0,-105,9), so the shared root edges (x 0 and x -5) never open. **Travel 10 degrees (0.1745
+  rad) each way**, fitted; a pull raises the trailing edge. The tip corner is 25 units aft of the axis
+  and moves 4.3 units (2.9 ft) up at full pull. The real Bear has a fixed stabilizer with elevators; as a
+  whole-tailplane pitch this is a fitted stabilator (the coordinator's decision, `Expectation::Required`
+  on the elevator).
+- **Ailerons and flaps: none.** The wing is one large facet a side with no whole strip, so the aileron
+  and flaps levers are `Expectation::Unsupported`: they move nothing and the probe fails the run if they
+  ever do (the B-52 roll precedent). Roll and the flap drag still come from the record's rates.
+
+### Gear (word `33b0`)
+
+Six flat wheel plates (a 6 by 8 unit profile, 4 x 5.3 ft, Jane's "tyres approx 1.50 m") in longitudinal
+planes: left main x -33, right main x 34, y 3 to 9, z -14 to -6; nose x 0, y 70 to 76, z -14 to -7. Jane's:
+"all units retract rearward, main units into nacelles". Hinges and timing are **fitted**:
+
+- Each plate folds **in its own plane**, rearward and up, **90 degrees** about a lateral X axis through its
+  **forward top corner**: mains (y 9, z -6), nose (y 76, z -7). A pivot on the forward edge means no
+  point is ever lower than the gear-down pose (the probe checks every one of 202 values).
+- Stowed, the mains lie at y 1 to 9, z -6 to 0, inside the nacelle section (underside z -7, ridge about
+  z 0), and the nose plate at y 69 to 76, z -7 to -1, inside the fuselage. The path passes through the skin
+  on the way (no doors are drawn).
+- **Timing:** by retraction progress `p = 1 - gear`, the mains turn over p 0 to 0.8 and the nose plate over
+  p 0.2 to 1, so the mains fold first and the nose plate last (and unfolds first). Hidden at gear 0.
+- Gear down is the source pose: the lowest point is the contact line, z -14 (9.33 ft), unchanged.
+
+### Exhaust, bay, probe
+
+No afterburner and no flame word: exhaust and brake are `Expectation::Unsupported` and `flame()` is
+false; nothing breaks. The shape has no bay word (T95-5 adds the fitted bay and doors), so bay is
+`Unsupported` too.
+
+`--animation-probe tu95`: 125 neutral faces (155 less the 30 hidden propeller phases), scale 0.6666667,
+**0 required failures and 0 check failures**, scope `reviewed-controls-and-attachments`. Elevator and
+rudder are `required moved` (5 distinct poses each), gear 22, rotor 4 (the fourth sample is one whole
+turn, equal to the first); aileron, flaps, brake, bay, hook and exhaust are `not-applicable` and stay
+still. The tu95 module restates the witnesses independently: tailplane rigid across all six panels and the
+tip rise against the exact turn, rudder hinge pinned and the free vertex against its radius, plates rigid
+with the pivot corner pinned and the rear corner on the fitted turn, stow boxes at the near-stow sample,
+every disc rigid with each vertex turned by the shared angle (10 kept faces, none of the other
+phases). Two combination files: a 25 pose pitch against yaw grid (`pitch-yaw-combinations.csv`) and a
+202 value dense gear sweep (`dense-gear.csv`). The battery entry `flight-animation-tu95` checks the two
+files' row counts (26 and 203); the C-130 and AC-130 animation scenarios are unchanged and pass. One rig
+unit test (`tu95_animation::tests`) covers the tailplane, rudder, gear and the shared propeller path on
+synthetic faces.
+
+### Frames (local only)
+
+`.local/m3-aircraft/frames/T95-2/` (png with ppm; view 2, look yaw and pitch are orbit angles, so the
+views are not exact orthographics; `batch.sh` is the script). Size views `side`, `top`, `front`,
+`threequarter`, `skin-top`, `skin-under`. Propellers spinning at two ticks, `props-tick200` and
+`props-tick203` (and `props-front-tick200`, `props-front-tick203`): the discs are at different angles.
+Rudder `rudder--1`, `rudder-0`, `rudder-1` (`-top`, `-rear`); tailplane `tail--1`, `tail-0`, `tail-1`
+(`-side`, `-rear`); gear `gear-1`, `gear-0.6`, `gear-0.25`, `gear-0.02`, `gear-0` (`-side`, `-under`) and
+`gear-side-sheet`; the ground at the gear (airport 2 ground start) `ground-side`, `ground-side-low`,
+`ground-front`, `ground-rear`.
+
+### Open for John
+
+- Rudder at 25 degrees and tailplane at 10 degrees (both fitted, accepted by the coordinator).
+- Gear stow directions and timing are fitted; the wheel plates are small and flat, so the fold is a quiet
+  detail at flight distances.
+- Disc size (14.7 x 12.7 ft against 18.4 ft) left as drawn; the corners of the turning quads reach 1.4 to
+  2.0 ft under the contact line (not drawn).
+- The shared eye and 28 ft hit volume stay for T95-7 and a general decision.

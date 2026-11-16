@@ -42,6 +42,7 @@ mod su25;
 mod su27;
 mod su35;
 mod tornado;
+mod tu95;
 mod v22;
 mod x31;
 mod yak141;
@@ -193,6 +194,13 @@ impl Control {
             // way. The stabilizer is the elevator, the rudder and the two inboard
             // flap wedges are `Required` below.
             Self::Aileron if id == Id::B52 => Expectation::Unsupported,
+            // T95-3 (coordinator decision, 2026-11-15): the Tu-95 shape has no
+            // whole aileron or flap surface (the wing is one large facet a
+            // side), so those levers move nothing and the probe requires that
+            // they stay that way, as for the B-52's roll. The whole tailplane
+            // is the elevator and the rudder strip is the rudder, both
+            // `Required` below.
+            Self::Aileron | Self::Flaps if id == Id::Tu95 => Expectation::Unsupported,
             // B2-3: the flying wing has no flap panel (its elevons are the
             // pitch and roll surfaces and the drag rudders the yaw and speed
             // brake), so the flap lever moves nothing and the probe requires
@@ -219,6 +227,9 @@ impl Control {
             // spoilers, which the shape does not draw), no afterburner and no
             // flame word, so brake and exhaust move nothing and must stay so.
             Self::Brake | Self::Exhaust if id == Id::B52 => Expectation::Unsupported,
+            // T95-3: the Tu-95 draws no airbrake, no afterburner and no flame
+            // word (the shape has one state word, the gear).
+            Self::Brake | Self::Exhaust if id == Id::Tu95 => Expectation::Unsupported,
             Self::Brake | Self::Exhaust if id == Id::F117 => Expectation::Unsupported,
             Self::Brake | Self::Exhaust
                 if matches!(
@@ -281,6 +292,9 @@ impl Control {
             {
                 Expectation::Required
             }
+            // T95-3: the Tu-95 shape has no bay word; T95-5 adds the fitted
+            // belly bay and its doors.
+            Self::Bay if id == Id::Tu95 => Expectation::Unsupported,
             Self::Bay => Expectation::Unknown,
             Self::VectorPitch if matches!(id, Id::Av8 | Id::Yak141) => Expectation::Required,
             Self::VectorPitch | Self::VectorYaw if id == Id::X31 => Expectation::Required,
@@ -294,7 +308,14 @@ impl Control {
             Self::Rotor
                 if matches!(
                     id,
-                    Id::C130 | Id::Ac130 | Id::E2 | Id::V22 | Id::Ah64 | Id::Mi24 | Id::Ch47
+                    Id::C130
+                        | Id::Ac130
+                        | Id::E2
+                        | Id::Tu95
+                        | Id::V22
+                        | Id::Ah64
+                        | Id::Mi24
+                        | Id::Ch47
                 ) =>
             {
                 Expectation::Required
@@ -684,6 +705,7 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
             | AircraftId::B52
             | AircraftId::B2
             | AircraftId::F117
+            | AircraftId::Tu95
     ) {
         "reviewed-controls-and-attachments"
     } else {
@@ -1220,6 +1242,17 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
                 );
             }
         }
+        if id == AircraftId::Tu95 {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                tu95::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
         if id == AircraftId::Mig31 {
             for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
                 mig31::check(
@@ -1378,6 +1411,9 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     }
     if id == AircraftId::B52 {
         failures.extend(b52::combinations(&airframe, &neutral, out)?);
+    }
+    if id == AircraftId::Tu95 {
+        failures.extend(tu95::combinations(&airframe, &neutral, out)?);
     }
     if id == AircraftId::Mig31 {
         failures.extend(mig31::combinations(&airframe, &neutral, out)?);
