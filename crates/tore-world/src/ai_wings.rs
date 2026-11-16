@@ -28,6 +28,8 @@ pub use chatter::{Chatter, Contact, ContactView, FuelLevel, Member};
 mod engagement;
 pub use engagement::Preset;
 #[cfg(test)]
+mod f111_tests;
+#[cfg(test)]
 mod f117_tests;
 mod ground;
 mod gunship;
@@ -2237,7 +2239,20 @@ impl AiWings {
         for actor in self.mission.actors() {
             if let Some(config) = self.configs.get_mut(&actor.id()) {
                 let flight = actor.flight();
-                config.set_wing_flight(flight.speed, flight.flaps, flight.gear);
+                // F111-5 (2026-11-16): a store on a fixed wing pylon holds the
+                // wing to its sweep limit, by the aircraft's live station
+                // rounds as a human's ownship does.
+                let held = config.fixed_stores_carried(|index| {
+                    actor
+                        .stations()
+                        .iter()
+                        .find(|s| usize::from(s.station.0) == index)
+                        .map_or(0, |s| match s.rounds() {
+                            tore_sim::ai::weapon_service::Rounds::Finite(n) => n,
+                            tore_sim::ai::weapon_service::Rounds::Unlimited => 1,
+                        })
+                });
+                config.set_wing_flight(flight.speed, flight.flaps, flight.gear, held);
             }
         }
     }
@@ -7697,6 +7712,83 @@ mod tests {
             .step(&mut combat, &[human(&player)], &world())
             .unwrap();
         assert_eq!(wings.configs[&tornado].stations[0].release_point(1), spread);
+    }
+
+    /// F111-5 (2026-11-16): an AI F-111F holds its wing to 26 degrees while a
+    /// store hangs on a fixed outer pylon (row 7), by the actor's own live
+    /// rounds, and sweeps on to the schedule's 72.5 degrees once it is empty.
+    #[test]
+    fn an_ai_f111_holds_its_wing_to_26_degrees_while_its_outer_pylon_carries() {
+        use tore_sim::{
+            ai::weapon_service::Rounds,
+            combat::{hardpoints::Rack, swing},
+        };
+        let (mut wings, targets) = build(None);
+        let mut combat = combat_fixture(false);
+        combat.targets = targets;
+        let player = flight::State::new(&aircraft(), [0., 20000., -5000.]).unwrap();
+        let mut config = combat.own().configuration().clone();
+        let mut outer = config.stations[0].clone();
+        outer.weapon.source = "MK82.JT".into();
+        outer.count = 2;
+        outer.internal = false;
+        outer.mount = [15.46, -3.31, 0.5];
+        outer.rack = Rack {
+            location: 4,
+            paired: true,
+            ..Rack::default()
+        };
+        config.stations = vec![outer];
+        config.tanks.clear();
+        config.aircraft = tore_formats::aircraft::AircraftId::F111;
+        // Station 0 is hardpoint row 7, the fixed outer pylon.
+        config.hardpoint_slots = vec![None, None, None, None, None, None, None, Some(0)];
+        let id = 3;
+        wings.configs.insert(id, config);
+        let fps = 650. * swing::FPS_PER_KNOT;
+        let step = |wings: &mut AiWings, combat: &mut live::State| {
+            let flight = wings.mission.actor_mut(id).unwrap().flight_mut();
+            flight.speed = fps;
+            flight.flaps = 0.;
+            wings.step(combat, &[human(&player)], &world()).unwrap();
+            wings.configs[&id].stations[0].rack.turn
+        };
+        // Loaded: the actor's station 0 holds rounds, so the wing is held.
+        {
+            let actor = wings.mission.actor_mut(id).unwrap();
+            let station = actor
+                .stations_mut()
+                .iter_mut()
+                .find(|s| s.station.0 == 0)
+                .expect("station 0");
+            station.store.rounds = Rounds::Finite(2);
+        }
+        let held = step(&mut wings, &mut combat);
+        assert!((held - (10_f64).to_radians() as f32).abs() < 1e-5, "{held}");
+        // Empty: the schedule's full 72.5 degrees (56.5 degrees of turn).
+        {
+            let actor = wings.mission.actor_mut(id).unwrap();
+            for station in actor.stations_mut() {
+                if station.station.0 == 0 {
+                    station.store.rounds = Rounds::Finite(0);
+                }
+            }
+        }
+        // F111-8 (2026-11-16): it leaves the hold at the sweep rate, 3 degrees a
+        // second (0.025 degrees a tick), not in one tick.
+        let first = step(&mut wings, &mut combat);
+        let tick = (3_f64.to_radians() * flight::DT) as f32;
+        assert!((first - held - tick).abs() < 1e-6, "{first} after {held}");
+        // ... and gets to the schedule's full 72.5 degrees (56.5 degrees of
+        // turn) in about 15.5 s more.
+        let mut free = first;
+        let mut ticks = 1;
+        while free < (56.5_f64).to_radians() as f32 - 2e-3 {
+            free = step(&mut wings, &mut combat);
+            ticks += 1;
+            assert!(ticks < 2_000, "the wing never left the hold: {free}");
+        }
+        assert!((1_850..=1_870).contains(&ticks), "{ticks} ticks");
     }
 
     #[test]

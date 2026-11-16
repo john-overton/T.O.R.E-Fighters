@@ -979,6 +979,58 @@ mod tests {
         );
     }
 
+    /// Retail-reading (skips without an install): F111-7 measures the glass of
+    /// the F-111F's cockpit art, the AC-130's `~AC130H.PIC`. The polygon is the
+    /// whole picture (the art is one window the size of the picture with its
+    /// opaque frame drawn over it), so the mask is exactly the art's own
+    /// transparent pixels less the polygon's last column and row; it covers no
+    /// opaque pixel, is the AC-130's own mask, and loses less than 0.5 percent
+    /// of the glass.
+    #[test]
+    fn the_f111_glass_is_the_transparent_area_of_the_ac130_art() {
+        let root = std::env::var_os("TORE_GAME_DIR").map_or_else(
+            || {
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../gameassets/fighters-anthology")
+            },
+            std::path::PathBuf::from,
+        );
+        let Ok(media) = tore_import::MediaSource::detect(&root) else {
+            eprintln!("skipped: no retail install at {}", root.display());
+            return;
+        };
+        let name = AircraftId::F111.cockpit();
+        assert_eq!(name, "~AC130H.PIC");
+        let Some(bytes) = ["FA_1.LIB", "FA_2.LIB"]
+            .iter()
+            .filter_map(|library| media.archive(library).ok())
+            .find_map(|library| library.read(name).ok())
+        else {
+            eprintln!("skipped: no {name} in the retail archives");
+            return;
+        };
+        let pic = tore_formats::Pic::parse(&bytes).unwrap();
+        assert_eq!((pic.width, pic.height), (1280, 490));
+        let source = Sprite {
+            width: pic.width,
+            height: pic.height,
+            rgba: pic.rgba(&[[0; 3]; 256]),
+            glyphs: vec![],
+        };
+        let mask = mask(&source, AircraftId::F111);
+        assert_eq!(mask, super::mask(&source, AircraftId::Ac130));
+        let transparent = source.rgba.chunks_exact(4).filter(|p| p[3] == 0).count();
+        let covered = mask.iter().filter(|v| **v == 1).count();
+        eprintln!("F111 glass: {covered} of {transparent} transparent pixels");
+        assert!(covered > 0);
+        for (at, covered_pixel) in mask.iter().enumerate() {
+            if *covered_pixel == 1 {
+                assert_eq!(source.rgba[at * 4 + 3], 0, "mask covers opaque art");
+            }
+        }
+        assert!(covered * 1000 >= transparent * 995);
+    }
+
     /// Transparent pixels of the retail `~B2H.PIC`'s main window and the mask's
     /// coverage of them (B2-7).
     const B2_MAIN_WINDOW_PIXELS: usize = 247_572;

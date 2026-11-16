@@ -395,3 +395,17 @@ the RCS page `SIG 100` closed and `SIG 150` with the bay open. `SU37L.SEE` is th
 HUD box reads `LSR RDY` with an AS-16 selected), a fixed row with no pod body. The AS-16 now wants a
 surface target, so `a2g-antiship-tu160` flies it at the Krivak (150 of 500 left). See [the Tu-160
 section](../formats/aircraft-variety.md#tu-160-ordnance-sensors-hud-and-cockpit-t160-67-2026-11-16).
+
+## F-111F sensors: radar and jammer reviewed, Pave Tack, 2026-11-16 (F111-6, F111-7)
+
+The F-111F's `A6R.SEE` and `A6.ECM` (the A-6's records) were unreviewed, so it flew with no radar
+and no jammer. Both are reviewed now (fitted): `--sensor-summary` reads `F111: radar A6R.SEE search 50 nmi
+60x60 deg track 25 nmi 45x45 deg look-down 0 TRANSITIONAL; infrared AV8IR.SEE search 15 nmi 60x60 deg track
+15 nmi 45x45 deg; visual VIS240.SEE search 10 nmi 120x90 deg track 5 nmi 120x90 deg; jammer A6.ECM
+TRANSITIONAL strength 0.30; signature radar 100 infrared 100`. The radar window reads `TWS 10 ... TRACK`
+once on, the RWR lights `JAM` with the jammer on, and the Weapons window reads `30 CHAFF`, `30 FLARE`. The laser
+and FLIR pair (`PAVESPK.SEE`, `AV8IR.SEE`, and the pod on the bay row) show as PAVE TACK in text only: the
+target camera window's title, the Load Ordnance sensor line and pod card, and the replay Sensor View
+(the infrared channel reads FLIR). The RCS page reads `SIG 165` with the doors shut and `SIG 248` with the bay
+open (default load, first GBU-28 released). Laser designation works: `a2g-laser-f111`. See [the F-111F
+section](../formats/aircraft-variety.md#f-111f-ordnance-sensors-hud-and-cockpit-f111-67-2026-11-16).

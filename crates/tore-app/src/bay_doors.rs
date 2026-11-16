@@ -63,6 +63,11 @@ pub(crate) fn belly_hole(face: &Face, o: &Opening) -> Vec<Face> {
     .1
 }
 
+/// [`units_at`] for the aircraft rigs outside this module (F111-5).
+pub(crate) fn units_at_pub(feet: f64, unit: f64) -> f32 {
+    units_at(feet, unit)
+}
+
 /// Shape units from feet for a shape drawn at `unit` feet a unit.
 fn units_at(feet: f64, unit: f64) -> f32 {
     (feet / unit) as f32

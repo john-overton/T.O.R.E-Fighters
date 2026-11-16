@@ -323,3 +323,11 @@ the shared seat; the Back view and the replay cameras take the per-aircraft eye 
 which gives the Tu-160 12 feet up and 71 feet ahead (the record's eye is the Tu-26's copy). See [the
 Tu-160 section](../formats/aircraft-variety.md#tu-160-ordnance-sensors-hud-and-cockpit-t160-67-2026-11-16).
 Frames are under `.local/m3-aircraft/frames/T160-6/`.
+
+## 2026-11-16 F-111F cockpit: the AC-130 family, no mirrors, its own eye (F111-7)
+
+The F-111F flies the AC-130's cockpit family by its record (`AC130.HUD`, stem `AC130`, `~AC130H.PIC`,
+1280 x 490; coordinator first pass, F111 item 8). That family has no flat mirror fill, so
+`mirrors::seeds` has no row for it and the rear feed camera stays on the shared seat; only the Back view and
+the replay cameras take the per-aircraft eye, which gives the F-111F 5 feet up and 25 feet ahead. See [the
+F-111F section](../formats/aircraft-variety.md#f-111f-ordnance-sensors-hud-and-cockpit-f111-67-2026-11-16). Frames are under `.local/m3-aircraft/frames/F111-6/`.

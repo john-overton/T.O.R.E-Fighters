@@ -15071,6 +15071,12 @@ the 0.7 ft stow gate are fitted (agent decisions 2026-11-15); the real-size fact
 first pass (opinionated, for John to review); the per-axis choice and not cutting the outer panel are the
 coordinator's decisions. Nothing attributed to John. No retail bytes committed.
 
+Update (F111-5, 2026-11-16): the 26 degree limit and the outer rows' places the paragraphs above
+leave open, the bay and the pylon-row findings are in [F-111F stations, bays and
+pylons](#f-111f-stations-bays-and-pylons-f111-5-2026-11-16). The swing outline is now the drawn
+skin's leading edge, (15, 12) to (54, 2), so rows 5 and 6 stand 0.84 and 0.79 ft further forward
+than "F111-3" says; the glove plates take the wing's skin.
+
 ## Bomber batch C identities (BMB-C1, 2026-11-15)
 
 Implementation, batch slice BMB-C1 (with BMB-C2 below, run together), Claude Sonnet.
@@ -17295,3 +17301,708 @@ the two `seeker_range_tests` in `strike_reach.rs`, and `the_tu160_is_a_quick_mis
 Provenance: the zone numbers are the retail record's, read by the code; the fire-range rule, the cue pointing
 gains, the scenarios and the fuel and order of the airfield cycle are fitted (agent decisions 2026-11-16). No
 retail bytes committed.
+
+## F-111F stations, bays and pylons (F111-5, 2026-11-16)
+
+Implementation, slice F111-5 of bomber batch B (worktree `m3-f111`, plan
+`.local/m3-aircraft/PLAN-F111.md`), Claude Sonnet. It applies the coordinator's first-pass
+decisions for the F-111F (`BOMBERS-DECISIONS-B.md`, "F-111F Aardvark" item 4 and 5, "SWING-1" and
+"F-111F rig"; John's to review): the wing rows re-placed on the panel's mid-chord, AIM-9 rails on
+the inner pylons, the sweep held to 26 degrees while the outer pylons carry, the designator bit
+off the wing rows and their class at 5,000 lb (BMB-B2), a weapons bay holding a Pave Tack by
+default, and the glove plates painted with the wing's own skin. Every number is **fitted** or
+**opinionated** (agent decisions, 2026-11-16) unless it says cited or measured. The numbers, the
+clearance tables and the code are in the [stores
+specification](../spec/stores-on-pylons.md#f-111f-stations-bays-and-pylons-f111-5-2026-11-16);
+earlier sections stay as written (B11): the survey and proposal in "F-111F stations (survey)" and
+the pivot work in "F-111F shape and rig (F111-2/3)" are what this builds on.
+
+**Stations after F111-5** (feet right / up / forward of the reference point; `F111.PT` keeps its
+nine rows and gains three, rows 9 to 11, while it is the retail record):
+
+| Row | What it is | Place | Capacity, class | Default |
+| ---: | --- | --- | --- | --- |
+| 5 | inner wing pylon pair, swivels (record 29 raw units) | +/-8.30 / pylon 1.0 ft under the wing / 2.38 (mid-chord) | 2, class 50 | 2 GBU-28 |
+| 6 | inner wing pylon pair, swivels (41) | +/-11.74 / 1.0 ft under / 1.86 | 2, class 50 | 2 Mk 82 (retarded) |
+| 7 | outer wing pylon pair, fixed (54) | +/-15.46 / 1.0 ft under / 1.31 | 4, class 50 | 4 AGM-65G |
+| 8 | outer wing pylon pair, fixed (65) | +/-18.61 / 1.0 ft under / 0.84 | 2, class 50 | 2 Mk 82 (retarded) |
+| 9 | weapons bay (new), shared magazine grid, centre line | 0 / -3.31 (belly plane) / 16.54 (the opening's middle plus the Mk 82 origin offset 0.87) | 2, class 12, flags `0x1500` | the Pave Tack pod; Mk 82 alternative |
+| 10 | AIM-9 shoulder rail (new) on row 5's pylon, swivels | +/-9.55 (1.25 ft outboard of the pylon) / on the pylon / 2.38 | 2 (one a side), class 5, `0x85` | empty |
+| 11 | AIM-9 shoulder rail (new) on row 6's pylon, swivels | +/-12.99 / on the pylon / 1.86 | 2, class 5, `0x85` | empty |
+
+**Wing rows 5 to 8.** The span is the record's, times the size fit's 0.859 (rows 5 and 6 as
+F111-3 left them; rows 7 and 8 were already 15.46 and 18.61 ft out), and the forward coordinate
+is the mid-chord of the drawn panel (TOR-14's rule), so every pylon stands in the middle of the
+chord: the stores preview's pylon-centre report reads **0.003 ft off the middle** at rows 7 and
+8 and 0.04 ft at row 5 (it read 0.8 ft aft at every pylon before: see the outline correction
+below). The height is the record's (-4 ft raw, the belly depth) under the wing's own surface,
+as every wing pylon: 1.0 ft deep. Rows 5 and 6 swivel (F111-3). Rows 7 and 8 are fixed pylons
+the wing **carries but does not turn back**: `swing::carries` is true for them, so the host and
+the drawing sweep their points with the panel (about the F-111F pivot) but not their stores'
+headings, and the wing is held to 26 degrees while they carry (below), so they are carried by at
+most 10 degrees.
+
+*Outline correction (F111-5).* `swing::F111F`'s panel outline had the leading edge from the
+shape's root corners, (13, 10) to (53, 0), which lies 0.8 ft aft of the drawn leading edge, the
+skin from (15, 12) to (54, 2) (faces `4021` and `4109`). The outline is now the drawn skin's,
+so rows 5 to 8 moved forward 0.84, 0.79, 0.81 and 0.80 ft (rows 5 and 6 from 1.54 and 1.07 to 2.38 and 1.86 ft; rows 7 and 8 from 0.50 and 0.04 ft, where the record's span puts them, to 1.31 and 0.84) and the
+fitted pylon centres agree with the drawn chord.
+
+**The sweep limit (decision 4).** While rows 7 or 8 carry a store or a tank the wing is held to
+26 degrees of sweep or less, whatever the speed (the schedule gives 23.06 degrees at 300 knots
+and 26 at 321, so below 321 knots nothing changes); the flaps still hold it spread. It is a
+function of the live loadout, so it is wired where the loadout is known:
+`SwingSpec::turn_carrying` (the schedule, held to `max_sweep_with_fixed_stores`);
+`Configuration::fixed_stores_carried` (rows 7 and 8, by the station's live rounds and by tanks);
+`Ownship::set_wing_flight` (the human's ownship) and `AiWings::carry_swing_wings` (every AI
+aircraft, by its actor's own rounds) set the stations' turn from it every tick; the drawing reads
+it from a new display-only flight flag, `State::wing_hold` (not coded on the wire, not in a
+checkpoint, like `gun_aim`): the world sets it on the frame's presented flight
+(`World::frame`) and the render snapshot sets it on a remote aircraft's pose from the stores it
+is drawn with (`pylons::wing_held`). `f111_animation::sweep_turn` and `pylons::swung` draw the held
+wing and the stations on it. When the last store leaves rows 7 and 8 the wing goes on to the
+schedule's sweep **at once** (the sweep has no rate, SWING-1: it is a pure function of speed), a
+jump of up to 46 degrees in one tick at 650 knots. Stated in the open items.
+Update (F111-8, 2026-11-16): the F-111F's wing now has a sweep rate, 3 degrees a second
+([F-111F flight review](#f-111f-flight-review-f111-8-2026-11-16)), so that release takes up to 15.5
+seconds, not one tick; item (3) below is closed for the player's own aircraft.
+
+**The bay (decision 5).** The shape has no bay (F111-0), so it is cut and lined as the B-52's
+is, from the forward belly plate `3132` (x +/-3 units, y 13 to 34, z -6 rising to -5: a 3.44 ft
+wide, 14 ft long quad, the plate's keel at the aft edge): an opening **3.0 ft wide and 12.0 ft
+long, 9.67 to 21.67 ft forward**, cut into two doors 1.5 ft wide hinged on the outer edges that
+swing 90 degrees down in the flight's 1.00 s bay travel, hanging 1.5 ft under the belly. The
+plate rises 0.55 ft forward, so the doors turn about hinge lines that lie in the plate
+(`roster_animation::cut_doors_sloped`: the axis is tilted 2.3 degrees), not about a level line,
+and the belly plane (-3.31 ft) is the keel line, the lowest point. The recess is **3.0 ft deep**
+(roof at -0.31 ft, under the fuselage's top skin at +1.1 ft); a lined box closes it (ceiling and
+four walls, the lower edges following the plate), a cradle rail hangs under the ceiling and two
+posts stand at the pod's ends, 4.6 ft either side of the opening's middle: drawn only while the
+doors are off their seat, in the grey of the gear plates (`f111_animation.rs`, addresses
+`7000` to `7013`). The cut and the lining are `bays::OPENINGS` and `bays::STATIONS` rows for the
+F-111F, so `State::bay_available` is true and the bay opens for a release and by the bay key.
+The real bay size was not found in a public source: the opening is the size the plate leaves.
+
+**What the bay holds.** The Pave Tack is a **designator pod loaded on the bay row**
+(`Loadout::load_designator`, the existing path): the record's `PAVESPK.SEE` stand-in (F111-0
+sensors), drawn as the shared authored pod model (a tube with a window on its nose) scaled to a
+fitted 8.0 by 1.25 ft body (`bays::pod_body`, real size not found; the pod hangs centred in the
+opening, 0.87 ft ahead of its middle, on the posts) and shown only while the doors are open,
+like every bay store. The standard load carries it (`stations::default_bay_pod`,
+`Configuration::with_default_load`): a Pave Tack at a station that holds no bomb. Loading two
+bombs on the row removes it (`refresh_equipment`: a pod leaves its station when a weapon takes it),
+and loading the pod again removes the bombs: **the pod and the bombs are alternatives**
+without a second row, so there is no `ALTERNATIVES` entry. The alternative load is **two Mk 82**
+(`MK82.JT`, the row's record, capacity 2, class 12 = 1,200 lb a store, so a 500 lb class bomb loads
+two, a 2,000 lb one none): they hang on the shared grid, two abreast (1.3 ft pitch), one long,
+one tier. The pod's mass (the record's 425 lb) is in the loadout; an internal pod adds nothing to
+the external-store radar signature (`store_signature`: a pod on a bay station is not outside).
+The sensors are unchanged: the laser and the FLIR stay the aircraft's fixed rows (3 and 4), so
+the pod adds a second laser designator of the same record that the sight takes first; the
+relabel as "Pave Tack" is F111-7's. A saved load that names every station names every pod it
+carries (`LoadoutSpec::apply` now drops the standard load's own pods first), and one saved
+with the four wing rows (before this slice) still restores, the bay and rails at their defaults
+(`later_weapon_rows` 3).
+
+**What each station admits and refuses** (measured with the stores preview, spread, 26 and
+72.5 degree wing, clip against the airframe at the store's full count; the 0.3 ft line of the
+F-15E A2 precedent for the airframe; the bay's 0.05 ft for its doors, ends, roof and neighbours):
+
+| Station | Admits | Refuses (named list) |
+| --- | --- | --- |
+| Row 5 (8.3 ft out, 0.85 ft from the pivot, under the glove) | the 61 catalog stores less 10 (tanks included, none refused) | `F111_ROW5_REFUSED`: `GBU29`, `GBU29P`, `GBU30`, `PAVEWA3` (1.10 ft into the airframe at 26 and 72.5 degrees), `AM39` 0.45, `AA6`, `GBU10`, `GBU10A`, `PAVEWAY` 0.37, `GBU16` 0.36 (`AS30` 0.28 and `GBU12` 0.23 stay) |
+| Row 6 | the 61 less 4 | `F111_ROW6_REFUSED`: the four GBU-27 class bombs (1.10 ft) |
+| Rows 7 and 8 | all 61 (no store enters the airframe at 16 or 26 degrees) | none |
+| Rails 10 and 11 | the AIM-9 family and the seven other infrared missiles the mask admits (`AA2`, `AA8`, `AA11`, `AA11B`, `AIM9B`, `AIM9M`, `AIM9X`) | `F111_RAIL_REFUSED`: `PL7`, `R550`, `AT12`, `GBU12` (the Tornado's rail line; not remeasured on the outboard shoulder) |
+| Bay (row 9) | `MK82`, `FAB250`, `LAU10` (two each) and the Pave Tack pod | `F111_BAY_REFUSED`: 15 stores that overrun the 12 ft opening or whose fins cross the door planes or the keel (`B13`, `B8`, `LAU61`, `AGM88`, `AGM45`, `GBU30`; `AT2`, `FAB500`, `MK82HD`, `CBU87`, `CBU89`, `MK20`, `RBK250`, `RBK500`, `GBU38`) |
+
+The bay's shared grid hangs a lone store in the outer column, so the singles (capacity 1) are
+measured off-centre and several refuse for that; centring a partial tier would move the B-2's and
+B-52's places and is the coordinator's to decide. Bay clearances for the two Mk 82 (doors open):
+0.40 ft to the door planes, 0.20 ft from the centre line, 2.35 ft to either end, 1.84 ft to the
+roof, 1.36 ft under the top skin, 0.25 ft above the closed belly plane, 0.39 ft between the two.
+
+**Glove plates.** The four fixed plates now take the wing's own top skin (`40bf` right, `44e5`
+left: colours, texture and flags) with texture coordinates fitted to that skin's mapping (a
+least-squares affine map from the plan position to the texel, residual a texel or two over the
+skin), so the plate carries the wing's pattern across the glove instead of one texel of the
+fillet; see the frames `glove-*`.
+
+**Findings.** (1) A pod could not stand beside the bay rows: the `0x400` designator bit that
+BMB-A2 and BMB-B2 cleared on the bomber bay rows is kept on this one row (the real Pave Tack
+station), and it is the only row that takes the pod. (2) The first scan, on the old chord outline, refused 12 stores on row 5 and 4 on row 6; the outline correction moved the pylons under the thicker part of the wing and two of the 12 (`AS30`, `GBU12`) now clear, all remeasured with Cheat loading (which ignores the lists) at 16, 26 and 72.5 degrees. (3) `ordnance_audit` pins: see the table
+below. (4) The AIM-9 rail on the inboard flank, as the Tornado's (TOR-11), enters the glove 0.26
+ft spread and 0.38 ft swept (row 5 stands 0.85 ft outboard of the pivot and the wing root), so the
+rails are on the outboard shoulder, as the F-14's glove pylon. (5) The default rails and the bay's
+bombs are empty by default: the real F-111F carried no AIM-9 in the Gulf War and the bay held the
+Pave Tack; the bomb-and-rail loads are Load Ordnance's.
+
+**Pins** (`--validate-ordnance`, measured on this tree after the profile was refreshed; the
+coordinator recomputes totals at integration, B4):
+
+| Pin | Before | After | Why |
+| --- | ---: | ---: | --- |
+| Aircraft | 54 | 54 | |
+| Weapon placements | 5,395 | 5,398 | the F-111F goes from 228 to 231: the bay admits 3 bombs, the two rails 7 missiles each (14), the inner pylons refuse 14 (row 5 ten, row 6 four); 228 + 3 + 14 - 14 |
+| Tank placements | 257 | 257 | no tank is refused or added |
+| Recovered weapon stations | 23 | 23 | the new rows have default stores, so they are source rows to the audit |
+| Cheat-only placements | 278 | 284 | the bay and the two rails take the two novelty bombs under Cheat loading |
+| Designator pod placements | 82 | 83 | the bay row keeps the designator bit |
+
+```text
+ordnance audit: 54 aircraft, 23 recovered weapon stations, 5398 weapon placements, 257 tank placements, 82 weapon and 9 tank records; passed
+ordnance audit: 1 designator pods, 83 pod placements, one to an aircraft, loaded and restored through the saved mission; passed
+ordnance audit: 2 novelty records, 284 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
+```
+
+`menus-ordnance-availability` and `a2g-catalog` carry the new expected lines (5,398 weapon and 284
+Cheat-only placements).
+
+
+**Open for John.** (1) The pod body (8.0 by 1.25 ft) and the bay opening (3.0 by 12.0 ft, 3 ft deep)
+are fitted: no real dimensions were found. (2) The cradle does not rotate out of the bay (the
+proposal's fitted animation was not done: the pod stays on its posts and shows with the doors
+open). (3) The wing releases to its scheduled sweep at once when the last outer store leaves
+(no sweep rate). (4) A lone bay store hangs off-centre (shared grid). (5) The default rails are
+empty. (6) The bay row's pod is the `PAVESPK.SEE` record and reads "Pave Spike" on the Load Ordnance
+page until F111-7's relabel. (7) Row 5's refusals list 12 stores because the pylon is 0.85 ft from the
+root; moving it outboard (it stands where the record puts it) would free them.
+
+Provenance: the record's rows, spans and the bay row's flag bits are the retail record's (F111-0);
+the mid-chord rule is TOR-14's; the outline correction, the bay opening, doors, lining, pod body,
+rails, refusal lists, defaults and the sweep hold's wiring are fitted (agent decisions, 2026-11-16);
+the 26 degree limit is the coordinator's first pass (one secondary source, no primary found);
+the 5,000 lb pylon rating and the Pave Tack's bay carriage are cited (Wikipedia, F111-0). No retail
+bytes are committed.
+
+Update (F111-6/7, 2026-11-16): the pod now reads "Pave Tack" on the Load Ordnance page, the four rail refusals are
+remeasured on the outboard shoulder and stand, and the A-6's radar and jammer records are reviewed; see
+[F-111F ordnance, sensors, HUD and cockpit](#f-111f-ordnance-sensors-hud-and-cockpit-f111-67-2026-11-16).
+
+
+## F-111F ordnance, sensors, HUD and cockpit (F111-6/7, 2026-11-16)
+
+Slices F111-6 (ordnance, default load, countermeasures) and F111-7 (sensors, HUD, cockpit, instruments)
+ran together (implementation mode, bomber batch B). They apply the coordinator's first-pass decisions for the
+F-111F (`BOMBERS-DECISIONS-B.md`, "F-111F Aardvark" items 6, 8 and 9; John's to review). Earlier F-111F
+sections stay as written (B11): F111-5 left the bay pod reading "Pave Spike" and the rail refusals
+measured on the inboard flank, and this section is the answer to both. Everything here is **fitted** or
+**opinionated** (agent decisions, 2026-11-16) unless it says retail. Frames are under
+`.local/m3-aircraft/frames/F111-6/`, logs under `.local/m3-aircraft/checks/F111-6/`.
+
+### F111-6: the load, live fire, release origins
+
+**Load Ordnance page.** The default load is what F111-5 set, checked here on the page (frame
+`load-ordnance`): the Internal Bay row shows **Pave Tack, 1 loaded (max 1)**; the wing rows show GBU-28/B 2 loaded
+(max 2), MK-82HD 6-Pack 2 loaded (max 2) on rows 6 and 8, AGM-65G Maverick 4 loaded (max 4), and the two AIM-9
+rail rows are empty; weight 99,999 of 100,000 lb with 28,413 lb of fuel (87 percent), so the page has 1 lb
+available. Load Ordnance has no named loads for any aircraft, so there are no presets to check. The sensor line
+under the page reads `Built-in PAVE TACK: no pod needed for laser ordnance.`
+
+**Live fire of every slot.** `flight-livefire-f111-slot1` to `slot7` (F111-5's, with `SHOTS_PER_ROUND` 6 on the two
+`MK82P.JT` rows) and `flight-jettison-f111-slot2` to `slot4` pass again on this tree (battery below). Slot 3, the
+AGM-65G row, stays a refused surface-missile slot (a live-fire target is an aircraft); the Maverick is flown at a
+ground target instead (below). Slots 5 to 7 (the bay with its pod, the two empty rails) are the never-loaded slots.
+
+**Release origins.** The human's release left from the cell the stores hang in at 200 and 650 knots
+(`a2g-release-origin-f111`, F111-5's: outer pylon 15.46 ft out and 1.31 ft ahead spread, carried 10 degrees aft
+with the wing held to 26 degrees; inner pylon 8.30 ft out), and the AI's release takes the same configuration and the
+same release (`State::release_strike` against `State::release_round`): `ai_wings::release::tests::
+an_ai_bomb_leaves_the_f111_bay_and_its_outer_pylon_from_their_own_places` pins the bay row and the outer pylon.
+Both are rerun on this tree and agree.
+
+**Guided stores against a target.** Two new scenarios.
+- `a2g-laser-f111` (`--a2g-run UKR QUCOL --attack laser --aircraft f111 --load GBU28 --station 0 --count 1`, 15,000 ft,
+  480 kt): the Pave Tack designates the tank, a GBU-28 from the inner wing pylon releases at 15.2 s (kind Laser,
+  range 23,237 ft inside its reach 14,995 to 25,987 ft, `laser Lasing`, buddy no), guides onto the spot and lands 6.7
+  ft from the tank, which is destroyed (`hp 0/200`). The sight's sensor is the bay pod's hemisphere laser (the loaded
+  pod comes before the fixed row, `Configuration::sight_sensor`).
+- `a2g-maverick-f111` (`--load AGM65G --station 2 --count 4 --attack maverick`, 3,000 ft, 350 kt): the lead truck of the
+  column is designated through the **A-G radar channel** (the F-111F has a radar now, below), locked, the AGM-65G
+  launched and the truck destroyed (miss 23 ft).
+
+**Countermeasures.** The record's own `A6.ECM` row works: 30 chaff and 30 flares (the Weapons window `30 CHAFF 30 FLARE`),
+five and three released in `flight-countermeasures-f111` (the same check as the B-2's: carried counts fall by exactly the
+releases, five cartridges in the air), and `--jammer-on` lights `JAM` on the RWR window (frame
+`countermeasures-chaff-flare-jammer`, strip `systems-rwr-weapons-strip-2x-jam-chaff-flare`). The chaff and flares leave from
+the standard tail outlet. The jammer was **not enabled before**: see Sensors.
+
+### F111-7: sensors
+
+`--sensor-summary` reads `F111: radar A6R.SEE search 50 nmi 60x60 deg track 25 nmi 45x45 deg look-down 0 TRANSITIONAL;
+infrared AV8IR.SEE search 15 nmi 60x60 deg track 15 nmi 45x45 deg; visual VIS240.SEE search 10 nmi 120x90 deg track 5 nmi
+120x90 deg; jammer A6.ECM TRANSITIONAL strength 0.30; signature radar 100 infrared 100`. All five sensor rows are the
+real aircraft's kinds (a terrain-following and attack radar, a jammer with chaff and flares, a FLIR and a laser in the
+Pave Tack, a visual set), and none is a pod body on a station the real aircraft lacks: the radar, jammer, FLIR and visual
+rows stay fixed rows with no body, and the one pod is the Pave Tack on the bay, a real station (F111-5).
+
+**Radar and jammer reviewed (fitted, agent decision, John to confirm).** `A6R.SEE` and `A6.ECM` (the A-6's records, the F-111F's
+template) had no preset or generation assignment, so they decoded as `UNREVIEWED (not enabled)` and the F-111F flew with
+no radar and no jammer at all, as the B-52 did before B52-7. `A6R.SEE` is now `Preset::Transitional` and `A6.ECM`
+`Generation::Transitional` (`sensors::profile`; [radar](../radar.md#presets)), the class of the F-14's radar and the B-52's
+jammer. One line each to revert. The EA-6B's records stay unreviewed (the tests that used the A-6's as the unreviewed
+sample now use them). The radar window reads `TWS 10 ... TRACK` (frame `target-cam-pave-tack-gbu28-laser`), there is no
+ground-mapping mode (the shared radar has none, as for the B-2 and B-52), and a surface missile is refused against an aircraft as everywhere
+(the Maverick row's live-fire slot).
+
+**PAVE TACK (text only).** One table entry, `AircraftId::sensor_names()`, now has the F-111F beside the F-117:
+`SensorNames { sight: "PAVE TACK", infrared: "FLIR", pod: "Pave Tack" }` (a new `pod` field for the Load Ordnance card;
+the F-117's repeats `IRADS` and is unused). The readers are the F117-7 ones:
+
+| Where | Every other aircraft | The F-111F |
+| --- | --- | --- |
+| Window 4's title | `TARGET CAM` | `PAVE TACK` (a weapon's seeker picture keeps `TARGET CAM`; frames `cockpit-front-view`, `target-cam-pave-tack-gbu28-laser`) |
+| Load Ordnance sensor line | `Built-in laser designator: no pod needed...` or `Aircraft laser pod equipped` | `Built-in PAVE TACK: no pod needed for laser ordnance.` |
+| Load Ordnance pod card (bay row and catalog) | the record's `Pave Spike` | `Pave Tack` (`ordnance::pod_name`) |
+| Radar window, infrared channel | `IR` | `FLIR` |
+| Replay Sensor View | the sensor record's name | `PAVE TACK` for the laser row, `FLIR` for the infrared row |
+
+Everything else says what the shared code says. `--sensor-summary` and the logs keep the retail file names. Tests:
+`aircraft::tests::only_the_f117_and_the_f111_have_their_own_sensor_names`, `ordnance::tests::the_f111s_bay_pod_is_named_pave_tack_on_the_page`
+and the extended helper-line test, `views::sight_label_tests::the_sensor_view_names_the_f111s_laser_pave_tack`.
+
+**The bay pod is a designator for the AI too.** The sight rule is one function of the configuration
+(`Configuration::sight_sensor`: a loaded pod first, else the fixed row) and the AI reads the same one for its lase duty
+(`AiWings::can_lase`, `capability`), its lase hold and its jettison (the pod leaves with the stores). New retail-reading
+tests (`ai_wings/f111_tests.rs`): an AI F-111F built from the real record carries the pod on the bay row's station, its sight
+is the pod's hemisphere laser, `can_lase` and the ground-order capability say designator and strike, and with the pod
+gone (jettisoned, or two bombs on the bay row) the fixed Pave Spike row still lases, so it stays a designator. The
+strike class is **Attack**: BMB-B1 already added the `F111.PT` override (a test pins it), so nothing was needed here.
+
+**RCS page.** Page 0 reads `SIG 165` with the doors shut and `SIG 248` with the bay open (frames `rcs-page-closed`,
+`rcs-page-bay-open`, `crop3x-rcs-closed-vs-bay-open`; a live-fire run on the default load, the first GBU-28 just released: the record's 100
+plus the store terms, and the open-bay term).
+
+### F111-7: HUD and cockpit
+
+| Item | Value |
+| --- | --- |
+| `AircraftId::hud()` | `AC130.HUD` (the record's own, naming `~ac130_p`) |
+| Cockpit stem, shape stem | `AC130`, `F111` |
+| Forward art | `~AC130H.PIC`, **1280 x 490**; no overlay pictures |
+| Record `viewOffset` | 0, 20, 60 (no host code reads it) |
+
+Pinned by the retail-reading test `crates/tore-import/tests/f111_cockpit.rs` (the five sensor rows, the radar, the names, the HUD module
+and its panel frame, the art size, no overlays, `viewOffset`).
+
+**Glass aperture (measured).** The AC-130's art is one window the size of the picture: **the mask covers 504,831 of its 505,305
+transparent pixels** (99.9 percent; the polygon is the whole picture and the opaque art trims it, losing the polygon's last
+column and row only). The new retail-reading test `hud_aperture::tests::the_f111_glass_is_the_transparent_area_of_the_ac130_art` reads the
+real art, pins the size, checks that the F-111F's mask is the AC-130's, covers no opaque pixel and keeps at least 99.5 percent of the
+transparent area. It does not fail closed. The HUD draws as the AC-130's does over the six small windows (frame `cockpit-front-view`:
+there is no cockpit art to draw behind, only the panels).
+
+**Eye (fitted, measured).** `mirrors::eye_offset` gains the F-111F: **5 ft up and 25 ft ahead** of the model origin (the shared seat is 7 up
+and 10 ahead). Measured on `F111.SH` after the per-axis factors (2/3 ft a unit times 0.859, 1.0, 0.827): the spine rises from 2.8 ft at 8.7 ft
+ahead to a crown 3.3 ft up from 23.3 to 27.3 ft ahead, the windscreen falls to 2.8 ft at 28 ft and the canopy ends at 30.7 ft (1.1 ft) before the
+nose cone. The shared seat is 15 ft aft of the crown and 4 ft over the spine, outside the cockpit. The seat is the crown's middle, 1.7 ft over
+it (the B-52's margin), so F2 Back looks over the hump and down the spine to the fin and tailerons (frame `cockpit-view-back-f2`). Readers
+and tests as the B-2's: `mirrors::tests::only_the_b2_the_f117_the_b52_and_the_f111_have_their_own_pilot_eye`,
+`flight_views::tests::back_from_a_b2_sits_at_its_own_seat`. The record's `viewOffset` is not used.
+
+**Rear view.** F2 Back from the eye above (frame `cockpit-view-back-f2`). As for the B-52, **no rear-view HUD exists** in the game, so no rear
+cue was built; the six windows stay.
+
+### AIM-9 rail refusals remeasured
+
+All eleven stores the infrared mask offers the rails were clipped on the **outboard shoulder** (where F111-5 put the rails) at the spread, 26 and 72.5
+degree wing with Cheat loading (the list ignored; `checks/F111-6/scripts/railscan.py`, `railscan.txt`). The seven admitted stores (`AA2`, `AA8`, `AA11`,
+`AA11B`, `AIM9B`, `AIM9M`, `AIM9X`) clip 0.00 ft everywhere; the four refused clip `R550` 0.40, `PL7` 0.83 (0.50 on the left rail at 72.5), `AT12` 0.44 and
+`GBU12` 1.02 ft, all over the 0.3 ft line. **`F111_RAIL_REFUSED` stays `PL7`, `R550`, `AT12`, `GBU12`**, now measured where the rails hang. See the
+[stores specification](../spec/stores-on-pylons.md).
+
+### Pins
+
+No pin moved: `--validate-ordnance` reads 54 aircraft, 23 recovered weapon stations, 5,398 weapon placements, 257 tank placements, 83 pod placements, 284
+Cheat-only, before and after (F111-5's values). The relabel and the sensor review change no placement.
+
+### Open for John
+
+1. **Radar and jammer enabled** as Transitional (fitted): the F-111F now has a radar window and a JAM light. The alternative is the old no-radar jet.
+2. **Eye** 5 ft up, 25 ft ahead (fitted); the AC-130 family has no art behind the HUD, so the cockpit view is the panels over the sky.
+3. **No rear-view HUD** and no ground-mapping radar mode (shared, a sensor change).
+4. **The pod body** is still the Pave Spike model (F111-5) while it reads Pave Tack everywhere; and it still does not rotate out of its cradle.
+5. The radar's 50 and 25 nmi are the A-6 record's, not a cited F-111F figure.
+6. The guns and live fire of every aircraft were not rerun: no shared gun or sight code changed.
+
+Provenance: sensor rows, HUD module, art and the template records retail; the radar and jammer assignments, the label text, the glass test, the eye entry
+and the scenarios fitted (agent decisions, 2026-11-16); strike class and HUD binding the coordinator's first pass. No retail bytes committed.
+
+## F-111F flight review (F111-8, 2026-11-16)
+
+Validation, fitting and the sweep rate, slice F111-8 (bomber batch B), Claude Sonnet (sonnet-high).
+The F-111F flies the hybrid adapter's `variety` configuration built from `F111.PT` and
+`F111.SH` with BMB-B2's corrections (29,120 / 50,200 lbf, tank 32,663 lb, flows 5 and 35
+lb/s) and the record's own envelopes (1 G row 788 kt at sea level, 1,434 kt at 36,000 ft),
+G rows (-2 to +5), maximum takeoff 100,000 lb and the A-6's loaded-control block
+(`loadedDrag` 60, `loadedElevator` 41). Raw probe output is local:
+`.local/m3-aircraft/checks/F111-8/` (`before/`, `after/`, `run_perf.sh`, `run_probes.sh`,
+`battery.txt`). "Before" is the repository at 34848491 (F111-6/7), "after" is with the
+sweep rate below. This is implementation mode.
+
+### What changed, and what did not
+
+**One change: the wing's sweep rate** (fitted, agent decision; the brief asked for it).
+SWING-1 gave every spec `sweep_rate_dps: None`, so the F-111F's wing was a pure function of
+speed, flaps and the 26 degree store hold, and when the last fixed-pylon store left at 650
+kt it went from 26 to 72.5 degrees in one tick (46.5 degrees). The F-111F's spec now has
+**3 degrees a second**, so the full 16 to 72.5 degrees takes 18.8 seconds and the release
+from the hold takes 15.5. **No published sweep time was found** (the Wikipedia article, the
+game's own Jane's text `F111.INF`, aerocorner, migflug, pilotinstitute, the MIT 16.885 course
+report and the NASA reports that came up give a range only; searched 2026-11-16): the figure
+is the brief's "about 15 to 20 seconds", an unsourced estimate, so the rate is a one-line
+constant (`swing::F111F.sweep_rate_dps`).
+
+- **Where the state lives.** `Configuration::wing_sweep: Option<f64>` (new, radians from the
+  drawn pose). `Configuration::set_wing_flight`, the one call the host makes each tick for
+  a human's ownship and for every AI actor, takes the schedule's turn as the target and
+  moves the state toward it by `SwingSpec::step_turn` (the rate times the 1/120 s tick,
+  landing exactly on the target). The swivelling and carried racks take the state's turn,
+  so a store leaves from where the moving wing has put it. With no rate (`None`) the
+  function is the old one: `step_turn` returns the target, no state is kept, the Tornado
+  and every other spec are bit for bit what they were (test
+  `only_the_f111f_has_a_sweep_rate_and_the_tornado_takes_its_turn_at_once`,
+  `the_sweep_rate_is_the_f111fs_and_the_tornado_follows_its_schedule_the_same_tick`).
+- **Checkpoints: carried, so a restore mid-sweep is exact (no version bump).** The sweep
+  state moves the swivelling and carried racks, so it changes where a store leaves: it is
+  coded in `Configuration`'s checkpoint record (`wing_sweep`, an `Option<f64>`, in the field
+  list of `checkpoint_records.rs`; the racks' own `turn` stays skipped, it is rewritten from
+  the state every tick). A restored configuration has the sweep it was saved with, so the
+  restored copy and the uninterrupted run have the same sweep and the same rack turns on
+  every tick (test `a_mid_sweep_checkpoint_restores_the_f111_wing_and_its_racks_identically`:
+  held at 26 degrees at 650 kt, the outer store leaves, checkpoint 100 ticks into the sweep,
+  both copies stepped to 72.5 degrees, bit-identical each tick). This covers the human's
+  ownship and the AI's configurations (`ai_wings_checkpoint.rs` codes them as shared
+  records, by content: a changing turn is a new record, only while a sweep runs) and the
+  handoff copies (the whole configuration is cloned). SIMULATION_VERSION 12 and
+  PROTOCOL_VERSION 84 are unreleased and already cover this cycle, so the field was added
+  with no bump (a checkpoint from before this slice, which has no field, is not read: the
+  format has no defaults, and none exist outside this unreleased cycle).
+- **The wire: not needed.** The host is authoritative for combat (a client holds the
+  session's copy of the mission and draws what the host sends), so the sweep is host state
+  and the clients draw it from their own simulation; host migration and standby hosts get
+  it through the checkpoint above. No wire field was added; a peer's drawing of another
+  aircraft's wing takes the schedule's turn (below).
+- **Presentation.** `flight::State::wing_turn: Option<f64>` (new, display-only like
+  `wing_hold`, never coded: `write_exact` ignores it): the world sets it on the frame's
+  presented clone from the ownship's state (`frame.rs`), and `f111_animation::sweep_turn`
+  and `pylons::swung` read it, falling back to the schedule when absent. So the drawn
+  wing and the drawn stores of **the aircraft the player flies** follow the moving turn.
+  **An AI F-111F, another peer's, or a replay's rebuilt state is drawn at the schedule's
+  turn** (their poses carry no turn): the AI actor's own racks do move at the rate, so a
+  store leaves from the moving wing while the drawing shows the schedule; a transient of
+  a few seconds after a release from the hold. Carrying the turn on the pose
+  (`AircraftPose`, 62 constructors, and the replay conversion) is the follow-up.
+
+### What is wrong, what was fitted
+
+**Nothing in the flight model was clearly wrong and citable, so no flight term was
+fitted** (the B2-8 and F117-8 bar): every figure with a source is inside it or the source
+is weak, and the one real gap (sea-level speed) is a trade between two published figures
+that the A-6 template's `loadedDrag` splits. Before and after probes are identical
+(`cmp` on all 13 performance logs and all 20 headless probe logs). The reasoning:
+
+- **Top speed at height.** The model settles at Mach 2.10 (1,206 kt) at 36,000 ft clean at
+  80,144 lb, Mach 2.28 at 63,481 lb, and Mach 1.94 at the 99,999 lb default load, thrust
+  limited (the corrected 50,200 lbf is the real total). The game's own Jane's text
+  (`F111.INF`, F-111A) says Mach 2.2 at height; Wikipedia's F-111F infobox says 1,434 kn
+  (Mach 2.5), which is the record's 1 G edge and a design figure. No fit.
+- **Top speed at sea level.** 663 kt (Mach 1.00) clean at 80,144 lb, 718 kt (Mach 1.09) at
+  63,481 lb, 611 kt (0.92) at the default load, against Mach 1.2 (795 kn) in Wikipedia and
+  `F111.INF`. The record's own 1 G edge (788 kt) is the published figure, so the shortfall
+  is the drag law: the shared drag is the thrust at the edge speed times the square of
+  speed over the edge, times `1 + loading x loadedDrag / 100`, and `loading` counts fuel
+  (0.69 at a full tank), so the A-6's `loadedDrag` 60 adds 41 percent to the drag at a
+  full tank. Setting it to 0 would put the sea-level speed on the edge (788 kt) and also
+  put the speed at height on the 1,434 kt edge (Mach 2.5), above the game's own Mach 2.2
+  and the real operational Mach 2.2 to 2.3. **Not fitted**: it trades one published figure
+  for another; the question is for John (Open item 1).
+- **Climb.** The 400 KEAS then Mach 0.90 schedule at full thrust, clean 80,144 lb: 5,000 ft
+  in 32 s, 10,000 ft in 53 s, 20,000 ft in 93 s, 36,000 ft in 150 s, 50,000 ft in 200 s;
+  the best sustained climb on the fighter schedule is 25,776 ft/min (Mach 0.8) to 30,945
+  ft/min (Mach 0.9) at 55,000 ft; peak specific excess power at sea level 283 ft/s (17,000
+  ft/min) at 80,144 lb and 391 ft/s (23,460 ft/min) at 63,481 lb. The published rate of
+  climb is 25,890 ft/min (Wikipedia, F-111F), unstated weight: the light figure is 9
+  percent under it. No fit.
+- **Takeoff and landing.** At the default load (99,999 lb, 100,000 maximum) the ground
+  start rotates at 141.4 kt and lifts off at 171.9 kt after 2,812 ft (GRE 1; 171.8 kt after
+  2,944 ft on UKR 1, the battery's field), 120.6 kt after 1,301 ft with
+  `--retail-stall-speeds`; the scripted landing at 87,586 lb (16,000 lb of fuel and the
+  stores) approaches at 161.9 kt, touches down at 155.3 kt and stops 2,348 ft later, and
+  the battery's approach (21,231 lb of fuel, 92,817 lb) flies the model's cap, 166.2 kt
+  (0.85 times the record's 195.5 kt landing limit), touching down at 164.8 kt with a 2,612
+  ft rollout on the 5,532 ft Simferopol runway. Real: "T-O and landing run under 915 m (3,000 ft)" (`F111.INF`, F-111A);
+  3,300 ft takeoff and 3,950 ft landing distances (Aerocorner, unstated weight and a
+  distance not a run); 115 kt approach with the wings spread, light (MIT 16.885 report on
+  the F-111, which calls its own figures estimates). The runs are under 3,000 ft and the
+  speeds are the shared weight-scaled stall rule (the model's 118.5 kt flapped 1 G stall
+  at the empty weight times the square root of 2.1 gross over empty), the same rule that
+  gives 140 to 167 kt for the other bombers: no fit, the windows are loose.
+- **Range and fuel flow.** Cruise at 470 kt and 36,000 ft burns 1.33 lb/s: 3,205 nautical
+  miles from the 32,663 lb tank (trimmed, throttle 0.31). `F111.INF` says "over 2,750
+  nautical miles with maximum internal fuel" (F-111A), Wikipedia 3,210 nmi ferry range
+  with drop tanks: the model is above the Jane's figure by 17 percent, in the band an
+  unreviewed cruise drag would give. The flows themselves (5 lb/s dry, 35 lb/s with the
+  afterburner, 0.62 and 2.51 lb per lbf per hour) **could not be checked against the
+  TF30-P-100**: no specific fuel consumption was found (Wikipedia "Pratt & Whitney TF30",
+  all-aero and the museum pages list thrust only; searched 2026-11-16), so BMB-B2's
+  fitted values stand, their stated analog the Turbo-Union RB.199 (0.598 dry, 2.5 reheat).
+- **Turns and roll.** Sustained level turn with the speed held, clean 80,144 lb: 3.5 to
+  3.6 G (74 degrees of bank, the model's cap) from 300 to 500 kt at 1,000 ft (12.8 to 7.7
+  degrees a second), 2.9 to 3.6 G at 15,000 ft (8.5 to 7.0), 2.3 to 2.9 G at 30,000 ft
+  (5.7 to 5.0). The roll probe reaches the shared 180 degrees a second cap. No real roll rate
+  was found (the F-111 rolls with spoilers and differential tailerons; sources that came
+  up say only that the spoilers are locked out at full sweep). No fit.
+- **Speed brake.** `airBrakesDrag` 256 gives 0.35 G of extra deceleration at 403 kt, 0.54
+  G at 564 kt and 0.69 G at 725 kt at 1,000 ft (a fighter's brake on an 80,000 lb jet; the
+  rig draws the dorsal plates as the brake, F111-3). No published figure; not changed.
+- **The 26 degree hold.** The default load has the AGM-65G on the outer pylon (row 7) and
+  the Mk 82 six-pack on row 8, so the wing is held at 26 degrees at any speed. The flight
+  model does not read it (no sweep term exists for any aircraft): the default load
+  takeoff (above), approach and top speed are the figures above, which include the
+  default load's 24,105 lb of stores. The real jet with a 26 degree wing is limited far
+  below the 1,111 kt (Mach 1.94 at 36,000 ft, afterburner, the default load) the model
+  allows. A flight limit while the stores are on (a thrust or speed cap from the
+  hold) would need the stores in the flight state (a shared change, wire and checkpoint);
+  Open item 3.
+
+### Before, after and real
+
+Probe: `performance_probe` on the corrected record and `--headless-flight`. Weights: "full"
+80,144 lb (clean, 32,663 lb tank), "default" 99,999 lb (the Load Ordnance default,
+24,105 lb of stores, 28,413 lb tank), "light" 63,481 lb (16,000 lb of fuel, clean). "Before" and
+"after" agree on every row (the flight model did not change); the second column is the
+change that did.
+
+| Quantity | Model (before = after) | Real (source) |
+| --- | --- | --- |
+| Wing sweep, release from the 26 degree hold at 650 kt | before: 26 to 72.5 degrees in one tick; after: 15.5 s | 16 to 72.5 degrees (Wikipedia, `F111.INF`); sweep time not found; 18.8 s for the full range is the brief's estimate |
+| Level top speed, sea level, afterburner (full / default / light) | 663 kt (M1.00) / 611 kt (M0.92) / 718 kt (M1.09) | Mach 1.2, 795 kn (Wikipedia; `F111.INF`) |
+| Level top speed, 36,000 ft, afterburner (full / default / light) | 1,206 kt (M2.10) / 1,111 kt (M1.94) / 1,307 kt (M2.28) | Mach 2.2 (`F111.INF`); 1,434 kn, Mach 2.5 (Wikipedia, the record's edge) |
+| Military power, 36,000 ft (full) | 918 kt (M1.60) | none found |
+| Time to 5,000 / 10,000 / 20,000 / 36,000 ft, 400 KEAS to M0.90 (full / default / light) | 32 / 53 / 93 / 150 s; 41 / 69 / 126 / 202 s; 26 / 42 / 71 / 112 s | none found |
+| Best sustained climb, fighter schedule, full | 25,776 ft/min (Mach 0.8) to 30,945 ft/min (Mach 0.9), at 55,000 ft | 25,890 ft/min (Wikipedia, unstated weight) |
+| Peak specific excess power, sea level, afterburner (full / light) | 283 / 391 ft/s (17,000 / 23,460 ft/min) | 25,890 ft/min as above |
+| Takeoff, default load, GRE 1 (UKR 1) | rotation 141.4 kt, liftoff 171.9 kt, 2,812 ft (171.8 kt, 2,944 ft); retail stall 120.6 kt, 1,301 ft | under 3,000 ft (`F111.INF`); 3,300 ft (Aerocorner) |
+| Approach, landing, 87,586 lb (battery, 92,817 lb) | approach 161.9 kt, touchdown 155.3 kt, roll 2,348 ft (166.2 kt, 164.8 kt, 2,612 ft) | under 3,000 ft (`F111.INF`); 3,950 ft landing distance (Aerocorner); 115 kt, light (MIT report, estimate) |
+| Cruise 470 kt, 36,000 ft, trimmed | 1.33 lb/s, 3,205 nmi from the tank | over 2,750 nmi with max internal fuel (`F111.INF`, F-111A) |
+| Fuel at full thrust | 5 lb/s dry (108.9 min), 35 lb/s afterburner (15.6 min) | TF30-P-100 specific fuel consumption not found |
+| Sustained turn, 15,000 ft, 450 kt, speed held (full) | 3.64 G, 8.5 deg/s | none found |
+| Speed brake, extra deceleration, 1,000 ft, 564 kt | 0.54 G | none found |
+| Thrust to weight at 80,144 lb / 99,999 lb | 0.63 / 0.50 | 0.61 (Wikipedia) |
+| G limit | -2 to +5 (retail, kept) | +7.33 (Wikipedia) |
+
+Sources read 2026-11-16: Wikipedia "General Dynamics F-111 Aardvark" (specifications,
+F-111F; the fixed pylons "could not be used with the wings fully swept"), Wikipedia "Pratt &
+Whitney TF30", all-aero.com, Aerocorner "General Dynamics F-111 Aardvark", Skybrary
+"F111", the MIT OCW 16.885J F-111 report, and the game's own Jane's text `F111.INF`
+(retail media, not committed). Real figures are for comparison only.
+
+### The AI heavy-class laws
+
+BMB-AI's laws key on the aircraft's flaps-up minimum level speed, not its class (the F-111F is
+Attack by BMB-B1's override). The F-111F's flaps-up minimum at the default load is about 234
+kt (the flaps-down 175.8 kt from `--headless-flight` over the 0.75 flap factor), above the 190.5
+kt line, at 87,586 lb about 219 kt, and about 187 kt at 63,481 lb: so the flaps-down climb-out
+wait and the final-approach flaps rule apply to it at its heavy weights and not at a landing
+weight. The two new scenarios pass cleanly (below); the AI laws were not changed.
+
+- `ai-heavy-takeoff-f111-gre-a1`: AI wing of two from Athens (12,000 ft) at the default load:
+  taxi 20.0 s, line up 30.1 s, takeoff roll 39.2 s, climb-out 77.2 s, **airborne 114.9 s**,
+  flies on; the probe checksum `6fdb08303d2a0f50` is the same before and after the sweep rate.
+- `ai-heavy-land-f111-ukr-a2`: sent home from the air at Simferopol (5,532 ft) with 16,000
+  lb of fuel and the stores, **touchdown 162 kt**, rolls out, clears, parks at 508.4 s,
+  0 ticks off the pavement.
+
+### Scenarios
+
+`flight-liftoff-f111`, `flight-liftoff-retail-f111`, `flight-approach-f111` join
+`flight.py` (`LIFTOFF_AIRCRAFT`, `LIFTOFF_TARGET` 150 to 190 kt, `APPROACH_TARGET` 140 to 175 kt,
+`INTERNAL_FUEL_LB` 32,663, `KNOWN_LIFTOFF` 171.8, `KNOWN_APPROACH` 166.2, the ordinary
+takeoff allowance); `flight-variety-f111` already existed. The windows are fitted, agent
+decisions, around the recorded figures and the weak published ones above, and
+`tools/test_battery_flight.py` pins the new entries. `tools/battery_scenarios/ai.py` adds
+the two AI scenarios above (`tools/test_battery_ai.py` lists them).
+
+### Checks
+
+`cargo fmt --all -- --check` clean; `cargo clippy --workspace --all-targets --locked -- -D
+warnings` clean; `cargo test --locked --workspace --no-fail-fast` 7,886 passed, 0 failed,
+108 ignored (7,882 before: four new tests, the checkpoint one among them, and the AI F-111F
+hold test now follows the rate); `--headless-flight 1200 --aircraft f111` 551.4 kt level at 5,006 ft, no crash, 0
+non-finite; the ground-start takeoff (UKR 1, default load) liftoff 171.8 kt after 2,944 ft;
+battery (`--jobs 2 --windows 1`) every `*f111*` scenario 28 of 28 (rerun after the checkpoint field), every `flight-approach-*`,
+`flight-liftoff-*` and `ai-heavy-*` 92 of 92; `python3 -B -m unittest discover -s tools` 587
+tests OK (skipped 5); `tools/check_docs.py` passed (382 files). Logs:
+`.local/m3-aircraft/checks/F111-8/`. Not run: the other battery lanes, `check_assets`, a
+windowed look at the moving wing (frames), mission and net batteries.
+
+Provenance: the sweep rate and the battery windows are fitted (agent decisions
+2026-11-16); the real figures are public pages and the game's own Jane's text, for
+comparison only; no retail bytes committed. The schedule (250 to 650 kt, flaps hold, 26
+degree hold) is unchanged.
+
+### Open for John
+
+1. **Sea-level speed against Mach at height.** The A-6 template's `loadedDrag` 60 puts
+   the F-111F at Mach 1.0 to 1.1 at sea level (published 1.2) and Mach 2.1 to 2.3 at height
+   (published 2.2, Wikipedia 2.5). Fit `loadedDrag` down (sea level to the edge, height
+   to Mach 2.5) or keep the split?
+2. **The sweep time.** 3 degrees a second (18.8 s) is the brief's estimate; no source.
+   A cited figure replaces the constant.
+3. **A flight limit under the 26 degree hold.** The wing is held at 26 degrees by the
+   default load's outer stores but the model still flies Mach 1.9 at height; a cap needs
+   the stores in the flight state (shared change). Or drop the hold from the default load.
+4. **Other aircraft's wing drawing.** An AI F-111F's, a peer's and a replay's drawn wing
+   take the schedule's turn, not the moving one (a carry on the pose and in the replay
+   conversion is the follow-up).
+5. **The roll rate (shared 180 degrees a second), the fuel flows (no TF30 figure), the G
+   limit (+5 against the real +7.33) and the roll of the real jet.**
+6. **The default load starts at 99,999 lb and approaches at 162 to 166 kt**, against 115 to
+   150 kt in the weak real figures (landing weights 40,000 to 55,000 lb): a landing at
+   the Load Ordnance default is a heavy landing, as the B-2's and B-52's are.
+
+## F-111F AI, missions, multiplayer and replay (F111-9, 2026-11-16)
+
+Implementation and verification mode, slice F111-9 (the F-111F's counterpart of B52-9, B2-9 and F117-9). The AI
+work was asked for by the coordinator on John's program (AGENTS.md: no AI work unless John asks). Everything here
+is `fitted`, agent decisions of 2026-11-16, except where a number is a record's. The shared bomber rules of
+[BMB-AI](#ai-fixes-for-the-bombers-bmb-ai-2026-11-16) and [B52-9](#b-52-ai-missions-multiplayer-and-replay-b52-9-2026-11-16)
+carry the F-111F unchanged: **no AI or airfield law was changed for it**. The one code fix is in the replay check
+(below). The tree was merged with `m3-aircraft` first (B52-9's final lookahead and taxi coast, both gated on
+`Situation::taxi_throttle_floor`), so the F-111F ran against them.
+
+### The AI strike (Attack class)
+
+The F-111F is an **Attack** class by BMB-B1's override (not a Heavy): the AI flies the retail passes (a level pass
+at 5,000 ft for a plain or laser bomb, the fast high pass for a seeker missile, the laydown for the retarded Mk 82),
+drops **one store a pass** (the Heavy's stick of eight does not apply) and takes the first store of the order bomb,
+then laser bomb (only with a spot assured), then seeker. Run with `--a2g-run UKR QUCOL --pilot ai --aircraft f111
+--load X --station N --count M`; stations are the run's order: 0 and 1 the inner wing rows (5 and 6, swivelling),
+2 and 3 the outer rows (7 and 8, carried), 4 the bay, 5 and 6 the AIM-9 rails.
+
+The wing is **held at 26 degrees** by the default load's stores on the outer pylons (F111-5), so every pylon is
+swept to the hold and every `ORIGIN` line reads the held wing's cell. The inner and the outer cell are the
+human's own, from `a2g-release-origin-f111` at 650 knots (-8.41 / -0.50 / 2.22 and -15.28 / -0.35 / -0.08 ft right,
+up and forward): the AI's racks are swept as the human's, at the AI's 393 knots (a free wing would sit at 36
+degrees there).
+
+| Run | What the log shows |
+| --- | --- |
+| GBU-28, inner pylon (station 0), `QUCOL` | level pass at 5,000 ft; `LASER` lasing from 0.025 s (its own Pave Tack and fixed laser); `RELEASE` at 3.4 s from (-8.41, -0.50, 2.22), `guided=Guiding` on its own spot, doors never move; impact 4.3 ft from the tank at 31 s, `KILL`, egress, not lost |
+| Mk 82, rows 6, 7 and 8 (stations 1, 2 and 3) | level pass; one release a pass at 16.25 s, 393 knots, from (-11.71, -0.35, 1.11), (-15.28, -0.35, -0.08) and (-18.30, -0.35, -1.09); `bay=0.00`, no `BAY` line; one bomb left in each row; the tank hurt (130 of 200), egress, not lost |
+| Two Mk 82 in the bay (station 4; the Pave Tack gives way to them) | `BAY` open at 15.7 s (0.96), release at 16.2 s from (-0.65, -2.59, 16.54) (the shared grid's first place), `bay=1.00`, the doors shut 1.95 s after the release, egress, not lost |
+| Four AGM-65G, outer pylon (station 2), the default load's row | the fast high pass fires one from 24,300 ft at 0.017 s from (-16.13, -0.40, -0.08), 11.8 s of flight, 16.5 ft from the tank, killed |
+| Two AGM-84E, outer pylon, against the Krivak (`QUSFLT`, `--unit`, 15 nm, 20,000 ft) | both leave at once (0.017 and 0.033 s), one a wing (right -15.28 and 15.28, forward -0.08), doors untouched, both hit at 29.3 s (96 ft), the Krivak destroyed; the run stops at 60 s |
+| Quick Mission wing (`--quick-wing`, `QUCOL`) | `ROLE strike`; the wing's standard load has the plain bomb first: the six retarded Mk 82 (`MK82P.JT`) of station 1, laydown at 1,308 ft, 483 knots, all six at once (a pack leaves whole), three vehicles killed, egress, not lost |
+
+**Open: the Ukraine factory.** The same quick-wing strike at the factory (`QUFACT`) is lost: the wingman's route from
+45,000 ft out crosses ground that rises to 730 ft, 2,600 ft past the release, the laydown holds 826 ft MSL (800 ft
+over the factory's 34 ft), so the aircraft is about 100 ft over the rise when the retarded pack's first three bombs
+fall onto it, and it is destroyed at 53 s (`KILL victim=0x2 category=0x4000`, `LOST crashed=yes`; three impacts at
+729 to 740 ft, 2,300 ft short of the target; the other three bombs land 133 to 192 ft from it). The same strike
+from the standard start at the factory (`--load MK82P --station 1 --count 6`, no `--quick-wing`) is clean: six
+bombs, 3 kills, not lost. It is the shared laydown height (the target's elevation, not the ground under the route),
+not an F-111F rule; the scenario uses the column. (The A-4E's quick wing at the factory flies the plain pass and
+is not lost.)
+
+The AI's **air-to-air** use of the F-111F is not exercised: the two AIM-9M rails start empty, the standard load
+has no air-to-air store, there is no gun, and the AI probe has no flag to load a wing's rails. An all-F-111F fight
+fires nothing; against Su-27s the F-111Fs fire nothing and keep their whole load (below).
+
+### Airfield
+
+No law change. The two heavy cycles of F111-8 and the full Southampton cycle pass on the merged tree with the
+B52-9 laws present (they are gated on `taxi_throttle_floor`, which the F-111F's wheels do not need: its rolling deceleration is the default 0.8 ft/s squared, the B-52's is 4.8, so the balance at 99,999 lb is under 0.1 against the 0.2 line; it flies
+the shared 1,500 ft lookahead and the old taxi throttle): `ai-heavy-takeoff-f111-gre-a1` and
+`ai-heavy-land-f111-ukr-a2` (touchdown 162 kt, parked at 508.4 s, 0 ticks off the pavement, checks in the
+battery before and after: the same), and the new `ai-merged-airfield-f111-wing2`: an AI wing of two from
+Southampton (FRA 14, 12,000 ft) at the full 99,999 lb: taxi 25.0 s, line up 35.1 s, takeoff roll 44.4 s, climb-out
+83.8 s, **airborne 120.7 s**, land order at 150 s, final 396.4 s, **touchdown 172 kt**, taxi clear 441.6 s, parked
+898.6 s; 108,923 ground samples, **0 off the pavement**; the check wants a touchdown at 180 kt or slower. Since
+no airfield code changed, the BMB-AI baseline comparison (the 129 airfield scenarios) was not rerun: the airfield
+code on `m3-f111` is `m3-aircraft`'s, whose B52-9 comparison stands.
+
+### Quick Mission
+
+`quick_mission::tests::the_f111_is_a_quick_mission_player_and_a_wing_choice`: `F111.PT` is offered as the player's
+aircraft ("F-111F Aardvark") and in every AI wing field, a draft carries it as the player and in every wing, and
+the night stealth rule (the B-2 and the F-117) does not take it. The strike is `ai-strike-f111-quick-wing` (above).
+Two 2 v 2 probes: `ai-f111-quick-mission-2v2` (all F-111F: no shot in 7,200 ticks, every wing still holds the
+standard load, `GBU-28 x2, MK-82HDP6 x2, AGM-65 x4, MK-82HDP6 x2, MK-82 x0, AIM-9M x0, AIM-9M x0`) and
+`ai-f111-vs-su27-2v2` (the Su-27s fire three missiles and hurt the player's wing; the F-111F wingman fires nothing
+and keeps its load; the probe's usual checks hold).
+
+### Multiplayer
+
+`net-a2g-stores-f111`: both players in F-111Fs (`F111_STORES_MISSION`, one wing of two). `tore-bot --load` hangs each
+store on the first station after the others that takes it, two of each, in the station order, so
+`AGM84E.JT,AGM84E.JT,AGM84E.JT,AGM84E.JT,MK82.JT` puts a Harpoon pair on each of the four wing rows (the outer
+pair holds the wing at 26 degrees) and the Mk 82 in the bay (the first row left that takes it); `--a2g bomb` (the
+first bomb station with a round) takes the Mk 82. The watching client sees a Mk 82 leave plane 0, the bomber's
+stations emptying on planes 0, 2 and 3 (the Mk 82 and the AI's), a Stores event of 20 bytes at most (12 events, 208 bytes), three
+aircraft drawn, and reads plane 0's **bay doors at 1.00** on its screen. (A plain `--load MK82.JT` bombs from the
+inner pylon, the first station that takes it, with the doors shut.) The Pave Tack pod is not on the wire as a
+store; it gives way to the Mk 82 in the loadout the bot sends.
+
+### Replay
+
+**A fix.** `--verify-render` failed for every F-111F recording at tick 1, "aircraft 0's stores differ"
+(`replay-rec-f111-2v2`: 2,400 of 2,401 ticks differing; the same for a pylon ripple). F111-3 gave `Rack` a `swing`
+field, the swing spec the host sets on the swivelling racks of an aircraft that is not the Tornado
+([`Rack::swing`]), and `same_stores` in `tore-session`'s `recording/convert.rs`, which leaves out the derived
+`Rack::turn`, did not leave it out: the live picture's racks carried `Some(F111F)` and the recording's none (the
+drawing sets it again from the aircraft's identity, `pylons::swung`). `same_stores` now clears it too, and
+`replay/convert.rs`'s sweep test pins that stores equal but for the swing spec are the same picture (and stores that
+differ in anything else are not). Evidence: both scenarios fail on the binary before the fix and pass after it
+(`checks/F111-9/run-rip-before` and `run-rec`). Nothing in the recording, the wire or a checkpoint changed.
+
+- `replay-rec-f111-2v2`: the F-111F as the player and in both wings, a 2 v 2 recorded three times: `--verify-render`
+  PASS (2,401 ticks, 0 differing), two runs record the same, the identity reads back. The default load carries
+  stores on the outer pylons, so the wings are held at 26 degrees all through the fight (500 to 570 knots).
+- `replay-rec-f111-takeoff` (the sweep): an AI F-111F pair takes off from Athens and is recorded for 250 s
+  (`--verify-render` PASS, 30,001 ticks, 0 differing): the wing is out with the flaps and gear (to 203 knots), and
+  once they are up the speed passes the schedule's 250 knots (drawn sweep 0 degrees), 321 knots (26 degrees, the
+  hold) and goes on to 461; the check reads the log and wants a drawn sweep change of at least 8 degrees (it is 26).
+- `replay-a2g-f111-ripple`: four Mk 82 from the outer pylon pair (`--station 2 --count 4`, 0.5 s apart, 650 knots,
+  the wing held at 26 degrees by those stores) recorded and replayed with `--verify-render` PASS (2,571 ticks,
+  0 differing); `--recording-log` reads back four releases and outcomes. The **bay cannot be flown by hand**: its two
+  Mk 82 push the start weight 100 lb over the 100,000 lb maximum (the default tank is already capped, F111-5 finding
+  6), so the bay is covered by `ai-strike-f111-bay` and `net-a2g-stores-f111`.
+
+**Not carried: the sweep of an AI F-111F, a peer or a replay.** Those draw the schedule's turn from the speed
+(the flaps and the held wing from the stores), not the rate-limited turn the host steps at 3 degrees a second; they
+differ only while the wing is moving (up to 18.8 s for the full 56.5 degrees). Carrying the present turn needs a field that is either a new device
+(`DEVICES` is 22, in the wire and the recording) or on `AircraftPose` (61 constructors). Both are a wire or a
+format change, so it stays open (F111-8 open item 4); verify-render is clean because the live and the replayed
+pictures both derive the schedule.
+
+### Checks (F111-9)
+
+Through `light3.sh`, profile `.local/m3-aircraft/profile-f111` (refreshed first), logs in
+`.local/m3-aircraft/checks/F111-9/`. `cargo fmt --all -- --check` clean; `cargo clippy --workspace --all-targets
+--locked -- -D warnings` clean; `cargo test --locked --workspace --no-fail-fast` 7,890 passed, 0 failed, 108
+ignored (7,886 before the merge of B52-9's three tests, plus the new Quick Mission test); `--validate-ordnance`
+passed with no pin moved (54 aircraft, 23 recovered stations, 5,398 weapon placements, 257 tank, 284 Cheat-only,
+83 pods); `python3 -B -m unittest discover -s tools` 607 tests OK (skipped 5); `tools/check_docs.py` passed (382
+files). Battery (`--jobs 2 --windows 1`): every `*f111*`, `ai-heavy-*`, `ai-strike-*`, `ai-merged-airfield-*`,
+`net-a2g-*`, `net-ai-strike-*` and `replay-a2g*` scenario, **98 of 98** (the 13 new ones among them: `ai-strike-f111-*`
+x6, `ai-f111-*` x2, `ai-merged-airfield-f111-wing2`, `net-a2g-stores-f111`, `replay-rec-f111-2v2`,
+`replay-rec-f111-takeoff`, `replay-a2g-f111-ripple`). Before the replay fix the two replay scenarios fail on the
+merged binary (`run-rip-before`). Not run: `--smoke-test`, `check_assets`, the rest of the AI lane (the
+862-scenario run), a Quick Mission played to the end, the BMB-AI airfield baseline comparison (no airfield code
+changed).
+
+Provenance: scenarios, checks and the replay fix fitted (agent decisions, 2026-11-16); ordnance, stations and
+the held wing are F111-5's; no retail bytes committed.
+
+### Open for John (F111-9)
+
+1. **The Ukraine factory quick wing** is lost to the AI's own retarded bombs over a rise (above): the laydown height
+   follows the target's elevation, not the ground under the route. A shared AI change.
+2. **The AI F-111F's air-to-air use** (the AIM-9M rails) is untested: the rails start empty and nothing loads them in
+   a probe.
+3. **AI, peer and replay sweep drawing** needs a pose or device field (a wire or format change).
+4. **The Pave Tack stays in the shut bay** while the AI lases; its cradle does not rotate out (F111-5).
+5. **The AI drops one Mk 82 a pass** (Attack class); an F-111F with four retarded Mk 82 packs lays one six-pack a
+   pass. A stick like the heavies' is a design choice.

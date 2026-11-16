@@ -1344,6 +1344,14 @@ mod tests {
             crate::mirrors::pilot_eye_of(Some(AircraftId::Tu160), [0., 1000., 0.], level)
         );
         assert_ne!(deck, shared);
+        // F111-7: the F-111F's seat is its drawn cockpit, 25 ft ahead.
+        body.aircraft = Some(AircraftId::F111);
+        let cockpit = body_camera(body, 3).position;
+        assert_eq!(
+            cockpit,
+            crate::mirrors::pilot_eye_of(Some(AircraftId::F111), [0., 1000., 0.], level)
+        );
+        assert_ne!(cockpit, shared);
     }
     #[test]
     fn back_from_another_aircraft_sits_at_its_pilot_eye_and_shows_it() {

@@ -3927,3 +3927,127 @@ The mask refuses air-to-air missiles and `AS15.JT` (the Kh-55, no `0x40`). The o
 records clear by at least 0.08 ft. Provenance: bay count, length and the six-missile default are the
 record and `TU160.INF`; opening, planes, depth, width, door count, mounts and the refusals fitted (agent,
 2026-11-16).
+
+## F-111F stations, bays and pylons (F111-5, 2026-11-16)
+
+Implementation specification, **opinionated** and **fitted**, agent-authored (F111-5, the
+coordinator's first-pass decisions of 2026-11-15; John's to review). A game configuration, not a
+claim of original behaviour. The measurements, the choices and the open items are in [F-111F
+stations, bays and pylons](../formats/aircraft-variety.md#f-111f-stations-bays-and-pylons-f111-5-2026-11-16).
+It reuses the shared machinery: `bays::STATIONS`, `OPENINGS` and `GRIDS` (the B-2's grid, the
+B-52's centred opening), `bay_doors::{centre_doors, centre_lining}` and the F-111F swing spec of
+[F111-3](#update-f111-3-2026-11-15-the-f-111fs-inner-pylons-swivel-about-its-own-pivot).
+
+**Stations** (`F111.PT` keeps rows 0 to 8 and `adjust_defaults` appends rows 9 to 11 while it is
+the retail record). Feet right / up / forward of the reference point:
+
+| Row | Station | Mount | Capacity, class | Default |
+| ---: | --- | --- | --- | --- |
+| 5 | inner wing pair, swivels, `Location::Wing` | +/-8.30 / 1.0 ft under the wing / 2.38 (mid-chord) | 2, 50 | 2 GBU-28 |
+| 6 | inner wing pair, swivels | +/-11.74 / 1.0 ft under / 1.86 | 2, 50 | 2 Mk 82 retarded |
+| 7 | outer wing pair, fixed, carried by the wing | +/-15.46 / 1.0 ft under / 1.31 | 4, 50 | 4 AGM-65G |
+| 8 | outer wing pair, fixed, carried by the wing | +/-18.61 / 1.0 ft under / 0.84 | 2, 50 | 2 Mk 82 retarded |
+| 9 | bay, `Location::Magazine`, grid 3.0 by 12.0 ft, centre line | 0 / -3.308 (belly plane) / 16.54 | 2, class 12, `0x1500` | no bombs; the Pave Tack pod |
+| 10 | AIM-9 rail, `Location::Shoulder` on row 5's pylon, swivels | +/-9.55 / on the pylon / 2.38 | 2, 5, `0x85` | empty |
+| 11 | AIM-9 rail on row 6's pylon, swivels | +/-12.99 / on the pylon / 1.86 | 2, 5, `0x85` | empty |
+
+The wing rows' forward coordinate is `F111F.mid_chord`, whose outline is now the drawn skin's
+leading edge, shape (15, 12) to (54, 2), and trailing edge at y -5, so the stores preview's
+pylon-centre report reads 0.003 ft off the chord's middle at rows 7 and 8 (it read 0.8 ft aft with
+the earlier (13, 10) to (53, 0) chord). `swing::carries(id, row)` is a swivelling row or a fixed
+one (`fixed_store_rows`): the host (`Configuration::set_wing_turn`) and the drawing
+(`pylons::swung`) sweep a carried station's point with the wing about the F-111F's pivot; only a
+swivelling one has its pylon turned back, so a fixed pylon's store keeps the aircraft's heading
+(at most 10 degrees off the wing's, while it carries). The rails hang on the pylon's outboard
+shoulder (`Hang::Shoulder`, 1.25 ft out): the Tornado's inboard flank enters the glove at row 5
+(0.26 ft spread, 0.38 ft at 72.5 degrees).
+
+**The sweep limit.** While a store or a tank hangs on row 7 or 8 the wing is held to 26 degrees of
+sweep or less: `SwingSpec::turn_carrying(speed, flaps, gear, fixed_stores)` is the schedule's
+turn capped at `max_sweep_with_fixed_stores` (26 degrees, a 10 degree turn from the drawn 16);
+flaps still hold it spread, and below 321 knots (where the schedule reaches 26 degrees) nothing
+changes. Who applies it: `Configuration::fixed_stores_carried(rounds)` (live station rounds and
+tank quantities on `swing::holds_sweep` rows); `Ownship::set_wing_flight` for the human;
+`AiWings::carry_swing_wings` for every AI aircraft, from the actor's own rounds; and, for the
+drawing, the display-only `flight::State::wing_hold` (set on the frame's presented flight by
+`World::frame`, and on a remote or replayed aircraft's pose by `render_snapshot::model_pose` from
+its stores through `pylons::wing_held`), read by `f111_animation::sweep_turn` and
+`pylons::swung`. It is not coded on the wire or in a checkpoint (the turn is a function of
+state both peers hold). No sweep rate exists (SWING-1), so the wing jumps to the schedule's
+sweep the tick the last outer store leaves. Tests:
+`swing.rs` `the_f111_outer_pylons_hold_the_sweep_to_26_degrees_while_they_carry`,
+`live.rs` `a_store_on_a_fixed_f111_pylon_holds_the_wing_to_26_degrees_and_rides_it`,
+`ai_wings.rs` `an_ai_f111_holds_its_wing_to_26_degrees_while_its_outer_pylon_carries`,
+`pylons.rs` `the_drawing_holds_the_f111_wing_while_a_store_hangs_on_a_fixed_outer_pylon`; battery
+`a2g-release-origin-f111` (the outer pylon's Mk 82 leaves 15.46 ft out and 1.31 ft ahead at 200
+knots and 15.28 ft out, 0.08 ft aft at 650 knots, the default load carrying; the default GBU-28
+8.30 / 2.38 and 8.41 / 2.22).
+
+**The bay (feet).** Belly plane -3.308 (the keel line of `F111.SH`'s two belly plates, z -6 units at
+2/3 ft times the z factor 0.827); the forward plate `3132` rises 0.55 ft over its 14 ft. Opening
+x +/-1.5, 9.67 to 21.67 forward (12.0 long, inside the plate's 8.67 to 22.67), cut into two
+doors 1.5 ft wide hinged on the outer edges (aft end at the plate, axis tilted 2.3 degrees with
+the plate), 90 degrees down in the flight's 1.00 s travel, hanging to -4.81 at the aft end. Recess
+3.0 deep, roof at -0.308 under the top skin (+1.1). A lined box (ceiling and four walls, lower edges
+following the plate), a cradle rail (0.4 ft wide, 0.6 deep, 8.4 ft long under the ceiling) and two
+posts (4.6 ft either side of the opening's middle) draw only while the doors are off their seat.
+Code: the F-111F row of `bays::OPENINGS` (`centre` 0, `inner` 0, `outer` 1.5, `inner_depth` equal
+to `depth`), `roster_animation::cut_doors_sloped`, `bay_doors::centre_lining`, `f111_animation.rs`
+(`Rig::faces`; lining addresses `7000` to `7013`). `State::bay_available` is true, so the bay key,
+the bay HUD cue and the open-bay signature term apply as for every bay aircraft. A pod or a bomb
+in the bay is drawn only with the doors off their seat.
+
+**What the bay holds.** The **Pave Tack** is a designator pod loaded on row 9 (`0x400` kept on this
+one row; the wing rows have it cleared): `PAVESPK.SEE`, the Pave Spike stand-in, drawn with the
+shared authored pod model at a fitted 8.0 by 1.25 ft (`bays::pod_body`), centred on the opening's
+middle plus the Mk 82 origin offset 0.87 ft, on the posts, not in the grid. The standard load
+carries it (`stations::default_bay_pod`, `Configuration::with_default_load`); a bomb load on the
+row displaces it and loading the pod displaces the bombs (`Loadout::refresh_equipment`,
+`load_designator`), so the pod and **two Mk 82** (the alternative, `MK82.JT`, two abreast at the
+grid's 1.3 ft pitch, one long, one tier, 0.40 ft to the door planes, 0.20 ft from the centre line,
+2.35 ft from the ends, 1.84 ft under the roof, 0.25 ft above the belly plane, 0.39 ft apart) are
+alternatives on one row without an `ALTERNATIVES` entry. A pod in a bay is not an external store
+(`store_signature`). A load that names every station drops the standard load's own pod unless it
+names it (`LoadoutSpec::apply`); `later_weapon_rows` is 3 so a load saved with the four wing rows
+still restores. The default load's mass includes the pod's 425 lb (the record's; the real pod is
+about 1,385 lb).
+
+**Refusals and admissions** (stores preview, airframe clip against the 0.3 ft line, 16, 26 and 72.5
+degrees; the bay's 0.05 ft; screening aids, not certification):
+
+| Row | Refuses | Admits |
+| --- | --- | --- |
+| 5 | `F111_ROW5_REFUSED` (10): `GBU29`, `GBU29P`, `GBU30`, `PAVEWA3` 1.10 ft; `AM39` 0.45; `AA6`, `GBU10`, `GBU10A`, `PAVEWAY` 0.37; `GBU16` 0.36 | 51 of 61 |
+| 6 | `F111_ROW6_REFUSED` (4): the GBU-27 class 1.10 ft | 57 of 61 |
+| 7, 8 | none | all 61 |
+| 10, 11 | `F111_RAIL_REFUSED` (4): `PL7`, `R550`, `AT12`, `GBU12` (the Tornado's rail line; not remeasured on the outboard shoulder) | 7: `AA2`, `AA8`, `AA11`, `AA11B`, `AIM9B`, `AIM9M`, `AIM9X`, each 0.00 ft |
+| 9 | `F111_BAY_REFUSED` (15): `AGM45`, `AGM88`, `AT2`, `B13`, `B8`, `CBU87`, `CBU89`, `FAB500`, `GBU30`, `GBU38`, `LAU61`, `MK20`, `MK82HD`, `RBK250`, `RBK500` | `MK82`, `FAB250`, `LAU10` and the pod |
+
+The tanks (`F150` to `F500`) clip nothing on rows 5 to 8 at any sweep. A lone bay store hangs in
+the shared grid's outer column (off the centre line), which refuses several single big stores that
+a centred one would clear. Rail-to-pylon-store clearances are bounding boxes only: the GBU-28's fins
+overlap an AIM-9 on rail 10 by 0.58 ft in box terms, so the rails start empty.
+
+**Glove plates.** `f111_animation::glove_plates` takes colours, texture and flags from the wing's
+top skin (`40bf`, `44e5`) and fits the plate vertices' texture coordinates to that skin's mapping
+(least squares, `uv_fit`), so the plates are the wing's camouflage across the glove (frames
+`free-top-700-clean`, `free-top-600-clean`).
+
+Guards: `bays.rs` `the_f111_has_one_centred_bay_with_a_grid_for_two_abreast_and_a_pod_body`;
+`hardpoints.rs` `the_f111_outer_pylons_rails_and_bay_are_placed_where_the_table_says`;
+`aircraft_stations.rs` `the_b1b_bay_rows_and_the_f111_wing_rows_are_corrected_and_nothing_else_moves`;
+`ai_wings/release.rs` `an_ai_bomb_leaves_the_f111_bay_and_its_outer_pylon_from_their_own_places`;
+`f111_animation.rs` `the_bay_cuts_the_belly_plate_into_two_leaves_and_draws_its_lining_only_open`;
+the probe's `bay` check (`--animation-probe f111`); battery `flight-bay-fire-f111-row9`,
+`flight-bay-fire-f111-pylon-row7`, `render-f111-clearance`, `a2g-release-origin-f111`,
+`flight-livefire-f111-slot1` to `slot7`.
+
+### F-111F AIM-9 rail refusals remeasured on the outboard shoulder (F111-6, 2026-11-16)
+
+F111-5 put rails 10 and 11 on the outboard shoulder but kept the Tornado's four refusals, measured on the
+inboard flank. All eleven stores the infrared mask offers were clipped again with Cheat loading (which
+ignores the lists) on the outboard shoulder at the spread, 26 and 72.5 degree wing (`checks/F111-6/scripts/railscan.py`,
+`railscan.txt`; against the airframe at the 0.3 ft line, both rails loaded). The seven admitted stores clip
+0.00 ft at every sweep. The four refused clip: `R550` 0.40 ft (all three sweeps), `PL7` 0.83 ft (0.50 at 72.5 on
+the left rail), `AT12` 0.44 ft and `GBU12` 1.02 ft. `F111_RAIL_REFUSED` is therefore **unchanged**, now measured
+on the outboard shoulder it names. See [the F-111F section](../formats/aircraft-variety.md#f-111f-ordnance-sensors-hud-and-cockpit-f111-67-2026-11-16).

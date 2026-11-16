@@ -458,6 +458,12 @@ impl LoadoutSpec {
         }
         base.cheat = self.cheat;
         base.fuel_lbs = self.fuel_lbs;
+        // A load that names every station names every pod it carries, so the
+        // standard load's own pod (the F-111F's Pave Tack, F111-5) goes unless
+        // the load names it again.
+        if self.stations.len() == current {
+            base.configuration.designator_pods.clear();
+        }
         let mut pods = Vec::new();
         for (index, load) in self.stations.iter().enumerate() {
             let station = &mut base.configuration.stations[index];

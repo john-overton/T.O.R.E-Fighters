@@ -208,6 +208,105 @@ pub const F111_WING_ROWS: std::ops::Range<usize> = 5..9;
 /// The real F-111 pylon rating as a weight class (class x 100 lb, BMB-B2):
 /// 5,000 lb a store.
 pub const F111_WING_CLASS: i32 = 50;
+/// The F-111F's inner and outer wing pylon pairs (`F111.PT` rows 5 and 6, the
+/// two swivelling pylons a wing, and rows 7 and 8, the two fixed ones;
+/// F111-5, 2026-11-16).
+pub const F111_INNER_ROWS: std::ops::Range<usize> = 5..7;
+pub const F111_OUTER_ROWS: std::ops::Range<usize> = 7..9;
+/// The F-111F's weapons bay (F111-5, 2026-11-16): the first of three rows
+/// [`adjust_defaults`] appends after the nine source rows, row 9, a
+/// [`Location::InternalBay`]-class row (location byte 3) on the shared bay code
+/// (`combat::bays`). The real bay holds a removable M61 or two 750 lb bombs, and
+/// on the F-111F the Pave Tack pod on its rotating cradle ("Wikipedia", "General
+/// Dynamics F-111 Aardvark"; `F111.INF`). The row's mask is the bay bomb mask
+/// `0x1100` plus the designator bit `0x400`: the pod loads here and nowhere else
+/// (the wing rows lost the bit in BMB-B2, B7: a pod stands on a station the real
+/// aircraft has). Two stores (the real two bombs, one tier of two abreast), a
+/// weight class of 1,200 lb a store (a 500 lb class bomb loads, a 2,000 lb one
+/// does not), the plain Mk 82 as its default store with
+/// no default count: the bay starts with the Pave Tack
+/// ([`F111_BAY_POD`]), which the bomb load displaces. **Fitted** (agent
+/// decision, F111-5; John's first-pass decision: the pod by default, two Mk 82 the
+/// alternative load).
+pub const F111_BAY: usize = 9;
+pub const F111_BAY_FLAGS: i32 = 0x1500;
+pub const F111_BAY_ITEMS: i32 = 2;
+pub const F111_BAY_CLASS: i32 = 12;
+/// The record position of the bay row, record units (a third of a foot): the
+/// shared bay code puts the stores where `combat::bays::STATIONS` says, so this
+/// is the middle of the opening for the record's own sake.
+pub const F111_BAY_MOUNT: [i32; 3] = [0, -10, 47];
+/// The designator pod the F-111F's bay holds by default, the Pave Tack:
+/// `PAVESPK.SEE`, the record's own laser designator row, drawn as a fitted
+/// body on its cradle (F111-5; the record is the Pave Spike stand-in of the
+/// F111-0 sensors review, shown as "Pave Tack" by F111-7).
+pub const F111_BAY_POD: &str = "PAVESPK.SEE";
+/// The F-111F's two AIM-9 shoulder rails (`F111.PT` rows 10 and 11, appended
+/// after the bay): one on each pair of inner swivelling pylons, rail 10 on row
+/// 5's pylon and rail 11 on row 6's, one Sidewinder a side, so four rails in
+/// all ("AIM-9 rails on the four inner swiveling pylons", Wikipedia, cited).
+/// The infrared mask `0x85`, class 5 and the AIM-9M default store are the
+/// Tornado's rail (TOR-6b); the position is the pylon's own record's, which
+/// `hardpoints::station_move` moves to the pylon's flank. **Opinionated**
+/// (agent decision, F111-5; John's first-pass decision).
+pub const F111_RAILS: std::ops::Range<usize> = 10..12;
+pub const F111_RAIL_FLAGS: i32 = 0x85;
+pub const F111_RAIL_CLASS: i32 = 5;
+/// Stores the F-111F's bay refuses though its mask and weight class admit them
+/// (F111-5, 2026-11-16; measured with the bay clearance report, the doors open,
+/// each store at its full count on the shared grid: a distance of under 0.05
+/// ft to a door plane, an end, the roof or another store, or running through
+/// one, or reaching below the closed belly plane): the 13 to 14 ft rocket pods
+/// and missiles that overrun the 12 ft opening (`B13`, `B8`, `LAU61`, `AGM88`,
+/// `AGM45`, the 20 ft `GBU30`), and the bombs whose fins span more than the
+/// opening leaves a lone store (a lone store hangs in the outer column of the
+/// shared grid): `AT2`, `FAB500`, `MK82HD`, `CBU87`, `CBU89`, `MK20`,
+/// `RBK250`, `RBK500`, `GBU38`. Three stay (`MK82`, `FAB250`, `LAU10`). See
+/// `docs/spec/stores-on-pylons.md`, "F-111F stations".
+pub const F111_BAY_REFUSED: [&str; 15] = [
+    "AGM45.JT",
+    "AGM88.JT",
+    "AT2.JT",
+    "B13.JT",
+    "B8.JT",
+    "CBU87.JT",
+    "CBU89.JT",
+    "FAB500.JT",
+    "GBU30.JT",
+    "GBU38.JT",
+    "LAU61.JT",
+    "MK20.JT",
+    "MK82HD.JT",
+    "RBK250.JT",
+    "RBK500.JT",
+];
+/// Stores the F-111F's two inner pylon rows refuse, the stores that enter the
+/// airframe by more than 0.3 ft (the F-15E A2 line, John 2026-11-10) at the
+/// spread, 26 and 72.5 degree wing, measured with the stores preview
+/// (F111-5, the panel's drawn mid-chord): row 5 (8.3 ft out, 0.85 ft from the
+/// swivel pivot, under the wing glove) the 5.4 ft finned GBU-27 class (1.10
+/// ft at 26 and 72.5 degrees), the AM-39 (0.45 ft), `AA6`, `GBU10`, `GBU10A`,
+/// `GBU16` and `PAVEWAY` (0.36 to 0.37 ft); row 6 only the GBU-27 class
+/// (1.10 ft). `AS30` (0.28 ft) and `GBU12` (0.23 ft) stay. The two outer
+/// pylons refuse nothing (no store enters the airframe there).
+pub const F111_ROW5_REFUSED: [&str; 10] = [
+    "AA6.JT",
+    "AM39.JT",
+    "GBU10.JT",
+    "GBU10A.JT",
+    "GBU16.JT",
+    "GBU29.JT",
+    "GBU29P.JT",
+    "GBU30.JT",
+    "PAVEWA3.JT",
+    "PAVEWAY.JT",
+];
+pub const F111_ROW6_REFUSED: [&str; 4] = ["GBU29.JT", "GBU29P.JT", "GBU30.JT", "PAVEWA3.JT"];
+/// Stores the F-111F's AIM-9 rails refuse though the infrared mask admits them
+/// (F111-5, the Tornado's line, 0.3 ft against the airframe or the pylon's own
+/// store, measured alone on the rail at the spread, 26 and 72.5 degree wing):
+/// the four the Tornado's rail refuses too.
+pub const F111_RAIL_REFUSED: [&str; 4] = ["PL7.JT", "R550.JT", "AT12.JT", "GBU12.JT"];
 /// The active-radar seeker bit of a station's flags (`loading.rs`: an
 /// active-radar missile such as the Kh-15, `AS16.JT`, needs it).
 pub const ACTIVE_RADAR_BIT: i32 = 0x20;
@@ -326,7 +425,22 @@ pub fn gun_pod_row(id: AircraftId) -> Option<usize> {
 /// took missiles on 2026-10-20, so a load saved with the one weapon row before
 /// it (the centreline bombs) still restores, the new row empty.
 pub fn later_weapon_rows(id: AircraftId) -> usize {
-    usize::from(id == AircraftId::F15)
+    match id {
+        AircraftId::F15 => 1,
+        // F111-5 (2026-11-16): the bay and the two AIM-9 rails, rows 9 to 11,
+        // came after a load saved with the four wing rows.
+        AircraftId::F111 => 3,
+        _ => 0,
+    }
+}
+
+/// The designator pod an aircraft's standard load carries on a bay row, the row
+/// and the equipment record: the F-111F's Pave Tack in its weapons bay
+/// (F111-5, 2026-11-16). It is a loaded designator pod
+/// (`Loadout::load_designator`), so a bomb load on the row displaces it and
+/// the pod can be loaded again from the Load Ordnance page.
+pub fn default_bay_pod(id: AircraftId) -> Option<(usize, &'static str)> {
+    (id.source() == AircraftId::F111).then_some((F111_BAY, F111_BAY_POD))
 }
 
 /// These names have authored GAS records, generated in memory at pack load.
@@ -452,6 +566,22 @@ pub fn weapon_allowed(id: AircraftId, row: usize, source: &str) -> bool {
         // The Tu-95's wing pylons take the AS-16 and nothing else (BMB-C2):
         // the active-radar bit the Kh-15 needs also admits the Harpoon class.
         AircraftId::Tu95 => row != TU95_WING_PYLONS || source == "AS16.JT",
+        // The F-111F's bay, wing pylons and AIM-9 rails each refuse what the
+        // measured clearances rule out (F111-5, 2026-11-16).
+        AircraftId::F111 => {
+            let refused = if row == F111_BAY {
+                &F111_BAY_REFUSED[..]
+            } else if F111_RAILS.contains(&row) {
+                &F111_RAIL_REFUSED[..]
+            } else if row == 5 {
+                &F111_ROW5_REFUSED[..]
+            } else if row == 6 {
+                &F111_ROW6_REFUSED[..]
+            } else {
+                &[]
+            };
+            !refused.contains(&source)
+        }
         AircraftId::Tornado => match row {
             TORNADO_SHOULDER => !TORNADO_SHOULDER_REFUSED.contains(&source),
             TORNADO_INNER_WING => !TORNADO_INNER_WING_REFUSED.contains(&source),
@@ -1108,9 +1238,33 @@ pub fn adjust_defaults(id: AircraftId, rows: &mut Vec<Hardpoint>) {
             }
         }
         AircraftId::F111 => {
+            let inner: Vec<[i32; 3]> = rows[F111_INNER_ROWS].iter().map(|h| h.position).collect();
             for row in &mut rows[F111_WING_ROWS] {
                 row.flags &= !DESIGNATOR_BIT;
                 row.weight_class = row.weight_class.min(F111_WING_CLASS);
+            }
+            // F111-5 (2026-11-16): the bay (row 9) and the two AIM-9 rails
+            // (rows 10 and 11), appended past the nine source rows so no
+            // index moves.
+            rows.push(Hardpoint {
+                location: 3,
+                flags: F111_BAY_FLAGS,
+                position: F111_BAY_MOUNT,
+                count: F111_BAY_ITEMS,
+                weight_class: F111_BAY_CLASS,
+                store: Some("MK82.JT".into()),
+                slew: [0; 4],
+            });
+            for position in inner {
+                rows.push(Hardpoint {
+                    location: 4,
+                    flags: F111_RAIL_FLAGS,
+                    position,
+                    count: 2,
+                    weight_class: F111_RAIL_CLASS,
+                    store: Some("AIM9M.JT".into()),
+                    slew: [0; 4],
+                });
             }
         }
         AircraftId::Tu26 => {
@@ -1183,6 +1337,25 @@ pub fn default_counts(id: AircraftId, rows: &mut [Hardpoint]) {
                 && row.count == B1B_BAY_ITEMS
             {
                 row.count = B1B_BAY_DEFAULT;
+            }
+        }
+        return;
+    }
+    if id == AircraftId::F111 {
+        // The F-111F's bay (F111-5) starts with the Pave Tack, not bombs, and
+        // its two AIM-9 rails start empty (opinionated, first pass): the rows
+        // keep their store, capacity and position, so Load Ordnance still
+        // offers them. Guarded on the appended rows.
+        for (row, flags) in [
+            (F111_BAY, F111_BAY_FLAGS),
+            (10, F111_RAIL_FLAGS),
+            (11, F111_RAIL_FLAGS),
+        ] {
+            if let Some(row) = rows.get_mut(row)
+                && row.flags == flags
+                && matches!(row.store.as_deref(), Some("MK82.JT" | "AIM9M.JT"))
+            {
+                row.count = 0;
             }
         }
         return;
@@ -2252,12 +2425,43 @@ mod tests {
             row.1 = 0x3e5;
             row.5 = 50;
         }
-        assert_eq!(key(&rows), expected);
+        // F111-5: the bay and the two AIM-9 rails are appended after the nine
+        // source rows (the rails on the inner pylons' records' positions).
+        assert_eq!(rows.len(), 12);
+        let appended = &key(&rows)[9..];
+        assert_eq!(
+            appended[0],
+            (3, 0x1500, F111_BAY_MOUNT, Some("MK82.JT".into()), 2, 12)
+        );
+        for (k, row) in appended[1..].iter().enumerate() {
+            assert_eq!(
+                *row,
+                (
+                    4,
+                    0x85,
+                    retail[5 + k].position,
+                    Some("AIM9M.JT".into()),
+                    2,
+                    5
+                )
+            );
+        }
+        assert_eq!(key(&rows)[..9], expected[..]);
         assert!(
             rows[F111_WING_ROWS]
                 .iter()
                 .all(|h| h.flags & DESIGNATOR_BIT == 0)
         );
+        // The bay is the one row that takes the pod.
+        assert!(rows[F111_BAY].flags & DESIGNATOR_BIT != 0);
+        assert_eq!(default_bay_pod(AircraftId::F111), Some((9, "PAVESPK.SEE")));
+        assert_eq!(default_bay_pod(AircraftId::B2), None);
+        // The default load starts the bay and the rails empty.
+        default_counts(AircraftId::F111, &mut rows);
+        assert_eq!(rows[9..].iter().map(|h| h.count).sum::<i32>(), 0);
+        assert_eq!(rows[5].count, retail[5].count);
+        assert_eq!(later_weapon_rows(AircraftId::F111), 3);
+        assert!(weapon_allowed(AircraftId::F111, 9, "MK82P.JT"));
         assert!(rows[..5].iter().all(|h| h.flags == 0x8));
         let mut edited = default_rows(AircraftId::F111);
         edited[0].count += 1;

@@ -464,6 +464,34 @@ pub(crate) fn cut_door_parts(
     fore: f32,
     height: f32,
 ) -> (Vec<Face>, Vec<Face>) {
+    cut_door_parts_sloped(f, fraction, doors, aft, fore, height, 0.)
+}
+
+/// [`cut_doors`] for a belly skin that rises along the aircraft: `height` is
+/// the skin's height at the `aft` end and `slope` how much it rises for each
+/// unit forward, so each door turns about its own hinge line, which lies in
+/// the skin (the F-111F's belly plate, F111-5).
+pub(crate) fn cut_doors_sloped(
+    f: &Face,
+    fraction: f64,
+    doors: impl IntoIterator<Item = (f32, f32, f32, f64)>,
+    (aft, fore, height, slope): (f32, f32, f32, f32),
+) -> Vec<Face> {
+    let (mut result, remaining) =
+        cut_door_parts_sloped(f, fraction, doors, aft, fore, height, slope);
+    result.extend(remaining);
+    result
+}
+
+fn cut_door_parts_sloped(
+    f: &Face,
+    fraction: f64,
+    doors: impl IntoIterator<Item = (f32, f32, f32, f64)>,
+    aft: f32,
+    fore: f32,
+    height: f32,
+    slope: f32,
+) -> (Vec<Face>, Vec<Face>) {
     let mut remaining = vec![f.clone()];
     let mut result = Vec::new();
     for (left, right, hinge, angle) in doors {
@@ -497,7 +525,7 @@ pub(crate) fn cut_door_parts(
                 turn(
                     &mut door,
                     [hinge, aft, height],
-                    [0., 1., 0.],
+                    [0., 1., slope],
                     angle * std::f64::consts::FRAC_PI_2 * fraction,
                 );
                 result.push(door);

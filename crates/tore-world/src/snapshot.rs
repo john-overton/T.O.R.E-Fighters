@@ -382,15 +382,30 @@ pub fn store_poses_of(
         let Some(station) = config.stations.get(pod.station) else {
             continue;
         };
+        // A pod in a bay hangs on its cradle in the middle of the opening, not
+        // in the bay's grid, at the aircraft's own fitted body (the F-111F's
+        // Pave Tack, F111-5).
+        let in_bay = station.rack.location() == tore_sim::combat::hardpoints::Location::Magazine;
         stores.push(StorePose {
             hardpoint: hardpoint(pod.station)
                 .and_then(|index| u8::try_from(index).ok())
                 .unwrap_or(u8::MAX),
             mount: station.mount,
-            rack: station.rack,
+            rack: if in_bay {
+                tore_sim::combat::hardpoints::Rack {
+                    tip: None,
+                    ..station.rack
+                }
+            } else {
+                station.rack
+            },
             shape: Some(format!("{EQUIPMENT_POD}{}", pod.store.source)),
             look: StoreLook::Pod,
-            body: tore_sim::combat::store_sizes::equipment_pod_body(&pod.store.source),
+            body: tore_sim::combat::bays::pod_body(config.aircraft)
+                .filter(|_| in_bay)
+                .unwrap_or_else(|| {
+                    tore_sim::combat::store_sizes::equipment_pod_body(&pod.store.source)
+                }),
             items: 1,
             loaded: 1,
         });

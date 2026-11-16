@@ -1654,6 +1654,200 @@ def b52_antiship_problems(output: str) -> list[str]:
 
 
 
+# F111-9 (2026-11-16): the AI flies the F-111F (an Attack class by BMB-B1's override, not a Heavy: one release a
+# pass, no stick) from every kind of station it has. The cells are where a store leaves (`ORIGIN`: right, up and
+# forward feet of the reference point) with the wing HELD at 26 degrees by the default load's stores on the outer
+# pylons: the inner pylons (rows 5 and 6, swivelling) and the outer ones (rows 7 and 8, carried) have swept to it,
+# and the first two are the human's own held cells at 650 knots (`a2g-release-origin-f111`: -8.41 / -0.50 / 2.22 and
+# -15.28 / -0.35 / -0.08), so the AI's racks are swept as the human's. A free wing at the pass's 393 knots would sit
+# at 36 degrees and every forward figure would be about 1 ft more aft. The bay row's first place is the shared grid's
+# (B-2 and B-52 grids, F111-5).
+F111_CELLS = {
+    # station: (store, right, up, forward) on the left (the first release is the left side's)
+    0: ("GBU28.JT", -8.41, -0.50, 2.22),
+    1: ("MK82.JT", -11.71, -0.35, 1.11),
+    2: ("MK82.JT", -15.28, -0.35, -0.08),
+    3: ("MK82.JT", -18.30, -0.35, -1.09),
+    4: ("MK82.JT", -0.65, -2.59, 16.54),
+}
+F111_PASS_FT = (4500.0, 5500.0)
+
+
+def f111_cell_problems(run: Run, label: str, station: int) -> list[str]:
+    """The first RELEASE left its station, from the cell the held wing puts it at (`F111_CELLS`)."""
+    weapon, right, up, forward = F111_CELLS[station]
+    problems: list[str] = []
+    releases = run.of("RELEASE")
+    if not releases:
+        return [f"{label}: nothing was released"]
+    first = releases[0]
+    if first.get("station") != str(station) or first.get("weapon") != weapon:
+        problems.append(f"{label}: released {first.get('weapon')} from station {first.get('station')}, "
+                        f"want {weapon} from {station}")
+    origins = [o for o in run.of("ORIGIN") if o.get("n") == "1"]
+    if not origins:
+        return problems + [f"{label}: no ORIGIN line for the first release"]
+    got = tuple(number(origins[0].get(k)) for k in ("right", "up", "forward"))
+    if (abs(got[0] - right) > 0.15 or abs(got[1] - up) > 0.15 or abs(got[2] - forward) > 0.3):
+        problems.append(f"{label}: the store left from {got}, the held wing's cell is ({right}, {up}, {forward})")
+    return problems
+
+
+def f111_run_problems(run: Run, label: str, station: int, *, bay: bool, guided: bool = False) -> list[str]:
+    """A level F-111F pass at the Ukraine column: one release (the Attack class's one a pass) from the station's
+    cell, the doors shut for a pylon and open for the bay, the target hit, egress, not lost."""
+    problems = consistency_problems(run, label)
+    problems += f111_cell_problems(run, label, station)
+    if run.setup.get("aircraft") != "F111":
+        problems.append(f"{label}: flew {run.setup.get('aircraft')}, want F111")
+    named = [f.get("name") for k, f in run.lines if k == "PROFILE"]
+    if "level" not in named:
+        problems.append(f"{label}: profiles {named}, want the level pass")
+    releases = run.of("RELEASE")
+    if len(releases) != 1:
+        problems.append(f"{label}: {len(releases)} releases, want the Attack class's one a pass")
+    elif not F111_PASS_FT[0] <= number(releases[0].get("alt_ft")) <= F111_PASS_FT[1]:
+        problems.append(f"{label}: released at {releases[0].get('alt_ft')} ft, want the 5,000 ft level pass")
+    if bay:
+        problems += bay_door_problems(run, label)
+    elif any(number(r.get("bay")) > 0.05 for r in releases) or run.of("BAY"):
+        problems.append(f"{label}: the bay doors moved for a pylon release")
+    if guided:
+        release = releases[0] if releases else {}
+        if release.get("guided") != "Guiding" or release.get("spot_owner") != (run.first("start") or {}).get("plane", "0"):
+            problems.append(f"{label}: the bomb was {release.get('guided')} on aircraft {release.get('spot_owner')}'s "
+                            "spot, want guiding on the F-111F's own spot")
+        if not any(f.get("state") == "Lasing" for f in run.of("LASER")):
+            problems.append(f"{label}: the F-111F never lased")
+        if not run.of("KILL"):
+            problems.append(f"{label}: the laser bomb killed nothing")
+    if not run.of("IMPACT"):
+        problems.append(f"{label}: no bomb landed")
+    if not run.of("EGRESS"):
+        problems.append(f"{label}: no EGRESS")
+    if run.of("LOST"):
+        problems.append(f"{label}: the F-111F was lost")
+    return problems
+
+
+def f111_laser_problems(output: str) -> list[str]:
+    """`ai-strike-f111-laser`: an AI F-111F's GBU-28 from the inner wing pylon (row 5, station 0) on its own spot:
+    the Pave Tack pod (the bay's, with the doors shut) and the fixed laser light the tank, the bomb guides, the
+    tank dies, the doors never move."""
+    runs = parse_runs(output)
+    if len(runs) != 1:
+        return [f"expected one strike run, got {len(runs)}"]
+    return f111_run_problems(runs[0], "F-111F GBU-28", 0, bay=False, guided=True)
+
+
+def f111_pylon_problems(output: str) -> list[str]:
+    """`ai-strike-f111-pylon`: an AI F-111F's Mk 82 from the three other wing rows in three runs, each from its
+    own held-wing cell: the inner pylon that swivels (row 6, station 1) and the two outer pylons the wing carries
+    (rows 7 and 8, stations 2 and 3)."""
+    runs = parse_runs(output)
+    if len(runs) != 3:
+        return [f"{len(runs)} runs finished, want 3"]
+    problems: list[str] = []
+    for run, station in zip(runs, (1, 2, 3)):
+        problems += f111_run_problems(run, f"F-111F Mk 82 station {station}", station, bay=False)
+    return problems
+
+
+def f111_bay_problems(output: str) -> list[str]:
+    """`ai-strike-f111-bay`: an AI F-111F's Mk 82 from the bay row (station 4; the Pave Tack gives way to them):
+    the doors open before the release, the bomb leaves the grid's first place, the doors shut after."""
+    runs = parse_runs(output)
+    if len(runs) != 1:
+        return [f"expected one strike run, got {len(runs)}"]
+    return f111_run_problems(runs[0], "F-111F bay Mk 82", 4, bay=True)
+
+
+def f111_maverick_problems(output: str) -> list[str]:
+    """`ai-strike-f111-maverick`: the default load's four AGM-65G on the outer pylon pair (row 7, station 2) fly
+    the fast high pass: the missile leaves the held wing's cell and kills the tank, the doors stay shut."""
+    runs = parse_runs(output)
+    if len(runs) != 1:
+        return [f"expected one strike run, got {len(runs)}"]
+    run, label = runs[0], "F-111F Maverick"
+    problems = consistency_problems(run, label)
+    releases = run.of("RELEASE")
+    if len(releases) != 1 or releases[0].get("weapon") != "AGM65G.JT" or releases[0].get("station") != "2":
+        problems.append(f"{label}: releases {[(r.get('weapon'), r.get('station')) for r in releases]}, "
+                        "want one AGM65G.JT from station 2")
+    origins = b52_origins(output)
+    if len(origins) != 1 or abs(origins[0][0] + 16.13) > 0.15 or abs(origins[0][2] + 0.08) > 0.3:
+        problems.append(f"{label}: the missile left from {origins}, want the outer pylon's held cell (-16.13, -0.40, -0.08)")
+    if not any(k.get("target") == "yes" for k in run.of("KILL")):
+        problems.append(f"{label}: the tank was not destroyed")
+    if any(number(r.get("bay")) > 0.05 for r in releases) or run.of("BAY"):
+        problems.append(f"{label}: the bay doors moved for a pylon release")
+    if run.of("LOST"):
+        problems.append(f"{label}: the F-111F was lost")
+    return problems
+
+
+def f111_antiship_problems(output: str) -> list[str]:
+    """`ai-strike-f111-antiship`: an AI F-111F with two AGM-84E on its outer pylon pair sinks the Krivak of the
+    Ukraine surface fleet from 15 nm: one Harpoon a wing from the held wing's cells, doors shut, both hit and the
+    ship is destroyed."""
+    runs = parse_runs(output)
+    if len(runs) != 1:
+        return [f"expected one strike run, got {len(runs)}"]
+    run, label = runs[0], "F-111F Harpoon"
+    problems = consistency_problems(run, label)
+    releases = run.of("RELEASE")
+    if len(releases) != 2 or any(r.get("weapon") != "AGM84E.JT" or r.get("station") != "2" for r in releases):
+        problems.append(f"{label}: releases {[(r.get('weapon'), r.get('station')) for r in releases]}, "
+                        "want two AGM84E.JT from station 2")
+    origins = b52_origins(output)
+    if (sorted(round(o[0], 1) for o in origins) != [-15.3, 15.3]
+            or any(abs(o[2] + 0.08) > 0.3 for o in origins)):
+        problems.append(f"{label}: the Harpoons left from {origins}, want one a wing at 15.28 ft out, 0.08 ft aft "
+                        "(the outer pylons carried to the held wing)")
+    if any(number(r.get("bay")) > 0.05 for r in releases) or run.of("BAY"):
+        problems.append(f"{label}: the bay doors moved for a pylon release")
+    if len(run.of("IMPACT")) != 2:
+        problems.append(f"{label}: {len(run.of('IMPACT'))} impacts, want 2")
+    if not any(k.get("victim") == KRIVAK_ID for k in run.of("KILL")):
+        problems.append(f"{label}: the Krivak ({KRIVAK_ID}) was not destroyed")
+    if run.of("LOST"):
+        problems.append(f"{label}: the F-111F was lost")
+    if run.setup.get("target") != KRIVAK_ID:
+        problems.append(f"{label}: aimed at {run.setup.get('target')}, want the Krivak")
+    return problems
+
+
+def f111_quick_wing_problems(output: str) -> list[str]:
+    """`ai-strike-f111-quick-wing`: a Quick Mission with the Ukraine armored column as the ground target: the
+    F-111F wingman takes the Strike role from the mission's bomber-class default and, with the wing's standard
+    load, picks the plain bomb first (the laser GBU-28 and the Mavericks come after it in the store order): the
+    retarded Mk 82 pack of the second inner row (station 1), laid down low, all six at once from one pass."""
+    runs = parse_runs(output)
+    if len(runs) != 1:
+        return [f"expected one strike run, got {len(runs)}"]
+    run, label = runs[0], "F-111F quick wing"
+    problems = consistency_problems(run, label)
+    role = (run.first("ROLE") or {}).get("role")
+    if role != "strike":
+        problems.append(f"{label}: the wing was given role {role}, want strike")
+    releases = run.of("RELEASE")
+    if len(releases) != 6 or any(r.get("weapon") != "MK82P.JT" or r.get("station") != "1" for r in releases):
+        problems.append(f"{label}: releases {[(r.get('weapon'), r.get('station')) for r in releases]}, "
+                        "want the six MK82P.JT of station 1")
+    named = [f.get("name") for k, f in run.lines if k == "PROFILE"]
+    if "laydown" not in named:
+        problems.append(f"{label}: profiles {named}, want the retarded bombs' laydown")
+    if len(run.of("IMPACT")) != 6:
+        problems.append(f"{label}: {len(run.of('IMPACT'))} impacts, want 6")
+    if not any(k.get("target") == "yes" for k in run.of("KILL")):
+        problems.append(f"{label}: the target was not destroyed")
+    if not run.of("EGRESS"):
+        problems.append(f"{label}: no EGRESS")
+    if run.of("LOST"):
+        problems.append(f"{label}: the F-111F wingman was lost")
+    return problems
+
+
 def _runs(skills_and_profiles, miss=True, **extra) -> list[dict]:
     wanted = []
     for skill, profile in skills_and_profiles:
@@ -2131,6 +2325,67 @@ def scenarios() -> list[Scenario]:
         timeout=600, expect=[r"RELEASE", r"ORIGIN", r"IMPACT", r"KILL"], check=b52_antiship_problems,
         notes="An AI B-52 with two AGM-84E on its pylons, 15 nm from the Ukraine surface fleet at 20,000 ft: one "
               "Harpoon leaves each wing, the doors stay shut, both hit the Krivak and it is destroyed.",
+    ))
+    # F111-9: the F-111F (an Attack class) from every kind of station it has: the inner wing pylon with its laser
+    # bomb, the three other wing rows with Mk 82, the bay, the Mavericks and the Harpoons, and a Quick Mission wing.
+    extra.append(Scenario(
+        name="ai-strike-f111-laser", lane="flight",
+        args=pilot_run("UKR", "QUCOL", "--aircraft", "f111", "--load", "GBU28", "--station", "0", "--seconds", "120",
+                       "--follow-egress"),
+        timeout=600, expect=[r"RELEASE", r"ORIGIN", r"KILL", r"EGRESS"], check=f111_laser_problems,
+        notes="An AI F-111F (an Attack class) on the Ukraine column at 5,000 ft: it lases with its own Pave Tack and "
+              "fixed laser, drops a GBU-28 from the inner wing pylon (the wing held at 26 degrees by the default load's "
+              "outer stores: the pylon's cell is the human's held cell), kills the tank on its own spot, the bay doors "
+              "stay shut, then egresses.",
+    ))
+    extra.append(Scenario(
+        name="ai-strike-f111-pylon", lane="flight",
+        args=pilot_run("UKR", "QUCOL", "--aircraft", "f111", "--load", "MK82", "--station", "1", "--count", "2",
+                       "--seconds", "120", "--follow-egress"),
+        timeout=900, expect=[r"RELEASE", r"ORIGIN", r"IMPACT", r"EGRESS"],
+        then=[Step(pilot_run("UKR", "QUCOL", "--aircraft", "f111", "--load", "MK82", "--station", "2", "--count", "2",
+                             "--seconds", "120", "--follow-egress"), timeout=600),
+              Step(pilot_run("UKR", "QUCOL", "--aircraft", "f111", "--load", "MK82", "--station", "3", "--count", "2",
+                             "--seconds", "120", "--follow-egress"), timeout=600)],
+        check=f111_pylon_problems,
+        notes="An AI F-111F drops a Mk 82 from each of the three other wing rows in turn: the inner pylon that swivels "
+              "(row 6) and the two outer pylons the wing carries (rows 7 and 8), each from its cell on the wing held at "
+              "26 degrees, one bomb a pass, doors shut, then egress.",
+    ))
+    extra.append(Scenario(
+        name="ai-strike-f111-bay", lane="flight",
+        args=pilot_run("UKR", "QUCOL", "--aircraft", "f111", "--load", "MK82", "--station", "4", "--count", "2",
+                       "--seconds", "120", "--follow-egress"),
+        timeout=600, expect=[r"RELEASE", r"ORIGIN", r"BAY", r"IMPACT", r"EGRESS"], check=f111_bay_problems,
+        notes="An AI F-111F with two Mk 82 in its bay (the Pave Tack gives way to them): the doors open before the "
+              "release, the bomb leaves the shared grid's first place, the doors shut about 2 s after, then egress.",
+    ))
+    extra.append(Scenario(
+        name="ai-strike-f111-maverick", lane="flight",
+        args=pilot_run("UKR", "QUCOL", "--aircraft", "f111", "--load", "AGM65G", "--station", "2", "--count", "4",
+                       "--seconds", "120", "--follow-egress"),
+        timeout=600, expect=[r"RELEASE", r"ORIGIN", r"IMPACT", r"KILL"], check=f111_maverick_problems,
+        notes="An AI F-111F with the default load's four AGM-65G on its outer pylon pair: the fast high pass fires one "
+              "from the held wing's cell and kills the tank, the doors stay shut.",
+    ))
+    extra.append(Scenario(
+        name="ai-strike-f111-antiship", lane="flight",
+        args=pilot_run("UKR", "QUSFLT", "--unit", KRIVAK_ID, "--aircraft", "f111", "--load", "AGM84E",
+                       "--station", "2", "--count", "2", "--altitude", "20000", "--from", "15", "--seconds", "60"),
+        timeout=600, expect=[r"RELEASE", r"ORIGIN", r"IMPACT", r"KILL"], check=f111_antiship_problems,
+        notes="An AI F-111F with two AGM-84E on its outer pylon pair, 15 nm from the Ukraine surface fleet at 20,000 ft: "
+              "one Harpoon leaves each wing from the held wing's cells, the doors stay shut, both hit the Krivak and it "
+              "is destroyed.",
+    ))
+    extra.append(Scenario(
+        name="ai-strike-f111-quick-wing", lane="flight",
+        args=pilot_run("UKR", "QUCOL", "--aircraft", "f111", "--quick-wing", "--seconds", "300", "--follow-egress"),
+        timeout=900, expect=[r"ROLE", r"RELEASE", r"IMPACT", r"EGRESS"], check=f111_quick_wing_problems,
+        notes="A Quick Mission with the Ukraine column as the ground target: an F-111F wing gets the Strike role from "
+              "the mission's bomber-class default and lays the six retarded Mk 82 of its standard load's second inner "
+              "row on the column in one low pass, then egresses. (The Ukraine factory is not used: the wingman's "
+              "route to it crosses a 730 ft rise and the pass is lost to its own bombs, an open item in "
+              "docs/formats/aircraft-variety.md, F111-9.)",
     ))
     return extra + [
         Scenario(

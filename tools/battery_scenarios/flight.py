@@ -130,6 +130,11 @@ STATIONS["b1b"] = [4, 4, 4]
 # The Tu-160 (T160-5, 2026-11-16): no gun; its two weapon rows are the bays', rows 4 (forward) and 5
 # (aft), six AS-16 (Kh-15) each, the record's 12.
 STATIONS["tu160"] = [6, 6]
+# The F-111F (F111-5, 2026-11-16): the four wing rows (row 5 GBU28.JT x2, row 6 MK82P.JT x2,
+# row 7 AGM65G.JT x4, row 8 MK82P.JT x2), then the bay (row 9; it starts with the Pave Tack, a
+# designator pod, so its Mk 82 selection holds none) and the two AIM-9 rails (rows 10 and 11,
+# empty by default): three never-loaded slots follow.
+STATIONS["f111"] = [2, 2, 4, 2, 0, 0, 0]
 
 
 def _numbers(output: str, prefix: str) -> dict:
@@ -407,6 +412,18 @@ APPROACH_TARGET["f117"] = (150, 180)
 # than the 5,671 ft run there.
 LIFTOFF_TARGET["b1b"] = (155, 185)
 APPROACH_TARGET["b1b"] = (145, 170)
+# The F-111F's windows (F111-8, 2026-11-16) are fitted, agent decisions, from weak public figures only
+# (docs/formats/aircraft-variety.md, "F-111F flight review"): a takeoff distance of 3,300 ft and a
+# landing distance of 3,950 ft (Aerocorner, an aircraft reference page, at an unstated weight), the
+# game's own Jane's text (`F111.INF`, retail media): "T-O and landing run under 3,000 ft", and an
+# approach of about 115 kt with the wings spread at a light weight (an MIT course report on the jet,
+# which calls its own numbers estimates). The scripted runs fly the default load (gross 99,999 lb at
+# takeoff: the 24,105 lb of stores and a 28,413 lb tank under the 100,000 lb maximum), measured to
+# lift off at 171.8 kt after 2,944 ft (UKR 1), and the approach at 65 percent fuel (21,231 lb, 92,817
+# lb gross with the stores), where the model's cap (0.85 times the record's 195.5 kt landing limit)
+# gives 166.2 kt, touchdown at 164.8 kt and a 2,612 ft rollout.
+LIFTOFF_TARGET["f111"] = (150, 190)
+APPROACH_TARGET["f111"] = (140, 175)
 # The figures the model gives with the fitted per-aircraft stall references
 # (`STALL_REFERENCE_FRACTIONS`, 2026-09-30), for the aircraft whose figure is not
 # exactly inside John's range, kept as a regression window of plus or minus 6
@@ -448,6 +465,9 @@ LIFTOFF_TARGET["tu160"] = (155, 185)
 APPROACH_TARGET["tu160"] = (130, 160)
 KNOWN_LIFTOFF["tu160"] = 167.8
 KNOWN_APPROACH["tu160"] = 143.6
+# The F-111F's measured liftoff and approach at its default load (F111-8, 2026-11-16).
+KNOWN_LIFTOFF["f111"] = 171.8
+KNOWN_APPROACH["f111"] = 166.2
 # TOR-6 (2026-11-11): the Tornado's default load is lighter than TOR-8 measured (one centreline tank, 1,650
 # lb of external fuel, not two): liftoff 146.4 kt (was 150.6), approach 155.1 kt (was 160.1), both inside the
 # windows and the plus or minus 6 percent regression band, so no window was refitted and the known values above
@@ -517,6 +537,8 @@ INTERNAL_FUEL_LB["f117"] = 18500
 # B1.PT internal fuel, 265,274 lb (BMB-B2: the Air Force fact sheet). The approach scenario flies 65
 # percent, 172,428 lb, a gross weight of 406,428 lb with the 42,000 lb default load.
 INTERNAL_FUEL_LB["b1b"] = 265274
+# F111.PT internal fuel, 32,663 lb (BMB-B2: the record's 5,025 gallons at 6.5 lb a gallon).
+INTERNAL_FUEL_LB["f111"] = 32663
 APPROACH_FUEL_CAP_LB = 100000
 
 
@@ -636,6 +658,8 @@ LIFTOFF_AIRCRAFT += ["f117"]
 LIFTOFF_AIRCRAFT += ["b1b"]
 # The Tu-160 joins them (T160-8, 2026-11-16).
 LIFTOFF_AIRCRAFT += ["tu160"]
+# The F-111F joins them (F111-8, 2026-11-16).
+LIFTOFF_AIRCRAFT += ["f111"]
 
 
 def liftoff_scenarios() -> list[Scenario]:
@@ -1292,6 +1316,8 @@ REFUSED_SLOTS = {
     # Tu-160 now has its radar (`TU160R.SEE`, Transitional), so, as everyone's, the AS-16 wants a
     # surface target, not the practice aircraft. `a2g-antiship-tu160` fires it at the Krivak.
     ("tu160", 1), ("tu160", 2),
+    # The F-111F's AGM-65G row is a surface missile (F111-5).
+    ("f111", 3),
 }
 
 
@@ -1301,6 +1327,8 @@ REFUSED_SLOTS = {
 # three bay rows hold the retail MK-82 AIR 7-Pack (`MK82AIR.JT`, 3,500 lb): a release sends seven
 # bombs and takes one round (B1B-5, 2026-11-16).
 SHOTS_PER_ROUND = {("tornado", 3): 3, ("tornadoc", 3): 3, ("b1b", 1): 7, ("b1b", 2): 7, ("b1b", 3): 7}
+# The F-111F's two MK82P.JT rows (slots 2 and 4, rows 6 and 8) release a six-pack a round (F111-5).
+SHOTS_PER_ROUND.update({("f111", 2): 6, ("f111", 4): 6})
 
 
 def check_slot(ac: str, slot: int):
@@ -1495,6 +1523,32 @@ def slot_scenarios() -> list[Scenario]:
         timeout=300,
         notes="20 presses through the B-1B's forward bay holding 20 Mk 82: one bomb a press, the bottom tier first, outermost first alternating sides.",
     ))
+    # F111-5 (2026-11-16): the F-111F's bay (row 9, two Mk 82 abreast through the shared grid;
+    # the Pave Tack it holds by default is displaced by the load) and its fixed outer pylon (row
+    # 7, a Mk 82 pair): one press opens the doors, the bomb leaves from its cell and the doors
+    # close; the pylon release leaves the doors shut.
+    out.append(Scenario(
+        name="flight-bay-fire-f111-row9", lane="flight",
+        args=["--stores-preview", "{work}/frames"], window=True,
+        env={"TORE_STORES_PREVIEW_AIRCRAFT": "f111",
+             "TORE_STORES_PREVIEW_RECORDS": "9=MK82.JT:2",
+             "TORE_STORES_PREVIEW_FUEL": "20000",
+             "TORE_STORES_PREVIEW_FIRE": "9"},
+        expect=["Stores firing: f111 row=9 PASS"],
+        outputs=["frames/f111-fire-row9-t000.png", "frames/f111-fire-row9-t400.png"],
+        timeout=300,
+        notes="F-111F bay release: the doors open before the Mk 82 leaves and close after it, as the F-22's, F-117's and B-52's do.",
+    ))
+    out.append(Scenario(
+        name="flight-bay-fire-f111-pylon-row7", lane="flight",
+        args=["--stores-preview", "{work}/frames"], window=True,
+        env={"TORE_STORES_PREVIEW_AIRCRAFT": "f111", "TORE_STORES_PREVIEW_FIRE": "7",
+             "TORE_STORES_PREVIEW_RECORDS": "7=MK82P.JT:2", "TORE_STORES_PREVIEW_FUEL": "20000"},
+        expect=["Stores firing: f111 row=7 PASS"],
+        outputs=["frames/f111-fire-row7-t000.png", "frames/f111-fire-row7-t400.png"],
+        timeout=300,
+        notes="F-111F outer pylon release: a Mk 82 leaves the fixed outer wing pylon with the bay doors shut (the default Maverick needs a target the preview does not give it, its live-fire slot scenario covers it).",
+    ))
     return out
 
 
@@ -1672,6 +1726,13 @@ def countermeasure_scenarios() -> list[Scenario]:
     out.append(Scenario(name="flight-countermeasures-tu160", lane="flight", args=args, window=True,
                         check=check_countermeasures, timeout=180,
                         notes="The Tu-160's retail TU160.ECM row: 99 chaff and 99 flares, five and three released, jammer on (T160-6)."))
+    # F111-6: the F-111F's own A6.ECM row (the A-6's record; 30 chaff and 30 flares, a jammer).
+    args = ["--live-fire", "--aircraft", "f111"] + ["--combat-command", "chaff"] * 5
+    args += ["--combat-command", "flare"] * 3
+    args += ["--countermeasure-preview", "240", "--capture-flight", "{work}/cm.ppm", "--no-audio"]
+    out.append(Scenario(name="flight-countermeasures-f111", lane="flight", args=args, window=True,
+                        check=check_countermeasures, timeout=180,
+                        notes="The F-111F's A6.ECM row: 30 chaff and 30 flares, five and three released (F111-6)."))
     out.extend(tornado_countermeasure_scenarios())
     return out
 
@@ -2302,7 +2363,7 @@ def capture_scenarios() -> list[Scenario]:
     # AL1 and refuses a ground start ("an enemy airfield").
     for ac in AIRCRAFT:
         add(f"groundstart-{ac}", ["--free-flight", "--aircraft", ac, "--theater", "UKR", "--ground-start", "9", "--flight-view", "1", "--flight-look", "150,-15", "--flight-zoom", "1.5"])
-    for ac in ("f22", "f22n", "b52", "f117", "b2", "b1b", "tu160"):
+    for ac in ("f22", "f22n", "b52", "f117", "b2", "b1b", "tu160", "f111"):
         for bay in ("0", "0.5", "1"):
             add(f"bay-{ac}-{bay}", ["--free-flight", "--aircraft", ac, "--flight-view", "1", "--flight-look", "150,-30", "--flight-bay", bay])
     return out

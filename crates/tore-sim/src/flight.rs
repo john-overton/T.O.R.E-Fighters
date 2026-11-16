@@ -130,6 +130,25 @@ pub struct State {
     pub gun_aim: [[f64; 2]; 3],
     /// Display-only linked gun membership, bits 0..2.
     pub gun_group: u8,
+    /// Display-only: a swing-wing aircraft's wing is held to its fixed-store
+    /// sweep limit because a store hangs on a fixed wing pylon (the F-111F's
+    /// outer pair, 26 degrees or less; F111-5, 2026-11-16). Combat knows what
+    /// is carried, the flight does not: the world sets it on the frame's
+    /// presented clone, and every drawing of the wing and of the swivelling
+    /// stations reads it ([`crate::combat::swing::SwingSpec::turn_carrying`]).
+    /// False everywhere else, never coded on the wire or in a checkpoint.
+    pub wing_hold: bool,
+    /// Display-only: a swing-wing aircraft's present wing turn, radians from
+    /// the drawn pose, when the aircraft's wing moves at a sweep rate (the
+    /// F-111F's, F111-8, 2026-11-16: [`crate::combat::swing::SwingSpec::sweep_rate_dps`]).
+    /// Combat keeps the turn, the flight does not: the world sets it on the
+    /// frame's presented clone and every drawing of the wing and of the
+    /// swivelling stations reads it. `None` everywhere else, and for any
+    /// state drawn without a combat configuration (a replay's rebuilt player,
+    /// another aircraft's pose), which take the schedule's turn at once
+    /// ([`crate::combat::swing::SwingSpec::turn_carrying`]). Never coded on the
+    /// wire or in a checkpoint.
+    pub wing_turn: Option<f64>,
     pub fuel: f64,
     pub systems: crate::aircraft_systems::Systems,
     pub payload_lbs: f64,
@@ -353,6 +372,8 @@ impl State {
             lift_controls,
             gun_aim: [[0.; 2]; 3],
             gun_group: 0,
+            wing_hold: false,
+            wing_turn: None,
             fuel,
             systems: Default::default(),
             payload_lbs: 0.,

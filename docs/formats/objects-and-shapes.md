@@ -2155,3 +2155,10 @@ plates) with one texture `_F111.PIC`, 19 exact-vertex twin groups (all pairs, al
 and no `E0` decal faces, so nothing is omitted. `F111_A.SH` to `F111_D.SH` load at the same scale; no
 whole-body damage variant is registered. The `render-f111-skin` scenario pins the look. Details:
 [F-111F shape and rig](aircraft-variety.md#f-111f-shape-and-rig-f111-23-2026-11-15).
+
+**Cockpit family (F111-7, 2026-11-16).** The F-111F flies the AC-130's cockpit family by its record
+(`AC130.HUD`, stem `AC130`, `~AC130H.PIC`, 1280 x 490: one window the size of the picture, no overlay
+pictures; coordinator first pass, F111 item 8, opinionated). Its HUD glass aperture is the whole picture
+trimmed by the art's own transparency, now measured on the imported art (a retail-reading test in
+`hud_aperture.rs`), and its pilot's eye is a per-aircraft table entry (5 ft up, 25 ft ahead, fitted from the
+scaled shape); see [the F-111F ordnance, sensors, HUD and cockpit section](../formats/aircraft-variety.md#f-111f-ordnance-sensors-hud-and-cockpit-f111-67-2026-11-16). No retail art is committed.

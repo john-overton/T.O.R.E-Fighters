@@ -376,6 +376,31 @@ def tornado_origin_problems(output: str, cases=None) -> list[str]:
     return problems
 
 
+# The F-111F's wing pylons (F111-5, 2026-11-16): the fixed outer pylon (row 7, station 2, Mk 82 in
+# place of the Mavericks) hangs 15.46 ft out and 1.31 ft ahead (the drawn chord's middle) with the
+# wing spread (200 kt) and, with the default load carrying on the outer rows, the wing is HELD at
+# 26 degrees at 650 kt (a free wing would be swept to 72.5): the pylon is carried 10 degrees aft,
+# 15.28 ft out and 0.08 ft aft of the reference point. The swivelling inner pylon (row 5, station 0,
+# the default GBU-28) hangs 8.30 ft out at 2.38 ft and moves to 8.41 ft out and 2.22 ft at the same
+# held wing. Left first, one pylon depth of 1.00 ft.
+F111_CASES = [
+    ("outer pylon, 200 kt", [(-15.46, -0.35, 1.31), (15.46, -0.35, 1.31)], 1.00),
+    ("outer pylon, 650 kt (held to 26 degrees)", [(-15.28, -0.35, -0.08), (15.28, -0.35, -0.08)], 1.00),
+    ("inner pylon, 200 kt", [(-8.30, -0.50, 2.38), (8.30, -0.50, 2.38)], 1.00),
+    ("inner pylon, 650 kt (held to 26 degrees)", [(-8.41, -0.50, 2.22), (8.41, -0.50, 2.22)], 1.00),
+]
+
+
+def f111_origin_problems(output: str) -> list[str]:
+    return tornado_origin_problems(output, F111_CASES)
+
+
+def f111_args(speed: str, station: str, load: str, count: str) -> list[str]:
+    return ["--a2g-run", "UKR", "QUCOL", "--attack", "release", "--from", "1", "--altitude", "3000",
+            "--speed", speed, "--repeat", count, "--gap", "0.5", "--aircraft", "f111", "--station", station,
+            "--load", load, "--count", count]
+
+
 def tornado_args(speed: str, station: str, load: str, count: str) -> list[str]:
     return ["--a2g-run", "UKR", "QUCOL", "--attack", "release", "--from", "1", "--altitude", "3000",
             "--speed", speed, "--repeat", count, "--gap", "0.5", "--aircraft", "tornado", "--station", station,
@@ -690,6 +715,18 @@ def scenarios() -> list[Scenario]:
             notes="The Tu-160's bay grids (T160-5, T160-6): the forward and aft bays' six AS-16 leave from the grid's own "
                   "places (the forward row first, outermost first, alternating sides, then the middle), and the forward "
                   "bay's Mk 82 row from its four abreast places, each from where it hangs.",
+        ),
+        Scenario(
+            name="a2g-release-origin-f111", lane="flight",
+            args=f111_args("200", "2", "MK82", "2"),
+            timeout=300,
+            then=[
+                Step(f111_args("650", "2", "MK82", "2"), timeout=300),
+                Step(f111_args("200", "0", "GBU28", "2"), timeout=300),
+                Step(f111_args("650", "0", "GBU28", "2"), timeout=300),
+            ],
+            check=f111_origin_problems,
+            notes="The F-111F's wing pylons leave stores from where they hang (F111-5): the fixed outer pylon from 15.46 ft out on the chord's middle with the wing spread, and carried 10 degrees aft at 650 kt because a store on the outer rows holds the wing to 26 degrees (a free wing would be swept to 72.5); the swivelling inner pylon beside the pivot likewise. Left then right.",
         ),
         Scenario(
             name="a2g-release-origin-tornado-rail", lane="flight",

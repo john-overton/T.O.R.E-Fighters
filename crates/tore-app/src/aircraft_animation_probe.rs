@@ -326,6 +326,8 @@ impl Control {
                         // T160-5: the Tu-160's two fitted bays, cut from the
                         // belly skin with a lined recess.
                         | Id::Tu160
+                        // F111-5: the F-111F's fitted bay doors and lining.
+                        | Id::F111
                 ) =>
             {
                 Expectation::Required

@@ -3668,6 +3668,43 @@ mod tests {
         assert!(!tore_world::surface::resolve::night_stealth(&night));
     }
 
+    /// F111-9 (2026-11-16): the F-111F Aardvark is offered as the player's
+    /// aircraft and in every AI wing field, by its own selection key
+    /// (`F111.PT`), and a draft carries it as the player and in every wing. It
+    /// never stands in for another bomber, and the stealth night rule is not
+    /// its own.
+    #[test]
+    fn the_f111_is_a_quick_mission_player_and_a_wing_choice() {
+        let mut q = full_catalog();
+        assert_eq!(AircraftId::F111.selection_key(), "F111.PT");
+        let player = q
+            .aircraft_files
+            .iter()
+            .position(|f| f == AircraftId::F111.selection_key())
+            .unwrap();
+        assert_eq!(q.aircraft_names[player], "F-111F Aardvark");
+        q.apply(6, player);
+        assert_eq!(q.player(), Some(AircraftId::F111));
+        for field in AI_AIRCRAFT_FIELDS {
+            let index = q.ai_choice(AircraftId::F111).unwrap();
+            assert_eq!(q.values(field)[index], "F-111F Aardvark");
+            q.apply(field, index);
+            assert_eq!(q.wing_aircraft(field), Some(AircraftId::F111));
+        }
+        let spec = q.mission_spec().unwrap();
+        assert_eq!(spec.wings[0].aircraft, AircraftId::F111);
+        for wing in spec.wings.iter().skip(1) {
+            assert_eq!(wing.aircraft, AircraftId::F111);
+        }
+        assert!(
+            !tore_formats::quick_template::tables::NIGHT_STEALTH_AIRCRAFT
+                .contains(&AircraftId::F111.pt())
+        );
+        let mut night = spec;
+        night.condition = tore_world::mission::Condition::Night;
+        assert!(!tore_world::surface::resolve::night_stealth(&night));
+    }
+
     /// Slice GRI-9: the Saab Gripen is offered as the player's aircraft and,
     /// because the AI can fly it, in every AI wing field. The identity the
     /// mission flies is named exactly (`GRIPEN.PT`), never aliased to another

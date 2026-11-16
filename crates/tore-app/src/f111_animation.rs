@@ -29,6 +29,7 @@ use tore_formats::{
     aircraft::{AircraftId, scale::scale_point},
     shape::{Face, Shape},
 };
+use tore_sim::combat::bays::{F111_BAY_MOUNT_FORWARD, F111_CRADLE_POSTS, Opening};
 use tore_sim::combat::swing::F111F;
 
 const ID: AircraftId = AircraftId::F111;
@@ -111,9 +112,28 @@ const GLOVE_OUTLINE: [[f32; 2]; 5] = [
     [13., 10.],
 ];
 const GLOVE_Z: f32 = 2.6;
-/// The fixed fillet top faces the plates take their look from (right, left).
-const GLOVE_LOOK_R: usize = 0x40e6;
-const GLOVE_LOOK_L: usize = 0x4460;
+/// The wing's own top skin faces the plates take their material from (right,
+/// left): colours, texture and flags, with texture coordinates fitted to the
+/// skin's own mapping (F111-5, 2026-11-16; the fillet's flat look before).
+const GLOVE_LOOK_R: usize = 0x40bf;
+const GLOVE_LOOK_L: usize = 0x44e5;
+
+/// The forward belly plate the bay is cut from: x +-3 units, y 13 to 34, z -6
+/// at its aft edge rising to -5 at its fore edge (a quad, `3132`), 12 ft of
+/// opening inside it (F111-5).
+pub(crate) const BELLY: usize = 0x3132;
+/// The bay lining's first address: past the module's code (0x6276) and under
+/// the state words (0x7240), clear of the glove plates (0x7e00).
+pub(crate) const LINING_BASE: usize = 0x7000;
+/// The lining faces: a ceiling and four walls, a cradle rail and two posts (5
+/// faces each).
+const LINING: usize = 5 + 5 + 2 * 5;
+pub(crate) fn lining(address: usize) -> bool {
+    (LINING_BASE..LINING_BASE + LINING).contains(&address)
+}
+/// Feet to scaled shape units (the header's 2/3 ft a unit; the per-axis size
+/// fit is already in the scaled shape).
+const UNIT: f64 = 2. / 3.;
 
 /// Pivot of the wing sweep, vertical axis, shape units: the centre of the
 /// smallest circle round the panel's root corners (fitted, F111-0), the same
@@ -189,10 +209,18 @@ pub(crate) fn rudder(address: usize) -> bool {
 
 /// How far the wing panel has turned from its drawn pose (the real 16
 /// degrees), radians: the speed schedule of [`F111F`] (spread to 250 knots,
-/// fully swept at 650), held spread by the flaps. This does not invent a flight
-/// law; it only draws the wing.
+/// fully swept at 650), held spread by the flaps, and held to 26 degrees or
+/// less while a store hangs on a fixed outer pylon (`state.wing_hold`, F111-5).
+/// This does not invent a flight law; it only draws the wing. Update (F111-8,
+/// 2026-11-16): the wing moves at the spec's sweep rate (3 degrees a second),
+/// so a frame whose flight carries the wing's present turn
+/// (`state.wing_turn`, set by the world for the aircraft it flies) draws that;
+/// a state without one (a replay, another aircraft's pose) draws the
+/// schedule's turn.
 pub(crate) fn sweep_turn(state: &State) -> f64 {
-    F111F.turn(state.speed, state.flaps, state.gear)
+    state.wing_turn.unwrap_or_else(|| {
+        F111F.turn_carrying(state.speed, state.flaps, state.gear, state.wing_hold)
+    })
 }
 
 /// One taileron angle in radians, positive lowering the trailing edge: pitch
@@ -339,13 +367,17 @@ fn glove_plates(shape: &Shape) -> AppResult<Vec<Face>> {
     let mut addresses = GLOVE_ADDRESSES.into_iter();
     for (look, side) in [(GLOVE_LOOK_R, 1f32), (GLOVE_LOOK_L, -1f32)] {
         let source = one(shape, look)?;
-        if source.positions.len() != 3 || source.colors.is_empty() {
+        if source.positions.len() != 4 || source.colors.is_empty() || source.uv.len() != 4 {
             return Err(format!("unreviewed F111.SH glove top face {look:x}").into());
         }
         let outline: Vec<[f32; 3]> = GLOVE_OUTLINE
             .iter()
             .map(|p| sp([side * p[0], p[1], GLOVE_Z]))
             .collect();
+        // The skin's own texture mapping, fitted by least squares (an affine
+        // map from the plan position to the texel) so the plate carries the
+        // wing's pattern across the glove instead of one texel.
+        let fit = uv_fit(source);
         let mut reversed = outline.clone();
         reversed.reverse();
         // Right: the outline is the underside and its reverse the top; the
@@ -360,11 +392,7 @@ fn glove_plates(shape: &Shape) -> AppResult<Vec<Face>> {
             faces.push(Face {
                 address: addresses.next().ok_or("four glove addresses")?,
                 colors: vec![source.colors[0]; n],
-                uv: if source.uv.is_empty() {
-                    Vec::new()
-                } else {
-                    vec![source.uv[0]; n]
-                },
+                uv: positions.iter().map(&fit).collect(),
                 positions,
                 texture: source.texture.clone(),
                 subtype: source.subtype,
@@ -376,8 +404,71 @@ fn glove_plates(shape: &Shape) -> AppResult<Vec<Face>> {
     Ok(faces)
 }
 
-pub struct Rig;
+/// A least-squares affine map from a face's plan position (x, y) to its
+/// texture coordinates, from the face's own vertices.
+fn uv_fit(face: &Face) -> impl Fn(&[f32; 3]) -> [f32; 2] + use<> {
+    // Normal equations for u (or v) = a x + b y + c over the vertices.
+    let n = face.positions.len() as f64;
+    let (mut sx, mut sy, mut sxx, mut sxy, mut syy) = (0., 0., 0., 0., 0.);
+    for p in &face.positions {
+        let (x, y) = (f64::from(p[0]), f64::from(p[1]));
+        sx += x;
+        sy += y;
+        sxx += x * x;
+        sxy += x * y;
+        syy += y * y;
+    }
+    let m = [[sxx, sxy, sx], [sxy, syy, sy], [sx, sy, n]];
+    let det3 = |m: [[f64; 3]; 3]| {
+        m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+            - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+            + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
+    };
+    let det = det3(m);
+    let solve = |channel: usize| -> [f64; 3] {
+        let (mut bx, mut by, mut b) = (0., 0., 0.);
+        for (p, uv) in face.positions.iter().zip(&face.uv) {
+            let t = f64::from(uv[channel]);
+            bx += f64::from(p[0]) * t;
+            by += f64::from(p[1]) * t;
+            b += t;
+        }
+        let rhs = [bx, by, b];
+        std::array::from_fn(|k| {
+            let mut c = m;
+            for r in 0..3 {
+                c[r][k] = rhs[r];
+            }
+            det3(c) / det
+        })
+    };
+    let (u, v) = (solve(0), solve(1));
+    move |p: &[f32; 3]| {
+        let (x, y) = (f64::from(p[0]), f64::from(p[1]));
+        [
+            (u[0] * x + u[1] * y + u[2]) as f32,
+            (v[0] * x + v[1] * y + v[2]) as f32,
+        ]
+    }
+}
+
+/// The bay: where the belly plate is cut and how the plate slopes there.
+pub struct Rig {
+    bay: Opening,
+    /// The plate's height at the opening's aft edge and its rise a unit
+    /// forward, scaled shape units.
+    belly: (f32, f32),
+}
 impl Rig {
+    /// A rig with the bay's opening and a level belly, for the tests that move
+    /// synthetic faces.
+    #[cfg(test)]
+    fn synthetic() -> Self {
+        Self {
+            bay: tore_sim::combat::bays::opening(ID).expect("F-111F bay"),
+            belly: (-5., 0.),
+        }
+    }
     pub fn load(bytes: &[u8], mut shape: Shape) -> AppResult<(Self, Shape)> {
         if tore_formats::module::code(bytes)?.0.len() != 25206
             || shape.faces.len() != 254
@@ -431,7 +522,17 @@ impl Rig {
             [7., NOZZLE_PLANE, 3.],
         )?;
         let plates = glove_plates(&shape)?;
+        // The bay's belly plate, its slope and the lining (F111-5).
+        let bay = tore_sim::combat::bays::opening(ID).ok_or("F111 bay opening missing")?;
+        let plate = one(&shape, BELLY)?.clone();
+        let belly = belly_line(&plate, (bay.aft / UNIT) as f32)?;
+        let wall = one(&gear, GEAR_MAIN[0])?.colors[0];
+        let mut lining_faces = lining_faces(&plate, &bay, belly, wall);
+        for (k, f) in lining_faces.iter_mut().enumerate() {
+            f.address = LINING_BASE + k;
+        }
         shape.faces.extend(plates);
+        shape.faces.extend(lining_faces);
         shape.faces.extend(
             gear.faces
                 .into_iter()
@@ -449,10 +550,37 @@ impl Rig {
                         .filter(|f| FLAME.contains(&f.address)),
                 ),
         );
-        Ok((Self, shape))
+        Ok((Self { bay, belly }, shape))
+    }
+    /// The faces a source face becomes: with the bay doors off their seat the
+    /// belly plate is cut into the two door leaves, turned down about their
+    /// hinges by `state.bay`; the lining draws only then.
+    pub fn faces(&self, source: &Face, state: &State) -> Vec<Face> {
+        let a = source.address;
+        if a == BELLY && state.bay > 0. {
+            let half = (self.bay.outer / UNIT) as f32;
+            return crate::roster_animation::cut_doors_sloped(
+                source,
+                state.bay,
+                [(-half, 0., -half, 1.), (0., half, half, -1.)],
+                (
+                    (self.bay.aft / UNIT) as f32,
+                    (self.bay.fore / UNIT) as f32,
+                    self.belly.0,
+                    self.belly.1,
+                ),
+            );
+        }
+        if lining(a) && state.bay <= 0. {
+            return Vec::new();
+        }
+        vec![source.clone()]
     }
     pub fn animate(&self, source: &Face, state: &State) -> Option<Face> {
         let a = source.address;
+        if lining(a) && state.bay <= 0. {
+            return None;
+        }
         let mut result = source.clone();
         let right = wing_right(a);
         if right || wing_left(a) {
@@ -528,6 +656,63 @@ impl Rig {
         Some(result)
     }
 }
+/// The belly plate's height at the opening's `aft` edge and its rise for each
+/// unit forward, from the plate's own vertices: a quad whose height depends on
+/// y alone, facing down.
+fn belly_line(plate: &Face, aft: f32) -> AppResult<(f32, f32)> {
+    let p = &plate.positions;
+    let (lo, hi) = (
+        p.iter().min_by(|a, b| a[1].total_cmp(&b[1])),
+        p.iter().max_by(|a, b| a[1].total_cmp(&b[1])),
+    );
+    let (Some(lo), Some(hi)) = (lo, hi) else {
+        return Err("unreviewed F111.SH belly plate".into());
+    };
+    let flat = p.iter().all(|q| {
+        (q[2] - (lo[2] + (q[1] - lo[1]) * (hi[2] - lo[2]) / (hi[1] - lo[1]))).abs() < 1e-3
+    });
+    if p.len() != 4
+        || hi[1] <= lo[1]
+        || !flat
+        || !plate.normal.is_some_and(|n| n[1] < -30000.)
+        || aft < lo[1]
+    {
+        return Err("unreviewed F111.SH belly plate".into());
+    }
+    let slope = (hi[2] - lo[2]) / (hi[1] - lo[1]);
+    Ok((lo[2] + (aft - lo[1]) * slope, slope))
+}
+
+/// The bay's lining: a ceiling, four walls whose lower edges follow the sloping
+/// belly plate, a cradle rail under the ceiling and the cradle's two posts,
+/// drawn in the grey of the shape's own gear plates, closed on every side so
+/// no sky shows through the cut.
+fn lining_faces(
+    template: &Face,
+    o: &Opening,
+    (belly_aft, slope): (f32, f32),
+    colour: u8,
+) -> Vec<Face> {
+    let middle = F111_BAY_MOUNT_FORWARD - tore_sim::combat::bays::B52_ORIGIN_AHEAD;
+    let rails = [[0., middle - 4.2, middle + 4.2]];
+    let posts = [
+        [0., middle - F111_CRADLE_POSTS],
+        [0., middle + F111_CRADLE_POSTS],
+    ];
+    let aft = (o.aft / UNIT) as f32;
+    let floor = crate::bay_doors::units_at_pub(o.belly, UNIT);
+    let mut faces = crate::bay_doors::centre_lining(template, o, UNIT, &rails, &posts);
+    for f in &mut faces {
+        f.colors = vec![colour; f.positions.len()];
+        for p in &mut f.positions {
+            if (p[2] - floor).abs() < 1e-4 {
+                p[2] = belly_aft + (p[1] - aft) * slope;
+            }
+        }
+    }
+    faces
+}
+
 /// The plume plates, drawn as the afterburner flame.
 pub(crate) fn flame(address: usize) -> bool {
     FLAME.contains(&address)
@@ -569,9 +754,24 @@ mod tests {
         s.speed = kt * 1.68781;
     }
 
+    /// F111-8 (2026-11-16): a frame whose flight carries the wing's present turn
+    /// (the world sets it for the aircraft combat moves at the sweep rate) is
+    /// drawn at that turn; without one the drawing takes the schedule's.
+    #[test]
+    fn the_wing_is_drawn_at_the_present_turn_when_the_frame_carries_one() {
+        let mut s = state();
+        knots(&mut s, 650.);
+        let schedule = sweep_turn(&s);
+        assert!((F111F.sweep_degrees(schedule) - 72.5).abs() < 1e-9);
+        s.wing_turn = Some(F111F.max_turn() * 0.5);
+        assert_eq!(sweep_turn(&s), F111F.max_turn() * 0.5);
+        s.wing_turn = None;
+        assert_eq!(sweep_turn(&s), schedule);
+    }
+
     #[test]
     fn the_rig_sweeps_the_wing_about_the_f111_pivot_and_moves_every_surface_whole() {
-        let rig = Rig;
+        let rig = Rig::synthetic();
         let mut s = state();
         // The wing: the schedule is the spec's, the tip goes aft and in about
         // the pivot, the panel stays rigid, flaps hold it out.
@@ -645,5 +845,68 @@ mod tests {
         s.exhaust = 0.5;
         assert!((rig.animate(&burner, &s).unwrap().positions[0][1] + 48.5).abs() < 1e-4);
         assert!(flame(0x4f4e) && !flame(0x1c77));
+    }
+
+    /// F111-5: shut, the belly plate is whole and nothing is lined; open, the
+    /// plate is cut into two leaves hanging on their hinge lines (in the
+    /// sloping plate) and the lining draws.
+    #[test]
+    fn the_bay_cuts_the_belly_plate_into_two_leaves_and_draws_its_lining_only_open() {
+        let mut plate = face(
+            BELLY,
+            &[
+                [-3., 13., -6.],
+                [3., 13., -6.],
+                [3., 34., -5.],
+                [-3., 34., -5.],
+            ],
+        );
+        plate.normal = Some([0., -32765., 0.]);
+        let opening = tore_sim::combat::bays::opening(ID).unwrap();
+        let belly = belly_line(&plate, (opening.aft / UNIT) as f32).unwrap();
+        // The plate's height at the aft edge of the opening: -6 units rising a
+        // unit over 21, times the z factor, at the opening's aft edge (14.505).
+        let aft = (opening.aft / UNIT) as f32;
+        let expect =
+            sp([0., 0., -6.])[2] + (aft - 13.) * (sp([0., 0., 1.])[2] - sp([0., 0., 0.])[2]) / 21.;
+        assert!((belly.0 - expect).abs() < 1e-4, "{belly:?}");
+        let rig = Rig {
+            bay: opening,
+            belly,
+        };
+        let mut s = state();
+        s.bay = 0.;
+        assert_eq!(rig.faces(&plate, &s).len(), 1);
+        let lining_face = Face {
+            address: LINING_BASE,
+            ..plate.clone()
+        };
+        assert!(rig.faces(&lining_face, &s).is_empty() && rig.animate(&lining_face, &s).is_none());
+        s.bay = 1.;
+        assert_eq!(rig.faces(&lining_face, &s).len(), 1);
+        let open = rig.faces(&plate, &s);
+        assert!(open.len() > 1);
+        // Both leaves hang the opening's half width under their hinge: the lowest
+        // vertex is 1.5 ft (2.25 units) under the plate at the aft edge.
+        let lowest = open
+            .iter()
+            .flat_map(|f| f.positions.iter())
+            .map(|p| p[2])
+            .fold(f32::MAX, f32::min);
+        let hang = (opening.outer / UNIT) as f32;
+        assert!(
+            (belly.0 - lowest - hang).abs() < 0.03,
+            "{lowest} against {}",
+            belly.0 - hang
+        );
+        // Half open, half the swing.
+        s.bay = 0.5;
+        let half = rig.faces(&plate, &s);
+        let lowest_half = half
+            .iter()
+            .flat_map(|f| f.positions.iter())
+            .map(|p| p[2])
+            .fold(f32::MAX, f32::min);
+        assert!((belly.0 - lowest_half - hang * std::f32::consts::FRAC_PI_4.sin()).abs() < 0.03);
     }
 }

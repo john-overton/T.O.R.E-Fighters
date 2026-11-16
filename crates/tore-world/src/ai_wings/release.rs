@@ -502,4 +502,64 @@ mod tests {
             }
         }
     }
+
+    /// F111-5: an AI bomb leaves the F-111F's bay row (9) inside its one
+    /// centred opening through the shared release, and one leaves its fixed
+    /// outer wing pylon (row 7) from under the wing, not from the bay.
+    #[test]
+    fn an_ai_bomb_leaves_the_f111_bay_and_its_outer_pylon_from_their_own_places() {
+        use tore_formats::aircraft::{AircraftId, Hardpoint};
+        use tore_sim::combat::{bays, hardpoints};
+        let (mut wings, _) = build(None);
+        let mut state = combat_fixture(false);
+        state.projectiles.clear();
+        let id = wings.mission().actors()[1].id();
+        let mut config = state.own().configuration().clone();
+        config.stations[0].weapon = mk82_pack(config.stations[0].weapon.clone());
+        let launcher_of =
+            |wings: &AiWings| crate::combat::launcher(wings.mission().actor(id).unwrap().flight());
+        let ground = |_: f64, _: f64| 0.;
+        let opening = bays::opening(AircraftId::F111).unwrap();
+        for (row, location, flags, count) in [(9, 3, 0x1500, 2), (7, 4, 0x3e5, 2)] {
+            let record = Hardpoint {
+                location,
+                flags,
+                position: [54, -12, -13],
+                store: None,
+                count,
+                weight_class: 50,
+                slew: [0; 4],
+            };
+            let (mount, rack) = hardpoints::placed_on(AircraftId::F111, row, &record, None);
+            config.stations[0].mount = mount;
+            config.stations[0].rack = rack;
+            config.stations[0].count = count as u16;
+            wings.configs.insert(id, config.clone());
+            state.projectiles.clear();
+            let weapon = config.stations[0].weapon.clone();
+            let emitted =
+                wings.release(&launch(id, 0x5000_0001), &mut state, &weapon, &[], &ground);
+            assert!(emitted > 0, "row {row}");
+            let launcher = launcher_of(&wings);
+            // The pack record stages its six bodies across the point; the middle
+            // of them is the point, as the B-52's test reads it.
+            let places: Vec<[f64; 3]> = state
+                .projectiles
+                .iter()
+                .map(|p| [0, 1, 2].map(|k| p.position[k] - launcher.position[k]))
+                .collect();
+            let middle = places.iter().map(|p| p[0]).sum::<f64>() / places.len() as f64;
+            if row == 9 {
+                // The first bomb leaves the grid's left column (0.65 ft out); the
+                // pack record stages its six bodies 2 ft apart across that point.
+                assert!((-2.5..-1.5).contains(&middle), "{places:?}");
+                for at in &places {
+                    assert!(at[2] > opening.aft && at[2] < opening.fore, "{at:?}");
+                }
+            } else {
+                // Under the outer wing pylon, 15 ft out or more, not in the bay.
+                assert!(middle.abs() > 12., "{places:?}");
+            }
+        }
+    }
 }

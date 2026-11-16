@@ -181,6 +181,17 @@ const DEFAULT_EYE: [f64; 2] = [7., 10.];
 /// inside the skin. The seat is the flight deck behind the windscreen, 71 ft
 /// ahead, and 12 ft up, 1.3 ft over the crown behind it, so the back view
 /// clears the fuselage and looks down its length to the fin and the tail.
+///
+/// F-111F (F111-7, 2026-11-16, fitted from the scaled shape: `F111.SH` after
+/// the per-axis real-size factors, 2/3 ft a unit times 0.859, 1.0 and 0.827):
+/// the cockpit hump stands on the centre line from 8.7 ft ahead of the origin
+/// (2.8 ft up) rising to a crown 3.3 ft up from 23.3 to 27.3 ft ahead, then
+/// the windscreen falls to 2.8 ft at 28 ft and the canopy ends at 30.7 ft
+/// (1.1 ft up) before the nose cone. The shared seat (10 ft ahead, 7 ft up)
+/// is 15 ft aft of the crown and 4 ft over the spine, outside the cockpit. The
+/// seat is the crown's middle, 25 ft ahead, and 5 ft up: 1.7 ft over the crown,
+/// as the B-52's, so the back view clears the hump and looks down the spine to
+/// the fin and the tailerons, not out of the inside of the glass.
 pub(crate) fn eye_offset(id: Option<AircraftId>) -> [f64; 2] {
     match id {
         Some(AircraftId::B2) => [10., 20.],
@@ -188,6 +199,7 @@ pub(crate) fn eye_offset(id: Option<AircraftId>) -> [f64; 2] {
         Some(AircraftId::B52) => [9., 63.],
         Some(AircraftId::B1b) => [11.3, 66.],
         Some(AircraftId::Tu160) => [12., 71.],
+        Some(AircraftId::F111) => [5., 25.],
         _ => DEFAULT_EYE,
     }
 }
@@ -518,7 +530,7 @@ mod tests {
     /// every other aircraft, and an unknown type, keeps the shared one (7 ft
     /// up, 10 ft ahead).
     #[test]
-    fn only_the_b2_the_f117_the_b52_and_the_tu160_have_their_own_pilot_eye() {
+    fn only_the_b2_the_f117_the_b52_the_b1b_the_tu160_and_the_f111_have_their_own_pilot_eye() {
         for id in AircraftId::ALL {
             let want = match id {
                 AircraftId::B2 => [10., 20.],
@@ -526,6 +538,7 @@ mod tests {
                 AircraftId::B52 => [9., 63.],
                 AircraftId::B1b => [11.3, 66.],
                 AircraftId::Tu160 => [12., 71.],
+                AircraftId::F111 => [5., 25.],
                 _ => [7., 10.],
             };
             assert_eq!(eye_offset(Some(id)), want, "{id:?}");
@@ -569,6 +582,13 @@ mod tests {
         let tu160 = at(Some(AircraftId::Tu160));
         for i in 0..3 {
             let moved = (tu160[i] - shared[i]) - (up[i] * 5. + forward[i] * 61.);
+            assert!(moved.abs() < 1e-9, "axis {i}");
+        }
+        // The F-111F: 2 ft lower and 15 ft further forward (the drawn
+        // cockpit), 1.7 ft over its 3.3 ft crown.
+        let f111 = at(Some(AircraftId::F111));
+        for i in 0..3 {
+            let moved = (f111[i] - shared[i]) - (-up[i] * 2. + forward[i] * 15.);
             assert!(moved.abs() < 1e-9, "axis {i}");
         }
     }

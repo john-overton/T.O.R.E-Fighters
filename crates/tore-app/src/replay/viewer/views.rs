@@ -1454,4 +1454,16 @@ mod sight_label_tests {
         assert_ne!(label, "IRADS", "{label}");
         assert!(!label.is_empty());
     }
+
+    /// F111-7: the F-111F's laser reads PAVE TACK in the Sensor View.
+    #[test]
+    fn the_sensor_view_names_the_f111s_laser_pave_tack() {
+        let Some((f111, map)) = resources(AircraftId::F111) else {
+            eprintln!("skipped: no retail install");
+            return;
+        };
+        let (label, sensor) = sight_record(&f111, &map).expect("the F-111F's laser");
+        assert_eq!(label, "PAVE TACK");
+        assert!(sensor.laser, "the Pave Tack lases");
+    }
 }

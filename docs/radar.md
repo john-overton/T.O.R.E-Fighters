@@ -160,7 +160,7 @@ flying channel, instead of borrowing a preset.
 | Preset | Radar records | Notch half-width, ft/s | Range factor at notch centre | Reference burn-through B, nmi | Angular coupling half-width / sidelobe floor |
 | --- | --- | ---: | ---: | ---: | --- |
 | Basic | F4BR, MIG21R, MIG27R | Disabled | 1.0 | 5 | 3 degrees / 0.05 |
-| Transitional | F14R, B52R (B52-7, 2026-11-15, fitted: the Tu-160's record renamed, a long-range bomber set; the AC-130's class), TU160R (T160-6/7, 2026-11-16, fitted: the record B52R renames, so the B-52's class) | 100 | 0.20 | 8 | 2 degrees / 0.02 |
+| Transitional | F14R, B52R (B52-7, 2026-11-15, fitted: the Tu-160's record renamed, a long-range bomber set; the AC-130's class), TU160R (T160-6/7, 2026-11-16, fitted: the record B52R renames, so the B-52's class), A6R (F111-7, 2026-11-16, fitted: the A-6's attack and terrain-following set, the F-111F's radar; the F-14's class) | 100 | 0.20 | 8 | 2 degrees / 0.02 |
 | Advanced | F18R, MIG29R, SU24R, SU27R, F22R, MIG31R | 60 | 0.45 | 10 | 1 degree / 0.005 |
 
 Basic sets are primarily vulnerable to ground clutter and carry no Doppler notch,
@@ -245,6 +245,13 @@ flares only.
 Update (T160-6/7, 2026-11-16): the Tu-160's `TU160R.SEE` (150 nmi search, 60 by 60 degrees) is
 reviewed Transitional and its `TU160.ECM` (RF mode, strength 0.30) Transitional, so it flies with a radar
 and a jammer; both were unreviewed and never enabled. The Tu-26's and Tu-95's records stay unreviewed.
+
+Update (F111-7, 2026-11-16): the F-111F carries `A6R.SEE` and `A6.ECM` (the A-6's records,
+its template), which decoded as unreviewed, so it flew with no radar and no jammer. Both are now
+reviewed, fitted agent decisions: `A6R.SEE` Transitional (search 50 nmi, track 25 nmi, 60 and 45
+degree cones, look-down 0, from the record) and `A6.ECM` Transitional, strength 0.30 (RF mode, 30
+chaff, 30 flares). The EA-6B's `EA6R.SEE` and `EA6.ECM` stay unreviewed. One line each in
+`sensors::profile` (`Preset::for_record`, `Generation::for_record`) to revert.
 
 Only installed, powered, undamaged RF jammers contribute. Jammer strength S is
 `clamp(ECM.radar_deception_chance / 100, 0, 1)`, repurposed as an authored

@@ -201,6 +201,19 @@ allowance; Athens, GRE 1, because Simferopol's 5,532 ft is shorter than the 5,47
 ([lane-ai](lane-ai.md)). Evidence: the
 [B-1B flight review](../formats/aircraft-variety.md#b-1b-lancer-flight-review-b1b-8-2026-11-16).
 
+Update (F111-8, 2026-11-16): the F-111F (`f111`) joins the liftoff, retail-stall and approach
+scenarios of `flight.py` (it was already in `VARIETY_AIRCRAFT`): fitted windows 150 to 190 kt
+liftoff and 140 to 175 kt approach, recorded 171.8 kt after 2,944 ft at the 99,999 lb default
+load and 166.2 kt (the model's cap) for the approach at 65 percent fuel (21,231 lb), an internal fuel of 32,663 lb and the
+ordinary takeoff allowance. Two AI scenarios join the BMB-AI set, `ai-heavy-takeoff-f111-gre-a1`
+(a wing of two at Athens at the default load: taxi, takeoff, climb-out to `Airborne`, flying on) and
+`ai-heavy-land-f111-ukr-a2` (sent home with 16,000 lb of fuel and the stores: lands at 175 kt or
+slower at Simferopol, rolls out, parks on the pavement); the F-111F's flaps-up minimum is above
+190.5 kt at those weights, so the BMB-AI flaps law and climb-out wait apply and pass unchanged.
+The wing's sweep rate (3 degrees a second) is covered by Rust tests (`swing`, `live`,
+`ai_wings`, `f111_animation`, and `live_checkpoint` for a restore mid-sweep stepping on identically), not by a scenario: no check line shows the sweep. Evidence: the
+[F-111F flight review](../formats/aircraft-variety.md#f-111f-flight-review-f111-8-2026-11-16).
+
 `flight-variety-gcurve-*` sweeps the full-stick G limit of the seven transports
 and airliners from 100 to 750 kt at 5,000 ft (`--maneuver gcurve`). Once the
 limit has passed 1.4 G it must not fall below 1.3 G, through the top speed and
@@ -402,6 +415,12 @@ adds order kinds.
 | `ai-strike-tu160-quick-wing` (T160-9) | A Quick Mission with the Ukraine factory as the target and a Tu-160 wing (`--quick-wing`), 400 s | `ROLE strike`, the forward row's six Mk 82 on the third attack (324 s) at the 5,000 ft heavy floor, doors open, egress, not lost |
 | `ai-strike-tu160-as16-tank` (T160-9) | An AI Tu-160 with its AS-16 (`--load AS16`), 10 nm from the column's T-90 at 20,000 ft | One AS-16 from the forward row's first place (right -1.59, forward 38.61), released at 20,000 ft or more of slant range, impact, T-90 killed. Before T160-9 the AI never fired it |
 | `ai-strike-tu160-antiship` (T160-9) | The same AS-16 against the Krivak of the Ukraine surface fleet (`QUSFLT --unit`), 15 nm, 115 s | One AS-16 leaves the forward row at 27,500 ft, hits the Krivak (47 ft, 150 of 500 left); the run stops before the fleet shoots the Tu-160 down at 119 s |
+| `ai-strike-f111-laser` (F111-9, 2026-11-16) | An AI F-111F (Attack class) on `~QUCOL` at 5,000 ft with the GBU-28 of the inner wing pylon (`--station 0`) | Level pass, the F-111F lases (its Pave Tack and fixed laser), one release from the held wing's cell (-8.41, -0.50, 2.22 ft: the human's own, `a2g-release-origin-f111`), `guided=Guiding` on its own spot, the tank killed, `bay=0.00` and no `BAY` line, egress, not lost |
+| `ai-strike-f111-pylon` (F111-9) | Three runs, a Mk 82 from rows 6, 7 and 8 (`--station 1`, `2`, `3`, `--count 2`) | One release a pass from (-11.71, -0.35, 1.11), (-15.28, -0.35, -0.08) and (-18.30, -0.35, -1.09), the doors never move, an impact, egress, not lost |
+| `ai-strike-f111-bay` (F111-9) | Two Mk 82 in the bay (`--station 4`; the Pave Tack gives way) | The doors open before the release (`BAY` open, 0.95 or more), one release from the shared grid's first place (-0.65, -2.59, 16.54), the doors read shut 1.5 to 6 s after, an impact, egress, not lost |
+| `ai-strike-f111-maverick` (F111-9) | The default load's four AGM-65G on the outer pylon pair (`--station 2 --count 4`) | One AGM-65G from (-16.13, -0.40, -0.08) on the fast high pass, the tank killed, the doors never move, not lost |
+| `ai-strike-f111-antiship` (F111-9) | Two AGM-84E on the outer pair (`--station 2 --count 2`), 15 nm from the Ukraine surface fleet's Krivak at 20,000 ft, 60 s | One Harpoon a wing (right -15.28 and 15.28 ft, forward -0.08), the doors never move, both hit and the Krivak is destroyed |
+| `ai-strike-f111-quick-wing` (F111-9) | A Quick Mission with the Ukraine column as the ground target and an F-111F wing (`--quick-wing`) | `ROLE strike`, the six retarded Mk 82 of station 1 in the laydown, six impacts, the target killed, egress, not lost. The factory is not used: the wingman is lost to its own bombs over a rise on the way (docs/formats/aircraft-variety.md, F111-9) |
 | `a2g-release-origin-b2` (B2-6) | The human trigger on the B-2's four bay rows (`--a2g-run --attack release`, 12 presses a Mk 82 row, 4 a Paveway row) | Each release leaves where it hangs: outermost first, alternating sides, front row before back, bottom tier first |
 | `ai-strike-tu160-stick` (T160-6, 2026-11-16) | An AI Tu-160 (Heavy) on `~QUCOL` at 20,000 ft, 12 nm out, the forward bay's six Mk 82 (`--aircraft tu160 --load MK82`) | Six releases from the grid's own places (four abreast at 45.73 then 38.18 ft ahead, -1.95 ft up), doors open for the release, an impact, egress, not lost; the cells equal the human's in `a2g-release-origin-tu160` |
 | `a2g-release-origin-tu160` (T160-6, 2026-11-16) | The human trigger on the Tu-160's bays (`--a2g-run --attack release`, 6 AS-16 a bay, 6 Mk 82 of the forward bay) | Each release leaves where it hangs: AS-16 three abreast (-1.59, +1.59, 0), forward row then back (38.61 and 22.66 ft forward, aft bay -12.73 and -28.68); Mk 82 four abreast |
@@ -1110,3 +1129,23 @@ radar; with `TU160R.SEE` enabled both slots are refused slots, as the Su-25's). 
 a vertex on each hinge line and the free edge `3.8 ft * sin(90 degrees * value)` below the plane from a
 sixth of the travel on, every leaf vertex on a hinge line at 1). The glove plates change the
 `render-tu160-skin` top view only at the swept root.
+
+Update (F111-5, 2026-11-16): the F-111F's stations. `f111` joins `STATIONS` (`flight-livefire-f111-slot1` to
+`slot7`: the four wing rows, the bay and the two AIM-9 rails; the bay and rails start empty, and slot 3, the
+AGM-65G row, is a refused surface-missile slot). New scenarios:
+
+| Scenario | Does | Pass when |
+| --- | --- | --- |
+| `flight-bay-fire-f111-row9` | `--stores-preview` actual one-press release of the bay's two Mk 82 (`9=MK82.JT:2`, 20,000 lb of fuel) | the doors open to 0.95 before the bomb leaves and close after, `Stores firing: f111 row=9 PASS` |
+| `flight-bay-fire-f111-pylon-row7` | the same from the fixed outer pylon (`7=MK82P.JT:2`) | a bomb leaves row 7 with the bay doors shut, `Stores firing: f111 row=7 PASS` |
+| `render-f111-clearance` | headless `TORE_STORES_PREVIEW_BAYCLEAR` of the two Mk 82 in the open bay | at least 0.05 ft to the door planes, ends and roof, above the closed belly plane, 0.05 ft between the bombs |
+| `a2g-release-origin-f111` | `--a2g-run` releases of the outer pylon's Mk 82 at 200 and 650 knots and of the default GBU-28 on the inner pylon | each store leaves from where it hangs: 15.46 ft out and 1.31 ft ahead at 200 knots, 15.28 ft out and 0.08 ft aft at 650 (the wing held to 26 degrees by the outer store); the GBU-28 8.30 / 2.38 and 8.41 / 2.22 |
+
+Update (F111-6, 2026-11-16): three scenarios for the F-111F's sensors and guided stores.
+
+| Scenario | Does | Pass when |
+| --- | --- | --- |
+| `a2g-laser-f111` | `--attack laser --aircraft f111 --load GBU28 --station 0` from 15,000 ft at 480 kt: the Pave Tack lases a tank, a GBU-28 leaves the inner wing pylon | Released guiding on aircraft 0's spot with the laser lasing, ends guiding within 40 ft, destroys the tank |
+| `a2g-maverick-f111` | `--attack maverick --load AGM65G --station 2 --count 4` (the outer pylon's four AGM-65G, through the A-G radar channel) | The column's lead truck is killed (`hp 0/200`) |
+| `flight-countermeasures-f111` | `--live-fire --aircraft f111`, five chaff and three flare commands | 30 chaff and 30 flares from the `A6.ECM` row, carried counts fall by the releases (the shared countermeasure check) |
+

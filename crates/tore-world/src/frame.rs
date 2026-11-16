@@ -264,6 +264,25 @@ impl World {
         let config = self.combat.state.ownship(cockpit.plane.0)?.configuration();
         let launcher = combat_launcher(presented.as_ref().unwrap_or(&cockpit.flight));
         let mut presented = presented.map_or(Cow::Borrowed(&cockpit.flight), Cow::Owned);
+        // F111-5 (2026-11-16): a store on a fixed wing pylon holds a swing
+        // wing to its sweep limit; the drawing of the wing and of its stations
+        // reads it from the frame's flight (the flight itself does not know
+        // what combat carries).
+        if let Some(own) = self.combat.state.ownship(cockpit.plane.0)
+            && own.wing_held()
+        {
+            presented.to_mut().wing_hold = true;
+        }
+        // F111-8 (2026-11-16): a swing wing with a sweep rate is drawn where
+        // combat has moved it to, not at the schedule's turn.
+        if let Some(turn) = self
+            .combat
+            .state
+            .ownship(cockpit.plane.0)
+            .and_then(|own| own.wing_turn())
+        {
+            presented.to_mut().wing_turn = Some(turn);
+        }
         if config.aircraft == tore_formats::aircraft::AircraftId::Ac130
             && let Some(devices) = picture.player.devices.as_ref()
         {

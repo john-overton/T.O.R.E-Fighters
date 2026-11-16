@@ -266,12 +266,17 @@ pub enum AircraftId {
 }
 /// An aircraft's own names for its targeting sight (the target camera's
 /// title, the Load Ordnance sensor line, the replay's Sensor View) and for
-/// its infrared channel (the radar page's IR label). See
-/// [`AircraftId::sensor_names`].
+/// its infrared channel (the radar page's IR label) and, for an aircraft whose
+/// designator can be a loadable pod, that pod's name on the Load Ordnance
+/// page. See [`AircraftId::sensor_names`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SensorNames {
     pub sight: &'static str,
     pub infrared: &'static str,
+    /// The name of the designator pod on the Load Ordnance page (the F-111F's
+    /// Pave Tack on its bay row). The F-117 has no such pod: its turret is a
+    /// fixed row, and the field only repeats the sight name.
+    pub pod: &'static str,
 }
 
 impl AircraftId {
@@ -1050,11 +1055,23 @@ impl AircraftId {
     /// laser bombs need) and the `AV8IR.SEE` row is its FLIR. Text only: the
     /// records, the sight and the channel behave as the shared ones. `None`
     /// for every other aircraft, which keep the generic labels.
+    ///
+    /// The F-111F (F111-7, 2026-11-16; coordinator first pass, F111 item 6)
+    /// shows its laser and FLIR pair as the PAVE TACK pod, the way the F-117
+    /// shows IRADS: the `PAVESPK.SEE` laser (its fixed row and the pod on its
+    /// bay row, a second record of the same laser) is the Pave Tack's laser
+    /// and `AV8IR.SEE` is its FLIR. Text only again.
     pub fn sensor_names(self) -> Option<SensorNames> {
         match self {
             Self::F117 => Some(SensorNames {
                 sight: "IRADS",
                 infrared: "FLIR",
+                pod: "IRADS",
+            }),
+            Self::F111 => Some(SensorNames {
+                sight: "PAVE TACK",
+                infrared: "FLIR",
+                pod: "Pave Tack",
             }),
             _ => None,
         }
@@ -2302,18 +2319,26 @@ mod profile_tests {
         assert!(!AircraftId::B52.has_pts());
         assert!(AircraftId::B2.has_pts() && AircraftId::F117.has_pts());
     }
-    /// F117-7: only the F-117 has its own sensor names (IRADS turret and FLIR,
-    /// decision 26); every other aircraft, the B-2 included, keeps the
-    /// generic labels.
+    /// F117-7 and F111-7: only the F-117 (IRADS turret and FLIR, decision 26)
+    /// and the F-111F (Pave Tack and its FLIR) have their own sensor names;
+    /// every other aircraft, the B-2 included, keeps the generic labels.
     #[test]
-    fn only_the_f117_has_its_own_sensor_names() {
+    fn only_the_f117_and_the_f111_have_their_own_sensor_names() {
         for id in AircraftId::ALL {
             let names = id.sensor_names();
-            if id == AircraftId::F117 {
-                let names = names.unwrap();
-                assert_eq!((names.sight, names.infrared), ("IRADS", "FLIR"));
-            } else {
-                assert_eq!(names, None, "{id:?}");
+            match id {
+                AircraftId::F117 => {
+                    let names = names.unwrap();
+                    assert_eq!((names.sight, names.infrared), ("IRADS", "FLIR"));
+                }
+                AircraftId::F111 => {
+                    let names = names.unwrap();
+                    assert_eq!(
+                        (names.sight, names.infrared, names.pod),
+                        ("PAVE TACK", "FLIR", "Pave Tack")
+                    );
+                }
+                _ => assert_eq!(names, None, "{id:?}"),
             }
         }
     }

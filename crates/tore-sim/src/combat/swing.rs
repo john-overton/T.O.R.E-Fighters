@@ -34,6 +34,10 @@
 //! identity too. A swivelling station carries its own aircraft's spec
 //! ([`rack_spec`]), so the F-111F's rows 5 and 6 swivel about the F-111F's
 //! pivot and the Tornado's stay on the Tornado's.
+//! Update (F111-8, 2026-11-16): the F-111F's spec has a sweep rate (3 degrees a
+//! second, fitted): its wing's turn is a state that follows the schedule at
+//! that rate ([`SwingSpec::step_turn`]) and the Tornado's, with none, still
+//! follows it the same tick.
 use tore_formats::aircraft::AircraftId;
 
 /// Shape units to feet at the Tornado's header scale 2 (2/3 ft a unit).
@@ -155,9 +159,12 @@ pub struct SwingSpec {
     /// Whether the landing gear, as well as the flaps, holds the wing spread
     /// (the Tu-26: "spread to 300 kt and whenever flaps or gear are out").
     pub gear_holds_spread: bool,
-    /// How fast the real wing sweeps, degrees a second, when a source gives
-    /// it. None has: the drawn sweep is a pure function of speed, not a state
-    /// that moves at a rate.
+    /// How fast the wing sweeps, degrees a second, when the aircraft has a
+    /// rate. `None` (the Tornado's, and every other spec's but the F-111F's):
+    /// the sweep is a pure function of speed, flaps and gear and follows it
+    /// the same tick. `Some`: the wing's turn is a state that moves toward
+    /// that function at this rate ([`SwingSpec::step_turn`]); the host keeps
+    /// it ([`super::live::Configuration::set_wing_flight`]).
     pub sweep_rate_dps: Option<f64>,
     /// Where the wing panel is placed against the retail shape.
     pub placement: Placement,
@@ -235,6 +242,24 @@ impl SwingSpec {
             _ => turn,
         }
     }
+    /// The wing's turn one tick (`dt` seconds) on: `current`, moved toward
+    /// `target` by at most [`Self::sweep_rate_dps`] degrees a second. With no
+    /// rate the wing is there at once and this is `target`, exactly
+    /// (bit for bit: the Tornado's path), whatever `current` was.
+    pub fn step_turn(&self, current: f64, target: f64, dt: f64) -> f64 {
+        match self.sweep_rate_dps {
+            None => target,
+            Some(rate) => {
+                let step = rate.to_radians() * dt;
+                let gap = target - current;
+                if gap.abs() <= step {
+                    target
+                } else {
+                    current + step * gap.signum()
+                }
+            }
+        }
+    }
     /// The speed in feet per second at which the schedule has swept the wing
     /// to `degrees` (flaps up): the inverse of [`Self::turn`], for captures
     /// and measurements that pose the wing. On a flat part of a detent law
@@ -306,6 +331,15 @@ impl SwingSpec {
     /// Whether any station swivels.
     pub fn has_swivel(&self) -> bool {
         !self.swivel_rows.is_empty()
+    }
+    /// Whether source hardpoint `hardpoint` rides the swinging wing: a
+    /// swivelling pylon, or a fixed one ([`Self::fixed_store_rows`]), which the
+    /// wing carries without turning it back (F111-5, 2026-11-16). A fixed
+    /// pylon's store does not turn with the wing in the drawing or the
+    /// release: the wing is held to 26 degrees or less while it holds one, so
+    /// the pylon is carried by at most 10 degrees of turn.
+    pub fn carries(&self, hardpoint: usize) -> bool {
+        self.swivels(hardpoint) || self.fixed_store_rows.contains(&hardpoint)
     }
     /// The fixed length of the swivelling pylon of source hardpoint
     /// `hardpoint`, when it has one.
@@ -563,15 +597,25 @@ pub const F111F: SwingSpec = SwingSpec {
         to_knots: 650.,
     },
     gear_holds_spread: false,
-    sweep_rate_dps: None,
+    // F111-8 (2026-11-16, fitted): 3 degrees a second, so the full 56.5 degree
+    // sweep takes 18.8 s (the brief's "about 15 to 20 s"; no published rate or
+    // sweep time was found, docs/formats/aircraft-variety.md, "F-111F flight
+    // review"). It matters when the last fixed-pylon store leaves and the wing
+    // goes from its 26 degree hold to the schedule (up to 46.5 degrees at 650 kt).
+    sweep_rate_dps: Some(3.),
     placement: Placement::NONE,
-    swivel_rows: &[5, 6],
+    swivel_rows: &[5, 6, 10, 11],
     fixed_store_rows: &[7, 8],
     max_sweep_with_fixed_stores: Some(26.),
+    // Update (F111-5, 2026-11-16): the leading edge is the drawn skin's, shape
+    // (15, 12) to (54, 2) (faces `4021` and `4109`, the fillet corner out to the
+    // tip), not the earlier (13, 10) to (53, 0) chord of the root corners, which
+    // lay 0.8 ft aft of the drawn leading edge at the outer pylons: the pylon
+    // centre report read every pylon 0.8 ft aft of the middle of the chord.
     outline: Some(WingOutline {
         leading: [
-            [13. * FEET_PER_UNIT * 0.859, 10. * FEET_PER_UNIT],
-            [53. * FEET_PER_UNIT * 0.859, 0.],
+            [15. * FEET_PER_UNIT * 0.859, 12. * FEET_PER_UNIT],
+            [54. * FEET_PER_UNIT * 0.859, 2. * FEET_PER_UNIT],
         ],
         trailing: [
             [13. * FEET_PER_UNIT * 0.859, -5. * FEET_PER_UNIT],
@@ -766,6 +810,37 @@ pub fn swivels(id: AircraftId, hardpoint: usize) -> bool {
 /// Whether `id` has any swivelling station.
 pub fn has_swivel(id: AircraftId) -> bool {
     spec(id).is_some_and(SwingSpec::has_swivel)
+}
+
+/// Whether source hardpoint `hardpoint` of aircraft `id` rides its swinging
+/// wing, swivelling or fixed ([`SwingSpec::carries`], F111-5, 2026-11-16).
+pub fn carries(id: AircraftId, hardpoint: usize) -> bool {
+    spec(id).is_some_and(|spec| spec.carries(hardpoint))
+}
+
+/// Whether `hardpoint` of aircraft `id` is a fixed wing pylon that holds the
+/// sweep to its limit while it carries a store ([`SwingSpec::fixed_store_rows`],
+/// F111-5, 2026-11-16): the F-111F's rows 7 and 8.
+pub fn holds_sweep(id: AircraftId, hardpoint: usize) -> bool {
+    spec(id).is_some_and(|spec| {
+        spec.max_sweep_with_fixed_stores.is_some() && spec.fixed_store_rows.contains(&hardpoint)
+    })
+}
+
+/// How far aircraft `id`'s wing has turned from its drawn pose, radians, at
+/// `speed_fps` with its flaps and gear out, held to its fixed-store sweep limit
+/// when `fixed_stores` says a store hangs on a fixed pylon
+/// ([`SwingSpec::turn_carrying`]): 0 for an aircraft with no swing wing.
+pub fn wing_turn_carrying(
+    id: AircraftId,
+    speed_fps: f64,
+    flaps: f64,
+    gear: f64,
+    fixed_stores: bool,
+) -> f64 {
+    spec(id).map_or(0., |spec| {
+        spec.turn_carrying(speed_fps, flaps, gear, fixed_stores)
+    })
 }
 
 #[cfg(test)]
@@ -1098,7 +1173,8 @@ mod tests {
         assert!((degrees(f, 650., 0., 0.) - 72.5).abs() < 1e-9);
         assert_eq!(f.turn(knots(700.), 1., 0.), 0.);
         let rows: Vec<usize> = (0..12).filter(|row| f.swivels(*row)).collect();
-        assert_eq!(rows, [5, 6]);
+        // F111-5: the two AIM-9 rails (rows 10 and 11) ride the inner pylons.
+        assert_eq!(rows, [5, 6, 10, 11]);
         assert_eq!(f.fixed_store_rows, [7, 8]);
         assert_eq!(f.pylon_length(5), Some(3.3));
         assert_eq!(f.pylon_length(7), None);
@@ -1115,13 +1191,13 @@ mod tests {
             B1B.turn_carrying(fast, 0., 0., true),
             B1B.turn(fast, 0., 0.)
         );
-        // The mid-chord reads the panel's own edges: leading (13, 10) to
-        // (53, 0), trailing at y -5, shape units.
+        // The mid-chord reads the drawn panel's own edges (F111-5): leading (15,
+        // 12) to (54, 2), trailing at y -5, shape units.
         let u = 2. / 3.;
-        let x13 = 13. * u * 0.859;
-        let x53 = 53. * u * 0.859;
-        assert!((f.mid_chord(x13).unwrap() - (10. - 5.) / 2. * u).abs() < 1e-9);
-        assert!((f.mid_chord(x53).unwrap() - (0. - 5.) / 2. * u).abs() < 1e-9);
+        let x13 = 15. * u * 0.859;
+        let x53 = 54. * u * 0.859;
+        assert!((f.mid_chord(x13).unwrap() - (12. - 5.) / 2. * u).abs() < 1e-9);
+        assert!((f.mid_chord(x53).unwrap() - (2. - 5.) / 2. * u).abs() < 1e-9);
         assert!(f.mid_chord(x53).unwrap() < f.mid_chord(x13).unwrap());
     }
 
@@ -1170,5 +1246,91 @@ mod tests {
         assert_eq!(rack_spec(AircraftId::B1b), None);
         assert!(has_swivel(AircraftId::F111) && swivels(AircraftId::F111, 6));
         assert!(!swivels(AircraftId::F111, 7));
+    }
+
+    /// F111-5 (2026-11-16): the F-111F's rails (rows 10 and 11) ride the
+    /// swivelling pylons, the fixed outer rows 7 and 8 are carried by the wing
+    /// without swivelling and hold the sweep to 26 degrees while they carry a
+    /// store; nothing else holds anything.
+    #[test]
+    fn the_f111_outer_pylons_hold_the_sweep_to_26_degrees_while_they_carry() {
+        let id = AircraftId::F111;
+        for row in [5, 6, 10, 11] {
+            assert!(swivels(id, row) && carries(id, row) && !holds_sweep(id, row));
+        }
+        for row in [7, 8] {
+            assert!(!swivels(id, row) && carries(id, row) && holds_sweep(id, row));
+        }
+        assert!(!carries(id, 9) && !carries(id, 4));
+        assert!(!holds_sweep(AircraftId::Tornado, 7) && !carries(AircraftId::B2, 7));
+        let at = |kt: f64, flaps: f64, held: bool| {
+            F111F.sweep_degrees(wing_turn_carrying(id, kt * FPS_PER_KNOT, flaps, 0., held))
+        };
+        // Free, the wing follows the schedule to 72.5 degrees; held it stops
+        // at 26.
+        assert!((at(650., 0., false) - 72.5).abs() < 1e-9);
+        assert!((at(650., 0., true) - 26.).abs() < 1e-9);
+        assert!((at(450., 0., true) - 26.).abs() < 1e-9);
+        // Below the limit the schedule is untouched: 16 degrees to 250 knots,
+        // 23.06 at 300.
+        assert_eq!(at(200., 0., true), at(200., 0., false));
+        assert!((at(300., 0., true) - 23.0625).abs() < 1e-9);
+        assert_eq!(at(300., 0., true), at(300., 0., false));
+        // The flaps still hold it spread.
+        assert!((at(650., 1., true) - 16.).abs() < 1e-9);
+        // An aircraft with no limit is never held.
+        let tornado =
+            |held| wing_turn_carrying(AircraftId::Tornado, 600. * FPS_PER_KNOT, 0., 0., held);
+        assert_eq!(tornado(true), tornado(false));
+    }
+
+    /// F111-8: the F-111F's wing has a rate, 3 degrees a second (18.8 s for
+    /// the full 56.5 degrees); every other spec, the Tornado's included, has
+    /// none, and `step_turn` then returns the target itself, bit for bit,
+    /// whatever the wing was.
+    #[test]
+    fn only_the_f111f_has_a_sweep_rate_and_the_tornado_takes_its_turn_at_once() {
+        use crate::flight::DT;
+        for spec in ALL {
+            assert_eq!(
+                spec.sweep_rate_dps.is_some(),
+                spec.name == "F-111F",
+                "{}",
+                spec.name
+            );
+        }
+        for (present, target) in [(0., 0.9), (0.9, 0.), (0.3, 0.3), (-0.1, 1.2345678901234567)] {
+            assert_eq!(
+                TORNADO.step_turn(present, target, DT).to_bits(),
+                target.to_bits()
+            );
+        }
+        // The Tornado's turn is the same function of speed and flaps it was.
+        for kt in [0., 250., 304., 452., 600., 900.] {
+            for flaps in [0., 0.3, 1.] {
+                let target = TORNADO.turn_carrying(knots(kt), flaps, 0., false);
+                assert_eq!(
+                    TORNADO.step_turn(7., target, DT).to_bits(),
+                    wing_turn(knots(kt), flaps).to_bits()
+                );
+            }
+        }
+        // The F-111F moves 3 degrees a second toward the target, either way,
+        // and lands exactly on it.
+        let step = 3_f64.to_radians() * DT;
+        let spread = F111F.min_turn();
+        let swept = F111F.max_turn();
+        assert_eq!(F111F.step_turn(spread, swept, DT), spread + step);
+        assert_eq!(F111F.step_turn(swept, spread, DT), swept - step);
+        assert_eq!(F111F.step_turn(swept, swept, DT), swept);
+        assert_eq!(F111F.step_turn(swept - step / 2., swept, DT), swept);
+        let mut turn = spread;
+        let mut ticks = 0;
+        while turn != swept {
+            turn = F111F.step_turn(turn, swept, DT);
+            ticks += 1;
+        }
+        // 56.5 degrees at 3 degrees a second is 18.83 s of 120 ticks.
+        assert!((2_258..=2_262).contains(&ticks), "{ticks} ticks");
     }
 }

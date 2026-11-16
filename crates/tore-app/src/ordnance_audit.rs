@@ -169,7 +169,16 @@ const TANK_RECORDS: usize = 9;
 /// 5,334 from 5,395 with the B-1B (-51) and the Tu-160 (-10) merged (2026-11-16,
 /// batch B integration; the merged total is measured by `--validate-ordnance` at the end of
 /// the round and recorded below).
-const WEAPON_PLACEMENTS: usize = 5334;
+/// 5,398 from 5,395 (F111-5, 2026-11-16, measured by `--validate-ordnance`): the
+/// F-111F goes from 228 to 231 placements. Its bay (new row 9, flags `0x1500`)
+/// admits three bombs (`MK82`, `FAB250`, `LAU10`; 15 refused for fit), its two
+/// AIM-9 rails (rows 10 and 11) seven infrared missiles each (14; four more
+/// refused), and its inner pylons refuse the stores that enter the airframe:
+/// row 5 ten (`AA6`, `AM39`, `GBU10`, `GBU10A`, `GBU16`, the GBU-27 class and
+/// `PAVEWAY`) and row 6 four (the GBU-27 class): 228 + 3 + 14 - 14 = 231.
+/// 5,337 with the F-111F (+3) on top of the B-1B and the Tu-160 (2026-11-16, batch B
+/// integration; the merged total is measured by `--validate-ordnance` at the end of the round).
+const WEAPON_PLACEMENTS: usize = 5337;
 /// 188 from 182: the F-16A's centreline tank row (F150.GAS or F250.GAS) plus
 /// the tank selection its two 0x07e5 wing rows accept, 6 tank placements.
 /// 192 from 188: the MiG-31 (M31-1). 201 from 192: the Mirage 2000 (M2K-1).
@@ -207,7 +216,10 @@ const TANK_PLACEMENTS: usize = 257;
 /// 278 from 260 (batches A, B and C integration, 2026-11-16): the bomber batch
 /// C records (BMB-C1, BMB-C2) add 18 Cheat-only pairs on the Tu-26, Tu-95 and
 /// Su-34 rows (measured), on top of 260 (the batch's own 276 was from 258).
-const NOVELTY_PLACEMENTS: usize = 278;
+/// 284 from 278 (F111-5, 2026-11-16, measured): the F-111F's new bay row (9) and
+/// its two AIM-9 rails (rows 10 and 11) take the two novelty bombs under Cheat
+/// loading, six more pairs.
+const NOVELTY_PLACEMENTS: usize = 284;
 /// Station and designator-pod pairs the normal rules accept (A2G decision 7).
 /// 67 from 65: the F-16A's two 0x07e5 wing rows carry the decoded designator
 /// bit 0x400, one pod each (slice F16A-4). 68: the MiG-31 (M31-1). 71: the Mirage 2000 (M2K-1).
@@ -227,7 +239,10 @@ const NOVELTY_PLACEMENTS: usize = 278;
 /// `0x07e5`) carry the decoded designator bit, one pod each (BMB-C1,
 /// 2026-11-15, measured, retail flags kept: the Tu-26's bay row and the
 /// Tu-95's pylon row lose the bit in BMB-C2, so they add none).
-const POD_PLACEMENTS: usize = 82;
+/// 83 from 82 (F111-5, 2026-11-16): the F-111F's bay row (9) carries the
+/// designator bit `0x400` (the Pave Tack station, B7: the one row of the
+/// aircraft that does), one pod; its wing rows keep it cleared.
+const POD_PLACEMENTS: usize = 83;
 
 pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
     if AircraftId::ALL.len() != AIRCRAFT {
@@ -1560,9 +1575,15 @@ fn assert_roundtrip(
         || restored.total_lbs() != draft.total_lbs()
         || restored.ammunition()? != draft.ammunition()?
     {
-        return Err(
-            "ordnance accepted-load restoration changed selection, mass or ammunition".into(),
-        );
+        return Err(format!(
+            "ordnance accepted-load restoration changed selection, mass or ammunition ({}: selection {}, mass {} to {}, ammunition {})",
+            aircraft.id.pt(),
+            LoadoutSpec::of(&restored) == accepted,
+            draft.total_lbs(),
+            restored.total_lbs(),
+            restored.ammunition()? == draft.ammunition()?
+        )
+        .into());
     }
     for tank in &restored.configuration.tanks {
         if tank.quantity > 0
