@@ -16046,3 +16046,195 @@ Frames (`.local/m3-aircraft/frames/B1B-6/`, png; `cap.sh`, `live.sh` and `cm.sh`
 `cockpit-look-left-45`, `cockpit-look-right-45`, `before-cockpit-back-f2` (the shared seat: inside the fuselage), `cockpit-back-f2`, `rcs-page-closed`,
 `rcs-page-bay-open`, `crop2x-rcs-closed-vs-bay-open`, `countermeasures-external`, `countermeasures-jammer`, `live-fire-hud-bay-slot1`, `external-threequarter`. The HUD draws inside the
 main window, the pages draw with the B-2 bezel, and no pod appears on the airframe.
+
+
+## B-1B Lancer flight review (B1B-8, 2026-11-16)
+
+Validation and fitting, slice B1B-8 (bomber batch B), Claude Sonnet (sonnet-high). Implementation mode. The B-1B flies
+the hybrid adapter's `variety` configuration built from `B1.PT` and `B1.SH` with BMB-B2's real thrust (69,560 lbf dry,
+123,120 lbf with afterburner), weights (empty 192,000 lb, fuel 265,274 lb, maximum takeoff 477,000 lb) and the record's own
+G rows (-2 to +5), 55,000 ft ceiling and flight-tuning block. The question was which of the record's authored values
+the real figures show to be clearly wrong, and what the coordinator's two named items give: the fuel flows and the
+sea-level edge of Mach 1.00. Four things changed, all through `aircraft_corrections.rs` or one per-aircraft hook; no
+shared law moved. Raw output is local: `.local/m3-aircraft/checks/B1B-8/` (`before/`, `after/`, `run_perf.sh`,
+`run_probes.sh`, `ai/`).
+
+### What was found
+
+| Term | Retail record | Verdict |
+| --- | --- | --- |
+| `fuelConsumption` 6 and `aftFuelConsumption` 16 lb/s | 0.311 and 0.468 lb/(lbf h) at the corrected thrust | **corrected** to 11 and 84 (below) |
+| 1 G fast edge at sea level, 1,120 ft/s | 664 kt, Mach 1.00 | **fitted** to 1,027 ft/s, Mach 0.92 (below) |
+| `airBrakesDrag` 256 | the fighter airbrake the family carries: 0.33 G of extra deceleration at 306 kt | **fitted** to 52 (below) |
+| clean drag (the shared square law about the 1 G edge) | with the real flows, Mach 0.8 at 36,000 ft burns 10.3 lb/s: 3,700 nautical miles | **fitted** per aircraft: a drag shape (below) |
+| `_gpullDrag` 12 | induced drag 12 / 256 = 0.047 W a G; a lifting-line estimate for 137 ft span, 1,950 square feet and e 0.9 gives 0.03 to 0.06 W a G | inside the band; kept |
+| `flapsDrag` 38, `flapsLift` 51, `gearDrag` 23 | fleet-level levers | not touched |
+| `rudderDrag` 128, `bayDrag` 12, `wheelBrakesDrag` 12, `coefDrag` 256 | read by the native diagnostic only, not the hybrid step | no effect |
+| sweep | the flight model has no sweep, swing-wing or wing-area term for any aircraft (`tore-sim` reads none; the Tornado review found the same, TOR-8) | **recorded**: sweep does not change the drag, lift or stall; no term was added |
+| `loadedElevator` 40 | divides the G limit by 1 + 0.4 x (fuel + stores) / empty weight: +5 G becomes 3.6 G at 406,000 lb | kept (no real G limit was found; Wikipedia gives none) |
+
+### What was fitted
+
+1. **Fuel flows, 6 and 16 to 11 and 84 lb/s (opinionated, coordinator first pass BMB-B1/B2 "about 11 / 84 lb/s, from the
+   cited TSFC").** The F101-GE-102's thrust-specific fuel consumption is 0.562 lb/(lbf h) dry and 2.46 with afterburner
+   (Wikipedia "General Electric F101", specifications, read 2026-11-16). 69,560 x 0.562 / 3,600 = 10.86, so 11; 123,120 x
+   2.46 / 3,600 = 84.13, so 84. The retail flows were the B-52's family's (6) and a fifth of the real afterburner burn (16);
+   a full tank on full afterburner lasted 276 minutes, now 52.6, and the real engines burn it in about that (84 lb/s x
+   3,600 = 302,400 lb/h). `fuelConsumption` and `aftFuelConsumption` rows, `B1B_FUEL_LB_PER_S` and `B1B_AB_FUEL_LB_PER_S`,
+   with the batch test that checks flow against thrust times SFC extended by two rows.
+2. **Sea-level fast edge, 1,120 to 1,027 ft/s (fitted; the figure is real).** The low-level speed of the B-1B is Mach 0.92
+   (Wikipedia, "Design": "its low-level speed increased to Mach 0.92"; the specification gives 608 kt at 200 to 500 ft,
+   from Pace 1998; Mach 0.92 at the sea-level speed of sound, 1,116.4 ft/s, is 608.4 kt). The record's edge was Mach 1.00
+   (664 kt). The `fit_envelopes` arm moves the sea-level vertex of the 1 G polygon to 1,027 ft/s and of the 0 G polygon to
+   1,087 (its 60 ft/s step over the 1 G edge kept); every other G row's fast side is held to the new 1 G edge by the
+   existing `hold_to_one_g`. The straight edge up to the 1,210 ft/s trim at 36,000 ft is the record's own shape: it now reads
+   Mach 0.96 at 5,000 ft, 1.00 at 10,000 ft, 1.04 at 15,000 ft and 1.09 at 20,000 ft. Afterburner at sea level now tops out at
+   608 kt, Mach 0.92 (was 663 kt). Higher up nothing moves: 716 kt, Mach 1.25 at 36,000 ft (real: Mach 1.25 at altitude,
+   721 kt at 50,000 ft, Pace 1998; the model gives 710 kt at 50,000 ft). The shared drag law ties the clean drag to the edge
+   (drag is the full thrust at the edge speed), so the lower edge raises the drag at a given speed near the ground by up to
+   19 percent; the shape below takes that back.
+3. **Speed brake, `airBrakesDrag` 256 to 52 (fitted from the drawn plates).** The real jet has no airbrake of its own; its
+   spoilers do the work. The rig (B1B-3) opens the two raised wing-root plates (`7b1c`, 6.7 ft along the hinge, 5.3 ft of
+   chord at 4/3 ft a unit, opened 43 degrees: about 49 square feet of frontal plate for both, a drag coefficient of 1.2): q
+   S Cd over the 325,000 lb weight is 0.056 G at 306 kt, 0.11 G at 428 kt and 0.18 G at 550 kt at sea level. The template's 256
+   gave a 325,000 lb bomber 0.33, 0.54 and 0.73 G (a fighter's airbrake, 71 kt lost in ten seconds at 306 kt); 52 is a fifth
+   of it, the B-2's 64 being a quarter for larger plates, and the probe reads 0.08, 0.13 and 0.17 G. Not a cited figure.
+4. **Drag shape (fitted, the B-52's per-aircraft hook).** With the real flows the shared square law burned 10.3 lb/s at
+   Mach 0.8 and 36,000 ft (520 kt): 3,700 nautical miles from the full tank against a published 5,100 (Wikipedia, Pace 1998)
+   and the game's own Jane's 6,475 (`B1.INF`; Aerocorner 6,478). The retail 6 lb/s gave 6,779 nautical miles at the
+   same point, which the authors' flow had been tuned around, so correcting the flow alone cost the range. The cause is
+   the drag law (as for the B-52, B52-8): the drag is the afterburner thrust times the square of the speed over the edge,
+   about 39,000 lbf at Mach 0.8 and 36,000 ft for a 326,000 lb aircraft whose lift-to-drag ratio of about 12 needs about
+   27,000. The new `models/variety/b1b.rs` gives the B-1B the existing `DragShape` with 0.72 of the reference drag on the square law
+   and 0.28 on the twelfth power (the B-52's exponent): 1 at the edge, so **no top speed moves**, and 0.38 at 0.726 of the
+   edge (520 kt at 36,000 ft), which holds the speed at 0.76 throttle and 7.6 lb/s: **5,026 nautical miles** (5,299 at the
+   probe's 65 percent cruise at 20,000 ft). Nothing else of the B-52's hook is taken (thrust lapse, rolling and brake
+   deceleration, stall reference, alignment all stay the shared values); `the_b52_flies_its_fitted_terms_and_no_other_aircraft_does`
+   now reads "the B-52 and the B-1B have a drag shape and no other aircraft does".
+
+### Before, after and real
+
+Probe: `performance_probe` on the corrected record (326,000 lb is the published gross weight, fuel 134,000 lb; 457,274 lb is
+the free-flight full tank; 477,000 lb is the Load Ordnance default, 42,000 lb of stores and 243,000 lb of fuel) and
+`tore-app --headless-flight` and `--ground-start`. "Before" is the repository at 7ada079b. Climb schedules are
+`PROBE_CLIMB=350,0.90` and `300,0.77` (full thrust with afterburner, from sea level).
+
+| Quantity | Before | After | Real (source) |
+| --- | --- | --- | --- |
+| Level top speed, sea level, afterburner | 663 kt (Mach 1.00) | 608 kt (Mach 0.92) | 608 kt at 200 to 500 ft, Mach 0.92 (Wikipedia, Pace 1998) |
+| Level top speed, 15,000 ft / 36,000 ft / 50,000 ft, afterburner | 685 kt (Mach 1.09) / 716 kt (1.25) / 710 kt | 653 kt (1.04) / 717 kt (1.25) / 711 kt | Mach 1.25 at altitude, 721 kt at 50,000 ft (Wikipedia, Pace 1998; `B1.INF` "approx Mach 1.25", 832 kt) |
+| Level top speed, military power: sea level / 36,000 ft (326,000 lb) | 498 kt (Mach 0.75) / 538 kt (Mach 0.94) | 519 kt (Mach 0.78) / 611 kt (Mach 1.06) | no figure found (the retail cap is the afterburner edge) |
+| Ceiling | 55,000 ft record; 55,005 ft on the 350 KCAS schedule | the same (55,101 ft) | 60,000 ft (Wikipedia, Aerocorner); the Air Force says "above 30,000 ft"; not changed (BMB-B2 kept the record's 55,000 ft) |
+| Climb, time to 5,000 ft / 20,000 ft / 36,000 ft, 350 KCAS to Mach 0.90, 326,000 lb | 46 / 170 / 353 s (6,500 ft/min to 5,000 ft) | 43 / 152 / 298 s (7,000 ft/min) | 5,678 ft/min, weight and conditions not stated (Wikipedia; Aerocorner) |
+| The same at 457,274 lb (full tank) / 477,000 lb (default load) | 59 / 244 / 490 s; 61 / 254 / 511 s (5,090 and 4,920 ft/min to 5,000 ft) | 56 / 218 / 414 s; 58 / 228 / 431 s (5,360 and 5,170 ft/min) | the same 5,678 ft/min |
+| Climb, 300 KCAS to Mach 0.77, 326,000 lb, time to 5,000 / 36,000 ft | 46 / 318 s | 44 / 286 s | none |
+| Acceleration at sea level, afterburner, 364 to 400 / 460 / 600 kt (326,000 lb) | 8 / 22 / 82 s | 8 / 21 / 88 s | none |
+| Peak specific excess power, sea level / 15,000 ft / 36,000 ft, afterburner (326,000 lb) | 168 / 139 / 107 ft/s | 180 / 155 / 125 ft/s | none |
+| Thrust to weight, 326,000 lb gross, afterburner | 0.378 | 0.378 | 0.38 at gross weight (Wikipedia) |
+| Cruise, Mach 0.8 at 36,000 ft (520 kt), burn and range from the 265,274 lb tank | 5.6 lb/s, 6,779 nm (6 lb/s flow) | 7.6 lb/s, **5,026 nm** (11 lb/s flow; 3,698 nm with the real flow and the shared square law) | range 5,100 nmi (Wikipedia, USAF, Pace 1998); 6,475 nm (`B1.INF`, Britannica; Aerocorner 6,478); 7,600 km with 16,800 kg of weapons (Britannica) |
+| Cruise at 65 percent of the edge, 20,000 ft, 435 kt | 4.5 lb/s, 7,321 nm | 6.0 lb/s, 5,299 nm | the same figures |
+| Military power / afterburner burn, endurance from the full tank | 6 and 16 lb/s: 737 and 276 min | 11 and 84 lb/s: 402 and 52.6 min | 0.562 and 2.46 lb/(lbf h) (Wikipedia, F101-GE-102) |
+| Sustained turn, held speed, 326,000 lb: 300 kt at 1,000 ft / 400 kt at 15,000 ft / 450 kt at 30,000 ft | 3.63 G, 74 degrees / 3.63 G / 2.29 G, 64 degrees | 3.63 G / 3.63 G / 2.29 G (G limit, not thrust) | none found |
+| Instantaneous pull, 300 kt at 1,000 ft | 3.89 G | 3.89 G (G rows and loading unchanged) | none (record +5 G, not sourced) |
+| Roll rate, full stick | 60.0 deg/s | 60.0 deg/s | no figure found |
+| Rudder, full pedal, 5,000 ft | sideslip -4.50 degrees | -4.49 degrees | none |
+| Speed brake, extra deceleration, idle throttle, 306 kt / 428 kt / 550 kt at 1,000 ft | 0.34 / 0.55 / 0.74 G | 0.08 / 0.13 / 0.17 G | plate estimate 0.06 / 0.11 / 0.18 G (not a cited figure) |
+| Takeoff, ground start, 477,000 lb (Athens, 12,000 ft) | liftoff 168.9 kt after 5,520 ft, rotation 160.0 kt, 100 ft at 5,545 ticks | liftoff 168.5 kt after 5,472 ft, rotation 159.5 kt, 100 ft at 5,512 ticks | roll about 4,000 ft at the "400,000 pound weight class", wings at 25 degrees (Air & Space Forces Magazine, "Pilot Report: B-1B", 1986); 6,400 ft at maximum afterburner with the full mission load, sea level, standard day (Florida Tech flight test thesis, from a search summary: the thesis would not open); no liftoff speed published |
+| Takeoff on Simferopol (UKR 1, 5,532 ft), 477,000 lb | liftoff after 5,720 ft | liftoff after 5,671 ft: **the run is longer than the runway** | the same figures |
+| Takeoff, `--retail-stall-speeds` | 133.2 kt after 3,231 ft | 132.9 kt after 3,211 ft | n/a (the imported polygon speeds) |
+| Approach, scripted, 65 percent fuel (406,428 lb), Simferopol: speed / touchdown / stop past the threshold | 166.2 kt / 159.7 kt / 4,294 ft | 166.2 kt / 158.8 kt / 4,769 ft (rollout from touchdown 2,722 ft, was 2,378) | "can land as slowly as 155 knots" (Air & Space Forces Magazine, 1986); no landing distance found |
+| The same at Athens (GRE 1) | not run | 166.2 kt / 153.1 kt / 4,614 ft | the same |
+| Scripted approach at the full 477,000 lb default load | crashes at touchdown (sink 19 ft/s, forward 270 ft/s) | the same | a real landing weighs far less (not tested) |
+| `--headless-flight 1200`, level at 5,000 ft | 435.5 kt | 409.3 kt (the level speed is 0.656 of the edge, and the edge at 5,000 ft is lower) | none |
+| Wing sweep at those speeds (rig only, no flight law) | 15 degrees at 169 kt | 15 degrees; 30 degrees at 350 kt; 41 at 400 kt; 67.5 degrees from 520 kt | 15 to 67.5 degrees (`B1.INF`, Wikipedia); 25 degrees for takeoff and climb (Air & Space Forces, 1986) |
+
+The scripted landing rolls 14 percent further (2,378 to 2,722 ft) because the airbrake lever is out on the rollout and the fit
+takes most of its drag away; the B-2's review found the same (19 percent). The takeoff run is 1 percent shorter (48 ft); the
+small change was not traced (the rolling takeoff has no aerodynamic drag term, the fuel burned on the roll is 200 lb more).
+
+### The swing schedule, the rudder and the AI laws
+
+- **Swing schedule (B1B-3, unchanged).** The wing is spread to 280 kt, fully swept (67.5 degrees, a 52.5 degree turn) from
+  520 kt, linear between, and the flaps hold it spread; no flight law reads it. Takeoff (168.5 kt at liftoff, 179 kt at 100 ft),
+  the scripted approach (166.2 kt) and the 160 to 200 kt climb-out are all spread (15 degrees), as the real jet flies them
+  (the real takeoff and climb use 25 degrees, Air & Space Forces, 1986; the rig has no 25 degree stop). The climb at 350
+  KCAS (370 to 420 kt below 10,000 ft) reads 30 to 45 degrees, and the supersonic dash (608 kt at sea level, 717 kt at
+  36,000 ft) is fully swept. Two things are not real: the schedule is speed only, so a Mach 0.8 cruise at 520 kt reads fully
+  swept, where the real jet cruises economically at high altitude with the wings forward (Wikipedia, Design); and **sweep does
+  not change the drag, the lift or the stall in the flight model** (no aircraft has such a term). Recorded, no sweep term added.
+- **Rudder.** The 0.45 radian cap (B1B-5, `RUDDER_LIMIT`) is in `b1b_animation.rs` only; the flight model reads the record's
+  `rudderYaw` words. The full-pedal probe (`--maneuver rudder`, sideslip -4.50 degrees, bank 20 degrees, before) reads
+  -4.49 degrees after: yaw authority is untouched.
+- **AI heavy-class laws (BMB-AI).** The B-1B's flaps-up minimum is 209 kt at full fuel, 194 at 75 percent (the BMB-AI table),
+  above the 190.5 kt where the laws change, so the flaps law and the climb-out wait apply to it. They work: an AI B-1B wing
+  of two from Athens (`ai-heavy-takeoff-b1b-gre-a1`) rolls at 68 s, climbs out from 136.6 s, is airborne (flaps and gear up) at 205.7 s and flies on;
+  from Southampton (12,000 ft) the full cycle (`ai-merged-airfield-b1b-wing2`) is airborne at 210.7 s, takes the land order,
+  touches down at 168 kt at the default load, rolls out, clears and parks at 1,137 s, all on the pavement (0 off-pavement
+  samples, 0 anomalies); sent home with 80,000 lb of fuel (`ai-heavy-land-b1b-ukr-a2`, Simferopol, 5,532 ft) it touches down at
+  168 kt (158 kt with 40,000 lb, 169 kt with 100,000 lb), parks on the pavement. All three pass cleanly and are new battery
+  scenarios. The takeoff needs the 12,000 ft fields (about 5,500 ft run at the default load).
+
+### Tests and scenarios added
+
+| Name | What it pins |
+| --- | --- |
+| `aircraft::the_b1b_tu160_and_f111_read_their_real_figures_only_while_retail` (extended) | the 11 and 84 lb/s flows, the 52 brake, the 1,027 and 1,087 ft/s sea-level edges, every one only while the record is retail |
+| `aircraft_corrections::the_batch_fuel_flows_are_the_corrected_thrust_times_the_cited_sfc_to_the_whole_pound` (two rows) | 11 = 69,560 x 0.562 / 3,600 and 84 = 123,120 x 2.46 / 3,600 |
+| `variety::the_b1b_tops_out_at_its_edges_and_its_cruise_burn_gives_the_published_range` | afterburner tops out at 608 kt at sea level and 716 kt at 36,000 ft; Mach 0.8 at 36,000 ft holds on 0.7 to 0.8 throttle (range 4,500 to 6,000 nm); the drag shape is 1 at the edge; the brake is 0.03 to 0.12 G |
+| `variety::the_b52_flies_its_fitted_terms_and_no_other_aircraft_does` (changed) | exactly two aircraft have a drag shape, the B-52 and the B-1B; every other fitted term is the B-52's alone |
+| `flight-variety-b1b`, `flight-liftoff-b1b`, `flight-liftoff-retail-b1b`, `flight-approach-b1b` | the B-1B in the variety, liftoff, retail-stall and approach scenarios: windows 155 to 185 kt liftoff and 145 to 170 kt approach, recorded 168.5 and 166.2 kt, a 7,000 tick takeoff allowance, Athens |
+| `ai-heavy-takeoff-b1b-gre-a1`, `ai-heavy-land-b1b-ukr-a2`, `ai-merged-airfield-b1b-wing2` | the AI heavy-class laws for the B-1B |
+
+### Open for John
+
+1. **The drag shape.** Fitted so the corrected flows keep the real range (5,026 nautical miles against Wikipedia's 5,100; the
+   game's own Jane's says 6,475). Without it the real flows cost a quarter to a third of the range (3,700 nautical miles) and
+   the shared law stays as for every other aircraft but the B-52. It also lowers the clean
+   drag at every speed under the edge: the climb is 5 to 15 percent faster, and the military-power top speed at 36,000 ft
+   is Mach 1.06 (it was Mach 0.94; the real figure was not found). The alternative is to delete `b1b.rs` and its one line.
+2. **The real fuel flows** halve the full-afterburner endurance to 52.6 minutes, and the range follows the fit above: the
+   coordinator's decision; one correction row each.
+3. **The sea-level edge** at Mach 0.92 is real; the edge between sea level and 36,000 ft is the record's straight line, so
+   Mach 1.00 arrives at 10,000 ft and 1.09 at 20,000 ft. A constant-equivalent-airspeed shape (a placard) would fit the
+   structure better; no real envelope was found.
+4. **Ceiling** 55,000 ft (record) against 60,000 ft (Wikipedia, Aerocorner) and "above 30,000 ft" (Air Force): left.
+5. **Roll rate** 60 degrees a second at full stick for a 400,000 lb bomber: no real figure was found; the B-52 review found
+   23.6 deg/s for its record; not fitted.
+6. **Wheel brakes and the landing roll** (2,722 ft from 159 kt at 406,000 lb, a bomber with spoilers and brakes): no real
+   landing distance was found for the B-1B (Aerocorner's 3,450 ft is the B-2's); not fitted. A scripted approach at the full
+   477,000 lb takeoff weight crashes at touchdown (sink 19 ft/s), as before; the battery flies 65 percent fuel.
+7. **Takeoff run** 5,472 ft at 477,000 lb (real: about 4,000 ft at 400,000 lb, 6,400 ft calculated at the full mission load):
+   inside the real range; no takeoff drag is modelled, as for the other bombers.
+8. **The wing schedule** is speed only (a Mach 0.8 cruise reads fully swept), and has no 25 degree stop for takeoff and climb.
+9. **Simferopol (UKR 1, 5,532 ft)** is shorter than the B-1B's takeoff run: the scenarios start from Athens.
+
+Sources (read 2026-11-16 unless dated): Wikipedia "Rockwell B-1 Lancer" (raw article: Design, "Mach 0.92 low-level speed",
+Specifications (B-1B) from Pace 1998 and Jenkins 1999: 721 kt at 50,000 ft, 608 kt at 200 to 500 ft, range 5,100 nmi, ceiling 60,000 ft,
+climb 5,678 ft/min, thrust to weight 0.38 at 326,000 lb, wing loading 167 lb/sqft); Wikipedia "General Electric F101"
+(F101-GE-102: 17,390 and 30,780 lbf, 0.562 and 2.46 lb/(lbf h)); aerocorner.com "B-1B Lancer" and its B-1 versus B-2 comparison
+(721 kt, 5,678 ft/min, 60,000 ft, 6,478 nm; takeoff and landing "not listed" for the B-1B, the 6,700 and 3,450 ft are the
+B-2's); Air & Space Forces Magazine, "Pilot Report: B-1B" (June 1986: 4,000 ft takeoff roll, wings at 25 degrees for takeoff and
+climb, "can land as slowly as 155 knots", the 400,000 lb weight class); a Florida Tech flight test thesis (6,400 ft, 403 on fetch,
+read only through a search-result summary, a weak figure); the game's own Jane's text `B1.INF` (retail media, not committed:
+Mach 1.25, 832 kt, 6,475 nm, 521 kt low-level penetration, 192,000 lb empty, 477,000 lb). The Air Force fact sheet could
+not be fetched (403). No takeoff or landing speed was found in any primary source.
+
+Provenance: fuel flows opinionated (coordinator first pass on the cited TSFC); sea-level edge, speed brake and drag shape fitted
+(agent decisions 2026-11-16); real figures public pages and the game's own Jane's text (comparison only); battery windows fitted. No
+retail bytes committed.
+
+### Checks (B1B-8)
+
+All through `.local/m3-imports/light3.sh` (away mode), profile `.local/m3-aircraft/profile-b1b` refreshed first, windows through
+`tools/agent-run.sh` (logs in `.local/m3-aircraft/checks/B1B-8/`): `cargo fmt --all -- --check` clean; `cargo clippy --workspace
+--all-targets --locked -- -D warnings` clean; `cargo test --locked --workspace --no-fail-fast` 7,876 passed, 0 failed, 108 ignored (7,875
+at B1B-6, plus the new B-1B performance test; the B-1B record test and the batch fuel-flow test extended);
+`--aircraft b1b --headless-flight 1200` 409.3 kt level at 5,005 ft, 0 non-finite, no crash; the ground-start takeoff
+(`--ground-start 1 --theater GRE --maneuver takeoff`) liftoff 168.5 kt after 5,472 ft, 100 ft at 5,512 ticks, 0 non-finite;
+battery (`--jobs 2 --windows 1`) **115 of 115 passed**: every `*b1b*` scenario (28), every `flight-approach-*` and `flight-liftoff-*`
+(the other aircraft's recorded windows hold: nothing shared moved), and the `ai-heavy-*` set with the three new B-1B scenarios;
+`python3 -B -m unittest discover -s tools` 587 OK (5 skipped); `tools/check_docs.py` passed (382 files). **Not run:** the full battery,
+the other AI, net and replay lanes, `--smoke-test`, `tools/check_assets.py`, windowed frames (no rig or art changed), a guided-store
+release (none carried). The shared drag, lapse, rolling, brake and stall terms were not touched, so no B52-8 style comparison of the
+other aircraft was needed: `the_b52_flies_its_fitted_terms_and_no_other_aircraft_does` pins that exactly the B-52 and the B-1B
+have a drag shape.

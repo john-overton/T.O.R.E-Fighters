@@ -19,7 +19,7 @@ from battery_scenarios._strips import ground_airport
 
 # Original roster covered by the established fixed-wing maneuver battery.
 AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su25", "mig23", "su35", "f22", "f22n", "faxx"]
-VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310", "mig25", "f16a", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc", "b52", "b2", "f117", "f111"]
+VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310", "mig25", "f16a", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc", "b52", "b2", "f117", "f111", "b1b"]
 # Aircraft whose PT disables spins (X-31 flag, F-22 family): they never enter one.
 SPIN_IMMUNE = {"x31", "f22", "f22n", "faxx"}
 
@@ -245,6 +245,10 @@ def tank_problems(output: str) -> list[str]:
 # 488,000 lb, so its scenarios run 18,000 ticks and allow 9,000 (B52-8, 2026-11-15).
 TAKEOFF_TICKS_MAX = {"b2": 10000, "b52": 9000}
 TAKEOFF_RUN_TICKS = {"b2": "12000", "b52": "18000"}
+# The B-1B at its 477,000 lb default gross lifts off at 4,659 ticks after 5,472 ft and reaches 100 ft at
+# 5,512 ticks (46 s), so it runs 9,000 ticks like the ordinary aircraft and allows 7,000 (B1B-8,
+# 2026-11-16, agent decision); 4,500 would fail it.
+TAKEOFF_TICKS_MAX["b1b"] = 7000
 
 
 def check_takeoff(output: str, ac: str | None = None) -> list[str]:
@@ -384,6 +388,19 @@ APPROACH_TARGET["b2"] = (140, 170)
 # approach window of 150 to 180 kt.
 LIFTOFF_TARGET["f117"] = (155, 185)
 APPROACH_TARGET["f117"] = (150, 180)
+# The B-1B's windows (B1B-8, 2026-11-16) are fitted, agent decisions, from secondary figures
+# (docs/formats/aircraft-variety.md, "B-1B Lancer flight review"): "the B-1B can land as slowly as
+# 155 knots" and a takeoff roll of about 4,000 ft in a 400,000 lb class takeoff with the wings at 25
+# degrees (Air & Space Forces Magazine, "Pilot Report: B-1B", June 1986), a calculated 6,400 ft at
+# maximum afterburner with the full mission load (a Florida Tech flight test thesis, read through a
+# search summary). The scripted runs fly the 477,000 lb default load (42,000 lb of Mk 82 AIR and
+# 243,000 lb of fuel): liftoff 168.5 kt after 5,472 ft (1.09 times the 154.1 kt flapped, weight
+# scaled stall) and the approach at the model's cap, 0.85 times the 195.5 kt landing limit (166.2 kt),
+# touching down at 153 to 159 kt. The liftoff window is 155 to 185 kt, the approach window 145 to
+# 170 kt. The runs start on Athens (GRE 1, 12,000 ft): the 5,532 ft Simferopol runway is shorter
+# than the 5,671 ft run there.
+LIFTOFF_TARGET["b1b"] = (155, 185)
+APPROACH_TARGET["b1b"] = (145, 170)
 # The figures the model gives with the fitted per-aircraft stall references
 # (`STALL_REFERENCE_FRACTIONS`, 2026-09-30), for the aircraft whose figure is not
 # exactly inside John's range, kept as a regression window of plus or minus 6
@@ -412,6 +429,9 @@ KNOWN_APPROACH["b2"] = 167.5
 # The F-117A's measured liftoff and approach at its default load (F117-8, 2026-11-15).
 KNOWN_LIFTOFF["f117"] = 177.2
 KNOWN_APPROACH["f117"] = 166.2
+# The B-1B's measured liftoff and approach at its default load (B1B-8, 2026-11-16).
+KNOWN_LIFTOFF["b1b"] = 168.5
+KNOWN_APPROACH["b1b"] = 166.2
 # TOR-6 (2026-11-11): the Tornado's default load is lighter than TOR-8 measured (one centreline tank, 1,650
 # lb of external fuel, not two): liftoff 146.4 kt (was 150.6), approach 155.1 kt (was 160.1), both inside the
 # windows and the plus or minus 6 percent regression band, so no window was refitted and the known values above
@@ -435,7 +455,7 @@ KNOWN_LIFTOFF["b52"] = 158.7
 KNOWN_APPROACH["b52"] = 166.2
 # The B-52H's liftoff and approach scenarios start from a 12,000 ft runway (Greece, airport 1):
 # UKR airport 1 is 5,532 ft, shorter than its 7,674 ft takeoff run and its 5,000 ft rollout.
-THEATER_FOR = {"b52": "GRE"}
+THEATER_FOR = {"b52": "GRE", "b1b": "GRE"}
 # Internal fuel of each aircraft's default load, pounds.
 INTERNAL_FUEL_LB = {
     "f18": 11220, "rafale": 9900, "f14": 15741, "a4e": 4434, "x31": 9975, "mig29": 13000, "su27": 19000,
@@ -473,6 +493,9 @@ INTERNAL_FUEL_LB["b52"] = 312197
 INTERNAL_FUEL_LB["b2"] = 167000
 # F117.PT internal fuel, 18,500 lb (the record's own tank; the approach scenario flies 65 percent, 12,025 lb).
 INTERNAL_FUEL_LB["f117"] = 18500
+# B1.PT internal fuel, 265,274 lb (BMB-B2: the Air Force fact sheet). The approach scenario flies 65
+# percent, 172,428 lb, a gross weight of 406,428 lb with the 42,000 lb default load.
+INTERNAL_FUEL_LB["b1b"] = 265274
 APPROACH_FUEL_CAP_LB = 100000
 
 
@@ -588,6 +611,8 @@ LIFTOFF_AIRCRAFT += ["b52"]
 LIFTOFF_AIRCRAFT += ["b2"]
 # The F-117A joins them (F117-8, 2026-11-15).
 LIFTOFF_AIRCRAFT += ["f117"]
+# The B-1B joins them (B1B-8, 2026-11-16).
+LIFTOFF_AIRCRAFT += ["b1b"]
 
 
 def liftoff_scenarios() -> list[Scenario]:

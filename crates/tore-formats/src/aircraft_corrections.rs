@@ -674,6 +674,38 @@ pub const B1B_MAX_TAKEOFF_LB: i32 = 477_000;
 pub const B1B_INTERNAL_FUEL_LB: i32 = 265_274;
 pub const B1B_THRUST_LBF: i32 = 69_560;
 pub const B1B_AFT_THRUST_LBF: i32 = 123_120;
+/// The B-1B's fuel flows (B1B-8, **opinionated**, coordinator first pass
+/// BMB-B1/B2 "about 11 / 84 lb/s, from the cited TSFC"): the record's
+/// `fuelConsumption` 6 and `aftFuelConsumption` 16 lb/s (whole pounds a second
+/// for all four engines at full military power and at full afterburner,
+/// [`TORNADO_FUEL_LB_PER_S`]) imply 0.311 and 0.468 lb/(lbf h) at the corrected
+/// thrust, a fifth of the real afterburning figure. The flow is the corrected
+/// thrust times the F101-GE-102's thrust-specific fuel consumption, 0.562 dry
+/// and 2.46 with afterburner lb/(lbf h) (Wikipedia "General Electric F101",
+/// read 2026-11-16, static sea level), over 3,600 seconds an hour, to the
+/// whole pound: 69,560 x 0.562 / 3,600 = 10.86, so 11 lb/s; 123,120 x 2.46 /
+/// 3,600 = 84.13, so 84 lb/s.
+pub const B1B_FUEL_LB_PER_S: i32 = 11;
+pub const B1B_AB_FUEL_LB_PER_S: i32 = 84;
+const B1B_RETAIL_FUEL_LB_PER_S: i32 = 6;
+const B1B_RETAIL_AB_FUEL_LB_PER_S: i32 = 16;
+/// B-1B speed brake (B1B-8, **fitted**): the airbrake drag word. The record's
+/// 256 is the fighter airbrake the hybrid adapter turns into a drag of weight
+/// x 256/256 x the brake x the speed share: a 325,000 lb bomber lost 71 kt in
+/// ten seconds at 306 kt (0.33 G of extra drag at 306 kt, 0.54 at 428 kt and
+/// 0.73 at 550 kt, probe `PROBE_ONLY=brake`). The real jet has no airbrake of
+/// its own; the rig (B1B-3) opens the two raised wing-root spoiler plates for
+/// the brake, each 6.7 ft along the hinge by 5.3 ft of chord opened 43 degrees
+/// (`B1.SH` word `7b1c`, 4/3 ft a unit), so about 49 square feet of frontal
+/// plate for both, at a drag coefficient of 1.2: q S Cd over the 325,000 lb
+/// weight is 0.056 G at 306 kt, 0.11 G at 428 kt and 0.18 G at 550 kt at sea
+/// level. The model's device fraction gives the factors 0.17, 0.20 and 0.25
+/// against the template; 52 is a fifth of it (0.20), as the B-2's 64 is a
+/// quarter, and the probe reads 0.08 G, 0.13 G and 0.17 G of extra deceleration
+/// at those three speeds (the drag shape of B1B-8 lowers the clean drag the
+/// brake rides on). A fit to the drawn size, not a cited figure.
+pub const B1B_AIRBRAKE_DRAG: i32 = 52;
+const B1B_RETAIL_AIRBRAKE_DRAG: i32 = 256;
 /// The B-1B's high-altitude top speed (BMB-B2, coordinator decision "trim to
 /// Mach 1.25"; the Mach number is the real one, `B1.INF` "approx Mach 1.25"
 /// and Wikipedia "Rockwell B-1 Lancer" infobox, Mach 1.25 at altitude; the
@@ -683,13 +715,25 @@ pub const B1B_AFT_THRUST_LBF: i32 = 123_120;
 /// (36,089 ft; sound 968.08 ft/s, standard atmosphere) is 1,210 ft/s (716.9
 /// kt), so the two 1 G vertices past it (1,400 ft/s at 41,500 ft and 1,410 at
 /// 36,000) become 1,210. The 1,200 ft/s vertex at 50,000 ft is already under
-/// it and stays, as does sea level (1,120 ft/s, 664 kt, Mach 1.00; the real
-/// low-level figure is about Mach 0.92 but the decision names only the edge at
-/// altitude). The 0 G polygon keeps its 65 ft/s step over the 1 G edge at
+/// it and stays; sea level (1,120 ft/s, 664 kt, Mach 1.00; the real low-level
+/// figure is about Mach 0.92) was left by the decision and is fitted by B1B-8
+/// below ([`B1B_SEA_LEVEL_FPS`]). The 0 G polygon keeps its 65 ft/s step over the 1 G edge at
 /// 36,000 ft (1,475 to 1,410): its two vertices at and above it become 1,275;
 /// every other row's fast side is held to the new 1 G edge ([`hold_to_one_g`]).
 const B1B_TOP_FPS: f64 = 1_210.;
 const B1B_ZERO_G_STEP_FPS: f64 = 65.;
+/// The B-1B's sea-level fast edge (B1B-8, **fitted**, the real figure): the
+/// record's 1,120 ft/s (664 kt, Mach 1.00) against the published "low-level
+/// speed increased to Mach 0.92" (Wikipedia "Rockwell B-1 Lancer", Design;
+/// 608 kt at 200 to 500 ft in the specification, Pace 1998). Mach 0.92 at the
+/// standard sea-level speed of sound, 1,116.4 ft/s, is 1,027 ft/s (608 kt). The
+/// 0 G polygon keeps its 60 ft/s step over the 1 G edge at sea level (1,180 to
+/// 1,120 in the record); every other row's fast side is held to the new edge
+/// ([`hold_to_one_g`]). The straight edge up to the trimmed 1,210 ft/s at
+/// 36,000 ft is the record's own shape: it reads Mach 0.96 at 5,000 ft, 1.00
+/// at 10,000 ft and 1.09 at 20,000 ft, the 1 G edge of the corrected jet.
+const B1B_SEA_LEVEL_FPS: f64 = 1_027.;
+const B1B_ZERO_G_SEA_STEP_FPS: f64 = 60.;
 /// The altitude from which the trim applies (the lowest fast-edge vertex it
 /// moves).
 const B1B_TRIM_ALTITUDE_FT: f64 = 36_000.;
@@ -1232,14 +1276,20 @@ pub(crate) fn fit_envelopes(
             {
                 return false;
             }
-            for (row, cap) in [
-                (zero, B1B_TOP_FPS + B1B_ZERO_G_STEP_FPS),
-                (one, B1B_TOP_FPS),
+            for (row, cap, sea_level) in [
+                (
+                    zero,
+                    B1B_TOP_FPS + B1B_ZERO_G_STEP_FPS,
+                    B1B_SEA_LEVEL_FPS + B1B_ZERO_G_SEA_STEP_FPS,
+                ),
+                (one, B1B_TOP_FPS, B1B_SEA_LEVEL_FPS),
             ] {
                 let top = top_index(&envelopes[row].points);
                 for p in envelopes[row].points.iter_mut().skip(top + 1) {
                     if p[1] >= B1B_TRIM_ALTITUDE_FT && p[0] > cap {
                         p[0] = cap;
+                    } else if p[1] == 0. && p[0] > sea_level {
+                        p[0] = sea_level;
                     }
                 }
             }
@@ -1824,6 +1874,29 @@ pub const CORRECTIONS: &[Correction] = &[
         key: "aftThrust",
         retail: 140_000,
         corrected: B1B_AFT_THRUST_LBF,
+    },
+    // B1B-8: a speed brake sized from the drawn spoiler plates.
+    Correction {
+        id: AircraftId::B1b,
+        block: Block::Plane,
+        key: "airBrakesDrag",
+        retail: B1B_RETAIL_AIRBRAKE_DRAG,
+        corrected: B1B_AIRBRAKE_DRAG,
+    },
+    // B1B-8: the fuel flows of four F101-GE-102 at the cited TSFC.
+    Correction {
+        id: AircraftId::B1b,
+        block: Block::Plane,
+        key: "fuelConsumption",
+        retail: B1B_RETAIL_FUEL_LB_PER_S,
+        corrected: B1B_FUEL_LB_PER_S,
+    },
+    Correction {
+        id: AircraftId::B1b,
+        block: Block::Plane,
+        key: "aftFuelConsumption",
+        retail: B1B_RETAIL_AB_FUEL_LB_PER_S,
+        corrected: B1B_AB_FUEL_LB_PER_S,
     },
     // Tu-160: real empty weight, thrust and fuel.
     Correction {
@@ -3148,7 +3221,7 @@ mod tests {
     fn the_batch_fuel_flows_are_the_corrected_thrust_times_the_cited_sfc_to_the_whole_pound() {
         // (flow, thrust lbf, SFC lb/(lbf h)), each within the rounding of one
         // whole pound a second, which is the record's unit.
-        let rows: [(i32, i32, f64); 10] = [
+        let rows: [(i32, i32, f64); 12] = [
             (F15E_FUEL_LB_PER_S, 32_558, 0.73),
             (F15E_AB_FUEL_LB_PER_S, 47_860, 1.94),
             (GRIPEN_FUEL_LB_PER_S, 12_140, 0.844),
@@ -3159,6 +3232,8 @@ mod tests {
             (F5E_AB_FUEL_LB_PER_S, 10_000, 2.13),
             (B52_FUEL_LB_PER_S, B52_THRUST_LBF, 0.52),
             (B2_FUEL_LB_PER_S, B2_THRUST_LBF, 0.375),
+            (B1B_FUEL_LB_PER_S, B1B_THRUST_LBF, 0.562),
+            (B1B_AB_FUEL_LB_PER_S, B1B_AFT_THRUST_LBF, 2.46),
         ];
         for (flow, thrust, sfc) in rows {
             let exact = f64::from(thrust) * sfc / 3600.;

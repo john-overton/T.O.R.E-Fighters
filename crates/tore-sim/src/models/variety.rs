@@ -6,6 +6,7 @@ use super::{
 use std::sync::Arc;
 use tore_formats::aircraft::{Aircraft, AircraftId};
 
+mod b1b;
 mod b52;
 mod lift;
 pub use lift::{
@@ -197,6 +198,9 @@ impl VarietyFlightModel {
         configuration.aerodynamics.envelopes = fitted_envelopes(a);
         if a.id.source() == B52 {
             b52::fit(&mut tuning, &mut configuration);
+        }
+        if a.id.source() == B1b {
+            b1b::fit(&mut configuration);
         }
         // Transports and airliners: a little more drag, so full power in
         // level flight settles at 96 percent of the top speed, just under
@@ -902,7 +906,10 @@ pub(crate) mod tests {
             let model = AircraftModel::for_aircraft(&synthetic(id)).unwrap();
             let c = model.configuration();
             let b52 = id.source() == AircraftId::B52;
-            assert_eq!(c.aerodynamics.drag_shape.is_some(), b52, "{id:?}");
+            // The B-52's and the B-1B's drag shapes are the only two (B52-8,
+            // B1B-8); the B-1B keeps every other term of the shared family.
+            let shaped = b52 || id.source() == AircraftId::B1b;
+            assert_eq!(c.aerodynamics.drag_shape.is_some(), shaped, "{id:?}");
             assert_eq!(model.stall_reference_fraction() != 1., b52, "{id:?}");
             assert_eq!(c.tuning.thrust_lapse_feet != 70_000., b52, "{id:?}");
             // The transports and the B-52 turn their noses at 0.4 a second.
@@ -962,6 +969,142 @@ pub(crate) mod tests {
             "{}",
             top.speed / 1.68781
         );
+    }
+    /// The B-1B at its corrected record (BMB-B2 thrust, weights and fuel, B1B-8
+    /// fuel flows and brake) with the 1 G edge of `fit_envelopes` (Mach 0.92 at
+    /// sea level, Mach 1.25 above 36,000 ft), for the checks of its drag shape.
+    fn b1b_like() -> Aircraft {
+        let mut a = synthetic(AircraftId::B1b);
+        for (key, value) in [
+            ("thrust", "69560"),
+            ("aftThrust", "123120"),
+            ("weight", "192000"),
+            ("internalFuel", "265274"),
+            ("maxTakeoffWeight", "477000"),
+            ("fuelConsumption", "11"),
+            ("aftFuelConsumption", "84"),
+            ("airBrakesDrag", "52"),
+            ("loadedDrag", "0"),
+        ] {
+            a.fields.get_mut(key).unwrap().value = value.into();
+        }
+        for e in &mut a.envelopes {
+            e.points = vec![
+                [220., 0.],
+                [250., 15_000.],
+                [350., 33_500.],
+                [460., 44_750.],
+                [630., 55_000.],
+                [900., 55_000.],
+                [1_200., 50_000.],
+                [1_210., 41_500.],
+                [1_210., 36_000.],
+                [1_027., 0.],
+            ];
+        }
+        a
+    }
+    /// Level flight of the B-1B from `kt` at `altitude` for `seconds`, on
+    /// afterburner or holding the start speed with the throttle.
+    fn fly_b1b_level(
+        altitude: f64,
+        kt: f64,
+        fuel: f64,
+        seconds: usize,
+        hold: bool,
+        burner: bool,
+    ) -> crate::flight::State {
+        use crate::flight::{DT, PilotInput, State};
+        let mut s = State::new(&b1b_like(), [0., altitude, 0.]).unwrap();
+        s.enable_research(1).unwrap();
+        s.cheats.unlimited_fuel = true;
+        s.fuel = fuel;
+        s.yaw = 0.;
+        s.pitch = 0.;
+        s.bank = 0.;
+        s.speed = kt * 1.68781;
+        s.velocity = [0., 0., s.speed];
+        s.throttle = 0.7;
+        s.burner = burner;
+        let target = s.speed;
+        for _ in 0..(seconds as f64 / DT) as usize {
+            let throttle = if hold {
+                (s.throttle + (target - s.speed) * 0.01 * DT).clamp(0.05, 1.)
+            } else {
+                1.
+            };
+            let input = PilotInput {
+                pitch: (0.004 * (altitude - s.position[1])
+                    - 0.04 * s.velocity[1]
+                    - 0.5 * s.pitch_rate)
+                    .clamp(-1., 1.),
+                throttle: Some(throttle),
+                ..Default::default()
+            };
+            s.step_surface(&input, |_, _| crate::research::Surface::runway(-60_000.));
+        }
+        s
+    }
+    /// B1B-8: the B-1B's drag shape moves nothing at the top-speed edge and
+    /// brings the cruise burn to the published range. The 1 G edge is the
+    /// record's trimmed one: afterburner tops out at Mach 0.92 at sea level
+    /// (608 kt, Wikipedia "Rockwell B-1 Lancer", 608 kt at 200 to 500 ft) and
+    /// Mach 1.25 at 36,000 ft (716 kt, 721 kt at 50,000 ft there), and Mach
+    /// 0.8 at 36,000 ft (520 kt) held on the 11 lb/s dry flow gives a range
+    /// near the published 5,100 nautical miles (6,475 in the game's own Jane's
+    /// text), where the shared square law gave 3,700.
+    #[test]
+    fn the_b1b_tops_out_at_its_edges_and_its_cruise_burn_gives_the_published_range() {
+        let edge = |altitude: f64, kt: f64| {
+            let top = fly_b1b_level(altitude, kt, 200_000., 240, false, true);
+            top.speed / 1.68781
+        };
+        let sea = edge(0., 560.);
+        assert!((sea - 608.).abs() < 12., "sea level {sea} kt");
+        let high = edge(36_000., 640.);
+        assert!((high - 716.).abs() < 12., "36,000 ft {high} kt");
+        // Mach 0.8 at 36,000 ft, 520 kt, from the full tank: the dry flow is
+        // 11 lb/s at full throttle.
+        let cruise = fly_b1b_level(36_000., 520., 200_000., 400, true, false);
+        let flow = 11. * cruise.throttle;
+        let range_nm = 265_274. / flow * 520. / 3_600.;
+        assert!((4_500. ..6_000.).contains(&range_nm), "range {range_nm} nm");
+        // The shared square law would burn about 10 lb/s here (0.94 of the dry
+        // thrust against drag of about 39,000 lbf): well short of the range.
+        let a = &AircraftModel::for_aircraft(&b1b_like())
+            .unwrap()
+            .configuration()
+            .aerodynamics
+            .clone();
+        assert!((a.drag_ratio(1.) - 1.).abs() < 1e-12);
+        assert!(
+            (0.3..0.45).contains(&a.drag_ratio(0.726)),
+            "{}",
+            a.drag_ratio(0.726)
+        );
+        // The speed brake is a spoiler pair, not a fighter airbrake (the
+        // template 256 gave 0.33 G of extra drag at 306 kt at sea level): its
+        // extra drag over the clean run is a small share of the weight.
+        let drag = |brake: f64| {
+            let mut s = crate::flight::State::from_model(
+                AircraftModel::for_aircraft(&b1b_like()).unwrap(),
+                [0., 1_000., 0.],
+            );
+            s.enable_research(1).unwrap();
+            s.speed = 306. * 1.68781;
+            s.velocity = [0., 0., s.speed];
+            s.throttle = 0.;
+            s.brake_out = brake > 0.;
+            s.brake = brake;
+            s.cheats.unlimited_fuel = true;
+            s.step(&crate::flight::PilotInput::default(), |_, _| -60_000.);
+            let t = s.trace.0.adapter.expect("hybrid step trace");
+            (t.forces.drag.total_lbf, t.forces.weight_lbs)
+        };
+        let (clean, weight) = drag(0.);
+        let (braked, _) = drag(1.);
+        let extra = (braked - clean) / weight;
+        assert!((0.03..0.12).contains(&extra), "{extra} G");
     }
     #[test]
     fn the_mirage_f1_gear_low_point_scales_with_its_shape_height() {

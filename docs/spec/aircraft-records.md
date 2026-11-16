@@ -797,3 +797,23 @@ loadout's starting-tank cap (78086f7e) lowers the fuel, the numbers are in the v
 document. Free flight and `--headless-flight` use the model's full tank.
 
 Logs are local: `.local/m3-aircraft/checks/BMB-C2/`.
+
+## B-1B flight review: fuel flows, sea-level edge and speed brake (B1B-8, 2026-11-16)
+
+Dated note, additions only. Four more `B1.PT` reads, each applied only while the record still holds its retail value and every
+other B-1B correction (BMB-B2) still holds, in `tore-formats` `aircraft_corrections.rs`:
+
+| Field | Retail | Read as | Label |
+| --- | ---: | ---: | --- |
+| `fuelConsumption` (military, all four engines, lb/s) | 6 | 11 | opinionated (coordinator first pass BMB-B1/B2, 2026-11-16): 69,560 lbf x 0.562 lb/(lbf h) / 3,600 = 10.86, the F101-GE-102's cited dry thrust-specific fuel consumption (Wikipedia "General Electric F101") |
+| `aftFuelConsumption` (afterburner, lb/s) | 16 | 84 | opinionated (the same): 123,120 lbf x 2.46 / 3,600 = 84.13 |
+| 1 G and 0 G fast edge at sea level, ft/s | 1,120 and 1,180 | 1,027 and 1,087 | fitted, the real figure: Mach 0.92 at low level, 608 kt (Wikipedia "Rockwell B-1 Lancer", Design and specification) at the standard sea-level speed of sound; the 0 G polygon keeps its 60 ft/s step, the other rows are held to the 1 G edge |
+| `airBrakesDrag` | 256 (the fighter airbrake) | 52 | fitted, from the two drawn spoiler plates (about 49 square feet at Cd 1.2); no cited figure |
+
+What a player notices: the full tank burns in 52.6 minutes on afterburner (276 before); afterburner tops out at 608 kt at sea
+level (663 before) and still at Mach 1.25 at 36,000 ft; the speed brake slows the bomber about a quarter as hard (0.08 G rather
+than 0.34 G at 306 kt). The thrust, weights, fuel, ceiling, G rows and the 36,000 ft top speed are unchanged. The cruise range
+stays near the published 5,100 nautical miles through a per-aircraft drag shape in `tore-sim`, not a record change
+([variety flight](variety-flight.md#rockwell-b-1b-lancer-b1b-8-2026-11-16)). Evidence, tables and open questions:
+[B-1B flight review](../formats/aircraft-variety.md#b-1b-lancer-flight-review-b1b-8-2026-11-16).
+

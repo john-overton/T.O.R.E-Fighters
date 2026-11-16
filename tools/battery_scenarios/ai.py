@@ -1687,7 +1687,9 @@ def scenarios() -> list[Scenario]:
     # full takeoff weights, and every one of the three flies the pieces at the field lengths of the
     # retail missions (docs/spec/ai-airfield.md, "Heavy bombers"). The land order comes after the
     # climb-out (a B-2 is airborne at 205 s, a B-52 at 200 s).
-    for aircraft, order, ticks, kt, pavement in (("b2", 30000, 150000, 175, True), ("b52", 36000, 150000, 175, False)):
+    # B1B-8 (2026-11-16): the B-1B joins them (airborne at 211 s, touches down at 168 kt at the default
+    # load, parks on the pavement; its flaps-up minimum is over 190.5 kt at full fuel).
+    for aircraft, order, ticks, kt, pavement in (("b2", 30000, 150000, 175, True), ("b52", 36000, 150000, 175, False), ("b1b", 30000, 150000, 175, True)):
         out.append(probe(f"merged-airfield-{aircraft}-wing2", [
             "--theater", "FRA", "--ground-start", "14",
             "--aircraft", aircraft, "--probe-friendly-aircraft", aircraft,
@@ -1702,7 +1704,7 @@ def scenarios() -> list[Scenario]:
     # Takeoff alone: the B-2 and B-52 from Athens (GRE 1, 12,000 ft; at their full weights they need about
     # 7,200 ft and the scripted player's own B-2 runs off the end of Mikonos' 7,246 ft), the F-117 from
     # Mikonos (GRE 2, 7,246 ft). Each leaves the ground, climbs out and flies on.
-    for aircraft, field in (("b2", 1), ("b52", 1), ("f117", 2)):
+    for aircraft, field in (("b2", 1), ("b52", 1), ("f117", 2), ("b1b", 1)):
         out.append(probe(f"heavy-takeoff-{aircraft}-gre-a{field}", [
             "--theater", "GRE", "--ground-start", str(field),
             "--aircraft", aircraft, "--probe-friendly-aircraft", aircraft,
@@ -1711,7 +1713,7 @@ def scenarios() -> list[Scenario]:
             notes="BMB-AI: the heavy takeoff (flaps and gear kept until the speed is there) at its full weight."))
     # Landing at Simferopol (UKR 2, 5,532 ft, the Ukraine's default field), sent home from the air, at a
     # landing weight: B-2 60,000 lb of fuel, B-52 80,000 lb, F-117 7,000 lb.
-    for aircraft, fuel, kt in (("b2", 60000, 150), ("b52", 80000, 145), ("f117", 7000, 190)):
+    for aircraft, fuel, kt in (("b2", 60000, 150), ("b52", 80000, 145), ("f117", 7000, 190), ("b1b", 80000, 175)):
         out.append(probe(f"heavy-land-{aircraft}-ukr-a2", [
             "--theater", "UKR", "--aircraft", aircraft, "--probe-friendly-aircraft", aircraft,
             "--probe-wing-size", "2", "--probe-wing-order", "600:bug-out", "--probe-fuel", str(fuel),

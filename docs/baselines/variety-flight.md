@@ -2420,3 +2420,35 @@ before and after table with its sources is in
   125.4 kt. Landing (`--maneuver land`, GRE 1): 270,000 lb approach 140.3 kt, touchdown
   131.6 kt, rollout 4,131 ft; 404,000 lb approach 166.2 kt (the cap), touchdown 153.7 kt,
   rollout 5,056 ft.
+
+## Rockwell B-1B Lancer validation, 2026-11-16
+
+B1B-8. Measured with `crates/tore-sim/examples/performance_probe.rs` (the B52-8 and B2-8 options `PROBE_CLIMB=KEAS,MACH`,
+`PROBE_SPEEDS_KT`, `PROBE_HOLD_SPEED`, `PROBE_CRUISE=ALT:KT`, `PROBE_ONLY=brake`) on the corrected record at 326,000 lb (the
+published gross weight, fuel 134,000 lb), 457,274 lb (full tank) and 477,000 lb (the default load), and with `tore-app
+--headless-flight`. The scripts are `.local/m3-aircraft/checks/B1B-8/run_perf.sh` and `run_probes.sh` (`before` and `after`),
+logs beside them; the before, after and real table with its sources is in
+[the B-1B flight review](../formats/aircraft-variety.md#b-1b-lancer-flight-review-b1b-8-2026-11-16).
+
+- Level top speed with afterburner (326,000 lb), before to after: sea level 663 to 608 kt (Mach 1.00 to 0.92); 15,000 ft 685 to
+  653 kt; 36,000 ft 716 to 717 kt (Mach 1.25); 50,000 ft 710 to 711 kt. Military power: sea level 498 to 519 kt, 36,000 ft 538 to
+  611 kt.
+- Climb at 350 KCAS then Mach 0.90, time to 5,000 / 20,000 / 36,000 ft: 326,000 lb 46 / 170 / 353 s to 43 / 152 / 298 s;
+  457,274 lb 59 / 244 / 490 s to 56 / 218 / 414 s; 477,000 lb 61 / 254 / 511 s to 58 / 228 / 431 s (published 5,678 ft/min).
+- Cruise, Mach 0.8 at 36,000 ft (520 kt), full tank: 6.0 lb/s, 6,779 nm at the retail flow; 10.3 lb/s, 3,698 nm at the real flow
+  on the shared law; 7.6 lb/s, **5,026 nm** with the drag shape (published 5,100). At 65 percent of the edge and 20,000 ft:
+  7,321, then 3,853, then 5,299 nm.
+- Sustained level turn, speed held, 326,000 lb: 2.9 to 3.6 G at 250 to 500 kt up to 15,000 ft and 2.3 G at 30,000 ft, before
+  and after (the G limit holds, not the thrust); instantaneous pull 3.1 to 3.9 G, unchanged.
+- Level acceleration, afterburner, sea level, 364 to 460 / 600 kt: 22 / 82 s to 21 / 88 s; peak specific excess power 168 to
+  180 ft/s at sea level, 107 to 125 at 36,000 ft.
+- Speed brake, idle, 10 s: extra deceleration 0.34 / 0.55 / 0.74 G to 0.08 / 0.13 / 0.17 G at 306 / 428 / 550 kt, 1,000 ft.
+- `--headless-flight 1200`: 409.3 kt level at 5,005 ft (was 435.5), no crash, no non-finite value, fuel 265,274 to 265,197 lb.
+- Takeoff (`--maneuver takeoff`, ground start, 477,000 lb): Athens (GRE 1, 12,000 ft) liftoff 168.9 kt after 5,520 ft to
+  168.5 kt after 5,472 ft; Simferopol (UKR 1, 5,532 ft) 5,720 to 5,671 ft, longer than the runway. Landing (`--maneuver land`,
+  65 percent fuel, 406,428 lb): approach 166.2 kt (the cap), Simferopol touchdown 159.7 to 158.8 kt, stopped 4,294 to 4,769 ft
+  past the threshold; Athens touchdown 153.1 kt, stopped 4,614 ft. The scripted landing at the full 477,000 lb crashes before and after.
+- AI heavy-class laws (BMB-AI): `ai-heavy-takeoff-b1b-gre-a1` airborne at 205.7 s; `ai-merged-airfield-b1b-wing2` airborne at
+  210.7 s, touchdown 168 kt, parked at 1,137 s on the pavement; `ai-heavy-land-b1b-ukr-a2` touchdown 168 kt at 80,000 lb of fuel
+  (158 kt at 40,000, 169 kt at 100,000), parked on the pavement; 0 anomalies in each.
+

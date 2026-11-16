@@ -183,6 +183,14 @@ load, an internal fuel of 18,500 lb (the approach flies 65 percent, 12,025 lb) a
 ordinary takeoff allowance. Evidence: the
 [F-117 flight review](../formats/aircraft-variety.md#f-117-flight-review-f117-8-2026-11-15).
 
+Update (B1B-8, 2026-11-16): the B-1B (`b1b`) joins the variety, liftoff, retail-stall and approach scenarios of
+`flight.py` (fitted windows 155 to 185 kt liftoff and 145 to 170 kt approach, recorded 168.5 and 166.2 kt at the 477,000 lb
+default load; an internal fuel of 265,274 lb, the approach flying 65 percent of it, 172,428 lb; a 7,000 tick takeoff
+allowance; Athens, GRE 1, because Simferopol's 5,532 ft is shorter than the 5,472 to 5,671 ft run). The AI lane gains
+`ai-heavy-takeoff-b1b-gre-a1`, `ai-heavy-land-b1b-ukr-a2` and `ai-merged-airfield-b1b-wing2`
+([lane-ai](lane-ai.md)). Evidence: the
+[B-1B flight review](../formats/aircraft-variety.md#b-1b-lancer-flight-review-b1b-8-2026-11-16).
+
 `flight-variety-gcurve-*` sweeps the full-stick G limit of the seven transports
 and airliners from 100 to 750 kt at 5,000 ft (`--maneuver gcurve`). Once the
 limit has passed 1.4 G it must not fall below 1.3 G, through the top speed and
