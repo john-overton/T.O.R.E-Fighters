@@ -1620,6 +1620,45 @@ fn a_drag_bomb_lays_down_clear_of_its_fuze_and_its_fragments() {
     assert_eq!(laydown_height_ft(&slow, 700.), 700.);
 }
 
+/// BMB-AI2: the laydown's ground is the highest on the last 8,000 ft of the
+/// run-in, the aim included, and all of it when the aircraft is closer.
+#[test]
+fn the_laydown_ground_is_the_highest_on_the_run_in() {
+    let aim = [0., 0., 0.];
+    // The run-in is flown along +x toward the aim at the origin: from -40,000.
+    let from = [-40_000., 5_000., 0.];
+    let flat = |_: f64, _: f64| 0.;
+    assert_eq!(laydown_ground_ft(&flat, from, aim), 0.);
+    // A 730 ft ridge 2,600 ft short of the aim is under the run-in's last
+    // 8,000 ft; one 12,000 ft short is not, and a ridge off the track is not.
+    let ridge = |x: f64, z: f64| {
+        if (-3_000. ..=-2_200.).contains(&x) && z.abs() < 500. {
+            730.
+        } else {
+            0.
+        }
+    };
+    assert_eq!(laydown_ground_ft(&ridge, from, aim), 730.);
+    let far = |x: f64, _: f64| {
+        if (-12_500. ..=-11_500.).contains(&x) {
+            730.
+        } else {
+            0.
+        }
+    };
+    assert_eq!(laydown_ground_ft(&far, from, aim), 0.);
+    let aside = |x: f64, z: f64| if x < -1_000. && z > 2_000. { 730. } else { 0. };
+    assert_eq!(laydown_ground_ft(&aside, from, aim), 0.);
+    // The aim's own ground counts, and an aircraft inside the 8,000 ft reads
+    // only the ground between it and the aim.
+    let at_aim = |x: f64, _: f64| if x > -100. { 80. } else { 0. };
+    assert_eq!(laydown_ground_ft(&at_aim, from, aim), 80.);
+    let behind = |x: f64, _: f64| if x < -5_000. { 400. } else { 0. };
+    assert_eq!(laydown_ground_ft(&behind, [-4_000., 900., 0.], aim), 0.);
+    // Straight over the aim: no line, the aim's ground.
+    assert_eq!(laydown_ground_ft(&at_aim, aim, aim), 80.);
+}
+
 /// The cue's miss across the aircraft's track, feet (positive: the aim lies
 /// right), for a bomb thrown `throw_ft` ahead along the heading and blown
 /// `drift_ft` to the right on the way down.

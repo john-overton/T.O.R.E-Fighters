@@ -322,6 +322,12 @@ pub const GUN_GATE_MIN_FT: f64 = 25.;
 /// rules, docs/spec/air-to-ground.md).
 pub const LAYDOWN_MIN_FT: f64 = 500.;
 pub const LAYDOWN_LEAD_FT: f64 = 8_000.;
+/// Fitted (BMB-AI2, 2026-11-16): the laydown's height is over the highest
+/// ground in the last [`LAYDOWN_LEAD_FT`] of the run-in to the aim, which
+/// holds the release point and the fall after it, read at this many points
+/// along it. The height was fitted over the target's own elevation, so a run
+/// in over rising ground flew nearer the ground than the fit allows.
+pub const LAYDOWN_TERRAIN_SAMPLES: u32 = 32;
 pub const LOW_MARGIN: f64 = 1.2;
 pub const FRAG_MARGIN: f64 = 1.1;
 
@@ -2062,6 +2068,15 @@ impl Strike {
             hold = (hold - GLIDE_DESCENT_FPS / 120.).max(lowest.min(hold));
             self.hold_ft = Some(hold);
         }
+        // A retarded pack's laydown height is over the ground it flies, not
+        // over the target (BMB-AI2): raised, never lowered, where the run-in
+        // rises above the target's elevation.
+        if pass == Pass::Laydown && self.hold_ft.is_some() {
+            if let Some(terrain) = cx.terrain {
+                let ground = laydown_ground_ft(terrain, own.position, aim);
+                hold = hold.max(ground + (hold - target[1]));
+            }
+        }
         let speed = if pass == Pass::FastHigh {
             SpeedRequest::Maximum
         } else {
@@ -3307,6 +3322,26 @@ fn laydown_height_at(store: &Store, speed_fps: f64, ground: f64) -> f64 {
         .map(|i| LAYDOWN_MIN_FT + 50. * f64::from(i))
         .find(|h| safe(*h))
         .unwrap_or(LAYDOWN_MIN_FT + 10_000.)
+}
+
+/// The highest ground on a laydown's run-in (BMB-AI2): the last
+/// [`LAYDOWN_LEAD_FT`] of the line from `from` to `aim` (all of it when the
+/// aircraft is closer), the aim included, at [`LAYDOWN_TERRAIN_SAMPLES`] + 1
+/// points. The pack's release and its fall are inside it.
+pub fn laydown_ground_ft(terrain: &dyn Fn(f64, f64) -> f64, from: Vector, aim: Vector) -> f64 {
+    let reach = horizontal(from, aim);
+    let span = reach.min(LAYDOWN_LEAD_FT);
+    let u = if reach > 1. {
+        [(from[0] - aim[0]) / reach, (from[2] - aim[2]) / reach]
+    } else {
+        [0.; 2]
+    };
+    (0..=LAYDOWN_TERRAIN_SAMPLES)
+        .map(|i| {
+            let back = span * f64::from(i) / f64::from(LAYDOWN_TERRAIN_SAMPLES);
+            terrain(aim[0] + u[0] * back, aim[2] + u[1] * back)
+        })
+        .fold(f64::MIN, f64::max)
 }
 
 /// A gun burst's aim (slice ST-T2): the pass's draw rule ([`aim_draw`])
