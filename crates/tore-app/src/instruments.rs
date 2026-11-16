@@ -467,6 +467,10 @@ pub struct CombatReadout {
     /// The aircraft has no jammer record (the same Tornado version): the
     /// RWR window never lights `JAM`, whatever the jammer key last did.
     pub no_jammer: bool,
+    /// The aircraft's own name for its targeting sight, the title of the
+    /// target camera window in place of `TARGET CAM` (the F-117's IRADS,
+    /// F117-7); `None` keeps the generic title.
+    pub sight_title: Option<&'static str>,
     pub target: Option<crate::target_window::Readout>,
     /// The AC-130's gunsight page; `None` on every other aircraft.
     pub gunsight: Option<gunsight::Page>,
@@ -543,6 +547,20 @@ pub struct Instruments {
 }
 /// The target camera's page, Shift+4 (docs/FLIGHT-CONTROLS.md).
 pub const TARGET_PAGE: u8 = 4;
+/// The window title of the target camera page: the aircraft's own name for
+/// its sight where it has one (the F-117's `IRADS`, F117-7), else
+/// `TARGET CAM`. A weapon's seeker picture (and its lost feed) is the
+/// weapon's view, not the sight's, so it keeps the generic title.
+fn target_page_title(combat: Option<&CombatReadout>) -> &'static str {
+    use targeting::Form;
+    let weapon_view = combat
+        .and_then(|c| c.targeting.as_ref())
+        .is_some_and(|page| matches!(page.form, Form::Seeker | Form::Static));
+    match combat.and_then(|c| c.sight_title) {
+        Some(title) if !weapon_view => title,
+        _ => "TARGET CAM",
+    }
+}
 impl Default for Instruments {
     fn default() -> Self {
         Self {
@@ -967,7 +985,7 @@ impl Instruments {
             1 => "ENVELOPE",
             2 => "FRONT VIEW",
             3 => "OTHER VIEW",
-            4 => "TARGET CAM",
+            4 => target_page_title(self.combat.as_ref()),
             5 => "RWR",
             6 => "NAV INFO",
             7 => "SYSTEMS",
@@ -1692,6 +1710,22 @@ mod tests {
             assert_eq!(i.rwr_scale_nmi(), rwr);
             assert!(rwr <= tore_sim::sensors::RANGE_LADDER_NMI[index]);
         }
+    }
+
+    /// F117-7: the target camera window carries the aircraft's own sight name
+    /// where it has one, `TARGET CAM` otherwise.
+    #[test]
+    fn the_target_page_title_is_the_aircraft_sight_name_when_it_has_one() {
+        assert_eq!(target_page_title(None), "TARGET CAM");
+        let mut combat = CombatReadout::default();
+        assert_eq!(target_page_title(Some(&combat)), "TARGET CAM");
+        combat.sight_title = tore_formats::aircraft::AircraftId::F117
+            .sensor_names()
+            .map(|names| names.sight);
+        assert_eq!(target_page_title(Some(&combat)), "IRADS");
+        // A weapon's seeker feed is the weapon's view, not the sight's.
+        combat.targeting = Some(targeting::Page::lost_feed(1));
+        assert_eq!(target_page_title(Some(&combat)), "TARGET CAM");
     }
 
     #[test]

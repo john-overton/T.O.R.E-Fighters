@@ -120,6 +120,13 @@ pub(super) fn sight_record(
             .map(|e| e.name)
             .filter(|n| !n.trim().is_empty())
             .unwrap_or_else(|| name.trim_end_matches(".SEE").to_owned());
+        // The F-117's turret reads IRADS, whatever its record is called, and
+        // its other sight record (the FLIR) FLIR (F117-7, decision 26).
+        let label = match profile.id.sensor_names() {
+            Some(names) if sensor.laser => names.sight.to_owned(),
+            Some(names) => names.infrared.to_owned(),
+            None => label,
+        };
         if found.as_ref().is_none_or(|(_, f)| sensor.laser && !f.laser) {
             found = Some((tore_formats::text::upper(&label), sensor));
         }

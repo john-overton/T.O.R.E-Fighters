@@ -1683,6 +1683,14 @@ pub fn sensor_helper(loadout: &Loadout, pods: bool) -> Option<String> {
     let Some(sensor) = loadout.configuration.sight else {
         return pods.then(|| "No built-in designator: hang a Pave Spike pod to lase.".to_string());
     };
+    // The F-117's turret has its own name (F117-7, decision 26): the line
+    // says IRADS, whatever the shared gimbal rule calls its record.
+    if let Some(names) = loadout.configuration.aircraft.sensor_names() {
+        return Some(format!(
+            "Built-in {}: no pod needed for laser ordnance.",
+            names.sight
+        ));
+    }
     let (what, needs) = if sensor.laser {
         ("laser designator", "laser ordnance")
     } else {
@@ -4381,6 +4389,17 @@ mod tests {
                 assert_eq!(sensor_helper(&ui.loadout, pods).as_deref(), Some(words));
             }
         }
+        // F117-7: the F-117's turret has its own name, whatever the gimbal.
+        let own = ui.loadout.configuration.aircraft;
+        ui.loadout.configuration.aircraft = tore_formats::aircraft::AircraftId::F117;
+        for gimbal in [CONE, Gimbal::Hemisphere] {
+            ui.loadout.configuration.sight = Some(sensor(true, gimbal));
+            assert_eq!(
+                sensor_helper(&ui.loadout, false).as_deref(),
+                Some("Built-in IRADS: no pod needed for laser ordnance.")
+            );
+        }
+        ui.loadout.configuration.aircraft = own;
     }
     /// The first and last row of `ink` in the page's pixels, and whether any
     /// of it is there.

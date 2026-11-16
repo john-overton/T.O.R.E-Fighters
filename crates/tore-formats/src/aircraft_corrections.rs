@@ -591,6 +591,18 @@ const F117_RETAIL_TOP_FPS: f64 = 1_020.;
 const F117_RETAIL_ZERO_G_TOP_FPS: f64 = 1_090.;
 /// The altitude of the vertex the trim moves.
 const F117_TRIM_ALTITUDE_FT: f64 = 36_000.;
+/// F-117A speed brake (F117-8, **fitted**): the airbrake drag word is 0. The
+/// record carries 256 (a fighter's airbrake: the hybrid adapter turns it into
+/// a drag of weight x the brake x the speed share, 0.30 G at 295 kt and 0.66 G
+/// at 530 kt on the 48,000 lb jet), but the real jet has no speed brake, no
+/// flaps and no drag device but the landing gear and, on landing, the drag
+/// chute: a pilot's account says "there are no drag devices on the jet: no
+/// speed brakes, no flaps, nothing" (jetcareers.com forum, read 2026-11-15, an
+/// unofficial source), and the shape has no airbrake word to draw (F117-3).
+/// The record's `flapsLift` and `flapsDrag` are already 0, so this makes the
+/// brake lever agree with them: it moves the lever's state but adds no drag.
+pub const F117_AIRBRAKE_DRAG: i32 = 0;
+const F117_RETAIL_AIRBRAKE_DRAG: i32 = 256;
 /// The retail 0 G and 1 G rows (speed ft/s, altitude ft). The top edges are the
 /// record's ceiling (42,000 ft for 1 G; the 0 G row reaches 2,000 ft higher).
 const F117_RETAIL_ZERO_G: [[f64; 2]; 9] = [
@@ -1350,7 +1362,8 @@ pub const CORRECTIONS: &[Correction] = &[
         retail: B2_RETAIL_AIRBRAKE_DRAG,
         corrected: B2_AIRBRAKE_DRAG,
     },
-    // F-117A: the real maximum takeoff weight and ceiling.
+    // F-117A: the real maximum takeoff weight and ceiling, and no speed brake
+    // (F117-8).
     Correction {
         id: AircraftId::F117,
         block: Block::Plane,
@@ -1364,6 +1377,13 @@ pub const CORRECTIONS: &[Correction] = &[
         key: "maxAlt",
         retail: F117_RETAIL_CEILING_FT,
         corrected: F117_CEILING_FT,
+    },
+    Correction {
+        id: AircraftId::F117,
+        block: Block::Plane,
+        key: "airBrakesDrag",
+        retail: F117_RETAIL_AIRBRAKE_DRAG,
+        corrected: F117_AIRBRAKE_DRAG,
     },
 ];
 

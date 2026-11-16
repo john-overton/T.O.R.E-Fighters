@@ -495,6 +495,7 @@ pub fn readout(
         flares: ro.countermeasures.flares,
         no_countermeasures: config.ecm.chaff[0] == 0 && config.ecm.flare[0] == 0,
         no_jammer: config.ecm_hardpoint.is_none(),
+        sight_title: config.aircraft.sensor_names().map(|names| names.sight),
         target: ro.targets.display.as_ref().map(|target| {
             let name = combat
                 .ground_name(target.id)
@@ -523,7 +524,20 @@ pub fn readout(
                 state: crate::target_window::mate_state(&ro.link, target.id),
             })
             .unwrap_or_default(),
-        scope: crate::scope::scope(ro, s, controls),
+        scope: {
+            let mut scope = crate::scope::scope(ro, s, controls);
+            // The F-117 calls its infrared channel the FLIR (F117-7): the
+            // label the window shows is the channel's mode word.
+            if let Some(names) = config.aircraft.sensor_names()
+                && scope.infrared
+            {
+                scope.channel = names.infrared;
+                if scope.mode == Some("IR") {
+                    scope.mode = Some(names.infrared);
+                }
+            }
+            scope
+        },
         rcs: crate::scope::rcs(config, ro, s, rcs_scale),
         rwr_failed: ro.damage.rwr_failed,
         rwr: rwr_readout(ro, s),

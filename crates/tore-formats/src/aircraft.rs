@@ -248,6 +248,16 @@ pub enum AircraftId {
     B2,
     F117,
 }
+/// An aircraft's own names for its targeting sight (the target camera's
+/// title, the Load Ordnance sensor line, the replay's Sensor View) and for
+/// its infrared channel (the radar page's IR label). See
+/// [`AircraftId::sensor_names`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SensorNames {
+    pub sight: &'static str,
+    pub infrared: &'static str,
+}
+
 impl AircraftId {
     /// Retail donor for an opinionated runtime variant.
     pub fn source(self) -> Self {
@@ -934,6 +944,21 @@ impl AircraftId {
             Self::B2 => Some("F18R.SEE"),
             // F117.PT has no radar row (VIS340, Pave Spike, F18.ECM, AV8IR).
             Self::F117 => None,
+        }
+    }
+    /// The F-117's own names for the two sensors its record shares with every
+    /// other aircraft (F117-7, 2026-11-15; John, decision 26, opinionated):
+    /// the `PAVESPK.SEE` row is its IRADS turret (the laser designator the
+    /// laser bombs need) and the `AV8IR.SEE` row is its FLIR. Text only: the
+    /// records, the sight and the channel behave as the shared ones. `None`
+    /// for every other aircraft, which keep the generic labels.
+    pub fn sensor_names(self) -> Option<SensorNames> {
+        match self {
+            Self::F117 => Some(SensorNames {
+                sight: "IRADS",
+                infrared: "FLIR",
+            }),
+            _ => None,
         }
     }
     /// Primary installed gun. Multi-gun identities expose every type in `guns`.
@@ -2143,6 +2168,21 @@ mod profile_tests {
         assert!(!AircraftId::B52.has_pts());
         assert!(AircraftId::B2.has_pts() && AircraftId::F117.has_pts());
     }
+    /// F117-7: only the F-117 has its own sensor names (IRADS turret and FLIR,
+    /// decision 26); every other aircraft, the B-2 included, keeps the
+    /// generic labels.
+    #[test]
+    fn only_the_f117_has_its_own_sensor_names() {
+        for id in AircraftId::ALL {
+            let names = id.sensor_names();
+            if id == AircraftId::F117 {
+                let names = names.unwrap();
+                assert_eq!((names.sight, names.infrared), ("IRADS", "FLIR"));
+            } else {
+                assert_eq!(names, None, "{id:?}");
+            }
+        }
+    }
     #[test]
     fn the_mirage_2000_reads_one_engine_and_one_m53_p2s_thrust_everyone_else_retail() {
         // Opinionated (John, 2026-11-09): the override applies where the
@@ -2544,6 +2584,7 @@ mod profile_tests {
             ("thrust", 21_600),
             ("maxTakeoffWeight", 54_000),
             ("internalFuel", 18_500),
+            ("airBrakesDrag", 256),
         ];
         let text = batch_text(
             "F117.PT",
@@ -2561,6 +2602,8 @@ mod profile_tests {
             (52_500., 45_000.)
         );
         assert_eq!(a.number("thrust"), 21_600.);
+        // F117-8: the real jet has no speed brake, so the record's 256 reads 0.
+        assert_eq!(a.number("airBrakesDrag"), 0.);
         let env = |g: i32| a.envelopes.iter().find(|e| e.g == g).unwrap();
         assert_eq!(
             env(1).points,

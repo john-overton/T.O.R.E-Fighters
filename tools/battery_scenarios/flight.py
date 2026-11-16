@@ -359,6 +359,18 @@ APPROACH_TARGET["mf1"] = (125, 150)
 # 6,700 ft at an unstated weight, Aerocorner).
 LIFTOFF_TARGET["b2"] = (140, 165)
 APPROACH_TARGET["b2"] = (140, 170)
+# The F-117A's windows (F117-8, 2026-11-15) are fitted, agent decisions, from
+# secondary figures only (docs/formats/aircraft-variety.md, "F-117 flight
+# review"): approach 150 kt (Aerocorner), a rotation speed of 160 kt and a
+# touchdown at 150 to 160 kt (a FlightGear simulator guide, unofficial), and a
+# pilot's account that the jet is Approach Category E, "oftentimes the approach
+# speed was in the 180s" (a forum post). The scripted runs fly the default load
+# (gross 52,000 lb at takeoff: two GBU-27 and a full tank), so the measured
+# 177.2 kt liftoff after 3,647 ft and the 166.2 kt approach (the 0.85 times the
+# record's landing limit cap) sit inside a liftoff window of 155 to 185 kt and an
+# approach window of 150 to 180 kt.
+LIFTOFF_TARGET["f117"] = (155, 185)
+APPROACH_TARGET["f117"] = (150, 180)
 # The figures the model gives with the fitted per-aircraft stall references
 # (`STALL_REFERENCE_FRACTIONS`, 2026-09-30), for the aircraft whose figure is not
 # exactly inside John's range, kept as a regression window of plus or minus 6
@@ -380,6 +392,9 @@ KNOWN_APPROACH["mf1"] = 127.6
 # The B-2's measured liftoff and approach at its default load (B2-8, 2026-11-15).
 KNOWN_LIFTOFF["b2"] = 158.1
 KNOWN_APPROACH["b2"] = 166.2
+# The F-117A's measured liftoff and approach at its default load (F117-8, 2026-11-15).
+KNOWN_LIFTOFF["f117"] = 177.2
+KNOWN_APPROACH["f117"] = 166.2
 # TOR-6 (2026-11-11): the Tornado's default load is lighter than TOR-8 measured (one centreline tank, 1,650
 # lb of external fuel, not two): liftoff 146.4 kt (was 150.6), approach 155.1 kt (was 160.1), both inside the
 # windows and the plus or minus 6 percent regression band, so no window was refitted and the known values above
@@ -434,6 +449,8 @@ INTERNAL_FUEL_LB["b52"] = 312197
 # B-2's approach scenario uses that cap (60 percent); the scripted approach speed
 # does not depend on the fuel in any case (B2-8).
 INTERNAL_FUEL_LB["b2"] = 167000
+# F117.PT internal fuel, 18,500 lb (the record's own tank; the approach scenario flies 65 percent, 12,025 lb).
+INTERNAL_FUEL_LB["f117"] = 18500
 APPROACH_FUEL_CAP_LB = 100000
 
 
@@ -547,6 +564,8 @@ LIFTOFF_AIRCRAFT += ["tornadoc"]
 LIFTOFF_AIRCRAFT += ["b52"]
 # The B-2 joins them (B2-8, 2026-11-15).
 LIFTOFF_AIRCRAFT += ["b2"]
+# The F-117A joins them (F117-8, 2026-11-15).
+LIFTOFF_AIRCRAFT += ["f117"]
 
 
 def liftoff_scenarios() -> list[Scenario]:

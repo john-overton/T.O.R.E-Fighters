@@ -134,7 +134,8 @@ pub fn defense_percent(level: usize) -> Option<u32> {
 pub const NIGHT_CONDITION: usize = 6;
 /// A friendly wing flying one of these at night turns every manned `<aaa>` into
 /// [`NIGHT_AAA`] with skill [`NIGHT_AAA_SKILL`] (list `0x4f31b0`, stealth flag
-/// `0x4f1c84`). Neither aircraft is imported yet, so the rule is dormant.
+/// `0x4f1c84`). Live since the F-117 and the B-2 became flyable (F117-6,
+/// 2026-11-15: `AircraftId::pt()` is the name matched here).
 pub const NIGHT_STEALTH_AIRCRAFT: [&str; 2] = ["F117.PT", "B2.PT"];
 pub const NIGHT_AAA: &[&str] = &["ZSU23.NT"];
 /// Novice.

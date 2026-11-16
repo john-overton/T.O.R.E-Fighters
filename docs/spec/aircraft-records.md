@@ -618,3 +618,21 @@ bomber by about a third as much (0.14 G rather than 0.44 G of extra deceleration
 kt at 1,000 ft), the landing rollout with the brake out is 19 percent longer, and the
 record ceiling is 50,000 ft. Evidence, tables and open questions:
 [B-2 flight review](../formats/aircraft-variety.md#b-2-flight-review-b2-8-2026-11-15).
+
+## F-117A flight review: no speed brake (F117-8, 2026-11-15)
+
+Dated note, additions only. One more `F117.PT` field is read differently, applied only
+while the record still holds its retail value and every other F-117 correction (BMB-A2)
+still holds, in `tore-formats` `aircraft_corrections.rs`:
+
+| Field | Retail | Read as | Label |
+| --- | ---: | ---: | --- |
+| `airBrakesDrag` | 256 (a fighter's airbrake) | 0 | fitted: the real jet has no speed brake, no flaps and no drag device but the gear and the landing drag chute (a pilot's forum account, unofficial; the record's `flapsLift` and `flapsDrag` are already 0 and the shape has no airbrake surface) |
+
+The brake lever still moves the state but adds no drag (it was 0.30 G of extra
+deceleration at 295 kt, 0.66 G at 530 kt). The scripted landing's rollout from touchdown
+is 25 percent longer (2,504 ft to 3,117 ft at the default load). Thrust, weights, fuel,
+the 2 lb/s flow, ceiling, envelopes, the 180 degree a second roll block, the stealth
+signature (infrared 20, radar 1) and `bayDrag` (which the hybrid adapter does not read)
+are unchanged. Evidence, the before, after and real table, and the open questions:
+[F-117 flight review](../formats/aircraft-variety.md#f-117-flight-review-f117-8-2026-11-15).

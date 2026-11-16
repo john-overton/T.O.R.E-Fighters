@@ -335,3 +335,10 @@ The B-2 flies its own retail cockpit family by John's decision of 2026-11-15
 bezel over `~B2H.PIC` (B2-7; the picture is 1394 x 508). Its Systems window shows one
 engine readout, as every aircraft's does (it has four engines), and its own fuel:
 `FUEL 167000 LBS` and `(+ EXT 0 LBS)` (B2-7 frames, instrument pages 0 to 9).
+
+The F-117 flies its own retail cockpit family by John's decision of 2026-11-15 (opinionated): `F117.HUD`
+names the panel `~f117_p`, so it draws the `~F117_P.PIC` bezel over `~F117H.PIC` (F117-7; the picture
+is 1673 x 508). Its window 4 is titled `IRADS` rather than `TARGET CAM` while it shows the sight (a weapon's
+seeker picture keeps `TARGET CAM`), and its radar window reads `NOT INSTALLED` or, on the infrared channel,
+`FLIR`. Its Systems window shows one engine readout and its own fuel (`FUEL 18500 LBS`), and its Weapons
+window no `CHAFF` or `FLARE` line (it carries no dispenser).

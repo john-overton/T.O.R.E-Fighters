@@ -297,3 +297,12 @@ feed camera (`mirrors::camera`) stays on the shared seat for every aircraft; onl
 Back view and the replay cameras take the new per-aircraft eye (`mirrors::eye_offset`),
 which gives the B-2 10 feet up and 20 feet ahead. See [the B-2 section](../formats/aircraft-variety.md#b-2-sensors-hud-and-cockpit-b2-7-2026-11-15). Frames are
 under `.local/m3-aircraft/frames/B2-7/`.
+
+## 2026-11-15 F-117 cockpit: no mirrors, its own eye (F117-7)
+
+The F-117 flies its own retail cockpit family (`F117.HUD`, stem `F117`, `~F117H.PIC`, 1673 x 508;
+John, 2026-11-15, decision 28). The picture has no flat mirror fill, so `mirrors::seeds` has no `F117`
+row and `--cockpit-sheet OUT_DIR f117` prints `f117 NO MIRRORS FITTED`, as for the B-2. The rear
+feed camera stays on the shared seat; only the Back view and the replay cameras take the per-aircraft
+eye, which gives the F-117 6 feet up and 14 feet ahead. See [the F-117 section](../formats/aircraft-variety.md#f-117-ordnance-sensors-and-cockpit-f117-67-2026-11-15).
+Frames are under `.local/m3-aircraft/frames/F117-6/`.
