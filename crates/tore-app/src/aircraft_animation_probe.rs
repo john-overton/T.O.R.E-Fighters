@@ -17,6 +17,7 @@ mod b747;
 mod c130;
 mod e2;
 mod f104;
+mod f111;
 mod f117;
 mod f14;
 mod f15;
@@ -275,6 +276,7 @@ impl Control {
                         // T160-3: the Tu-160's keel plates (word 7ffc) are drawn
                         // plates the brake lever drops, not an airbrake.
                         | Id::Tu160
+                        | Id::F111
                 ) =>
             {
                 Expectation::Required
@@ -322,6 +324,7 @@ impl Control {
                         | Id::TornadoClean
                         | Id::B1b
                         | Id::Tu160
+                        | Id::F111
                 ) =>
             {
                 Expectation::Required
@@ -352,6 +355,7 @@ impl Control {
                         | Id::Tornado
                         | Id::TornadoClean
                         | Id::Tu160
+                        | Id::F111
                 ) =>
             {
                 Expectation::Required
@@ -515,7 +519,7 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     // The Tornado's wing sweeps with speed (TOR-3), so its controls are isolated
     // below the 250 knot sweep threshold; the sweep schedule and the coupled
     // sweep/flap grid cover that interaction explicitly.
-    if id.source() == AircraftId::Tornado {
+    if id.source() == AircraftId::Tornado || id == AircraftId::F111 {
         neutral.speed = 200. * 1.68781;
     }
     // The B-1B's wing sweeps with speed from 280 knots (B1B-3) and the
@@ -716,6 +720,7 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
             | AircraftId::B1b
             | AircraftId::F117
             | AircraftId::Tu160
+            | AircraftId::F111
     ) {
         "reviewed-controls-and-attachments"
     } else {
@@ -1230,6 +1235,17 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
                 );
             }
         }
+        if id == AircraftId::F111 {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                f111::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
         if id == AircraftId::B52 {
             for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
                 b52::check(
@@ -1465,6 +1481,9 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     }
     if id == AircraftId::Tu160 {
         failures.extend(tu160::combinations(&airframe, &neutral, out)?);
+    }
+    if id == AircraftId::F111 {
+        failures.extend(f111::combinations(&airframe, &neutral, out)?);
     }
     failures.extend(rotorcraft::combinations(&airframe, &neutral, out)?);
     moving_parts(&airframe, &neutral, out)?;

@@ -338,6 +338,14 @@ pub struct Rack {
     /// 2026-11-10, decision 19). The model's underside over it is read at the
     /// spread position, because the panel is rigid.
     pub turn: f32,
+    /// The swing wing a swivelling station turns with, when it is not the
+    /// Tornado's: the F-111F's rows 5 and 6 carry [`super::swing::F111F`]
+    /// and swivel about its pivot (F111-3, 2026-11-15). `None` is the
+    /// Tornado's spec ([`super::swing::TORNADO`]), which every station that
+    /// is not on another aircraft's swing wing uses; set with [`Self::turn`]
+    /// every tick by the host ([`super::swing::rack_spec`]) and never carried
+    /// by a checkpoint or a recording.
+    pub swing: Option<&'static super::swing::SwingSpec>,
 }
 
 /// One pylon of one side of a station: the point its stores hang from (feet
@@ -366,7 +374,13 @@ impl Rack {
             over: [None; 5],
             tip: None,
             turn: 0.,
+            swing: None,
         }
+    }
+    /// The swing wing this rack's [`Self::turn`] is about (the Tornado's
+    /// unless [`Self::swing`] names another).
+    pub fn swing_spec(self) -> &'static super::swing::SwingSpec {
+        self.swing.unwrap_or(&super::swing::TORNADO)
     }
     pub fn location(self) -> Location {
         Location::from_byte(self.location)
@@ -566,14 +580,16 @@ impl Rack {
                         let out = sign * self.location().rail_out();
                         let pylon = [point[0] - out, point[1], point[2]];
                         let mut carried =
-                            super::swing::swept(sign > 0., pylon, f64::from(self.turn));
+                            self.swing_spec()
+                                .swept(sign > 0., pylon, f64::from(self.turn));
                         carried[0] += out;
                         carried
                     } else {
                         // The wing that carries the point: a left-hand pod
                         // is a lone store on the left wing (TOR-13), a
                         // paired record's left side mirrors to a negative x.
-                        super::swing::swept(point[0] >= 0., point, f64::from(self.turn))
+                        self.swing_spec()
+                            .swept(point[0] >= 0., point, f64::from(self.turn))
                     },
                     slots,
                 }
@@ -1265,6 +1281,25 @@ pub fn station_move(id: AircraftId, hardpoint: usize) -> Option<StationMove> {
             TORNADO_WING_OUTER[1],
             Hang::AsRecorded,
         ),
+        // The F-111F's inner wing pair (rows 5 and 6, the two swivelling
+        // pylons a wing; F111-3, 2026-11-15): the record's span (29 and 41
+        // raw units, a third of a foot each, times the size fit's x factor)
+        // and the placed panel's mid-chord there ([`super::swing::F111F`]),
+        // so the swivel about the F-111F's pivot ([`Rack::swing`]) carries
+        // them and the pylon stands in the middle of the chord at every
+        // sweep (TOR-14's rule). The outer rows 7 and 8 are fixed and stay
+        // where the record puts them (F111-5 measures every station).
+        (AircraftId::F111, 5 | 6) => {
+            let out = F111_WING_INNER[hardpoint - 5];
+            at(
+                Location::Wing,
+                out,
+                super::swing::F111F
+                    .mid_chord(out)
+                    .expect("the F-111F has a panel outline"),
+                Hang::AsRecorded,
+            )
+        }
         (AircraftId::Su27, 7) => at(Location::Wing, SU27_WING[0], SU27_WING[1], Hang::Separate),
         (AircraftId::Su35, 7) => at(Location::Wing, SU35_WING[0], SU35_WING[1], Hang::Separate),
         _ => None,
@@ -1438,6 +1473,16 @@ const TORNADO_WING_OUTER: [f64; 2] = [
 /// AIM-9 side rail hangs its missile, feet (TOR-6b, fitted, agent decision
 /// 2026-11-11; see docs/spec/stores-on-pylons.md).
 const TORNADO_RAIL_FORWARD: f64 = 0.0;
+
+/// The F-111F's two swivelling inner pylons' spans, feet out (F111-3,
+/// 2026-11-15): the record's raw x (29 and 41) over three, times the x factor
+/// of the size fit ([`tore_formats::aircraft::scale::F111_SHAPE_SCALE`]), so
+/// 8.30 and 11.74 ft: the same place the record puts them on the scaled
+/// shape, only the forward coordinate moves (to the mid-chord).
+const F111_WING_INNER: [f64; 2] = [
+    29. / 3. * tore_formats::aircraft::scale::F111_SHAPE_SCALE[0],
+    41. / 3. * tore_formats::aircraft::scale::F111_SHAPE_SCALE[0],
+];
 
 /// The Yak-141's outer underwing pylon (retail's row 16.67 ft out, which
 /// is past two thirds of the model's 18.5 ft half span, by the tip): 11 ft
@@ -2527,6 +2572,7 @@ mod tests {
             over: [Some(-2.); 5],
             tip: None,
             turn: 0.,
+            swing: None,
         };
         for slot in 0..2 {
             let p = belly.store_point([0., -6., 0.], 2, 0, slot, mk82);
@@ -3276,6 +3322,72 @@ mod tests {
         };
         assert!((chord(16. - swing::WING_IN_FT) - 5.46).abs() < 0.01);
         assert!(swing::PYLON_LENGTH_FT + 1.0 < chord(16. - swing::WING_IN_FT));
+    }
+
+    /// F111-3, 2026-11-15: the F-111F's inner rows (5 and 6) swivel about the
+    /// F-111F's own pivot and stand on its panel's mid-chord; the outer rows
+    /// stay fixed; a Tornado rack, which names no spec, still turns about the
+    /// Tornado's pivot.
+    #[test]
+    fn the_f111_inner_pylons_swivel_about_the_f111_pivot_and_the_tornados_stay_put() {
+        use crate::combat::swing::{self, F111F, TORNADO};
+        let record = |x| Hardpoint {
+            location: 4,
+            position: [x, -12, -4],
+            flags: 0x3e5,
+            count: 2,
+            store: Some("MK82P.JT".into()),
+            weight_class: 50,
+            slew: [0; 4],
+        };
+        let size = StoreSize::of_shape(Some("MK82.SH"));
+        let pivot = F111F.pivot_feet(true);
+        for (row, x) in [(5, 29), (6, 41)] {
+            let moved = station_move(AircraftId::F111, row).expect("rows 5 and 6 are moved");
+            assert_eq!(moved.location, Location::Wing);
+            assert!((moved.right - f64::from(x) / 3. * 0.859).abs() < 1e-9);
+            assert_eq!(moved.forward, F111F.mid_chord(moved.right).unwrap());
+            let (mount, mut rack) = placed_on(AircraftId::F111, row, &record(x), None);
+            rack.paired = true;
+            assert!(swing::swivels(AircraftId::F111, row));
+            let spread = rack.side_pylons(mount, 0, 1, size)[0].point;
+            for degrees in [16., 30., 45., 60., 72.5] {
+                let turn = F111F.turn(F111F.speed_for_sweep(degrees), 0., 0.);
+                // The racks the host turns carry the F-111F's spec.
+                let mut turned = rack;
+                turned.turn = turn as f32;
+                turned.swing = swing::rack_spec(AircraftId::F111);
+                let now = turned.side_pylons(mount, 0, 1, size)[0].point;
+                let expect = F111F.swept(true, spread, f64::from(turned.turn));
+                for i in 0..3 {
+                    assert!(
+                        (now[i] - expect[i]).abs() < 1e-9,
+                        "row {row} {degrees}: {now:?}"
+                    );
+                }
+                // About the F-111F's pivot, not the Tornado's: the distance
+                // to it never changes, and the Tornado's would change it.
+                let radius = |p: Vector, c: [f64; 3]| (p[0] - c[0]).hypot(p[2] - c[2]);
+                let at = pivot;
+                assert!((radius(now, at) - radius(spread, at)).abs() < 1e-6);
+                if degrees > 16. {
+                    let own = TORNADO.pivot_feet(true);
+                    assert!((radius(now, own) - radius(spread, own)).abs() > 0.1);
+                }
+            }
+            // A rack with no spec turns about the Tornado's pivot, as before.
+            let mut tornado = rack;
+            tornado.turn = 0.5;
+            let was = tornado.side_pylons(mount, 0, 1, size)[0].point;
+            let carried = TORNADO.swept(true, spread, 0.5);
+            for i in 0..3 {
+                assert!((was[i] - carried[i]).abs() < 1e-9);
+            }
+        }
+        // The outer pair is fixed.
+        assert_eq!(station_move(AircraftId::F111, 7), None);
+        assert_eq!(station_move(AircraftId::F111, 8), None);
+        assert!(!swing::swivels(AircraftId::F111, 7) && !swing::swivels(AircraftId::F111, 8));
     }
 
     #[test]

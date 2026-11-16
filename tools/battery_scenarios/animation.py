@@ -13,7 +13,7 @@ from battery import Scenario
 REVIEWED_AIRCRAFT = ("a7", "f4b", "f4j", "f4e", "f4g", "f15", "mig17", "f16c", "f104", "a310", "c130", "ac130", "e3", "a10", "av8", "ah64", "mi24", "ch47",
                      "yak141", "v22", "il76", "e2", "b747",
                      "f18", "rafale", "mig29", "su27", "su35", "mig21", "su25", "f22", "f22n", "faxx", "x31", "mig23", "f14", "a4e", "mig25",
-                     "f16a", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc", "b52", "b2", "f117", "b1b", "tu160")
+                     "f16a", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc", "b52", "b2", "f117", "b1b", "tu160", "f111")
 
 
 def check_report(work: Path, _output: str) -> list[str]:
@@ -97,6 +97,13 @@ def check_report(work: Path, _output: str) -> list[str]:
         # The F-117 (F117-3 and F117-4): the ruddervator pitch/yaw grid (25 poses), the dense gear
         # sweep (202 values) and the interim bay sweep (8 values); no elevon, flap, brake or plume.
         "F117.PT": {"dense-gear.csv": 203, "pitch-yaw-combinations.csv": 26, "bay-sweep.csv": 9},
+        # The F-111F (F111-3): the pitch/roll grid at the spread and the fully swept wing (25 poses each),
+        # the sweep against speed and flaps (40 poses), the root seam, swept span and taileron clearance
+        # at nine sweep angles, the taileron corner swing, and the dense gear, dorsal brake and plume sweeps.
+        "F111.PT": {"dense-gear.csv": 203, "pitch-roll-combinations-16deg.csv": 26,
+                    "pitch-roll-combinations-72deg.csv": 26, "sweep-flap-combinations.csv": 41,
+                    "sweep-seam-span-taileron.csv": 19, "taileron-corner-swing.csv": 25,
+                    "brake-sweep.csv": 9, "exhaust-sweep.csv": 8},
         # The Tornado IDS (Clean) (TOR-13) drives the Tornado's own rig: the same sweeps.
         "tornadoc": {"dense-gear.csv": 203, "pitch-roll-combinations-25deg.csv": 26,
                      "pitch-roll-combinations-67deg.csv": 26, "sweep-flap-combinations.csv": 36,

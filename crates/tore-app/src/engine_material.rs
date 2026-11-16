@@ -121,6 +121,10 @@ pub fn nozzle(id: AircraftId, address: usize) -> bool {
         // TOR.SH: the two nozzle exit octagons at y -24 (subtype 0x64), left
         // 0x3e90 and right 0x3eb7 (TOR-4; docs/formats/aircraft-control-surfaces.md).
         AircraftId::Tornado => matches!(address, 0x3e90 | 0x3eb7),
+        // F111.SH: the two nozzle exit octagons at y -36 (subtype 0x64), the
+        // left one in both windings (0x1c77, 0x1fe8) and the right in one
+        // (0x23ad; F111-3, docs/formats/aircraft-variety.md).
+        AircraftId::F111 => crate::f111_animation::NOZZLE.contains(&address),
         AircraftId::Mig23 => matches!(address, 0x34af | 0x34d6),
         AircraftId::Su35 => matches!(address, 0x2aee | 0x366c | 0x3690 | 0x3a9b | 0x3af0),
         AircraftId::A4E
@@ -154,6 +158,7 @@ pub fn outlet_count(id: AircraftId) -> usize {
         | AircraftId::Su35
         | AircraftId::F15E
         | AircraftId::F5E
+        | AircraftId::F111
         | AircraftId::Tornado => 2,
         _ => 0,
     }
@@ -194,6 +199,7 @@ mod tests {
             AircraftId::Su35,
             AircraftId::F15E,
             AircraftId::F5E,
+            AircraftId::F111,
             AircraftId::Tornado,
         ] {
             assert_eq!(outlet_count(id), 2);

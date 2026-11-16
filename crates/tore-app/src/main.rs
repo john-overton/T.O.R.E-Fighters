@@ -57,6 +57,7 @@ mod effect_renderer;
 mod ejection_art;
 mod engine_material;
 mod f104_animation;
+mod f111_animation;
 mod f117_animation;
 mod f14_animation;
 mod f14_geometry;

@@ -192,11 +192,11 @@ pub fn swung<'a>(
     let turn = swing::wing_turn_of(id, state.speed, state.flaps, state.gear) as f32;
     let mut posed = stores.to_vec();
     for store in &mut posed {
-        store.rack.turn = if swing::swivels(id, usize::from(store.hardpoint)) {
-            turn
-        } else {
-            0.
-        };
+        let swivels = swing::swivels(id, usize::from(store.hardpoint));
+        store.rack.turn = if swivels { turn } else { 0. };
+        // F111-3: the swivelling stations turn about their own aircraft's
+        // pivot (None for the Tornado's).
+        store.rack.swing = if swivels { swing::rack_spec(id) } else { None };
     }
     std::borrow::Cow::Owned(posed)
 }
