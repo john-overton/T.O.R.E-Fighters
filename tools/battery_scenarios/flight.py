@@ -1540,6 +1540,18 @@ def jettison_scenarios() -> list[Scenario]:
                     timeout=180,
                 )
             )
+    # B1B-6: the B-1B has no gun, so its first slot is the forward bay (4 seven-packs): jettisoned
+    # like the other two.
+    out.append(
+        Scenario(
+            name="flight-jettison-b1b-slot1",
+            lane="flight",
+            args=["--live-fire", "--aircraft", "b1b", "--weapon-slot", "1", "--combat-command", "jettison", "--combat-probe-ticks", "300", "--capture-flight", "{work}/j.ppm", "--no-audio"],
+            window=True,
+            check=check_jettison("b1b", 1),
+            timeout=180,
+        )
+    )
     return out
 
 
@@ -1581,6 +1593,13 @@ def countermeasure_scenarios() -> list[Scenario]:
     out.append(Scenario(name="flight-countermeasures-b2", lane="flight", args=args, window=True,
                         check=check_countermeasures, timeout=180,
                         notes="The B-2's retail F18.ECM row: 30 chaff and 30 flares, five and three released (B2-6)."))
+    # B1B-6: the B-1B keeps the same retail F18.ECM row (B1.PT names it; its real ALQ-161 is a jammer).
+    args = ["--live-fire", "--aircraft", "b1b"] + ["--combat-command", "chaff"] * 5
+    args += ["--combat-command", "flare"] * 3
+    args += ["--countermeasure-preview", "240", "--capture-flight", "{work}/cm.ppm", "--no-audio"]
+    out.append(Scenario(name="flight-countermeasures-b1b", lane="flight", args=args, window=True,
+                        check=check_countermeasures, timeout=180,
+                        notes="The B-1B's retail F18.ECM row: 30 chaff and 30 flares, five and three released (B1B-6)."))
     out.extend(tornado_countermeasure_scenarios())
     return out
 

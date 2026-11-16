@@ -15900,3 +15900,149 @@ row, between the nacelles' inner walls (x +-4 ft, where the nacelle underside re
 beside the doors' hinge line). (5) The fitted door count (two a bay) and the 6.7 ft roof. (6) The
 bay stores hang 0.7 ft aft of each bay's middle to suit two different shape origins.
 (7) Real external stations: none authored.
+
+## B-1B Lancer ordnance, sensors, HUD and cockpit (B1B-6/7, 2026-11-16)
+
+Slices B1B-6 (ordnance, default load, countermeasures) and B1B-7 (sensors, HUD, cockpit, instruments)
+ran together (implementation mode, bomber batch B). They apply the coordinator's first-pass decisions of
+2026-11-15 (`BOMBERS-DECISIONS-B`, "B-1B Lancer" 5, 7 and 9, and "B-1B stations"), not John's; every
+number below is **fitted** (agent, 2026-11-16) unless it says it is the record's or retail's. The machinery
+is batch A's (the B-52's and B-2's slices): the shared bay grid and doors of
+[B-1B stations](#b-1b-lancer-stations-bays-and-pylons-b1b-5-2026-11-16), the B-2's measured glass
+([B-2 sensors, HUD and cockpit](#b-2-sensors-hud-and-cockpit-b2-7-2026-11-15)) and the per-identity eye
+table. Earlier sections stay as written (B11). Frames are in `.local/m3-aircraft/frames/B1B-6/`, logs in
+`.local/m3-aircraft/checks/B1B-6/`.
+
+### B1B-6: the load, the bays and the release
+
+- **Load Ordnance (checked, frame `load-ordnance`).** Three `Internal Bay` rows and nothing else (no gun, no
+  pylon, no pod): each `MK-82 AIR 7-Pack, 4 loaded (max 4)`, vehicle weight 477,000 of 477,000 lb (carried
+  42,000 lb), internal fuel 243,000 lb (92 percent), and the page's line `Aircraft laser pod equipped` for the fixed
+  Pave Spike row. The 12 packs are the record's 12 and are **84 Mk 82**, the real load (B1B-5). Changing a row to the plain
+  `MK82` offers 20 a row (4 abreast, 5 tiers, 60 in all). No code changed: B1B-5's page is the page.
+- **Default counts.** 4, 4 and 4, the same through a saved load and a restart (`--validate-ordnance` still
+  reads `B1.PT: 3 source rows, 12 compatible weapon placements, defaults and restart passed`).
+- **Live fire (battery, B1B-5's scenarios, rerun).** `flight-livefire-b1b-slot1` to `-slot3` fire one pack a press, seven bombs
+  each (`SHOTS_PER_ROUND` counts them), and empty the row at four packs. **New:** `flight-jettison-b1b-slot1` (the
+  forward bay: the generator starts at slot 2 because slot 1 is a gun elsewhere; the B-1B has none), beside B1B-5's
+  `-slot2` and `-slot3`.
+- **Release origin, the human against the AI (new scenarios).** `a2g-release-origin-b1b` (the human trigger, six runs
+  through `--a2g-run --attack release`): each bay's plain Mk 82 row leaves its first nine places from the grid's own cells
+  (4 abreast, columns -1.95, +1.95, -0.65, +0.65 ft, outermost first alternating sides, the bottom tier 0.62 ft under the
+  reference, the next tier 1.3 ft up) at 35.30, 19.97 and -13.03 ft ahead, and each default seven-pack row leaves four packs
+  of seven, each pack's bombs from the pack's own place and then staggered by the retail pack offset (right 0, -2, +2, -4, +4, -6,
+  +6 ft and down 0, -2, -6, -12, -20, -30, -42 ft, so a pack streams 12 ft wide and 42 ft deep in the first
+  instants: shared code, unchanged, B1B-5's open item). `ai-strike-b1b-stick` (an AI B-1B, `--load MK82 --count 20`,
+  20,000 ft) drops a stick of eight 0.25 s apart from **the same cells** (the `ai-strike: ORIGIN` lines match the human's to 0.1 ft),
+  doors read open at every release and shut again 1.5 to 6 s after the last, an impact and egress; `ai-strike-b1b-pack` (the default
+  load) drops four packs of seven, the first bomb of each from the row's own place. The human's and the AI's cells match; the
+  B-2's precedent checks the same two runs.
+- **Guided stores: none to fire.** The four stores the bay rows admit (`MK82AIR`, `MK82`, `MK82P3`, `FAB1000`) are all
+  unguided; the laser-guided and GPS-guided records (`GBU29`/`30`, `GBU38`, JDAM class) are refused by B1B-5's clearance list,
+  so there is no guided release to measure against a target and no `a2g-laser-b1b` scenario. The fixed Pave Spike row still
+  lases (the B-2's `a2g-laser-b2` path); it waits on a guided store. Listed for John (the same open item as B1B-5's refusals).
+- **Countermeasures (checked, new scenario `flight-countermeasures-b1b`).** The retail `F18.ECM` row (`LateColdWar`, strength 0.30)
+  gives **30 chaff and 30 flares** (the Weapons window `30 CHAFF 30 FLARE`) and a jammer: after five chaff and three flare
+  commands the page reads `25 CHAFF 27 FLARE`, six flares burn and 170 chaff puffs are in the air at 60 ticks, and `--jammer-on` lights `JAM`
+  on the RWR window (frames `countermeasures-external`, `countermeasures-jammer`). The cartridges leave from the shared
+  tail origin. The real B-1B's ALQ-161 is a jammer and its dispensers are in the tail; the record gives the counts.
+
+### B1B-7: sensors
+
+`--sensor-summary` reads `B1b: radar F18R.SEE search 90 nmi 60x60 deg track 50 nmi 45x45 deg look-down 0 ADVANCED;
+infrared AV8IR.SEE search 15 nmi 60x60 deg track 15 nmi 45x45 deg; visual VIS340.SEE search 10 nmi 170x140 deg track 5 nmi 170x140
+deg; jammer F18.ECM LATE strength 0.30; signature radar 40 infrared 60`.
+
+| Row | Record | What the game draws | Against the real aircraft |
+| --- | --- | --- | --- |
+| 1 | `VIS340.SEE` | the visual channel | any aircraft has one |
+| 2 | `F18R.SEE` | the radar, the F/A-18's air-to-air RWS and TWS (`Preset::Advanced`) | the real jet has a ground-mapping radar, which the shared radar does not have (no ground-map mode, as for the B-2 and B-52) |
+| 3 | `F18.ECM` | chaff, flares and the jammer | the real jet's ALQ-161 is a jammer: kept |
+| 4 | `PAVESPK.SEE` | a fixed laser row, no pod body | the real jet carried no Pave Spike (a pod came much later): kept as retail by decision, **never drawn** |
+| 5 | `AV8IR.SEE` | the infrared channel on M, no pod body | the real jet had no infrared sensor of its own: kept as retail by decision, never drawn |
+
+- **Radar profile (agent decision, no change): Advanced, the record's.** The row is `F18R.SEE`, already reviewed
+  `Preset::Advanced` (60 ft/s notch, burn-through 10 nmi; [radar](../radar.md#presets)). The B-52's row needed a new preset
+  because `B52R.SEE` was unreviewed and the B-52 flew blind; the B-1B's does not, so nothing was added and the B-1B
+  flies the F/A-18's radar as the B-2 does. A new test (`the_b1b_radar_row_is_the_reviewed_advanced_f18_record`)
+  pins the record and the preset. If John prefers a bomber-class set, the Transitional class of `B52R.SEE` is the one-line
+  alternative (a new record name has no row to rename).
+- **No pod body on any station.** The record has no external station; a designator pod can only hang on a row with the
+  `0x400` bit, and none of the five rows has it (asserted by the new retail-reading test `b1b_cockpit`). Frames
+  `external-*` of B1B-5 and the rear view show no pod.
+- **RCS page (checked, frame `crop2x-rcs-closed-vs-bay-open`).** `SIG 40` with the bays shut (the record's 40) and `SIG 60` with
+  them open (`--flight-bay 1`; the open-bay term of 1.5, `Deployment::bay`), the open bays reaching only the RCS page as for the
+  F-22, F-117, B-2 and B-52. The oval is the exposure contour.
+
+### B1B-7: HUD and cockpit
+
+- **HUD and art (decision 7): the record.** `bmbrcc.HUD` names the instrument frame `~B2_P.PIC` (the new retail-reading
+  test checks it) and the cockpit art is the B-2's `~B2H.PIC` (1394 x 508, stem `B2`, no overlays). The HUD draws as the B-2's:
+  flight data, the weapon and count (`4 MK-82AIR7`), the level-bomb cue, `NO TARGET`, the gear, brake and flap column, and
+  (B1B-5 made the bays real) the `BAY` cue while the doors move, with `R 1.1` and `IMP 0:24` once a pack is away (frame `live-fire-hud-bay-slot1`). The
+  window frames are the B-2's bezel (frames `cockpit-front-view`, `before-cockpit-front`).
+- **Glass aperture: measured, not fail closed.** `hud_aperture::mask` already routes the B-1B and the Tu-160 to the B-2's
+  20-vertex polygon, keyed to the 1394 x 508 picture (BMB-B1 added the arm; B2-7 measured it): the main window between the two
+  struts, 246,986 of its 247,572 transparent pixels (99.76 percent), no opaque pixel, no side pane. This slice **verifies it
+  for the B-1B** rather than assuming it: the retail-reading test `the_b2_glass_is_the_main_window_of_the_imported_art` now also
+  asserts the B-1B's cockpit art is `~B2H.PIC` and its mask is pixel-identical to the B-2's on the real art, and a synthetic test
+  (`the_b1b_glass_is_the_b2_glass_for_the_shared_picture`) pins the inside, the side panes and the fail-closed size. The frame
+  `cockpit-front-view` shows the HUD drawn through the main window only.
+- **Eye (fitted, measured).** `mirrors::eye_offset` gains the B-1B: **11.3 ft up and 66 ft ahead** of the model origin
+  (the shared seat is 7 up and 10 ahead). Measured on `B1.SH` (4/3 ft a unit): the fuselage crown rises along the centre line from 8 ft (z 6 units) at 38.7 ft ahead of the origin to
+  10.7 ft (z 8) at 64 ft (y 48 units); there the **flight deck** begins: the nose roof drops to 6.7 ft (z 5) and a canopy ridge 2.7 ft wide
+  runs on from the crown (10.7 ft at 64 ft, 9.3 ft at 68 ft) and slopes down to the roof at 72 ft (y 54); the nose cone ends at 86.7 ft. The
+  shared seat is 54 ft aft of the deck, inside the fuselage, so F2 Back looked at its inner walls (frame `before-cockpit-back-f2`). A seat inside
+  the ridge (8.7 ft up, the deck's middle) looked at the ridge's own back wall 2.7 ft behind it (the skin draws from inside): rejected. The seat
+  is the deck's middle in plan, 66 ft ahead, 0.6 ft over the 10.7 ft crown behind it, so F2 Back clears the spine and looks down the length of the aircraft
+  to the fins and the wing panels (frame `cockpit-back-f2`). Readers and tests are the B2-7 and B52-7 ones
+  (`mirrors::tests::only_the_b2_the_f117_and_the_b52_have_their_own_pilot_eye`, extended). The forward cockpit, mirrors, padlock and target
+  camera do not read the eye; the record's `viewOffset` (0, 30, 60) is the B-2's template value and is **not used** (at 4/3 ft a unit it would be
+  40 and 80 ft, not the drawn deck; pinned by the new test).
+- **Rear view.** F2 Back is the shared rear view from that seat; no rear-view HUD exists (the B-52's open item 3), and the aircraft has no
+  tail gun to cue (it has no gun). The Back view at rest shows the wings spread (the sweep follows speed).
+- **Instruments.** The Systems window shows one engine readout (the shared page; the aircraft has four engines) and `FUEL 243000 LBS`, the
+  Weapons window `12 MK-82AIR7` and `30 CHAFF 30 FLARE`, and the Target Cam, RWR, Radar and Nav pages draw in the B-2's bezel.
+
+### Tests (this slice)
+
+`tore-app`: `hud_aperture::tests::the_b1b_glass_is_the_b2_glass_for_the_shared_picture` (new), the retail-reading B-2 glass test (extended to the B-1B),
+`mirrors::tests::only_the_b2_the_f117_and_the_b52_have_their_own_pilot_eye` (extended: the B-1B's 4.3 ft up and 56 ft ahead of the shared seat).
+`tore-sim`: `sensors::profile::tests::the_b1b_radar_row_is_the_reviewed_advanced_f18_record` (new). `tore-import`:
+`tests/b1b_cockpit.rs` (new, retail-reading, skips without an install: the five rows with no designator bit, `F18R.SEE`, `BMBRCC.HUD`, its panel and
+the B-2's art, no overlays, 1394 x 508, the unused `viewOffset`). Battery (new): `a2g-release-origin-b1b`, `ai-strike-b1b-stick`, `ai-strike-b1b-pack`,
+`flight-countermeasures-b1b`, `flight-jettison-b1b-slot1`.
+
+### Open for John
+
+1. **Guided stores.** The bay rows admit four unguided stores, so the fixed Pave Spike has nothing to guide; the JDAM, GBU and cluster loads wait on
+   B1B-5's open item (a wider pitch for fat stores, or the combined bay).
+2. **Radar.** The F/A-18's Advanced radar as the record gives it (no ground-mapping mode, as for the B-2 and B-52); a bomber-class preset would be a
+   new record or an override.
+3. **Pave Spike and IR rows** stay as retail rows with no pod body, as the B-2's.
+4. **Eye** at 11.3 ft up, 66 ft ahead (over the deck's hump): fitted, change in `mirrors::eye_offset`.
+5. **HUD** draws in the B-2's main window only; whole-picture (the AC-130 choice) is a one-line change.
+6. **Pack stagger** (12 ft wide, 42 ft deep): shared retail release code, listed in B1B-5.
+
+Provenance: sensor rows, HUD module, art, panel names and the countermeasure counts spec-derived (retail records); the
+radar choice, the eye, the glass reuse and the release checks fitted, agent decisions 2026-11-16 on the coordinator's first pass. No retail bytes
+committed.
+
+### Checks
+
+All through `.local/m3-imports/light3.sh` (away mode), profile `.local/m3-aircraft/profile-b1b` refreshed first, windows through
+`tools/agent-run.sh` (logs in `.local/m3-aircraft/checks/B1B-6/`): `cargo fmt --all -- --check` clean; `cargo clippy --workspace --all-targets
+--locked -- -D warnings` clean; `cargo test --locked --workspace --no-fail-fast` 7,875 passed, 0 failed, 108 ignored (7,864 at B1B-5; three new tests, two
+unit and one retail-reading, and the merge's), the retail-reading tests against the install; `--validate-ordnance` passed with **no pin moved** (54 aircraft, 23 recovered
+stations, 5,344 weapon placements, 257 tank placements, 82 weapon and 9 tank records, pods 82, Cheat-only 278; `B1.PT` 3 source rows, 12 placements);
+`--aircraft b1b --headless-flight 600`: 435.5 kt level at 5,001 ft, 0 non-finite, no crash (fuel 265,274 to 265,253 lb; no payload on that path);
+`--cockpit-sheet ... b1b`: `NO MIRRORS FITTED`; battery (`--jobs 2 --windows 1`) **23 of 23**: every `*b1b*` scenario (21: B1B-5's 14, with the new
+`a2g-release-origin-b1b`, `ai-strike-b1b-stick`, `ai-strike-b1b-pack`, `flight-countermeasures-b1b` and `flight-jettison-b1b-slot1`), `menus-ordnance-availability`
+and `a2g-catalog`; `python3 -B -m unittest discover -s tools` 587 OK (5 skipped); `tools/check_docs.py` passed (382 files). **Not run:** the guns and live fire of every
+aircraft (no shared gun or sight code was touched: the changes are the B-1B's eye entry, a test and battery scenarios), the full battery, `--smoke-test`,
+`check_assets`, a networked B-1B release, replay scenarios for the B-1B (B1B-9), `flight-liftoff` and approach for the B-1B (B1B-8).
+
+Frames (`.local/m3-aircraft/frames/B1B-6/`, png; `cap.sh`, `live.sh` and `cm.sh` in `checks/B1B-6/`): `load-ordnance`, `before-cockpit-front`, `cockpit-front-view`,
+`cockpit-look-left-45`, `cockpit-look-right-45`, `before-cockpit-back-f2` (the shared seat: inside the fuselage), `cockpit-back-f2`, `rcs-page-closed`,
+`rcs-page-bay-open`, `crop2x-rcs-closed-vs-bay-open`, `countermeasures-external`, `countermeasures-jammer`, `live-fire-hud-bay-slot1`, `external-threequarter`. The HUD draws inside the
+main window, the pages draw with the B-2 bezel, and no pod appears on the airframe.

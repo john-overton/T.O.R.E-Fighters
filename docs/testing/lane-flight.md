@@ -1052,3 +1052,10 @@ press from the bottom tier up, outermost first alternating sides; the row's own 
 the door leaves, ends, roof and floor and each other by at least 0.05 ft with the doors open) and
 `render-b1b-clearance-default` (the default 12 seven-packs, centred in the bays). `render-b1b-skin` keeps
 `--loadout none` (its skin check needs no stores; the default load now starts since the start-fuel fix, 6f0277d8).
+
+Update (B1B-6, 2026-11-16): new scenarios for the B-1B's ordnance. `a2g-release-origin-b1b` (six `--a2g-run --attack release` runs: each of the three bays' plain Mk 82 rows, 12
+presses, the first nine places from the grid's cells, 4 abreast, outermost first alternating sides, 1.3 ft a tier; each bay's default seven-pack row, four packs of seven bombs from the
+pack's own place and the retail pack stagger), `ai-strike-b1b-stick` (an AI B-1B, `--load MK82 --count 20` at 20,000 ft: a stick of eight 0.25 s apart from the same cells, the doors open at
+every release) and `ai-strike-b1b-pack` (the default load: four packs of seven, the first bomb of each from the row's own place), `flight-countermeasures-b1b` (the retail `F18.ECM`: 30 chaff
+and 30 flares, five and three released) and `flight-jettison-b1b-slot1` (the forward bay, which the generator's slot-2 start leaves out). No guided store is admitted on the bay rows, so
+there is no `a2g-laser-b1b`.

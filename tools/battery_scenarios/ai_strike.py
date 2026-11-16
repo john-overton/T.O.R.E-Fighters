@@ -1215,6 +1215,80 @@ def b2_stick_problems(output: str) -> list[str]:
     return problems
 
 
+# B1B-6 (2026-11-16): the B-1B's three bays, one centre line each (B1B-5): 4 abreast, 1 long, the bottom
+# tier 0.62 ft under the reference and 1.3 ft a tier; the forward bay's mount is 35.30 ft ahead, the
+# intermediate's 19.97 and the aft bay's -13.03 ft. The opening of each is 8 ft wide.
+B1B_BAYS = {0: (35.30, 29.33, 42.67), 1: (19.97, 13.33, 28.00), 2: (-13.03, -19.83, -4.83)}
+
+
+def b1b_origins(output: str) -> list[tuple[float, float, float]]:
+    return [(float(m[3]), float(m[4]), float(m[5])) for m in ORIGIN_LINE.findall(output)]
+
+
+def b1b_stick_problems(output: str) -> list[str]:
+    """`ai-strike-b1b-stick`: an AI B-1B at 20,000 ft drops a stick of eight Mk 82 from its forward bay's
+    grid, one every 0.25 s from the grid's own first eight places (B1B-6): the cells a human's press
+    leaves from (`a2g-release-origin-b1b`)."""
+    runs = parse_runs(output)
+    if len(runs) != 1:
+        return [f"expected one strike run, got {len(runs)}"]
+    run = runs[0]
+    problems = consistency_problems(run, "B-1B stick")
+    problems += bay_door_problems(run, "B-1B stick")
+    releases = run.of("RELEASE")
+    if len(releases) != 8:
+        problems.append(f"{len(releases)} releases, want a stick of 8")
+    times = run.times("RELEASE")
+    if any(abs((b - a) - 0.25) > 0.02 for a, b in zip(times, times[1:])):
+        problems.append(f"the stick is not 0.25 s apart: {times}")
+    origins = b1b_origins(output)
+    if len(origins) != len(releases):
+        problems.append(f"{len(origins)} origin lines for {len(releases)} releases")
+    forward, lo, hi = B1B_BAYS[0]
+    for n, origin in enumerate(origins[:8]):
+        want = (B2_COLUMNS[n % 4], -0.62 + 1.3 * (n // 4), forward)
+        if abs(origin[0] - want[0]) > 0.1 or abs(origin[1] - want[1]) > 0.1 or abs(origin[2] - want[2]) > 1.0:
+            problems.append(f"bomb {n + 1} left from {origin}, the grid's place is {want}")
+        if not lo < origin[2] < hi or not -4.0 < origin[0] < 4.0:
+            problems.append(f"bomb {n + 1} left from {origin}, outside the forward opening")
+    if len(set(origins)) != len(origins):
+        problems.append("two bombs left from one place")
+    if not run.of("IMPACT"):
+        problems.append("no bomb landed")
+    if not run.of("EGRESS"):
+        problems.append("no EGRESS after the stick")
+    if run.of("LOST"):
+        problems.append("the B-1B was lost")
+    if run.setup.get("aircraft") != "B1b":
+        problems.append(f"flew {run.setup.get('aircraft')}, want B1b")
+    return problems
+
+
+def b1b_pack_problems(output: str) -> list[str]:
+    """`ai-strike-b1b-pack`: the default load's seven-packs leave the forward bay a pack at a time, the
+    first bomb of each pack from the grid's own place (columns -1.95, +1.95, -0.65, +0.65 ft)."""
+    runs = parse_runs(output)
+    if len(runs) != 1:
+        return [f"expected one strike run, got {len(runs)}"]
+    run = runs[0]
+    problems = consistency_problems(run, "B-1B pack")
+    problems += bay_door_problems(run, "B-1B pack")
+    origins = b1b_origins(output)
+    if len(origins) % 7 or len(origins) < 28:
+        problems.append(f"{len(origins)} bombs, want whole packs of seven, four packs")
+    forward = B1B_BAYS[0][0]
+    for pack in range(len(origins) // 7):
+        first = origins[pack * 7]
+        want = (B2_COLUMNS[pack % 4], -0.62, forward)
+        if abs(first[0] - want[0]) > 0.1 or abs(first[1] - want[1]) > 0.1 or abs(first[2] - want[2]) > 1.0:
+            problems.append(f"pack {pack + 1} left from {first}, the row's place is {want}")
+    if not run.of("IMPACT"):
+        problems.append("no bomb landed")
+    if run.of("LOST"):
+        problems.append("the B-1B was lost")
+    return problems
+
+
 def b2_climb_problems(output: str) -> list[str]:
     """`ai-strike-b2-climb`: from 5,000 ft 30 nm out an AI B-2 climbs to its release floor (10,000 ft
     or more) before it bombs, then bombs and gets out; it never gets low."""
@@ -1582,6 +1656,23 @@ def scenarios() -> list[Scenario]:
         notes="An AI B-2 (a Heavy) on the column at 20,000 ft, 12 nm out: a stick of eight Mk 82 from the left "
               "bay's grid, 0.25 s apart, from the grid's own first eight places (front row, bottom tier, "
               "outermost first), then egress. Doors stay shut for the AI's release (coordinator decision).",
+    ))
+    extra.append(Scenario(
+        name="ai-strike-b1b-stick", lane="flight",
+        args=pilot_run("UKR", "QUCOL", "--aircraft", "b1b", "--load", "MK82", "--count", "20", "--altitude", "20000",
+                       "--from", "12", "--seconds", "200", "--follow-egress"),
+        timeout=600, expect=[r"RELEASE", r"ORIGIN", r"IMPACT", r"EGRESS"], check=b1b_stick_problems,
+        notes="An AI B-1B (a Heavy) on the column at 20,000 ft, 12 nm out, 20 Mk 82 in its forward bay: a stick of "
+              "eight 0.25 s apart from the grid's own first eight places (4 abreast, outermost first, bottom tier "
+              "then the next), the cells a human's press leaves from, then egress (B1B-6).",
+    ))
+    extra.append(Scenario(
+        name="ai-strike-b1b-pack", lane="flight",
+        args=pilot_run("UKR", "QUCOL", "--aircraft", "b1b", "--load", "MK82AIR", "--altitude", "20000",
+                       "--from", "12", "--seconds", "200", "--follow-egress"),
+        timeout=600, expect=[r"RELEASE", r"ORIGIN", r"IMPACT"], check=b1b_pack_problems,
+        notes="An AI B-1B with the default load's seven-packs (four in the forward bay): four packs of seven, the first "
+              "bomb of each from the row's own place, doors read open at every release (B1B-6).",
     ))
     extra.append(Scenario(
         name="ai-strike-b2-climb", lane="flight",

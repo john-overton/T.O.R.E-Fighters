@@ -369,3 +369,15 @@ Sensor View name; no other aircraft changed). The jammer row is gone (BMB-A2), s
 chaff and no flare line. The laser works from the fixed row with a GBU-27 released from the bay (`a2g-laser-f117`:
 lased, released, guided, the tank destroyed). The RCS page reads `SIG 1` closed and `SIG 2` with the bay open.
 See [the F-117 section](../formats/aircraft-variety.md#f-117-ordnance-sensors-and-cockpit-f117-67-2026-11-15).
+
+## B-1B sensors: the F/A-18 radar and jammer, five fixed rows, 2026-11-16 (B1B-6, B1B-7)
+
+The B-1B keeps its five bomber-template rows as retail (the coordinator's first pass: no pod body, no substitute): `VIS340.SEE`,
+the F/A-18's `F18R.SEE` (`Preset::Advanced`, nothing added), `F18.ECM` (`LateColdWar`, strength 0.30), `PAVESPK.SEE` and `AV8IR.SEE`, none with
+the designator bit. `--sensor-summary` reads `B1b: radar F18R.SEE search 90 nmi 60x60 deg track 50 nmi 45x45 deg look-down 0 ADVANCED;
+infrared AV8IR.SEE search 15 nmi 60x60 deg track 15 nmi 45x45 deg; visual VIS340.SEE search 10 nmi 170x140 deg track 5 nmi 170x140 deg; jammer
+F18.ECM LATE strength 0.30; signature radar 40 infrared 60`. `--live-fire --aircraft b1b --combat-command chaff` (five) and `flare` (three) leaves `25
+CHAFF 27 FLARE` of 30 and 30 (battery `flight-countermeasures-b1b`), and `--jammer-on` lights `JAM` on the RWR window. The RCS page reads `SIG 40` closed
+and `SIG 60` with the bays open (`--flight-bay 1`). The radar gives the bomber the shared air-to-air modes only (no ground-mapping mode), as for the B-2
+and B-52. Not run: an RWR with a plotted emitter (no scripted path exists). See [the B-1B
+section](../formats/aircraft-variety.md#b-1b-lancer-ordnance-sensors-hud-and-cockpit-b1b-67-2026-11-16).

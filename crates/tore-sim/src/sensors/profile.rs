@@ -837,6 +837,36 @@ mod tests {
         assert_eq!(Preset::for_record("TU160R.SEE"), None);
     }
 
+    /// B1B-7: the B-1B's five rows keep the retail records; its radar row is
+    /// `F18R.SEE`, the F/A-18's, already reviewed Advanced, so the B-1B flies
+    /// the air-to-air RWS/TWS radar of that class (no change, no new preset).
+    #[test]
+    fn the_b1b_radar_row_is_the_reviewed_advanced_f18_record() {
+        assert_eq!(Preset::for_record("F18R.SEE"), Some(Preset::Advanced));
+        // The jammer row `F18.ECM` is the F/A-18's late-generation block.
+        let a = aircraft_with(&["F18R.SEE", "F18.ECM"]);
+        let profiles = SensorProfiles::from_source(&a, |name| {
+            Ok(if name.ends_with(".SEE") {
+                sensor_bytes(name, 3)
+            } else {
+                ecm_bytes(name)
+            })
+        })
+        .unwrap();
+        assert_eq!(
+            profiles.radar.as_ref().map(|r| r.record.as_str()),
+            Some("F18R.SEE")
+        );
+        assert_eq!(
+            profiles.radar.as_ref().map(|r| r.preset),
+            Some(Preset::Advanced)
+        );
+        assert_eq!(
+            profiles.jammer.as_ref().map(|j| j.generation),
+            Some(Generation::LateColdWar)
+        );
+    }
+
     #[test]
     fn a_reviewed_record_still_enables_its_flying_channel() {
         let a = aircraft_with(&["F18R.SEE", "F18.ECM"]);

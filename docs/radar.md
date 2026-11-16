@@ -1023,3 +1023,8 @@ range; aspect and the open bay bring a faint aircraft into view; a jammer
 shortens a site's view; a flak team's picture and a battery radar read the
 echo too).
 
+
+Update (B1B-7, 2026-11-16): the B-1B's radar row is `F18R.SEE`, already in the Advanced row of the table above, so
+no preset was added and none moved; a test pins the record (`sensors::profile::tests::the_b1b_radar_row_is_the_reviewed_advanced_f18_record`).
+Its RCS page reads `SIG 40` closed and `SIG 60` with the three bays open (the open-bay term of 1.5 reaches
+the RCS page only, as for the F-22, F-117, B-2 and B-52). See [the B-1B section](formats/aircraft-variety.md#b-1b-lancer-ordnance-sensors-hud-and-cockpit-b1b-67-2026-11-16).
