@@ -2415,7 +2415,7 @@ mod profile_tests {
             (121_000., 235_220.)
         );
         // B-2A: thrust 69,200, empty 158,000, fuel 167,000, maximum 376,000;
-        // the fuel flow stays the retail 6 lb/s.
+        // the fuel flow 6 lb/s becomes 7 (B2-6).
         // B2-8 adds the real 50,000 ft ceiling (both top edges up 1,000 ft)
         // and the fitted airbrake drag 64 (the B-1B's 256 in the record).
         let b2 = [
@@ -2465,7 +2465,7 @@ mod profile_tests {
             (a.number("internalFuel"), a.number("maxTakeoffWeight")),
             (167_000., 376_000.)
         );
-        assert_eq!(a.number("fuelConsumption"), 6.);
+        assert_eq!(a.number("fuelConsumption"), 7.);
         assert_eq!(
             (a.number("maxAlt"), a.number("airBrakesDrag")),
             (50_000., 64.)

@@ -430,6 +430,26 @@ def scenarios() -> list[Scenario]:
         return problems
 
     outputs = [f"{name}.tore-replay" for name, _, _ in PASSES] + ["pack-again.tore-replay"]
+
+    # B2-9: a B-2's bay ripple (twelve Mk 82 from the left bay's grid, 0.5 s apart) recorded, replayed tick for
+    # tick with `--verify-render` (the stores of every aircraft compared each tick) and read back as twelve
+    # releases and outcomes, the station's count falling 32 to 20.
+    b2_args = [*RUN, "UKR", "QUCOL", "--attack", "release", "--from", "1", "--altitude", "20000", "--speed", "300", "--repeat", "12",
+               "--gap", "0.5", "--aircraft", "b2", "--station", "0", "--load", "MK82", "--count", "32",
+               "--record", "{work}/b2-ripple.tore-replay", "--verify-render"]
+
+    def b2_check(work: Path, output: str) -> list[str]:
+        problems = verify_problems(output, "the B-2 ripple", 3_000)
+        rows = events(work, "b2-ripple")
+        for name in ("weapon.release", "weapon.outcome"):
+            got = len(kind(rows, name))
+            if not 11 <= got <= 12:
+                problems.append(f"{got} {name} events for a ripple of 12 presses")
+        if len(kind(rows, "stores.items")) < 11:
+            problems.append("fewer stores.items entries than releases")
+        problems += rc.file_problems(work, "log-b2-ripple/log.jsonl", rc.check_jsonl)
+        return problems
+
     return [
         Scenario(
             name="replay-a2g",
@@ -441,5 +461,18 @@ def scenarios() -> list[Scenario]:
             then=steps,
             check_work=check,
             notes="bombs, rockets, lasers, JDAMs and HARMs recorded, replayed tick for tick and read back as events",
-        )
+        ),
+        Scenario(
+            name="replay-a2g-b2-ripple",
+            lane="replay",
+            args=b2_args,
+            timeout=300,
+            expect=[r"a2g-run: done"],
+            outputs=["b2-ripple.tore-replay"],
+            then=[Step(["--recording-log", "{work}/b2-ripple.tore-replay", "--out", "{work}/log-b2-ripple", "--rate", "5"],
+                       timeout=300)],
+            check_work=b2_check,
+            notes="A B-2 bay ripple (twelve Mk 82 from the left bay grid) recorded, replayed tick for tick and read back "
+                  "as twelve releases and outcomes (B2-9).",
+        ),
     ]

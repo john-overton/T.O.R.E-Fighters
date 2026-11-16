@@ -1067,6 +1067,114 @@ def no_laze_problems(output: str) -> list[str]:
     return problems
 
 
+# The B-2's bay grids (B2-5, B2-9: `combat::bays::GRIDS`, `hardpoints::grid_point`): the left bay's
+# centre x -5.333 ft, the right's +4.667; a 4 abreast row outermost first alternating sides, the Mk 82s
+# 4 abreast, 2 long (forward 10.44 then 2.89 ft), bottom tier first (up -2.95 ft), the Paveway III
+# 4 abreast, 1 long (forward 6.67 ft, up -1.79 ft). The openings run -3.0 to +16.33 ft forward.
+B2_COLUMNS = (-1.95, 1.95, -0.65, 0.65)
+B2_BAY_X = {"left": -5.333, "right": 4.667}
+B2_OPENING_FORWARD = (-3.0, 16.33)
+ORIGIN_LINE = re.compile(r"^ai-strike: ORIGIN t=(\S+) n=(\d+) station=(\d+) right=(\S+) up=(\S+) forward=(\S+)$", re.M)
+
+
+def b2_mk82_cells(bay: str, count: int) -> list[tuple[float, float, float]]:
+    """The first `count` Mk 82 places of a B-2 bay: (right, up, forward) feet."""
+    x = B2_BAY_X[bay]
+    cells = []
+    for tier in range(4):
+        for row in (10.44, 2.89):
+            for column in B2_COLUMNS:
+                cells.append((x + column, -2.95 + 1.3 * tier, row))
+    return cells[:count]
+
+
+def b2_stick_problems(output: str) -> list[str]:
+    """`ai-strike-b2-stick`: an AI B-2 at 20,000 ft drops a stick of eight Mk 82 from its left bay grid
+    (B2-9): one every 0.25 s from the grid's own first eight places, egress after the last."""
+    runs = parse_runs(output)
+    if len(runs) != 1:
+        return [f"expected one strike run, got {len(runs)}"]
+    run = runs[0]
+    problems = consistency_problems(run, "B-2 stick")
+    releases = run.of("RELEASE")
+    if len(releases) != 8:
+        problems.append(f"{len(releases)} releases, want a stick of 8")
+    times = run.times("RELEASE")
+    if any(abs((b - a) - 0.25) > 0.02 for a, b in zip(times, times[1:])):
+        problems.append(f"the stick is not 0.25 s apart: {times}")
+    origins = [(float(r["right"]), float(r["up"]), float(r["forward"]))
+               for r in (dict(zip(("t", "n", "station", "right", "up", "forward"), m)) for m in ORIGIN_LINE.findall(output))]
+    if len(origins) != len(releases):
+        problems.append(f"{len(origins)} origin lines for {len(releases)} releases")
+    for n, (origin, want) in enumerate(zip(origins, b2_mk82_cells("left", 8))):
+        if abs(origin[0] - want[0]) > 0.1 or abs(origin[1] - want[1]) > 0.1 or abs(origin[2] - want[2]) > 1.0:
+            problems.append(f"bomb {n + 1} left from {origin}, the grid's place is {want}")
+        lo, hi = B2_OPENING_FORWARD
+        if not lo < origin[2] < hi or not -9.333 < origin[0] < -1.333:
+            problems.append(f"bomb {n + 1} left from {origin}, outside the left opening")
+    if len(set(origins)) != len(origins):
+        problems.append("two bombs left from one place")
+    if any(number(r.get("alt_ft")) < 15000 for r in releases):
+        problems.append("released below the 15,000 ft this run's threat floor")
+    if not run.of("IMPACT"):
+        problems.append("no bomb landed")
+    if not run.of("EGRESS"):
+        problems.append("no EGRESS after the stick")
+    if run.of("LOST"):
+        problems.append("the B-2 was lost")
+    if run.setup.get("aircraft") != "B2":
+        problems.append(f"flew {run.setup.get('aircraft')}, want B2")
+    return problems
+
+
+def b2_climb_problems(output: str) -> list[str]:
+    """`ai-strike-b2-climb`: from 5,000 ft 30 nm out an AI B-2 climbs to its release floor (10,000 ft
+    or more) before it bombs, then bombs and gets out; it never gets low."""
+    runs = parse_runs(output)
+    if len(runs) != 1:
+        return [f"expected one strike run, got {len(runs)}"]
+    run = runs[0]
+    problems = consistency_problems(run, "B-2 climb")
+    releases = run.of("RELEASE")
+    if not releases:
+        return problems + ["no release from 5,000 ft over 30 nm"]
+    if any(number(r.get("alt_ft")) < 9000 for r in releases):
+        problems.append(f"released at {releases[0].get('alt_ft')} ft, under its floor")
+    if number(run.summary.get("min_agl_ft")) < 4000:
+        problems.append(f"flew down to {run.summary.get('min_agl_ft')} ft above the ground")
+    if not run.of("IMPACT"):
+        problems.append("no bomb landed")
+    if not run.of("EGRESS"):
+        problems.append("no EGRESS after the stick")
+    if run.of("LOST"):
+        problems.append("the B-2 was lost")
+    return problems
+
+
+def b2_paveway_problems(output: str) -> list[str]:
+    """`ai-strike-b2-paveway`: an AI B-2's Paveway III leaves the first place of its left bay's grid
+    (4 abreast, outermost first) and kills the tank on its laser spot (B2-9)."""
+    runs = parse_runs(output)
+    if len(runs) != 1:
+        return [f"expected one strike run, got {len(runs)}"]
+    run = runs[0]
+    problems = consistency_problems(run, "B-2 Paveway")
+    origins = ORIGIN_LINE.findall(output)
+    if len(origins) != 1:
+        return problems + [f"{len(origins)} origin lines, want 1"]
+    _, _, station, right, up, forward = origins[0]
+    for name, got, want, tol in (("right", right, -7.28, 0.1), ("up", up, -1.79, 0.1), ("forward", forward, 6.67, 1.0)):
+        if abs(float(got) - want) > tol:
+            problems.append(f"Paveway left {name} {got}, the grid's first place is {want}")
+    if station != "2":
+        problems.append(f"released from station {station}, want the left bay's Paveway row 2")
+    if not run.of("KILL"):
+        problems.append("the laser bomb did not kill its target")
+    if not run.of("EGRESS"):
+        problems.append("no EGRESS")
+    return problems
+
+
 def _runs(skills_and_profiles, miss=True, **extra) -> list[dict]:
     wanted = []
     for skill, profile in skills_and_profiles:
@@ -1360,7 +1468,7 @@ def scenarios() -> list[Scenario]:
          "fuze and the fragments (under 1,000 ft), released level with a lead on the column."),
         ("ai-strike-heavy-level", heavy, 900,
          "A C-130 with a bay of Mk 82 on the factory: its release floor is the 10,000 ft Quick Mission "
-         "altitude, not the 5,000 ft base."),
+         "altitude, not the 5,000 ft base. B2-9 (2026-11-15): its eight bombs now leave as a stick."),
         ("ai-strike-offset", offsets, 900,
          "Level and dive Mk 82 passes starting 1,000 and 3,000 ft off the attack line: the sideways law lays "
          "the track on the aim and releases on the first pass."),
@@ -1375,6 +1483,33 @@ def scenarios() -> list[Scenario]:
         first, steps, wants = run_list(entries)
         extra.append(Scenario(name=name, lane="flight", args=first, timeout=timeout, then=steps,
                               check=lambda out, wants=wants: strike_problems(out, wants), notes=notes))
+    # B2-9: the first heavy bomber with its own bays (docs/formats/aircraft-variety.md, "B-2 ordnance,
+    # missions, multiplayer and replay").
+    extra.append(Scenario(
+        name="ai-strike-b2-stick", lane="flight",
+        args=pilot_run("UKR", "QUCOL", "--aircraft", "b2", "--load", "MK82", "--altitude", "20000", "--from", "12",
+                       "--seconds", "200", "--follow-egress"),
+        timeout=600, expect=[r"RELEASE", r"ORIGIN", r"IMPACT", r"EGRESS"], check=b2_stick_problems,
+        notes="An AI B-2 (a Heavy) on the column at 20,000 ft, 12 nm out: a stick of eight Mk 82 from the left "
+              "bay's grid, 0.25 s apart, from the grid's own first eight places (front row, bottom tier, "
+              "outermost first), then egress. Doors stay shut for the AI's release (coordinator decision).",
+    ))
+    extra.append(Scenario(
+        name="ai-strike-b2-climb", lane="flight",
+        args=pilot_run("UKR", "QUCOL", "--aircraft", "b2", "--load", "MK82", "--from", "30", "--seconds", "500",
+                       "--follow-egress"),
+        timeout=900, expect=[r"RELEASE", r"ORIGIN", r"IMPACT", r"EGRESS"], check=b2_climb_problems,
+        notes="An AI B-2 starting at 5,000 ft 30 nm out climbs to its 10,000 ft release floor before it bombs "
+              "(at its corner speed, under its level-flight minimum, it sank to the ground before B2-9).",
+    ))
+    extra.append(Scenario(
+        name="ai-strike-b2-paveway", lane="flight",
+        args=pilot_run("UKR", "QUCOL", "--aircraft", "b2", "--load", "PAVEWA3", "--seconds", "120",
+                       "--follow-egress"),
+        timeout=600, expect=[r"RELEASE", r"ORIGIN", r"KILL", r"EGRESS"], check=b2_paveway_problems,
+        notes="An AI B-2's Paveway III (GBU-27) leaves the first place of its left bay's 4 abreast grid and kills "
+              "the tank on its own laser spot.",
+    ))
     return extra + [
         Scenario(
             name="ai-strike-laser-self", lane="flight",

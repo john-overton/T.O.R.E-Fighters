@@ -821,6 +821,9 @@ def scenarios() -> list[Scenario]:
         ("f5e", "lobby-ordnance-laser", True, True, True),
         ("mf1", "lobby-ordnance-laser", True, True, True),
         ("tornado", "lobby-ordnance-laser", False, True, True),
+        # Slice B2-9: the B-2's decoded wing mask admits a laser store (the GBU-27 rows) and its record has
+        # the Pave Spike sensor row (`PAVESPK.SEE`, no pod body), so there is no warning, as the F-15E's.
+        ("b2", "lobby-ordnance-laser", False, True, True),
     ):
         out.append(
             Scenario(

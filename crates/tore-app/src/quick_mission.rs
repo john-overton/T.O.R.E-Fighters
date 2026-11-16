@@ -3522,6 +3522,36 @@ mod tests {
         }
     }
 
+    /// Slice B2-9: the B-2 Spirit is offered as the player's aircraft and,
+    /// because the AI can fly it, in every AI wing field. The identity the
+    /// mission flies is named exactly (`B2.PT`), never aliased to the F-117 or
+    /// the B-1B-shaped template it was authored from.
+    #[test]
+    fn the_b2_is_a_quick_mission_player_and_a_wing_choice() {
+        let mut q = full_catalog();
+        // The player's own list offers it by its selection key, B2.PT.
+        let player = q
+            .aircraft_files
+            .iter()
+            .position(|f| f == AircraftId::B2.selection_key())
+            .unwrap();
+        q.apply(6, player);
+        assert_eq!(q.player(), Some(AircraftId::B2));
+        // The AI's list offers it too, in every wing field.
+        for field in AI_AIRCRAFT_FIELDS {
+            let index = q.ai_choice(AircraftId::B2).unwrap();
+            q.apply(field, index);
+            assert_eq!(q.wing_aircraft(field), Some(AircraftId::B2));
+        }
+        // The mission the draft flies carries the B-2 as the player and in
+        // every wing, and never another aircraft.
+        let spec = q.mission_spec().unwrap();
+        assert_eq!(spec.wings[0].aircraft, AircraftId::B2);
+        for wing in spec.wings.iter().skip(1) {
+            assert_eq!(wing.aircraft, AircraftId::B2);
+        }
+    }
+
     /// Slice GRI-9: the Saab Gripen is offered as the player's aircraft and,
     /// because the AI can fly it, in every AI wing field. The identity the
     /// mission flies is named exactly (`GRIPEN.PT`), never aliased to another

@@ -216,6 +216,16 @@ pub const GUIDED_CLOSE_FT: f64 = 10_000.;
 /// Rockets: at most this many from one pass, fired at the record's cadence
 /// while the cue stays inside the circle (fitted, agent).
 pub const ROCKETS_PER_PASS: u32 = 8;
+/// A heavy's bombs: at most this many from one level pass, a stick at the
+/// record's cadence that starts on the aim and walks on beyond it (fitted,
+/// agent, B2-9; the spec's "stick", docs/spec/ai-strike.md "Heavy bombers",
+/// had no code before the first heavy with bombs). Centring it on the aim
+/// needs the aim shifted by half the stick, a new checkpointed field, so it
+/// is left to John.
+pub const HEAVY_STICK_BOMBS: u32 = 8;
+/// A stick that has waited this long for its next bomb (a sight warning, the
+/// floor) is over and the pass exits.
+const STICK_GRACE_TICKS: u64 = 2 * 120;
 /// Guided weapons and seekers: the run ends this close (fitted, the
 /// straight run's).
 pub const GUIDED_EXIT_FT: f64 = 2_000.;
@@ -1243,7 +1253,7 @@ impl Strike {
                         self.spot_wait_point(cx)
                             .filter(|_| self.phase == Phase::Wait)
                     });
-                order.steer = point.map(|p| self.cruise_steer(cx, p, SpeedRequest::Corner));
+                order.steer = point.map(|p| self.cruise_steer(cx, p, level_speed(cx)));
                 order.activity = Some(Activity::Pursuing);
                 order
             }
@@ -1258,7 +1268,7 @@ impl Strike {
                 order
             }
             Phase::TurnBack => {
-                order.steer = target_at.map(|p| self.cruise_steer(cx, p, SpeedRequest::Corner));
+                order.steer = target_at.map(|p| self.cruise_steer(cx, p, level_speed(cx)));
                 order.activity = Some(Activity::Pursuing);
                 order
             }
@@ -2035,7 +2045,7 @@ impl Strike {
         let speed = if pass == Pass::FastHigh {
             SpeedRequest::Maximum
         } else {
-            SpeedRequest::Corner
+            level_speed(cx)
         };
         let afterburner = pass == Pass::FastHigh;
         let ahead =
@@ -2095,6 +2105,13 @@ impl Strike {
             };
         }
         let pull_out = dive_pull_out_ft(own);
+        // A heavy's stick in progress is not ended by the cue passing the aim
+        // (B2-9): its later bombs fall beyond it; it ends with its count.
+        let stick_going = cx.inputs.class == StrikeClass::Heavy
+            && kind == StoreKind::Bomb
+            && self.released > 0
+            && self.released < HEAVY_STICK_BOMBS
+            && self.rounds_left(cx) > 0;
         let ended = match pass {
             _ if kind == StoreKind::Rocket
                 && self.released > 0
@@ -2114,7 +2131,7 @@ impl Strike {
                             || own.agl_ft < STRAFE_BREAK_AGL_FT))
                     || (kind == StoreKind::Gun && self.rounds_left(cx) == 0)
             }
-        } || (level_like && self.overflown(cx, target, aim, solution))
+        } || (level_like && !stick_going && self.overflown(cx, target, aim, solution))
             || (kind.seeker() && distance < STRAIGHT_EXIT_FT)
             || (kind.level_run() && distance < GUIDED_EXIT_FT);
         if ended {
@@ -2308,12 +2325,23 @@ impl Strike {
                 _ => true,
             } || kind != StoreKind::Bomb;
             let first = self.released == 0;
+            // A heavy's free-falling bomb has no maximum range: the record's
+            // zone 1 maximum (the Mk 82's 20,000 ft) is a short bomb's
+            // stand-off, and a heavy's release height under threat (15,000
+            // ft over a defended target, John 2026-10-11) is a slant of more
+            // than that, so the B-2 never released (B2-9, 2026-11-15).
+            let heavy_bomb = cx.inputs.class == StrikeClass::Heavy && kind == StoreKind::Bomb;
+            // Its stick goes on after the first at the record's cadence,
+            // whatever the cue says.
+            let in_stick = heavy_bomb && !first && self.released < HEAVY_STICK_BOMBS;
             let in_zone = !kind.unguided()
                 || s.impact.is_some_and(|i| {
                     let range = slant(own.position, i);
                     self.store(cx).is_none_or(|st| {
                         range >= st.minimum_range_ft
-                            && (st.maximum_range_ft <= 0. || range <= st.maximum_range_ft)
+                            && (heavy_bomb
+                                || st.maximum_range_ft <= 0.
+                                || range <= st.maximum_range_ft)
                     })
                 });
             // The release test (slice ST-T2): the shared gate around the
@@ -2340,7 +2368,7 @@ impl Strike {
                     StoreKind::Laser if self.takeover.is_some() => {
                         first && s.due && !s.guided_in_flight
                     }
-                    k if k.unguided() => first && due,
+                    k if k.unguided() => (first && due) || in_stick,
                     _ => first && (s.due || planned),
                 };
             if fire && floor_ok && !s.warning && self.rounds_left(cx) > 0 {
@@ -2354,9 +2382,13 @@ impl Strike {
                         .store(cx)
                         .map_or(super::QUARTER_SECOND_TICKS, |st| st.cadence_ticks);
                 self.released_on_plan(cx.tick);
+                // A heavy's stick goes on while its count and bombs last.
+                let stick_on =
+                    heavy_bomb && self.released < HEAVY_STICK_BOMBS && self.rounds_left(cx) > 1;
                 // A bomb, a guided weapon or a seeker leaves once a pass;
                 // the run then exits (a dive climbs out first).
-                if kind != StoreKind::Rocket && pass != Pass::Dive {
+                if stick_on {
+                } else if kind != StoreKind::Rocket && pass != Pass::Dive {
                     // A laser weapon on the aircraft's own spot is held on
                     // the target until it lands (slice ST-L).
                     if !(kind == StoreKind::Laser && self.hold_after_release(cx)) {
@@ -2365,6 +2397,8 @@ impl Strike {
                 } else if kind != StoreKind::Rocket {
                     self.segment_to(Segment::Climb, cx.tick);
                 }
+            } else if in_stick && cx.tick > self.next_release + STICK_GRACE_TICKS {
+                self.exit(cx);
             }
         }
         self.update_commit(cx, target, aim, solution);
@@ -3068,6 +3102,28 @@ pub fn release_floor_ft(threat: ThreatLevel) -> f64 {
     match threat {
         ThreatLevel::Clear | ThreatLevel::Air => FLOOR_CLEAR_FT,
         ThreatLevel::Guns | ThreatLevel::Missiles => FLOOR_DEFENDED_FT,
+    }
+}
+
+/// A heavy whose corner speed is under its minimum level-flight speed flies
+/// its level run at this multiple of that minimum (fitted, agent, B2-9).
+pub const HEAVY_BELOW_MINIMUM_MARGIN: f64 = 1.3;
+
+/// The speed a level run and the legs round it are flown at: the corner
+/// speed, except for a heavy whose corner speed is under the minimum speed it
+/// can hold level flight at (`limits.minimum`, the AI's own figure for the
+/// loaded aircraft). The B-2's corner speed, the slow edge of its 3 G row, is
+/// 316 ft/s at 5,000 ft against a minimum of 378, so at the corner speed it
+/// wallowed in 50 degree banks and sank to the ground (B2-9). The C-130's
+/// corner speed (256 ft/s against 227) is above its minimum and is unchanged.
+fn level_speed(cx: &Context<'_>) -> SpeedRequest {
+    let limits = cx.own.limits;
+    if cx.inputs.class == StrikeClass::Heavy && limits.corner.0 < limits.minimum.0 {
+        SpeedRequest::Explicit(super::ScalarSpeed(
+            (HEAVY_BELOW_MINIMUM_MARGIN * limits.minimum.0).min(limits.maximum.0),
+        ))
+    } else {
+        SpeedRequest::Corner
     }
 }
 

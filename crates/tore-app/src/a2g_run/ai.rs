@@ -134,7 +134,7 @@ use tore_sim::{
         controller::Activity, engagement::StrikeRole, mission::AiActor, strike::Pass as StrikePass,
         weapon_service::Rounds, wing::PlayerOrder,
     },
-    attitude::Vector,
+    attitude::{Vector, dot},
     combat::{
         blast::MarkKind,
         delivery::DeliveryMode,
@@ -1294,10 +1294,10 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
         .filter(|p| p.owner == w.plane.0 && !w.seen.contains(&p.id))
         .filter(|p| p.weapon.as_ref().is_none_or(|wp| !live::is_gun(wp)))
         .filter(|p| p.gun_round.is_none())
-        .map(|p| (p.id, p.position, p.station, p.weapon.clone()))
+        .map(|p| (p.id, p.position, p.previous, p.station, p.weapon.clone()))
         .collect();
     let at = scene.striker_at(w.plane);
-    for (id, position, station, weapon) in fresh {
+    for (id, position, previous, station, weapon) in fresh {
         w.seen.insert(id);
         if let Some(store) = weapon
             .as_ref()
@@ -1357,6 +1357,20 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
             });
         let lead = scene.actor(w.plane).map_or(0., hooks::lead);
         let dive = hooks::dive_deg(scene.striker_velocity(w.plane));
+        // Where the round started against the aircraft, feet right, up and
+        // forward (B2-9, as the human run's `origin` line): the AI's release
+        // from a bay grid is checked against the grid's cells.
+        if let Some(actor) = scene.actor(w.plane) {
+            let launcher = tore_world::combat::launcher(actor.flight());
+            let from: Vector = std::array::from_fn(|i| previous[i] - launcher.position[i]);
+            println!(
+                "ai-strike: ORIGIN t={t:.3} n={} station={station} right={:.2} up={:.2} forward={:.2}",
+                w.releases,
+                dot(from, launcher.basis.right),
+                dot(from, launcher.basis.up),
+                dot(from, launcher.basis.forward),
+            );
+        }
         println!(
             "ai-strike: RELEASE t={t:.3} n={} weapon={} station={station} alt_ft={alt:.0} speed_kt={speed:.0} range_ft={range:.0}{aim} lead_ft={lead:.0} dive_deg={dive:.0}{guided}",
             w.releases,

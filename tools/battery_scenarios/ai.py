@@ -276,6 +276,39 @@ def checker(**kw) -> Callable[[str], list[str]]:
     return lambda output: probe_problems(output, **kw)
 
 
+B2_ACTOR = re.compile(r"^actor=(\d+) (\S+ [\d-]+) B2 activity=\S+ alive=\w+ rounds=(\d+) ", re.M)
+STORES_LINE = re.compile(r"^AI stores: actor=(\d+) .*? stations=\[(.*)\]$", re.M)
+SHOT_AT_STATION = re.compile(r"^AI probe attack: .* missiles=(\d+) gun_bursts=(\d+) gun_rounds=(\d+) ", re.M)
+
+
+def b2_no_air_to_air_checker() -> Callable[[str], list[str]]:
+    """The B-2 wing in a fight (slice B2-9): the probe's usual checks, and the B-2s carry no gun (rounds=0) and
+    nothing but Mk 82 and GBU-27 on their stations, so they fire no air-to-air shot; the player's own run
+    (also a B-2) fires no missile or gun burst either."""
+    base = checker()
+
+    def check(output: str) -> list[str]:
+        problems = base(output)
+        ids = {m.group(1) for m in B2_ACTOR.finditer(output)}
+        if not ids:
+            problems.append("no B-2 actor in the probe")
+        for m in B2_ACTOR.finditer(output):
+            if int(m.group(3)) != 0:
+                problems.append(f"{m.group(2)} (B-2) holds {m.group(3)} gun rounds")
+        for m in STORES_LINE.finditer(output):
+            if m.group(1) in ids:
+                names = re.findall(r"([A-Z0-9-]+) x\d+", m.group(2))
+                other = [n for n in names if n not in ("MK-82", "GBU-27")]
+                if other:
+                    problems.append(f"B-2 actor {m.group(1)} carries {other}")
+        shots = SHOT_AT_STATION.search(output)
+        if shots and (int(shots.group(1)), int(shots.group(2)), int(shots.group(3))) != (0, 0, 0):
+            problems.append(f"the B-2 player fired {shots.groups()} (missiles, gun bursts, gun rounds)")
+        return problems
+
+    return check
+
+
 DATALINK_LINE = re.compile(r"^t=(\d+) data link: (member|lock|unlock) plane=(\d+)(?: radar=(true|false)| target=(\d+))$", re.M)
 
 
@@ -1863,6 +1896,24 @@ def scenarios() -> list[Scenario]:
                      notes="Tornado IDS (Clean) against Tornado IDS (Combat) in a 2 v 2 fight: "
                            "the Combat version's chaff and flares leave its BOZ-107."))
 
+    # 13j. The B-2 Spirit in a mission (slice B2-9, 2026-11-15): the strike class is Heavy (BMB-A1) with
+    # no override, the record has no air-to-air store and no gun, the Load Ordnance default is 64 Mk 82
+    # in the two bays. Against its own kind nobody can shoot; against Su-27s it must not fire anything
+    # (no air-to-air engagement) and does what a bomber does, which is fly. The strike itself is
+    # `ai-strike-b2-*` (ai_strike.py). The return to base is not registered: the AI B-2 does not land
+    # (docs/formats/aircraft-variety.md, "B-2 ordnance, missions, multiplayer and replay").
+    out.append(probe("b2-quick-mission-2v2", fight(2, 2, "--aircraft", "b2",
+                                                    "--probe-friendly-aircraft", "b2",
+                                                    "--probe-enemy-aircraft", "b2",
+                                                    "--separation", "5", *attack), ticks=7200,
+                     notes="All B-2: the player's wing and the enemy wing fly the B2.PT identity (four F118 "
+                           "class engines, bay Mk 82 default load, no gun, no air-to-air store) in a 2 v 2."))
+    out.append(probe("b2-vs-su27-2v2", fight(2, 2, "--aircraft", "b2",
+                                              "--probe-friendly-aircraft", "b2",
+                                              "--probe-enemy-aircraft", "su27",
+                                              "--separation", "5", *attack), ticks=7200,
+                     check=b2_no_air_to_air_checker(),
+                     notes="The B-2 wing against Su-27s: the B-2s fire nothing (no air-to-air store, no gun)."))
     # 14. The fixed acceptance probes.
     out.append(Scenario(name="ai-roster-probe", lane="ai", args=["--ai-roster-probe-ticks", "3600", "--no-audio"], timeout=1800))
     out.append(Scenario(name="ai-probe-matrix", lane="ai",

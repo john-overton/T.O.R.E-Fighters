@@ -493,7 +493,7 @@ pub(crate) mod tests {
             ("internalFuel", 167_000),
             ("thrust", 69_200),
             ("maxTakeoffWeight", 376_000),
-            ("fuelConsumption", 6),
+            ("fuelConsumption", 7),
             ("_gpullDrag", 12),
             ("airBrakesDrag", 64),
         ] {
@@ -611,6 +611,50 @@ pub(crate) mod tests {
         let (_, braked, _) = step(312., 1_000., 1.);
         let extra = (braked - clean) / w;
         assert!((0.08..0.22).contains(&extra), "{extra} G");
+        // Fuel flow (B2-6, the F118's 7 lb/s): ten seconds at full throttle
+        // burn 70 lb of the 167,000 lb tank. The cruise range the probe
+        // measures with this flow, 4,779 nm at 308 kt and 20,000 ft with the
+        // throttle trimmed (published 6,000 nm unrefuelled, Air Force fact
+        // sheet), is in docs/formats/aircraft-variety.md; it needs the
+        // probe's altitude hold, so this test pins the flow itself.
+        let mut burn = State::from_model(model.clone(), [0., 20_000., 0.]);
+        burn.enable_research(1).unwrap();
+        burn.speed = 308. * KT;
+        burn.velocity = crate::attitude::Basis::new(0., 0., 0.)
+            .forward
+            .map(|v| v * burn.speed);
+        burn.throttle = 1.;
+        burn.cheats.unlimited_fuel = false;
+        burn.fuel = 167_000.;
+        for _ in 0..1_200 {
+            burn.step(&PilotInput::default(), |_, _| -60_000.);
+        }
+        let per_second = (167_000. - burn.fuel) / 10.;
+        assert!((6.5..7.5).contains(&per_second), "{per_second} lb/s");
+        // The probe's trimmed cruise holds 0.40 throttle (2.97 lb/s): the same
+        // ten seconds at that throttle give the range, loosely round the
+        // published 6,000 nm (the probe's altitude hold gives 4,779 nm).
+        let mut cruise = State::from_model(model.clone(), [0., 20_000., 0.]);
+        cruise.enable_research(1).unwrap();
+        cruise.speed = 308. * KT;
+        cruise.velocity = crate::attitude::Basis::new(0., 0., 0.)
+            .forward
+            .map(|v| v * cruise.speed);
+        cruise.throttle = 0.4;
+        cruise.cheats.unlimited_fuel = false;
+        cruise.fuel = 167_000.;
+        for _ in 0..1_200 {
+            cruise.step(
+                &PilotInput {
+                    throttle: Some(0.4),
+                    ..Default::default()
+                },
+                |_, _| -60_000.,
+            );
+        }
+        let cruise_flow = (167_000. - cruise.fuel) / 10.;
+        let range_nm = 167_000. / cruise_flow * 308. / 3_600.;
+        assert!((3_500. ..6_500.).contains(&range_nm), "range {range_nm} nm");
     }
     /// The B-52H's flight terms (B52-8, 2026-11-15): a B-52 built from
     /// synthetic values near the corrected record (real thrust, weights and

@@ -618,3 +618,19 @@ bomber by about a third as much (0.14 G rather than 0.44 G of extra deceleration
 kt at 1,000 ft), the landing rollout with the brake out is 19 percent longer, and the
 record ceiling is 50,000 ft. Evidence, tables and open questions:
 [B-2 flight review](../formats/aircraft-variety.md#b-2-flight-review-b2-8-2026-11-15).
+
+## B-2A fuel flow (B2-6, 2026-11-15)
+
+Dated note, additions only. One more `B2.PT` field is read differently, applied only while the record
+still holds its retail value and every other B-2 correction still holds (`aircraft_corrections.rs`,
+`B2_FUEL_LB_PER_S`):
+
+| Field | Retail | Read as | Label |
+| --- | ---: | ---: | --- |
+| `fuelConsumption` (military, all four engines, lb/s) | 6 (the B-1B's) | 7 | opinionated (coordinator first pass, 2026-11-15, held for John): 69,200 lbf x 0.375 lb/(lbf h) / 3,600 = 7.2, the F118-GE-100 figure BMB-A2 cites; the page that gives 0.375 was not recorded |
+
+The record has no afterburner flow (0). What a player notices: the same 167,000 lb of fuel lasts
+398 minutes at full power instead of 464, and 930 minutes instead of 1,066 in the probe's trimmed
+cruise, which is 4,779 nm (5,486 nm at 6 lb/s; the published unrefuelled range is about 6,000 nm).
+The thrust, weights, fuel, 50,000 ft ceiling and the speed brake are unchanged. Evidence:
+[B-2 ordnance, missions, multiplayer and replay](../formats/aircraft-variety.md#b-2-ordnance-missions-multiplayer-and-replay-b2-69-2026-11-15).

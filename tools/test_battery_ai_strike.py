@@ -1187,6 +1187,82 @@ class SelectionTests(unittest.TestCase):
         self.assertTrue(description)
 
 
+
+B2_SETUP = (
+    "ai-strike: setup aircraft=B2 load={load} station={station} count=32 rounds=32 target=0x50000001 "
+    "target_at=999570,7,789571 hp=200 skill=1 profile=none handback=none order=none mode=none"
+)
+
+
+def b2_run(cells, alt=20000, spacing=0.25, kill=True, station=0, load="MK82.JT", egress=True, min_agl=20000):
+    """A B-2 driver run releasing from `cells` (right, up, forward), one every `spacing` seconds."""
+    out = [
+        B2_SETUP.format(load=load, station=station),
+        "ai-strike: PROFILE t=0.000 name=none requested=none note=chosen",
+        "ai-strike: start t=0.000 plane=0 range_ft=24304 alt_ft=20000 speed_kt=450",
+    ]
+    for n, (right, up, forward) in enumerate(cells, 1):
+        t = 79.35 + spacing * (n - 1)
+        out.append(f"ai-strike: ORIGIN t={t:.3f} n={n} station={station} right={right:.2f} up={up:.2f} forward={forward:.2f}")
+        out.append(f"ai-strike: RELEASE t={t:.3f} n={n} weapon={load} station={station} alt_ft={alt} speed_kt=311 "
+                   "range_ft=19500 pass=1 aim_ft=154 inside=yes lead_ft=2155 dive_deg=-0")
+    for n in range(1, len(cells) + 1):
+        out.append(f"ai-strike: IMPACT t={115.0 + n * 0.1:.3f} n={n} miss_ft=300.0 at=1.0,2.0,3.0")
+    kills = 1 if kill else 0
+    if kill:
+        out.append("ai-strike: KILL t=116.358 victim=0x50000001 category=0x0400 target=yes")
+    if egress:
+        out.append("ai-strike: EGRESS t=129.258 range_ft=6780 alt_ft=22166")
+    out.append(
+        f"ai-strike: summary t=149.267 ran_s=149.3 profile=level releases={len(cells)} impacts={len(cells)} "
+        f"kills={kills} egress={'yes' if egress else 'no'} lost=no activity=Attacking target_hp=0/200 "
+        f"closest_ft=615 store_rounds_left=24 min_agl_ft={min_agl}"
+    )
+    out.append("ai-strike: done")
+    return "\n".join(out)
+
+
+class B2Tests(unittest.TestCase):
+    """The B-2 strike checks (slice B2-9)."""
+
+    def test_the_grids_first_places_are_the_right_ones(self):
+        cells = s.b2_mk82_cells("left", 8)
+        self.assertEqual([round(c[0], 2) for c in cells[:4]], [-7.28, -3.38, -5.98, -4.68])
+        self.assertEqual({round(c[2], 2) for c in cells[:4]}, {10.44})
+        self.assertEqual({round(c[2], 2) for c in cells[4:8]}, {2.89})
+        self.assertEqual({round(c[1], 2) for c in cells}, {-2.95})
+        self.assertEqual(round(s.b2_mk82_cells("right", 1)[0][0], 2), 2.72)
+
+    def test_a_full_stick_from_the_grid_passes(self):
+        out = b2_run(s.b2_mk82_cells("left", 8))
+        self.assertEqual(s.b2_stick_problems(out), [])
+
+    def test_a_short_stick_two_bombs_from_one_place_or_a_wrong_cell_fails(self):
+        cells = s.b2_mk82_cells("left", 8)
+        self.assertTrue(any("want a stick of 8" in p for p in s.b2_stick_problems(b2_run(cells[:2]))))
+        same = [cells[0]] * 8
+        self.assertTrue(any("one place" in p for p in s.b2_stick_problems(b2_run(same))))
+        wrong = [(c[0] + 5.0, c[1], c[2]) for c in cells]
+        self.assertTrue(any("outside the left opening" in p or "grid's place" in p for p in s.b2_stick_problems(b2_run(wrong))))
+        slow = b2_run(cells, spacing=0.5)
+        self.assertTrue(any("0.25 s" in p for p in s.b2_stick_problems(slow)))
+        self.assertTrue(any("no EGRESS" in p for p in s.b2_stick_problems(b2_run(cells, egress=False))))
+
+    def test_a_low_release_fails_the_stick_and_the_climb_wants_a_floor(self):
+        cells = s.b2_mk82_cells("left", 8)
+        self.assertTrue(any("15,000" in p for p in s.b2_stick_problems(b2_run(cells, alt=9000))))
+        self.assertEqual(s.b2_climb_problems(b2_run(cells, alt=10059, min_agl=5000)), [])
+        self.assertTrue(any("under its floor" in p for p in s.b2_climb_problems(b2_run(cells, alt=5100, min_agl=5000))))
+        self.assertTrue(any("above the ground" in p for p in s.b2_climb_problems(b2_run(cells, alt=10059, min_agl=170))))
+
+    def test_the_paveway_leaves_the_first_place_of_its_row(self):
+        good = b2_run([(-7.28, -1.79, 6.67)], station=2, load="PAVEWA3.JT")
+        self.assertEqual(s.b2_paveway_problems(good), [])
+        bad = b2_run([(-7.28, -2.95, 10.44)], station=2, load="PAVEWA3.JT")
+        self.assertTrue(s.b2_paveway_problems(bad))
+        self.assertTrue(any("kill" in p for p in s.b2_paveway_problems(
+            b2_run([(-7.28, -1.79, 6.67)], station=2, load="PAVEWA3.JT", kill=False))))
+
 if __name__ == "__main__":
     unittest.main()
 
