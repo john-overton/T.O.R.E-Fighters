@@ -9694,3 +9694,369 @@ press, 0.958 in the actual one-press probe), the doors stay 1 s after the releas
 reads `State::bay` on the RCS page only (no change to a row a radar reads), so it now applies
 to the F-117 at 1.5 times with the doors fully open, and the F-22's values are unchanged.
 Update to [F117-3 bay (interim)](#bay-interim-f117-4-f117-5-replaces-it): replaced.
+
+## Su-34 source review (2026-11-15)
+
+Research mode, slice SU34-0 (bomber batch C, plan `.local/m3-aircraft/PLAN-SU34.md`).
+This reviews `SU34.PT` (Su-34 Platypus) and its dependency closure before
+`AircraftId::Su34` exists. No original module was executed. PT, SEE, ECM and JT
+are read as bounded BRF data with the field order in `aircraft_schema.rs`; SH and
+HUD are inspected as data (`shape_inspect`, a face and branch projection with a
+throw-away script outside the repository). Slice done by Claude Sonnet. Nothing
+here changes code or behaviour. Real-aircraft figures are cited and never
+establish game behaviour. Questions for John are not decided here: they are
+marked "(for John)" and collected in the plan's "Questions for John".
+Real figures come from the Wikipedia Su-34 article (read 2026-11-15) unless
+another source is named; it gives no station layout, gear detail or roll-control
+detail, and those gaps are said where they matter.
+
+### Su-34 build and extraction
+
+The closure was extracted to `.local/m3-imports/scratch/su34` with `tore-extract
+--include 'SU34*' ... --include '*.PT' --include '*.SEE' --include '*.JT'
+--include '*.ECM'`. `FA_2.LIB` holds the whole closure; the `SETUP.ESA` copy is
+the same set. The usual five unrelated archive errors appear. **The Su-34 has no
+cockpit art, HUD, PTS or list icon of its own**: there is no `SU34.HUD`, no
+`~SU34*.PIC`, no `SU34.PTS` and no `ICO2SU34.PIC` (the Su-33 and Su-35 have
+icons). It has `SU34.INF` with `SU34_0.PIC` and `SU34_1.PIC` (encyclopedia, in
+`FA_3.LIB`), and a radio callout `^ACSU34.5K`.
+
+### Su-34 identity and record (the record decoded)
+
+| Field | Decoded value |
+| --- | --- |
+| PT | `SU34.PT`, 14,716 bytes, SHA-256 `08ae4705ee58007b0a90339ab2c5d4663ba7c2c57ccedd69f589ac20f57be577` |
+| Displayed names | `Su-34`, `Su-34 Platypus`, `SU34.PT` |
+| Schema | OBJECT + NPC + PLANE, 219 statements; `structType` 5; `typeSize` 660; `instanceSize` 626 |
+| Object class / year / hit points | `0x4000` (attack) / 1998 / 145; `expType` 30 |
+| PLANE flags | `0x15`: base `0x01`, multi-crew `0x04`, seat `0x10`; hook, no-lift, carrier clear |
+| Shape | `su34.SH` (25,088 bytes; header exponent 8, **1/3 ft per unit**), shadow `su34_s.SH` (12 faces) |
+| Damage looks | `SU34_A.SH` 305 faces, `SU34_B.SH` 22 (a small piece), `SU34_C.SH` 283, `SU34_D.SH` 22 (a small piece) |
+| Skins | `_SU34.PIC` 154,244 bytes, `_SU34_A/B/C/D.PIC` |
+| Sounds | `&JET1N.11K`, `&JET1A.11K`, `&powerup.5k`, `&powerdn.5k` (the Su-27's) |
+| HUD | `su33cc.HUD` (the file is `SU33CC.HUD`, 4,608 bytes, with the byte-identical `SU33_C.HUD` and `SU33.HUD`) |
+| AI script | `f.BI` (the shared 12,800-byte script) |
+| Engines / thrust | 2 / 40,755 lbf military, 59,510 lbf afterburner; fuel flow 5, afterburner 30 |
+| Weights / fuel / ceiling | empty 36,000 lb, maximum takeoff 97,000, internal fuel 20,000, ceiling 55,000 ft, minimum altitude 300 ft |
+| G / speeds | -4 / +9; 1 G row top 1,465 kt at 36,000 ft; sea level 741 kt (the catalog) |
+| Signatures | `sigs` 125 / 125 / 100 / 100 / 0; `maxVisDist` 294 |
+| Eye (`viewOffset`) | 2 / 20 / 80 units (0.7 ft right, 6.7 ft up, 26.7 ft forward) |
+| Stations | 9 rows (below) |
+
+The decoded record equals the catalog row in [`fa-aircraft.csv`](fa-aircraft.csv)
+field for field. Hashes later slices depend on:
+
+| Resource | SHA-256 |
+| --- | --- |
+| `SU34.SH` | `c3823eb6f62620a8c0eabb0a703d5cd02d76c5ef268037d19f205d1ae6adad30` |
+| `SU34_S.SH` | `470634ce9811ba10b69f9f40dcecf8e18d151241bf398f1a361c50cad189c8bd` |
+| `SU34_A.SH` | `d801d17f6a042b03c12567ff8e8b073ce69bc29c2c97a501e1fb3a807a088ea4` |
+| `SU34_B.SH` | `d66dcf1166d57c9ac299e064519d502fbac419811dcf020525f75466338639bc` |
+| `SU34_C.SH` | `29a760e633a09776d34d14565d4c9848438cc8f7eb5ef966883bec0426bb8678` |
+| `SU34_D.SH` | `f6177e0c5c71a32cd76c0f5154ca7ab1eb71bdd2ffdfac6cb4c14cec6a4b2382` |
+| `SU33CC.HUD` | `d22b4cd527bd4aaa23eb690fb1a75a7e92e797367f2eded97c3a89f56a3751ef` |
+| `SU37L.SEE` | `f5d6d7fac00841a2e8caa0ecb9b0603cad52947cb2bcc1220519e3f5b6179940` |
+| `VIS300.SEE` | `2369a8be84e01882666a6d275f82edd02e631fdf0871f7ea66bc8c81f3b71cfb` |
+| `SU27R.SEE` | `f5f9f4fdb990bd80489011ff462ea891721ce3f7422a3279577b99aac943ce0e` |
+| `SU27I.SEE` | `9023d91759d6892966cb7ca38d4dbf4e90a905f17b8c2f9bd5f5951f34642169` |
+| `SU27.ECM` | `dffc2ccc6446b5b60dcbb2bacc425111bb717d86599ac2f1b3309ac587727a47` |
+| `AS14.JT` | `c97b03741c9596784e79fe92c3c0cacb44532c3e3ea023d96cc7a72db822bb07` |
+| `AT12.JT` | `3488b26fe0b45cf367ec901079fd2fdcfb136497c6c08a7d0c84e21547c5dc40` |
+| `AA11.JT` | `5c0874d5953c7832dd01d3f79900c5cf0e6d78991662e6b07433f507a9ccca28` |
+| `GSH301.JT` | `c9797da6113cbdbe8246a617904940a0ab3a2823eb7f2ee383d4136ff71d81d8` |
+
+### Su-34 dependency closure
+
+| Dependency | State | What TORE does |
+| --- | --- | --- |
+| Shape `su34.SH`, shadow, four damage looks, `_SU34*.PIC` | all present | Normal shape path; five state words (below). `parked_aircraft.rs` already lists `SU34.PT` with gear word `0x67cc` |
+| AI script `f.BI` | present (shared) | TORE does not run retail scripts; `BehaviorFamily` and `strike_class.rs` decide (SU34-9). The attack class `0x4000` makes it a strike aircraft by the rule |
+| Sensors `VIS300.SEE`, `SU27R.SEE`, `SU27I.SEE`, `SU37L.SEE`, ECM `SU27.ECM` | present | Reviewed in the sensor section; all five rows are fixed rows at the origin (no pod, B7) |
+| Stores `AS14.JT`, `AT12.JT`, `AA11.JT` | present | Already in the TORE roster (`AS14`/`AT12` flown from the Su-24 and Tornado, `AA11` from the Su-27) |
+| Gun `GSH301.JT` | present | The Su-27's gun |
+| HUD `su33cc.HUD`, cockpit `~SU33*.PIC` | present (another aircraft's) | The Su-33 family used by the MiG-29, Su-25 and MiG-23; glass already measured (below) |
+| `ICO2SU34.PIC`, `SU34.PTS`, `SU34.HUD`, `~SU34*.PIC` | **absent** | Nothing to import; the list screen needs a fallback picture decision (SU34-1) |
+| Sounds | present | Shared |
+
+### Su-34 record against the other records (the template copy)
+
+Of 219 statements `SU34.PT` equals `SU27.PT` on **198**, `SU33.PT` 198 and
+`SU35B.PT` 198 (those share most with the Su-27 too), `SU35.PT` 197, `MIG29V.PT`
+181. **It is the Su-27 record (`SU27.PT`) with 21 statements changed**, a block
+of retail edits and the rest the Su-27's. The changed statements, and where each
+value also appears (so which record it was lifted from):
+
+| Statement | Su-34 | Su-27 | Also in |
+| --- | --- | --- | --- |
+| `obj_class` | `0x4000` (attack) | `0x8000` (fighter) | `SU24`, `SU25`.. (64 records carry the attack word) |
+| year | 1998 | 1984 | `SU35`, `B2`, `GRIPEN` |
+| `maxVisDist`, `sigs[0..1]` | 294, 125 | 290, 124 | `SU33`, `SU35` (the later Flanker values) |
+| `turbulencePercent` | 118 | 117 | `SU33`, `SU35` |
+| `maxAlt` | 55,000 | 61,000 | `B-1B`, `B-52` |
+| `internalFuel` | 20,000 | 19,000 | `AURORA` only (its own) |
+| `maxTakeoffWeight` | 97,000 | 60,000 | **nobody (its own value)** |
+| `viewOffset` | 2 / 20 / 80 | 0 / 20 / 60 | the x of 2 is nobody's |
+| `stallDelay`, `spinExit`, `_gpullDrag`, `PLANE.flags` (`0x15`), `searchFrequencyT` 12, debris offsets | bomber-class values | fighter values | the attack/bomber records (`SU24`, `B1`, `F15E`, `TOR`, `F111`, ...) |
+| 9 hardpoint rows | own (below) | the Su-27's | not copied |
+| 14 G-envelope rows | own (below) | Su-27's | not copied |
+
+Fields that stay the Su-27's: empty weight **36,000 lb**, both thrusts (**40,755
+/ 59,510 lbf**), fuel flows, G limit **-4 / +9**, hit points 145, flight and
+spin tables, drag terms, `structure`, the `systemDamage` table, gun, ECM, radar
+and IRST. The envelope is the Su-27's reshaped: the 1 G row keeps the Su-27's
+2,473 ft/s (1,465 kt) top at 36,000 ft and 1,250 ft/s (741 kt) at sea level; the
+ceiling edge is cut to 55,000 ft; the -4 and +9 rows are degenerate slivers (4
+points, 930 to 970 ft/s) instead of the Su-27's 6- and 5-point rows. The sensor
+set differs from the Su-27's only in `VIS300.SEE` (the large-aircraft visual,
+27,300/21,840 ft against `VIS340.SEE`'s 30,940/25,480) and the added
+`SU37L.SEE` laser.
+
+**Against the real Su-34** (Wikipedia Su-34 article, read 2026-11-15):
+
+| Value | Record | Real | Verdict |
+| --- | --- | --- | --- |
+| Empty weight | 36,000 lb (the Su-27's) | 22,500 kg, 49,604 lb | 27% low, copied |
+| Internal fuel | 20,000 lb | 12,100 kg, 26,676 lb | 25% low |
+| Maximum takeoff | 97,000 lb | 45,100 kg, 99,428 lb | 2.4% low, its own value; keep |
+| Afterburner thrust | 59,510 lbf (2 engines) | 2 x AL-31FM1 at 132 kN, 29,700 lbf each: 59,400 lbf | matches within 0.2% (the record's afterburner figure is the FM1's) |
+| Military thrust | 40,755 lbf | AL-31F about 16,900 lbf each (33,800 lbf; the plan's figure; the Wikipedia page lists no dry thrust) | about 21% high, the Su-27's; same finding as `aircraft.md` line 421 |
+| Top speed | 1,465 kt at 36,000 ft (Mach 2.55) | Mach 1.8 at altitude (1,900 km/h, about 1,030 kt); sea level 1,435 km/h, 775 kt | high edge 42% too fast; sea level 741 kt against 775 kt is fine |
+| G | -4 / +9 | the Wikipedia infobox lists +9; the plan's note says +7 | sources disagree: leave |
+| Ceiling | 55,000 ft | the usual public figure is 14,650 m (48,000 ft); not re-fetched this session | high by about 14% |
+| Gun rounds | 150 (row 5) | GSh-30-1, 180 rounds | 17% low |
+
+**Options (for John).** (a) Keep retail. (b) Real weights and fuel only
+(49,600 / 26,700), the Tornado precedent. (c) As (b), plus dry thrust to 33,800
+lbf, the high-altitude edge trimmed to Mach 1.8 (the F-117 method:
+`fit_envelopes`), the gun to 180 rounds. **Recommendation: (c); keep maximum
+takeoff 97,000, afterburner 59,510, G, the sea-level edge and the ceiling** (a
+14% ceiling gap is not one the batch has corrected before). The name "Su-34
+Platypus" stays (decision 7). Mark the corrections fitted/real with the
+source.
+
+### Su-34 shape scale and size
+
+Header exponent 8 (CODE 22,506 bytes, 321 faces): 1/3 ft per unit, like the
+Su-27, Su-35 and the other fighters, so no `debris::scale` arm is needed. Re-
+measured at the header scale (neutral pose; gear down in brackets):
+
+| Axis | Units | Feet | Real | Gap |
+| --- | --- | --- | --- | --- |
+| Span | x -79..76 (155) | 51.7 | 14.7 m, 48.2 ft | +7.3% |
+| Length | y -105..108 (213; the stinger to the nose) | 71.0 | 23.34 m, 76.6 ft | -7.2% |
+| Height | z -16..35 (51) [-26..35 (61)] | 17.0 [20.3] | 6.09 m, 20.0 ft (the plan says 19.4) | gear down +1.5% (against 20.0) |
+
+Every axis is within 8%, so **recommendation: keep 1:1**, no per-axis scaling
+(the Su-27 itself is 52.3 ft across against a real 48 ft). The shadow
+`su34_s.SH` covers x -78..76 and y -105..109, so it matches. The shape's nose is
+a narrow Flanker nose with one canopy hump (top and front projections): **the
+flattened "platypus" nose and the wide side-by-side cabin are not drawn**; the
+shape is a Su-27M (Su-35 family) airframe with the Su-34 name. That is retail;
+an authored nose is out of scope. Wingtip streamers sit at the tips (x 79 and
+76, y -40 units).
+
+### Su-34 state words and the rule 11 fold table
+
+Five words, **the same offsets from the base as the Su-35's** (`0x67c0`,
+`0x67c6`, `0x67cc`, `0x67d8`, `0x67de` against `0x79c0` to `0x79de`), found with
+each word set alone:
+
+| Word | Value | Effect | Reading |
+| --- | --- | --- | --- |
+| `67c0` | 1 | +16 faces (`4e8e`..`505f`) | Afterburner plume (two nozzles of eight, y -78 to -132, 44 units long) |
+| `67c6` | 1 | +2 faces `4dc9`, `4de0` | Dorsal airbrake plate (a deployed pose only; hinge on its forward edge, y 43 z 17; aft edge raised to y 26 z 31, the Su-27's plate form) |
+| `67cc` | 1 | +8 faces (`4a7b`..`4bce`) | Gear: three rigid flat plates, no braces (`-1` adds nothing; the Su-27's `-1` adds two brace faces) |
+| `67d8` | -1 | removes `4cbe`/`4cd5`, adds `4d1b`/`4d32` | **Left flap** (x -49 to -23): neutral to down. `+1` removes the neutral faces and adds none: no up pose |
+| `67de` | -1 | removes `4c14`/`4c3b`, adds `4c71`/`4c88` | **Right flap**, the same; `+1` likewise |
+
+Values 2 to 20 equal `+1` for the flap words and change nothing for the others.
+**No state word exists for canards, tailerons, ailerons, rudders, slats or
+airbrake closing**: the Su-34 has the Su-35's five words and none of the
+Su-27's slat word `421a` or its unknown single-face word `4208`. The Su-27 has
+seven words (flame 16, brake 2, gear 8 with two brace faces, `4208` 1, two flap
+words with up and down poses, slats 4); the Su-35 five (flame 8, brake 2, gear
+18, two flap words). Su-34 flame (16) and gear (8) counts are the Su-27's;
+the word layout is the Su-35's.
+
+**Rule 11 fold table** (vertices / turned / on the hinge / fixed off axis; the
+surface is one rigid panel and turns about the named axis; faces named by
+address):
+
+| Surface | Faces | Verts per face | Turn / hinge / fixed | Axis |
+| --- | --- | --- | --- | --- |
+| Right canard | `47cc`, `480d` (both windings) | 4, 4 | 4 / 0 / 0 | lateral spindle at the root chord midpoint (20, 23.5, -3) |
+| Left canard | `34e6`, `3597` | 4, 4 | 4 / 0 / 0 | spindle (-21, 23, -3) |
+| Right taileron | `4837`, `4906` (quad), `4714`, `4777` (root triangle) | 4, 4, 3, 3 | all / 0 / 0 | spindle at the root edge midpoint (23.5, -49, -3.5) |
+| Left taileron | `3666`, `3727`, `360b`, `3646` | 4, 4, 3, 3 | all / 0 / 0 | spindle (-23, -49, -3.5) |
+| Right outer aileron panel | `4886`, `4988` | 4, 4 | 2 / 2 / 0 | hinge (76,-27,-1) to (49,-29,-1) |
+| Left outer aileron panel | `36d6`, `375f` | 4, 4 | 2 / 2 / 0 | hinge (-78,-27,-1) to (-49,-29,-1) |
+| Right flap | `4c14`, `4c3b`; down `4c71`, `4c88` | 4 each | 2 / 2 / 0 | hinge (23,-22,-1) to (49,-29,-1) |
+| Left flap | `4cbe`, `4cd5`; down `4d1b`, `4d32` | 4 each | 2 / 2 / 0 | hinge (-23,-22,-1) to (-49,-29,-1) |
+| Airbrake | `4dc9`, `4de0` | 4, 4 | 2 / 2 / 0 | forward edge (+-4, 43, 17) |
+| Gear | `4a7b`, `4a9a`, `4ae6`, `4b05`, `4b69`, `4b88`, `4ba7`, `4bce` | 4 each | all / 0 / 0 | plates turn whole |
+| Fins and tips | `37cb`, `37ee`, `38b9`, `38dc` (left); `49af`, `49d6`, `49fd`, `4a24` (right) | 4 each | not moved | one plate per side, no rudder face |
+
+**Verdict: no face folds; the whole-surface gate (John, 2026-11-07 and
+2026-11-08) is met.** The tail root triangle and the quad of each taileron share
+one root edge and one planform, so all four faces of a side turn as one panel
+(the Su-35 rig's pentagon, split in two here). The tails are slightly
+non-planar in the source (z -2 at the forward root vertex, -5 elsewhere); the
+spindle stays lateral. The root vertices at (+-23, -35, -2) and (+-23, -63, -5)
+are shared with boom faces, so a small root gap opens on the move (accepted:
+MiG-31, MiG-29, Su-27, Su-35 precedent). The flap down pose is a morph target,
+not a rotation: both hinge vertices stay put, the inboard chord is 10.0 units
+before and after, the outboard chord grows from 7 to 9.2, so the Su-35 rig's
+neutral-to-deployed morph (not a turn) is the right form.
+
+**Surfaces against the gate, one by one.**
+
+| Surface | In the source | Gate | Recommendation |
+| --- | --- | --- | --- |
+| Canards | One flat plate a side at z -3, root x +-20/21 (y 16 to 31, 5 ft), tip x 38/39, no state word | Met (whole panel) | Pitch only, the Su-35 rig's 0.25 x elevator (the Gripen precedent: no evidence real canards roll) |
+| Tailerons | Pentagon a side at z -2..-5, x 23 to 55, no state word | Met (whole panels) | Pitch plus differential roll, the fleet standard (PLAN-TAILERONS, rule 12); the Su-27 and Su-35 rigs already do (0.30 pitch, 0.10 roll, clamp 0.40). The Wikipedia page does not say which surfaces roll the Su-34; Flanker family practice is the evidence (opinionated) |
+| Ailerons | An outboard trailing quad a side (x 49 to 78), no state word | Met; one separate panel, not a split of the wing | Rig as a roll surface, 0.20 x aileron about the leading edge (the Su-35's outer-aileron value); the real jet's roll control is not described in the cited page (for John) |
+| Rudders | The fin and its tip are one plate a side; **no rudder face and no rudder word** | None to turn | The F-15E precedent (batch 5 decision 4): no rudder motion. Option: split the fin plate as the Su-27 and Su-35 rigs do (fitted, authored geometry; 0.35 rad) |
+| Flaps | Whole quads, down pose only | Met | Down morph on the flap input; no up pose (the Su-27 had one, the Su-34 does not) |
+| Slats | None in the shape | n/a | Nothing to rig |
+| Airbrake | Raised plate only | Met | Rig the plate; the closed pose along the spine (z 15 to 17) is authored in SU34-3 |
+
+### Su-34 gear
+
+Three rigid plates and no braces: the mains are one flat quad each side (x 25 and
+-24, y -28 to -14, z -25 to 0; 4.7 ft long, 8.3 ft tall) and the nose a plate and
+a cross plate (y 57 to 69, z -26 to -5, plus a plate across at y 66), both
+windings, as the Su-27. The wheelbase is 84 units (28 ft), the track 49 units
+(16.3 ft); low points -26 (nose) and -25 (mains): 8.7 and 8.3 ft. The real
+jet's tandem main wheels (the lead's note; the cited page confirms a twin
+tandem main undercarriage only for the T10V-2 prototype and says nothing of the
+production gear) are **not drawn**: the 4.7 ft plate is one wheel's length.
+Options (for John): (a) as drawn, rigid plates folding like the Su-27's
+(recommended; no authored geometry); (b) add a second authored plate behind each
+main (fitted, doubles the main faces). Doors and braces do not exist. The rig
+folds the plates inward on the shape's own axis; the main plates fold across the
+nacelle belly (z -16), which SU34-3 must probe for a clip.
+
+### Su-34 stations (survey)
+
+The record has nine rows. Rows 0 to 4 are fixed sensor rows (flags `0x08`, at
+the origin except the jammer 16.7 ft aft); row 5 is the gun; **rows 6 to 8 are
+the only weapon rows**, with the Su-24 style masks and a wingtip row:
+
+| Row | Location | Flags | Position (PT units; ft right / up / forward) | Default | maxItems / maxWeight | Capacity at the default |
+| --- | --- | --- | --- | --- | --- | --- |
+| 5 | Internal gun | `0x08` | 10 / 5 / 60 (3.3 / 1.7 / 20.0) | `GSH301.JT` | 150 / 0 | 150 rounds |
+| 6 | Fuselage | `0x7e5` | 24 / -30 / -13 (8.0 / -10.0 / -4.3) | `AS14.JT` | 4 / 80 | 4 AS-14 Kedge (1,495 lb each, 5,980 lb) |
+| 7 | Wing | `0x7e5` | 50 / -15 / -23 (16.7 / -5.0 / -7.7) | `AT12.JT` | 4 / 80 | 4 AT-12 Swinger (132 lb each) |
+| 8 | Wingtip | `0x85` | 81 / -1 / -34 (27.0 / -0.3 / -11.3) | `AA11.JT` | 2 / 10 | 2 AA-11 Archer (230 lb each) |
+
+(The record has no centreline row and none of the Flankers' `AA-12` or `AA-ML`
+rows.) The Su-34 rows are not the Su-27's: they sit at the Su-24's masks
+(`0x7e5`) but at Su-34 positions. Against the shape: **row 6 hangs 10 ft below
+the reference, 5 units (1.7 ft) below the main wheel bottoms** (-25 in shape
+terms) and about 14 units below the nacelle belly (x 24 is the nacelle's outer
+wall), so a four-missile load would sit lower than the gear; row 7 is 14 units
+(4.7 ft) under the wing; row 8 is on the wingtip, mid-chord. The retail rows
+were never checked against this shape.
+
+**Real: 12 hardpoints** ("12 x on wing and fuselage"), external load 12,000 to
+14,000 kg, no single munition above 4,000 kg (Wikipedia, Su-34). **The page
+gives no layout and no per-station loads, and no second source could be
+fetched** (GlobalSecurity returned 403, sukhoi.org did not resolve): so the
+real 12-station map and the per-station limits below are **not cited**; what
+follows is a proposal, labelled opinionated. The Flanker real-station layout in
+`docs/spec/stores-on-pylons.md` is the Su-27's 10 stations: wingtips (2), three
+underwing pylons a wing (6), intake ducts (2), tunnel (2).
+
+| Retail row | Proposed Flanker-style stations (reused table) | Note |
+| --- | --- | --- |
+| 8 (wingtip, 2 AA-11) | the wingtip pair, as the Flankers | Unchanged |
+| 7 (wing, 4 AT-12; the wing mask admits the bombs and missiles of the Su-24 row) | the middle and outer underwing pylons, two a wing, spread to the next pylon, the Su-27 rule | Wing leading edge slopes 0.67 ft aft per ft out here (the Flanker table uses 0.75): re-measure each pylon |
+| 6 (fuselage, 4 AS-14) | the intake and tunnel stations: two a side as pairs (retail says 4 total) | Needs a `station_move` for the height as well (the gear clip above) |
+| inner underwing pylons (about 10 ft out) | none (as the Flankers: no retail row) | |
+
+Two of the real 12 stations (a Su-34 has more than the Flanker's 10) have no
+record row and no source for their position: leave them unplaced rather than
+invent them (standing decision 2 applies only where public data supports
+them). The real heavy stores (KAB-500, Kh-29 on the fuselage and wing, Kh-31
+and Kh-35 anti-ship, R-77 and R-73 on the wingtips, per the weapons list on the
+page) are largely outside the retail `JT` set; Load Ordnance keeps to what the
+weapons data already allows. Fuel: no drop-tank row in the record; real Su-34
+tanks are not cited (none added).
+
+### Su-34 gun
+
+`GSH301.JT` (GSh-301 30 mm x 6, 1956, the Su-27's gun, 1 lb a round, 2,933 ft/s)
+at row 5 (10 / 5 / 60 units: 3.3 ft right, 20 ft forward, the Su-27's position)
+with **150 rounds**. Real: one GSh-30-1 with 180 rounds (Wikipedia). Recommend
+180 (the B-52 and Gripen precedent: real round counts). The gun is not shown on
+the model; the muzzle position follows the record.
+
+### Su-34 sensors (B7)
+
+| Row | File | Reading | B7 |
+| --- | --- | --- | --- |
+| 0 | `VIS300.SEE` | visual, 27,300 / 21,840 ft (the large-aircraft visual: the B-52 and the transports) against the Su-27's `VIS340.SEE` 30,940 / 25,480 | Fixed row at the origin: no pod |
+| 1 | `SU27R.SEE` | radar, look-down 0, search / track 150 / 115 nmi (Advanced preset) | Fixed row |
+| 2 | `SU27I.SEE` | IRST, zone 60 degrees to 54,684 ft (the Su-27's) | Fixed row, nothing to draw |
+| 3 | `SU27.ECM` | jammer, chaff, flares, `LateColdWar`; position 16.7 ft aft | Matches "Khibiny ECM fitted as standard" (Wikipedia: not a pod) |
+| 4 | `SU37L.SEE` | built-in laser, 60 degrees to 60,760 ft, signature 1 (like `SU24L`, `KA50L`) | Fixed row; **no designator pod station is claimed** |
+
+**B7 result: no sensor or designator pod sits on a station the real aircraft
+lacks**, because all five sensor rows are fixed rows at the origin and no pod body
+exists to draw. The Wikipedia page lists no IRST for the base Su-34 (only an
+electro-optical pod for the Su-34M): the retail IRST row is the Su-27's. The
+shape has the long tail stinger (rear radar housing in reality, not cited here)
+and no pod body. Recommend: keep all five rows with no body drawn (the
+Tornado and B-2 precedent). Keep the retail radar numbers (game numbers).
+
+### Su-34 HUD and cockpit art
+
+The record names `su33cc.HUD`, the HUD the MiG-29, Su-25 and MiG-23 use
+(`aircraft.rs`: `SU33CC.HUD`, stem `SU33`, forward `~SU33H.PIC`, panel
+`~SU33_P.PIC`). `hud_aperture.rs` already maps the stem `SU33` to the MiG-29
+glass group, and the stem has left and right overlays and no centre one, so the
+cockpit needs **no new art and no new aperture measurement**: a new
+`AircraftId::Su34` arm only. `~SU33_W.PIC` is the missing optional picture
+(unused by the host, as for the other four). The cockpit is the Su-33 family's
+single-seat cockpit: nothing in the media draws a side-by-side cabin and no
+`~SU34*.PIC` exists. **Recommend: follow the record** (batch 5 decision 2
+precedent). The eye (2 / 20 / 80 units) is 6.7 ft forward of the Su-27's; it
+puts the viewpoint inside the shape's single canopy hump only if the hump's
+extent is read the same way: SU34-7 measures it with the cockpit sheet.
+
+### Su-34 crew
+
+Standing decision 6: pilot only. The record's multi-crew bit (`0x04`) matches the
+F-15E, Tornado and F-111. The side-by-side seating is not modelled, drawn or
+re-eyed; the left/right overlay set is the Su-33 cockpit's. The radio callout
+calls the second seat `CO-PILOT` (`radio-chatter.md`), which already applies.
+
+### Rig reuse: Su-27 and Su-35
+
+Both rigs are keyed to their own shapes' face addresses and CODE length (12,838
+bytes and 146 faces; 27,114 and 329), so **neither runs on `su34.SH`**: the Su-34
+needs its own `su34_animation.rs`, built from the Su-35 rig's code and laws.
+Reusable as written: the helpers (`one`, `roots`, `branch`, `turn`,
+`split_surface`), the all-moving tail law (-0.30 x elevator, -side x 0.10 x
+aileron, clamp 0.40), the canard law (0.25 x elevator), the flap morph, the
+flame scale, the brake turn and the fold probe. New for the Su-34: the face
+tables and pivots above; ailerons (outer panels, 0.20 x aileron, the Su-35's
+value, with the Su-34 shape's own hinges); canard and tail pivots; the gear
+(Su-27 form: rigid plates, here without braces; the Su-35's 18-face gear and
+nosewheel steering differ); no rudder (unless the fin is split), no slats, no
+up flap. The Su-34's word layout equals the Su-35's, which suggests the shape is
+a derivative of `su35.SH`. About 60% of the Su-35 rig applies unchanged as code
+and laws; 100% of the address tables are new.
+
+### Su-34 summary of recommendations
+
+1. Record: real weights and fuel, dry thrust 33,800, Mach 1.8 edge, 180 gun rounds;
+   keep maximum takeoff, afterburner thrust, G, sea-level edge, ceiling (fitted
+   or real, John's call).
+2. Size 1:1.
+3. Rig: canards pitch only; tailerons pitch and roll; outer ailerons roll;
+   flaps down morph; brake; no rudders (or a split fin); gear as drawn.
+4. Stations: map rows 6, 7, 8 onto the Flanker real-station layout; no inner
+   pylons; two real stations unplaced.
+5. Sensors no body; HUD and cockpit follow the record (`su33cc.HUD`, SU33 stem).
+6. Pilot only.
