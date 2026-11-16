@@ -618,3 +618,98 @@ bomber by about a third as much (0.14 G rather than 0.44 G of extra deceleration
 kt at 1,000 ft), the landing rollout with the brake out is 19 percent longer, and the
 record ceiling is 50,000 ft. Evidence, tables and open questions:
 [B-2 flight review](../formats/aircraft-variety.md#b-2-flight-review-b2-8-2026-11-15).
+
+## Bomber batch B record corrections: B-1B, Tu-160, F-111F (BMB-B2, 2026-11-15)
+
+**Opinionated (coordinator first pass, `BOMBERS-DECISIONS-B.md`, for John to review),
+implemented by slice BMB-B2.** Like the batch A corrections above, each is a TORE override
+over the record, applied where `Aircraft::parse` reads it (`aircraft_corrections.rs`,
+`aircraft_stations.rs`), only to its own identity and only while every value it replaces
+still holds the retail number. The sources are those of the three batch B reviews in
+[the variety document](../formats/aircraft-variety.md#bomber-batch-b-record-and-station-corrections-bmb-b2-2026-11-15).
+
+| Aircraft | Field | Retail | Game | Source |
+| --- | --- | ---: | ---: | --- |
+| B-1B | Maximum take-off, lb | 447,000 | 477,000 | the game's own `B1.INF`, Air & Space Forces Magazine "B-1B Lancer", Wikipedia "Rockwell B-1 Lancer" (the record is a digit transposition; 395,000 was the B-1A) |
+| B-1B | Internal fuel, lb | 105,000 | 265,274 | Air Force Global Strike Command B-1B fact sheet (the game's `B1.INF` says 195,000) |
+| B-1B | Thrust, lbf (4 x F101-GE-102) | 58,400 | 69,560 | 17,390 each (Wikipedia "General Electric F101", read 2026-11-15) |
+| B-1B | Afterburner thrust, lbf | 140,000 | 123,120 | 30,780 each (Wikipedia F101; `B1.INF`) |
+| B-1B | 1 G and 0 G fast edge above 36,000 ft, ft/s | 1,400 and 1,410; 1,465 and 1,475 | 1,210; 1,275 | Mach 1.25 (`B1.INF`, Wikipedia) at 968.08 ft/s: **fitted** (the 0 G step over 1 G of 65 ft/s kept) |
+| B-1B | Bay rows 5 to 7 flags | `0x1500` | `0x1100` | designator bit `0x400` cleared (**fitted**, B7) |
+| Tu-160 | Empty weight, lb | 202,260 | 242,500 | `TU160.INF`; Wikipedia "Tupolev Tu-160" 242,508 |
+| Tu-160 | Thrust, lbf (4 x NK-32) | 158,092 | 123,600 | about 30,900 each (Wikipedia "Kuznetsov NK-32" / "Tupolev Tu-160", read 2026-11-15) |
+| Tu-160 | Afterburner thrust, lbf | 232,398 | 220,400 | about 55,100 each (the same pages) |
+| Tu-160 | Internal fuel, lb | 368,000 | 326,285 | 148,000 kg (aerospaceweb.org "Tu-160" as the T160-0 review read it); sources run 286,600 to 352,735 |
+| F-111F | Internal fuel, lb | 5,025 (gallons) | 32,663 | 5,025 US gal x 6.5 lb/gal (JP-4 planning figure); American Airpower Museum F-111 page 5,040 gal |
+| F-111F | Thrust, lbf (2 x TF30-P-100) | 50,200 (the afterburner total) | 29,120 | 14,560 each (Wikipedia "Pratt & Whitney TF30", `F111.INF`) |
+| F-111F | Afterburner thrust, lbf | 80,000 | 50,200 | 25,100 each (the same) |
+| F-111F | Fuel flow, lb/s (dry / afterburner) | 3 / 6 | 5 / 35 | **fitted** from the RB.199's cited TSFC 0.598 / 2.5 (no TF30 figure found), see the variety document |
+| F-111F | Wing rows 5 to 8 flags, weight class | `0x07e5`, 70 / 70 / 70 / 60 | `0x03e5`, 50 each | designator bit cleared (**fitted**: Pave Tack rides in the bay); 5,000 lb a pylon (Wikipedia "General Dynamics F-111 Aardvark") |
+
+Unchanged on purpose: the B-1B's empty weight (192,000 lb, real), ceiling (55,000 ft) and
+G rows (-2 / +5, no source) and its retail name `B- 1B Lancer`; the Tu-160's maximum
+take-off weight (606,260 lb), four engines, 50,000 ft ceiling, top speed and the Kh-55
+(`AS15.JT`, refused by the bay mask: the retail record is a 220 lb stand-in); the F-111F's
+empty weight, maximum, top speed, ceiling and G rows (retail-authored). The B-1B and
+Tu-160 fuel flows are not changed (the decisions list thrust, weights and fuel only);
+the variety document lists what the cited TSFC would give.
+
+**Fuel over the maximum.** None of the three has empty plus full fuel over its maximum
+take-off weight (457,274 / 477,000; 568,785 / 606,260; 80,144 / 100,000), so the
+record-level check is not involved. Their default loads add stores, and the loadout's
+starting-tank cap (78086f7e) then lowers the fuel: the B-1B to 243,000 lb (of 265,274) and the
+F-111F to 28,838 lb (of 32,663); the Tu-160 starts full (600,532 lb). Free flight and
+`--headless-flight` use the model's full tank.
+
+Logs are local: `.local/m3-aircraft/checks/BMB-B2/`.
+
+
+## Bomber batch C record corrections: Tu-26, Tu-95, Su-34 (BMB-C2, 2026-11-15)
+
+**Opinionated (coordinator first pass, `BOMBERS-DECISIONS-C.md`, for John to review),
+implemented by slice BMB-C2.** Like the batch A and B corrections above, each is a TORE
+override over the record, applied where `Aircraft::parse` reads it
+(`aircraft_corrections.rs`, `aircraft_stations.rs`), only to its own identity and only
+while every value it replaces still holds the retail number. The sources are those of the
+three batch C reviews in
+[the variety document](../formats/aircraft-variety.md#bomber-batch-c-record-and-station-corrections-bmb-c2-2026-11-15).
+"The game's own Jane's text" is the reference-media `.INF` file.
+
+| Aircraft | Field | Retail | Game | Source |
+| --- | --- | ---: | ---: | --- |
+| Tu-26 | Empty weight, lb | 110,230 | 127,868 | 58,000 kg, Wikipedia "Tupolev Tu-22M" (Tu-22M3 specification, read 2026-11-15); the record's is maximum take-off minus fuel minus the Jane's 52,910 lb weapon load |
+| Tu-26 | Thrust, lbf (2 x NK-25) | 59,986 | 66,000 | 33,000 each (145 kN, Wikipedia "Kuznetsov NK-25", read 2026-11-15) |
+| Tu-26 | Afterburner thrust, lbf | 88,180 | 110,000 | 55,000 each (245 kN, the same page; Wikipedia's Tu-22M3 page gives 55,700) |
+| Tu-26 | Ceiling `maxAlt`, ft, and every polygon's top | 60,000 (0 G 65,500) | 43,635 (0 G 49,135) | 13,300 m, the game's own `TU26.INF` and Wikipedia; polygons cut there (`lower_ceiling`), the 0 G one 5,500 ft above, as the Tornado's, F-15E's and Gripen's |
+| Tu-26 | 1 G fast edge at 36,000 ft, ft/s | 1,933 (1,145 kt) | 1,823 (1,080 kt) | Mach 1.88, 1,080 kt, `TU26.INF`: **fitted** cap (0 G 2,084 to 1,974, the 151 ft/s step kept; sea level, 1,010 ft/s, stays) |
+| Tu-26 | Bay row 5 flags | `0x1500` | `0x1120` | designator bit `0x400` cleared (**fitted**, B7: no pod on a bomb bay) and the active-radar bit `0x20` set so the bay takes the Kh-15 (`AS16.JT`; the real jet's six-round rotary launcher, `TU26.INF`) |
+| Tu-26 | Glove rows 7 and 8, capacity (default load) | 4 and 6 AS-16 | 2 and 2 | the real four underwing Kh-15 (`TU26.INF`, "four more underwing"; Wikipedia: six internal, four underwing), one a side on each glove pair; **opinionated** |
+| Tu-95 | Thrust, lbf (4 x NK-12MV) | 355,080 | 129,000 | the record is 4 x 14,795 shp x 6 (`TU95.INF`, Wikipedia "Kuznetsov NK-12"), the rule that made the C-130's 108,192; **fitted** at the AC-130U's 2.18 lbf per shp |
+| Tu-95 | Empty weight, lb | 264,550 | 198,415 | 90,000 kg, `TU95.INF` (Bear-H); Wikipedia "Tupolev Tu-95" (Tu-95MS) 198,416 |
+| Tu-95 | Internal fuel, lb | 100,000 | 148,150 | 67,200 kg, Wikipedia "Tupolev Tu-95" (Tu-95MS) |
+| Tu-95 | Maximum take-off, lb | 407,850 | 414,470 | 188,000 kg, `TU95.INF` (Bear-H) and Wikipedia (the record's is Jane's Bear-F) |
+| Tu-95 | Rows 5 and 6 (`T23_1.JT`, Bear-A to F dorsal and ventral turrets), default | 2,000 rounds each | none | the Bear-H has the tail turret only (Wikipedia "Tupolev Tu-95"; `TU95.INF`); row 3, the tail gun, stays |
+| Tu-95 | Row 8 (wing pylons) position, record units | 27 / -35 / 35 | 36 / -6 / 35 | 12 ft out (the retail 9 ft was inside the fuselage) and 2 ft below the reference point (the retail 11.7 ft was 2.4 ft under the gear's ground plane); **fitted** |
+| Tu-95 | Row 8 flags, capacity, weight class | `0x17e5`, 6, 160 | `0x1025`, 10, 0 | AS-16 only (`weapon_allowed` refuses every other weapon; the mask has no tank, pod, bomb or other seeker bit, B7); ten stores, the Tu-95MS16's ten underwing Kh-55 (Wikipedia "Kh-55"); the class byte tops out at 255 (nine AS-16), so none; **opinionated** |
+| Su-34 | Empty weight, lb | 36,000 | 49,604 | 22,500 kg, Wikipedia "Sukhoi Su-34" (read 2026-11-15) |
+| Su-34 | Internal fuel, lb | 20,000 | 26,676 | 12,100 kg, the same page |
+| Su-34 | Thrust, lbf (2 x AL-31F) | 40,755 | 33,800 | about 16,900 each (the Su-27 comparison in [aircraft.md](../formats/aircraft.md); the Su-34 page lists no dry thrust) |
+| Su-34 | 1 G and 0 G fast edge above 36,000 ft, ft/s | 2,308 / 2,473; 2,417 / 2,600 | 1,742; 1,869 | Mach 1.8 at altitude (Wikipedia "Sukhoi Su-34", 1,900 km/h) at 968.08 ft/s: **fitted** (the 127 ft/s 0 G step kept) |
+| Su-34 | Gun row 5 rounds | 150 | 180 | one GSh-30-1, 180 rounds (Wikipedia "Sukhoi Su-34") |
+| Su-34 | Fuselage row 6 height, record units | -30 (10 ft down) | -18 (6 ft down) | the retail point is 1.7 ft under the main wheels' bottoms; the new one is 2.3 ft above them and 0.7 ft under the nacelle belly; **fitted** |
+
+Unchanged on purpose: the Tu-26's maximum take-off weight (273,370 lb), fuel (110,230 lb)
+and fuel flows (10 and 66 lb/s, which already match the NK-25's cited fuel consumption at
+the real thrust), name and speed at sea level; the Tu-95's ceiling (40,750 ft), speeds, fuel
+flow (4 lb/s) and tail turret (2,000 rounds); the Su-34's afterburner thrust (59,510 lbf,
+within 0.2 percent of the real 59,400), maximum take-off weight (97,000 lb), G limits
+(-4 / +9), ceiling (55,000 ft), sea-level edge (741 kt) and name `Su-34 Platypus`.
+
+**Fuel over the maximum.** None of the three has empty plus full fuel over its maximum
+take-off weight (Tu-26 238,098 / 273,370; Tu-95 346,565 / 414,470; Su-34 76,280 / 97,000;
+compile-time assertions in `aircraft_corrections.rs`), so the record-level check is not
+involved. Their default loads add stores; where those take the total over the maximum the
+loadout's starting-tank cap (78086f7e) lowers the fuel, the numbers are in the variety
+document. Free flight and `--headless-flight` use the model's full tank.
+
+Logs are local: `.local/m3-aircraft/checks/BMB-C2/`.

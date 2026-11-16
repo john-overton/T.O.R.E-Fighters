@@ -56,6 +56,66 @@ pub const B2_BAY_ROWS: std::ops::Range<usize> = 5..9;
 /// The designator bit of a station's flags (a targeting or laser pod may sit
 /// there, and a multi-store pod: `loading.rs`).
 pub const DESIGNATOR_BIT: i32 = 0x400;
+/// The B-1B's three bay rows (`B1.PT` rows 5 to 7; BMB-B2).
+pub const B1B_BAY_ROWS: std::ops::Range<usize> = 5..8;
+/// The F-111F's four wing pair rows (`F111.PT` rows 5 to 8; BMB-B2).
+pub const F111_WING_ROWS: std::ops::Range<usize> = 5..9;
+/// The real F-111 pylon rating as a weight class (class x 100 lb, BMB-B2):
+/// 5,000 lb a store.
+pub const F111_WING_CLASS: i32 = 50;
+/// The active-radar seeker bit of a station's flags (`loading.rs`: an
+/// active-radar missile such as the Kh-15, `AS16.JT`, needs it).
+pub const ACTIVE_RADAR_BIT: i32 = 0x20;
+/// The Tu-26's bay row (`TU26.PT` row 5, flags `0x1500`; BMB-C2):
+/// [`adjust_defaults`] clears the designator bit and sets the active-radar bit
+/// so the bay carries the Kh-15.
+pub const TU26_BAY: usize = 5;
+/// The Tu-26's wing glove rows (`TU26.PT` rows 7 and 8, AS-16 pairs of four and
+/// six) whose capacity, and so default load, [`adjust_defaults`] cuts to two
+/// each (BMB-C2).
+pub const TU26_GLOVE_ROWS: std::ops::RangeInclusive<usize> = 7..=8;
+/// The capacity of each Tu-26 glove row: one store a side, so four AS-16
+/// underwing in all, the real Kh-15 count (`TU26.INF`; BMB-C2). A default
+/// store's capacity is the row's count (`Loadout::capacity`, the mission
+/// validator), so the default cannot be capped without the capacity.
+pub const TU26_GLOVE_CAPACITY: i32 = 2;
+/// The Tu-95's two Bear-A to F gun turret rows (`TU95.PT` rows 5 and 6,
+/// `T23_1.JT`, flags `0x180a`), whose defaults [`adjust_defaults`] clears
+/// (BMB-C2); row 3, the tail turret, stays.
+pub const TU95_EXTRA_GUNS: std::ops::RangeInclusive<usize> = 5..=6;
+/// The Tu-95's wing pylon row (`TU95.PT` row 8, flags `0x17e5`, paired, six):
+/// [`adjust_defaults`] moves it out and up, trims its mask and raises its
+/// count to the Tu-95MS16's ten, and [`weapon_allowed`] leaves only the AS-16
+/// on it.
+pub const TU95_WING_PYLONS: usize = 8;
+/// The Tu-95 pylon row's new position in record units (a third of a foot):
+/// 36 is 12 ft out (fitted, opinionated), up -6 is 2 ft below the reference
+/// point, 0.7 ft above the 1.3 ft wing underside's lowest plane and 7.3 ft
+/// above the gear's ground-contact plane (-28 units; the retail -35 was 2.4 ft
+/// below it), forward 35 stays (the record's).
+pub const TU95_WING_POSITION: [i32; 3] = [36, -6, 35];
+/// The Tu-95's pylon row mask: the retail `0x17e5` (every seeker, bomb, tank
+/// and pod bit) down to the reviewed row, the pair flag, the base bit and the
+/// active-radar seeker bit the AS-16 needs (`0x1025`).
+pub const TU95_WING_FLAGS: i32 = 0x1025;
+/// The Tu-95 pylon row's capacity: ten stores, five a side (the Tu-95MS16's
+/// ten underwing Kh-55s, Wikipedia "Kh-55", read 2026-11-15; opinionated, the
+/// real pylon arrangement was not found).
+pub const TU95_WING_COUNT: i32 = 10;
+/// The Su-34's gun row (`SU34.PT` row 5, `GSH301.JT`) whose round count
+/// [`adjust_defaults`] sets to the real magazine (BMB-C2).
+pub const SU34_GUN: usize = 5;
+/// The Su-34's GSh-30-1 magazine: 180 rounds (Wikipedia "Sukhoi Su-34", read
+/// 2026-11-15). The record carries the Su-27's 150.
+pub const SU34_GUN_ROUNDS: i32 = 180;
+/// The Su-34's fuselage row (`SU34.PT` row 6, four `AS14.JT`, flags `0x7e5`)
+/// whose height [`adjust_defaults`] raises (BMB-C2).
+pub const SU34_FUSELAGE: usize = 6;
+/// The Su-34 fuselage row's new height in record units: -18 is 6 ft below the
+/// reference point (fitted), 2.3 ft above the main wheels' bottoms (-25 shape
+/// units, 8.3 ft) and 0.7 ft below the nacelle belly (-16 units, 5.3 ft). The
+/// retail -30 is 10 ft down, 1.7 ft below the wheels.
+pub const SU34_FUSELAGE_UP: i32 = -18;
 /// The F-117's two internal bay rows (`F117.PT` rows 4 and 5, flags `0x1100`,
 /// one store each): [`weapon_allowed`] refuses the stores that cannot clear
 /// the fitted bays and [`extra_weapon`] admits the Paveway II laser bombs.
@@ -193,6 +253,8 @@ pub fn tank_allowed(id: AircraftId, row: usize, name: &str) -> bool {
 /// mask (0x85) admits, as the F-14's glove-pylon rail does). The F-117's two bay
 /// rows refuse only [`F117_BAY_REFUSED`] (F117-5: the measured bay clearances
 /// leave every store the mask and [`extra_weapon`] admit clear of the doors).
+/// The Tu-95's wing pylon row (row 8) refuses everything but `AS16.JT`
+/// (BMB-C2).
 pub fn weapon_allowed(id: AircraftId, row: usize, source: &str) -> bool {
     match id.source() {
         AircraftId::F15E => match row {
@@ -206,6 +268,9 @@ pub fn weapon_allowed(id: AircraftId, row: usize, source: &str) -> bool {
             _ => true,
         },
         AircraftId::F117 => !(F117_BAY_ROWS.contains(&row) && F117_BAY_REFUSED.contains(&source)),
+        // The Tu-95's wing pylons take the AS-16 and nothing else (BMB-C2):
+        // the active-radar bit the Kh-15 needs also admits the Harpoon class.
+        AircraftId::Tu95 => row != TU95_WING_PYLONS || source == "AS16.JT",
         AircraftId::Tornado => match row {
             TORNADO_SHOULDER => !TORNADO_SHOULDER_REFUSED.contains(&source),
             TORNADO_INNER_WING => !TORNADO_INNER_WING_REFUSED.contains(&source),
@@ -619,6 +684,64 @@ fn default_signature(id: AircraftId) -> &'static [Signature] {
             (3, 0x1100, [-10, -22, -2], "PAVEWA3.JT", 1, 20),
             (3, 0x1100, [10, -22, -2], "PAVEWA3.JT", 1, 20),
         ],
+        // The bomber batch B rows (BMB-B2). The Tu-160's two bay rows carry no
+        // designator bit (0x1184), so it has no entry.
+        AircraftId::B1b => &[
+            (1, 0x1008, [0, 0, 0], "VIS340.SEE", 1, 0),
+            (1, 0x1008, [0, 0, 0], "F18R.SEE", 1, 0),
+            (1, 0x1008, [0, 0, -50], "F18.ECM", 1, 0),
+            (1, 0x1008, [0, 0, 0], "PAVESPK.SEE", 1, 0),
+            (1, 0x1008, [0, 0, 0], "AV8IR.SEE", 1, 0),
+            (3, 0x1500, [0, -31, 110], "MK82AIR.JT", 4, 140),
+            (3, 0x1500, [0, -31, 63], "MK82AIR.JT", 4, 140),
+            (3, 0x1500, [0, -31, -37], "MK82AIR.JT", 4, 140),
+        ],
+        AircraftId::F111 => &[
+            (1, 0x8, [0, 0, 0], "VIS240.SEE", 1, 0),
+            (1, 0x8, [0, 0, 0], "A6R.SEE", 1, 0),
+            (1, 0x8, [0, 0, -50], "A6.ECM", 1, 0),
+            (1, 0x8, [0, 0, 0], "AV8IR.SEE", 1, 0),
+            (1, 0x8, [0, 0, 0], "PAVESPK.SEE", 1, 0),
+            (4, 0x7e5, [29, -12, -4], "GBU28.JT", 2, 70),
+            (4, 0x7e5, [41, -12, -8], "MK82P.JT", 2, 70),
+            (4, 0x7e5, [54, -12, -13], "AGM65G.JT", 4, 70),
+            (4, 0x7e5, [65, -12, -17], "MK82P.JT", 2, 60),
+        ],
+        // The bomber batch C rows (BMB-C2). The Tu-26's bay row has no default
+        // store (`""`) and is the one that takes the active-radar bit.
+        AircraftId::Tu26 => &[
+            (1, 0x1008, [0, 0, 0], "VIS300.SEE", 1, 0),
+            (1, 0x1008, [0, 0, 0], "TU26R.SEE", 1, 0),
+            (1, 0x1008, [0, 0, -100], "TU26.ECM", 1, 0),
+            (1, 0x180a, [0, 22, -130], "T23_1.JT", 2_000, 0),
+            (1, 0x1008, [0, 0, 0], "SU37L.SEE", 1, 0),
+            (3, 0x1500, [0, -40, 72], "", 8, 120),
+            (1, 0x1185, [19, -40, 29], "AS16.JT", 2, 54),
+            (4, 0x1185, [34, -35, 13], "AS16.JT", 4, 108),
+            (4, 0x1185, [50, -35, -1], "AS16.JT", 6, 160),
+        ],
+        AircraftId::Tu95 => &[
+            (1, 0x1008, [0, 0, 0], "VIS300.SEE", 1, 0),
+            (1, 0x1008, [0, 0, 0], "TU95R.SEE", 1, 0),
+            (1, 0x1008, [0, 0, -100], "TU95.ECM", 1, 0),
+            (1, 0x180a, [0, 0, -100], "T23_1.JT", 2_000, 0),
+            (1, 0x1008, [0, 0, 0], "SU37L.SEE", 1, 0),
+            (1, 0x180a, [0, 16, 20], "T23_1.JT", 2_000, 0),
+            (1, 0x180a, [0, -15, -20], "T23_1.JT", 2_000, 0),
+            (3, 0x1180, [0, -35, 38], "AS16.JT", 6, 160),
+            (4, 0x17e5, [27, -35, 35], "", 6, 160),
+        ],
+        AircraftId::Su34 => &[
+            (1, 0x8, [0, 0, 0], "VIS300.SEE", 1, 0),
+            (1, 0x8, [0, 0, 0], "SU27R.SEE", 1, 0),
+            (1, 0x8, [0, 0, 0], "SU27I.SEE", 1, 0),
+            (1, 0x8, [0, 0, -50], "SU27.ECM", 1, 0),
+            (1, 0x8, [0, 0, 0], "SU37L.SEE", 1, 0),
+            (2, 0x8, [10, 5, 60], "GSH301.JT", 150, 0),
+            (1, 0x7e5, [24, -30, -13], "AS14.JT", 4, 80),
+            (4, 0x7e5, [50, -15, -23], "AT12.JT", 4, 80),
+            (5, 0x85, [81, -1, -34], "AA11.JT", 2, 10),
+        ],
         _ => &[],
     }
 }
@@ -629,7 +752,11 @@ fn default_signature(id: AircraftId) -> &'static [Signature] {
 /// weight class or position changes, so every station index and everything
 /// each station accepts stays as decoded; only what the row holds by default
 /// changes (`store`), with one exception, the Mirage F1's belly capacity
-/// (below).
+/// (below). Update (BMB-A2 to BMB-C2, 2026-11-15): the bomber records also take
+/// flag, weight class, capacity and position changes where listed below (the
+/// B-2's, B-1B's and F-111F's flags, the F-111F's class, the Tu-26's flags and
+/// glove capacity, the Tu-95's pylon row, the Su-34's fuselage row height);
+/// no row is added or removed, so every index stays.
 ///
 /// - **Mirage F1** (`MF1.PT` row 4, the centreline station): no default
 ///   `ALQ167.ECM` pod. The record's American jammer pod is not in Jane's list
@@ -676,6 +803,53 @@ fn default_signature(id: AircraftId) -> &'static [Signature] {
 ///   flares, which go with it (no source found for a chaff or flare dispenser
 ///   on the real jet, and none is added). The row keeps its place, mask, count
 ///   and position, the way the F-5E's did in B5-2.
+/// - **B-1B** (`B1.PT` rows 5 to 7, the three bay rows; BMB-B2, coordinator
+///   first pass 2026-11-15): the designator bit `0x400` is cleared (`0x1500`
+///   to `0x1100`), as for the B-2: no pod on a bomb bay. **Fitted** (agent
+///   decision). Nothing else of a row changes.
+/// - **F-111F** (`F111.PT` rows 5 to 8, the four wing pairs; BMB-B2,
+///   coordinator first pass 2026-11-15): the designator bit is cleared
+///   (`0x07e5` to `0x03e5`; the real Pave Tack rides in the bay, not on a
+///   wing pylon, docs/formats/aircraft-variety.md "F-111F sensors"), and each
+///   weight class is capped at 50 (5,000 lb a store, the real pylon rating,
+///   Wikipedia "General Dynamics F-111 Aardvark": "each pylon had a capacity
+///   of 5,000 lb"; the record's 70 and 60 are 7,000 and 6,000 lb). **Fitted**
+///   (agent decision). Defaults, counts, masks and positions stay.
+/// - **Tu-26** (`TU26.PT` row 5, the bay row; BMB-C2, coordinator first pass
+///   2026-11-15): the designator bit `0x400` is cleared and the active-radar
+///   bit `0x20` set (`0x1500` to `0x1120`): no pod on a bomb bay (B7), and the
+///   bay takes the Kh-15 (`AS16.JT`, the real six-round rotary launcher,
+///   `TU26.INF`) as the B-52's bay rows do. The same bit admits the other
+///   active-radar missiles (`AGM84A.JT`, `AM39.JT`), as on the B-52. **Fitted**
+///   (agent decision). Count, class, position and the empty default stay.
+///   The two wing glove rows (rows 7 and 8, `AS16.JT` pairs of four and six,
+///   twelve in all with the intake pair) are cut to two each
+///   ([`TU26_GLOVE_CAPACITY`]), so the wings carry the real four Kh-15
+///   ("four more underwing", `TU26.INF`; Wikipedia "Tupolev Tu-22M": six
+///   internal and four underwing) and the default external load is six with
+///   the intake-trunk pair (row 6, kept). This is the second place the
+///   function changes a count (the Mirage F1's belly was the first): a default
+///   store's capacity is its row's count, so a default cannot be capped
+///   alone, and the glove rows' bomb capacity falls with it. Classes 108 and
+///   160, masks and positions stay.
+/// - **Tu-95** (`TU95.PT`; BMB-C2, coordinator first pass 2026-11-15): rows 5
+///   and 6, the Bear-A to F dorsal and ventral turrets (`T23_1.JT`, the real
+///   Bear-H has the tail turret alone, Wikipedia "Tupolev Tu-95"), hold
+///   nothing; row 3, the tail gun, stays (2,000 rounds, the review found no
+///   real magazine). Row 8, the wing pylons: x +-12 ft and 2 ft below the
+///   reference point ([`TU95_WING_POSITION`]; the retail 9 ft out and 11.7 ft
+///   down was inside the fuselage and under the gear's ground plane), the mask
+///   `0x17e5` to `0x1025` ([`TU95_WING_FLAGS`]: no tank, pod, bomb or
+///   air-to-air bit, B7), ten stores ([`TU95_WING_COUNT`]) with no weight
+///   class (the class byte holds 255 at most, nine AS-16, and ten need 264),
+///   and [`weapon_allowed`] leaves the AS-16 alone on it. **Opinionated**
+///   (the Tu-95MS16's ten pylon missiles are cited, the arrangement is not),
+///   positions fitted.
+/// - **Su-34** (`SU34.PT`; BMB-C2, coordinator first pass 2026-11-15): the gun
+///   row 5 holds 180 rounds in place of 150 ([`SU34_GUN_ROUNDS`], the real
+///   GSh-30-1 magazine), and the fuselage row 6 moves up from -10 ft to -6 ft
+///   ([`SU34_FUSELAGE_UP`]: the retail point is 1.7 ft under the main wheels'
+///   bottoms). **Fitted** (agent decision).
 pub fn adjust_defaults(id: AircraftId, rows: &mut [Hardpoint]) {
     if !is_retail(id, rows) {
         return;
@@ -697,6 +871,38 @@ pub fn adjust_defaults(id: AircraftId, rows: &mut [Hardpoint]) {
             }
         }
         AircraftId::F117 => rows[F117_JAMMER].store = None,
+        AircraftId::B1b => {
+            for row in &mut rows[B1B_BAY_ROWS] {
+                row.flags &= !DESIGNATOR_BIT;
+            }
+        }
+        AircraftId::F111 => {
+            for row in &mut rows[F111_WING_ROWS] {
+                row.flags &= !DESIGNATOR_BIT;
+                row.weight_class = row.weight_class.min(F111_WING_CLASS);
+            }
+        }
+        AircraftId::Tu26 => {
+            let bay = &mut rows[TU26_BAY];
+            bay.flags = (bay.flags & !DESIGNATOR_BIT) | ACTIVE_RADAR_BIT;
+            for row in &mut rows[TU26_GLOVE_ROWS] {
+                row.count = row.count.min(TU26_GLOVE_CAPACITY);
+            }
+        }
+        AircraftId::Tu95 => {
+            for row in &mut rows[TU95_EXTRA_GUNS] {
+                row.store = None;
+            }
+            let pylons = &mut rows[TU95_WING_PYLONS];
+            pylons.position = TU95_WING_POSITION;
+            pylons.flags = TU95_WING_FLAGS;
+            pylons.count = TU95_WING_COUNT;
+            pylons.weight_class = 0;
+        }
+        AircraftId::Su34 => {
+            rows[SU34_GUN].count = SU34_GUN_ROUNDS;
+            rows[SU34_FUSELAGE].position[1] = SU34_FUSELAGE_UP;
+        }
         _ => {}
     }
 }
@@ -1636,6 +1842,155 @@ mod tests {
         let before = key(&edited);
         adjust_defaults(AircraftId::B2, &mut edited);
         assert_eq!(key(&edited), before);
+    }
+    /// BMB-B2 (2026-11-15): the B-1B's three bay rows lose only the designator
+    /// bit; the F-111F's four wing rows lose it and cap their weight class at
+    /// 50 (5,000 lb); an edited record or another identity is left alone.
+    #[test]
+    fn the_b1b_bay_rows_and_the_f111_wing_rows_are_corrected_and_nothing_else_moves() {
+        let retail = default_rows(AircraftId::B1b);
+        assert_eq!(retail.len(), 8);
+        assert!(retail[B1B_BAY_ROWS].iter().all(|h| h.flags == 0x1500));
+        let mut rows = retail.clone();
+        adjust_defaults(AircraftId::B1b, &mut rows);
+        let mut expected = key(&retail);
+        for row in &mut expected[5..8] {
+            row.1 = 0x1100;
+        }
+        assert_eq!(key(&rows), expected);
+        assert!(
+            rows[B1B_BAY_ROWS]
+                .iter()
+                .all(|h| h.flags & DESIGNATOR_BIT == 0)
+        );
+        assert!(rows[..5].iter().all(|h| h.flags == 0x1008));
+        // Repeated application is a no-op (the signature no longer matches).
+        adjust_defaults(AircraftId::B1b, &mut rows);
+        assert_eq!(key(&rows), expected);
+        let retail = default_rows(AircraftId::F111);
+        assert_eq!(retail.len(), 9);
+        let classes: Vec<_> = retail[F111_WING_ROWS]
+            .iter()
+            .map(|h| h.weight_class)
+            .collect();
+        assert_eq!(classes, [70, 70, 70, 60]);
+        let mut rows = retail.clone();
+        adjust_defaults(AircraftId::F111, &mut rows);
+        let mut expected = key(&retail);
+        for row in &mut expected[5..9] {
+            row.1 = 0x3e5;
+            row.5 = 50;
+        }
+        assert_eq!(key(&rows), expected);
+        assert!(
+            rows[F111_WING_ROWS]
+                .iter()
+                .all(|h| h.flags & DESIGNATOR_BIT == 0)
+        );
+        assert!(rows[..5].iter().all(|h| h.flags == 0x8));
+        let mut edited = default_rows(AircraftId::F111);
+        edited[0].count += 1;
+        let before = key(&edited);
+        adjust_defaults(AircraftId::F111, &mut edited);
+        assert_eq!(key(&edited), before);
+        let mut other = default_rows(AircraftId::B2);
+        let before = key(&other);
+        adjust_defaults(AircraftId::F111, &mut other);
+        adjust_defaults(AircraftId::B1b, &mut other);
+        assert_eq!(key(&other), before);
+    }
+    /// BMB-C2 (2026-11-15): the Tu-26's bay row loses the designator bit and
+    /// gains the active-radar bit, its glove rows hold two AS-16 each; the Tu-95 keeps only its tail turret and
+    /// gets the AS-16-only pylons; the Su-34's gun holds 180 rounds and its
+    /// fuselage row hangs higher. Everything else of every row stays, and an
+    /// edited record or another identity is left alone.
+    #[test]
+    fn the_batch_c_rows_are_corrected_and_nothing_else_moves() {
+        // Tu-26.
+        let retail = default_rows(AircraftId::Tu26);
+        assert_eq!(retail.len(), 9);
+        assert_eq!(retail[TU26_BAY].flags, 0x1500);
+        let mut rows = retail.clone();
+        adjust_defaults(AircraftId::Tu26, &mut rows);
+        let mut expected = key(&retail);
+        expected[TU26_BAY].1 = 0x1120;
+        // The glove pairs carry one store a side (four AS-16 underwing); the
+        // intake pair and every class stay.
+        expected[7].4 = 2;
+        expected[8].4 = 2;
+        assert_eq!(key(&rows), expected);
+        assert_eq!((rows[6].count, rows[7].count, rows[8].count), (2, 2, 2));
+        assert_eq!(
+            (
+                rows[6].weight_class,
+                rows[7].weight_class,
+                rows[8].weight_class
+            ),
+            (54, 108, 160)
+        );
+        assert_eq!(rows[TU26_BAY].flags & DESIGNATOR_BIT, 0);
+        assert_eq!(rows[TU26_BAY].flags & ACTIVE_RADAR_BIT, ACTIVE_RADAR_BIT);
+        adjust_defaults(AircraftId::Tu26, &mut rows);
+        assert_eq!(key(&rows), expected);
+        // Tu-95.
+        let retail = default_rows(AircraftId::Tu95);
+        assert_eq!(retail.len(), 9);
+        let mut rows = retail.clone();
+        adjust_defaults(AircraftId::Tu95, &mut rows);
+        let mut expected = key(&retail);
+        expected[5].3 = None;
+        expected[6].3 = None;
+        expected[TU95_WING_PYLONS].1 = 0x1025;
+        expected[TU95_WING_PYLONS].2 = [36, -6, 35];
+        expected[TU95_WING_PYLONS].4 = 10;
+        expected[TU95_WING_PYLONS].5 = 0;
+        assert_eq!(key(&rows), expected);
+        // The tail turret and the bay row are untouched.
+        assert_eq!(rows[3].store.as_deref(), Some("T23_1.JT"));
+        assert_eq!((rows[3].count, rows[3].position), (2_000, [0, 0, -100]));
+        assert_eq!(rows[7].store.as_deref(), Some("AS16.JT"));
+        // 12 ft out, above the gear's ground-contact plane (-28 units).
+        assert_eq!(rows[TU95_WING_PYLONS].position[0], 36);
+        assert!(rows[TU95_WING_PYLONS].position[1] > -28);
+        adjust_defaults(AircraftId::Tu95, &mut rows);
+        assert_eq!(key(&rows), expected);
+        assert!(weapon_allowed(
+            AircraftId::Tu95,
+            TU95_WING_PYLONS,
+            "AS16.JT"
+        ));
+        for source in ["AGM84A.JT", "AM39.JT", "AIM120.JT", "MK82.JT", "AS15.JT"] {
+            assert!(!weapon_allowed(AircraftId::Tu95, TU95_WING_PYLONS, source));
+            assert!(weapon_allowed(AircraftId::Tu95, 7, source), "{source}");
+        }
+        assert!(weapon_allowed(AircraftId::Tu26, 8, "AGM84A.JT"));
+        // Su-34.
+        let retail = default_rows(AircraftId::Su34);
+        assert_eq!(retail.len(), 9);
+        let mut rows = retail.clone();
+        adjust_defaults(AircraftId::Su34, &mut rows);
+        let mut expected = key(&retail);
+        expected[SU34_GUN].4 = 180;
+        expected[SU34_FUSELAGE].2 = [24, -18, -13];
+        assert_eq!(key(&rows), expected);
+        // The wheels' bottoms are 25 units down: the row is above them.
+        assert!(rows[SU34_FUSELAGE].position[1] > -25);
+        adjust_defaults(AircraftId::Su34, &mut rows);
+        assert_eq!(key(&rows), expected);
+        // An edited record or another identity stays as it was.
+        for id in [AircraftId::Tu26, AircraftId::Tu95, AircraftId::Su34] {
+            let mut edited = default_rows(id);
+            edited[0].weight_class += 1;
+            let before = key(&edited);
+            adjust_defaults(id, &mut edited);
+            assert_eq!(key(&edited), before, "{id:?}");
+        }
+        let mut other = default_rows(AircraftId::B52);
+        let before = key(&other);
+        for id in [AircraftId::Tu26, AircraftId::Tu95, AircraftId::Su34] {
+            adjust_defaults(id, &mut other);
+        }
+        assert_eq!(key(&other), before);
     }
     /// F117-5 (2026-11-15): the F-117's two bay rows take the Paveway II laser
     /// bombs beyond the retail bomb-only mask, and nothing else of the row,

@@ -2,7 +2,7 @@
 //! unit mounts. `HQ2J`, `HQ61`, `MIM23`, `ROLAND`, `SAN5`, `SAN8`, `AAA20`,
 //! `M163`, `T20_1` and `T23_1` all decode from `FA_2.LIB`, but no NT hardpoint
 //! names any of them. Only `T23_1.JT` is named by a PT record, and that is the
-//! turret record of the unported Tu-26 and Tu-95.
+//! turret record of the Tu-26 and Tu-95 (imported identities since BMB-C1).
 //!
 //! The check reads the user's own install (the `gameassets` link or
 //! `TORE_GAME_DIR`) through the importer's media source and skips quietly
@@ -123,7 +123,9 @@ fn no_nt_unit_mounts_a_decoded_only_surface_record() {
     .collect();
     assert_eq!(carriers, expected, "decoded PT carriers of the ten records");
 
-    // No imported aircraft is built with one either.
+    // No imported aircraft is built with one either, except the Tu-26 and
+    // the Tu-95, whose own tail turret rows name T23_1.JT (BMB-C1,
+    // 2026-11-15: they are imported identities now).
     for id in AircraftId::ALL {
         let library = libraries
             .iter()
@@ -133,17 +135,20 @@ fn no_nt_unit_mounts_a_decoded_only_surface_record() {
         let aircraft =
             Aircraft::parse(&bytes).unwrap_or_else(|error| panic!("{}: {error}", id.pt()));
         for record in DECODED_ONLY {
-            assert!(
-                !id.guns().contains(&record),
-                "{} must not mount {record} as a gun",
+            let carrier = record == "T23_1.JT" && matches!(id, AircraftId::Tu26 | AircraftId::Tu95);
+            assert_eq!(
+                id.guns().contains(&record),
+                carrier,
+                "{} gun claim for {record}",
                 id.pt()
             );
-            assert!(
-                !aircraft
+            assert_eq!(
+                aircraft
                     .hardpoints
                     .iter()
                     .any(|hardpoint| hardpoint.store.as_deref() == Some(record)),
-                "{} decoded station list names {record}",
+                carrier,
+                "{} decoded station list and {record}",
                 id.pt()
             );
         }

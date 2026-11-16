@@ -88,7 +88,11 @@ pub fn mask(source: &Sprite, id: AircraftId) -> Vec<u8> {
                 (465, 185),
             ],
         ),
-        AircraftId::Mig29 | AircraftId::Su25 | AircraftId::Mig23 => (
+        // The Su-34's su33cc.HUD is the Su-33 family's, the same module and the
+        // same ~SU33H.PIC the MiG-29, Su-25 and MiG-23 fly, so it takes the
+        // glass already measured for them (BMB-C1, 2026-11-15; coordinator
+        // first pass, Su-34 item 7). The pilot eye is SU34-7's.
+        AircraftId::Mig29 | AircraftId::Su25 | AircraftId::Mig23 | AircraftId::Su34 => (
             (1280, 490),
             &[(511, 100), (770, 100), (752, 388), (528, 388)],
         ),
@@ -195,7 +199,16 @@ pub fn mask(source: &Sprite, id: AircraftId) -> Vec<u8> {
         | AircraftId::A310
         // The B-52 flies the AC-130 panel family its BMBROH.HUD names
         // (BMB-A1, 2026-11-15; John, decision 14): the same ~AC130H.PIC.
-        | AircraftId::B52 => ((1280, 490), &[(0, 0), (1279, 0), (1279, 489), (0, 489)]),
+        | AircraftId::B52
+        // The F-111F flies the same ~AC130H.PIC its AC130.HUD names (BMB-B1,
+        // 2026-11-15; coordinator first pass, F111 item 8): the whole picture,
+        // as the B-52.
+        | AircraftId::F111
+        // The Tu-26 and Tu-95 fly the same ~AC130H.PIC their bmbroh.HUD names
+        // (BMB-C1, 2026-11-15; coordinator first pass, Tu-26 item 10 and
+        // Tu-95 item 10): the whole picture, as the B-52.
+        | AircraftId::Tu26
+        | AircraftId::Tu95 => ((1280, 490), &[(0, 0), (1279, 0), (1279, 489), (0, 489)]),
         // Bomber batch A (BMB-A1, 2026-11-15): the F-117 (~F117H.PIC) has a
         // cockpit picture of its own, whose glass has not been measured. No
         // expected size, so the aperture fails closed (an empty mask) until
@@ -212,7 +225,12 @@ pub fn mask(source: &Sprite, id: AircraftId) -> Vec<u8> {
         // the left strut), a pixel outside it, so the opaque art trims it and
         // the two side panes stay out. Measured on the imported art,
         // `the_b2_glass_is_the_main_window_of_the_imported_art`. Fitted.
-        AircraftId::B2 => (
+        // The B-1B (bmbrcc.HUD) and the Tu-160 (b2.HUD) fly the B-2's cockpit
+        // picture `~B2H.PIC` by the record (BMB-B1, 2026-11-15; coordinator
+        // first pass, B1B item 7 and Tu-160 item 8), so they take the glass
+        // measured for it (B2-7). Fitted for the B-2; the same art, so the
+        // same polygon.
+        AircraftId::B2 | AircraftId::B1b | AircraftId::Tu160 => (
             (1394, 508),
             &[
                 (398, 90),

@@ -2209,8 +2209,8 @@ impl AiWings {
 
     /// Carry every AI aircraft's swivelling wing stations with its swinging
     /// wing, as the host does for a human's ownship (TOR-5): the turn is a
-    /// pure function of the aircraft's own speed and flaps
-    /// ([`tore_sim::combat::swing::wing_turn`]), so every peer works out the
+    /// pure function of the aircraft's own speed, flaps and gear
+    /// ([`tore_sim::combat::swing::SwingSpec::turn`]), so every peer works out the
     /// same value and nothing is checkpointed or recorded. Without it an AI
     /// aircraft's rails and releases leave from the spread positions while its
     /// drawn racks sit at the swept ones (B5-AI, 2026-11-11). An aircraft with
@@ -2219,10 +2219,7 @@ impl AiWings {
         for actor in self.mission.actors() {
             if let Some(config) = self.configs.get_mut(&actor.id()) {
                 let flight = actor.flight();
-                config.set_wing_turn(tore_sim::combat::swing::wing_turn(
-                    flight.speed,
-                    flight.flaps,
-                ));
+                config.set_wing_flight(flight.speed, flight.flaps, flight.gear);
             }
         }
     }
