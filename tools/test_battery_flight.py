@@ -80,7 +80,7 @@ class TakeoffAndLandingTests(unittest.TestCase):
         # MiG-31's and Mirage 2000's liftoff and approach figures (M25-8, M31-8,
         # M2K-8). The F-16A has no per-aircraft speed target: its record equals
         # the F-16C's (F16A-6).
-        self.assertEqual(set(flight.APPROACH_TARGET) | {"x31"}, set(flight.AIRCRAFT) | {"mig25", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc", "b52", "b2", "f117"})
+        self.assertEqual(set(flight.APPROACH_TARGET) | {"x31"}, set(flight.AIRCRAFT) | {"mig25", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc", "b52", "b2", "f117", "tu95"})
         self.assertIn("mig25", flight.VARIETY_AIRCRAFT)
         self.assertIn("mig25", flight.LIFTOFF_AIRCRAFT)
         self.assertIn("mig25", flight.LIFTOFF_TARGET)
@@ -155,6 +155,17 @@ class TakeoffAndLandingTests(unittest.TestCase):
             self.assertIn("f117", getattr(flight, key))
         self.assertNotIn("f117", flight.TAKEOFF_TICKS_MAX)
         self.assertEqual(flight.approach_fuel("f117"), round(0.65 * 18500))
+        # The Tu-95 Bear-H (T95-8, 2026-11-16): its 7,400 ft run needs the long tick limit and the Greek field.
+        for key in ("VARIETY_AIRCRAFT", "LIFTOFF_AIRCRAFT", "HEAVY_AIRCRAFT"):
+            self.assertIn("tu95", getattr(flight, key))
+        for key in ("LIFTOFF_TARGET", "APPROACH_TARGET", "INTERNAL_FUEL_LB", "KNOWN_LIFTOFF", "KNOWN_APPROACH"):
+            self.assertIn("tu95", getattr(flight, key))
+        self.assertEqual(flight.TAKEOFF_TICKS_MAX["tu95"], 10000)
+        self.assertEqual(flight.TAKEOFF_RUN_TICKS["tu95"], "18000")
+        self.assertEqual(flight.THEATER_FOR["tu95"], "GRE")
+        self.assertEqual(flight.LIFTOFF_TARGET["tu95"], (135, 165))
+        self.assertEqual(flight.APPROACH_TARGET["tu95"], (145, 170))
+        self.assertEqual(flight.approach_fuel("tu95"), round(0.65 * 148150))
 
     def test_overweight_and_stuck(self):
         text = TAKEOFF.replace("gross_lb=41838", "gross_lb=50000")

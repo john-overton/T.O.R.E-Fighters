@@ -2420,3 +2420,34 @@ before and after table with its sources is in
   125.4 kt. Landing (`--maneuver land`, GRE 1): 270,000 lb approach 140.3 kt, touchdown
   131.6 kt, rollout 4,131 ft; 404,000 lb approach 166.2 kt (the cap), touchdown 153.7 kt,
   rollout 5,056 ft.
+
+## Tupolev Tu-95 Bear-H validation, 2026-11-16
+
+T95-8. Measured with `crates/tore-sim/examples/performance_probe.rs` (the B-52H's `PROBE_CLIMB=bomber`,
+`PROBE_SPEEDS_KT`, `PROBE_HOLD_SPEED`, `PROBE_CRUISE=ALT:KT`) on the corrected record at 346,565 lb (full tank),
+388,894 lb (the default load of 16 AS-16) and 300,000 lb, and with `tore-app --headless-flight`. The scripts are
+`.local/m3-aircraft/checks/T95-8/run_probes.sh before|after` and `run_ground.sh before|after`; logs are beside
+them. The before and after table with its sources is in
+[the Tu-95 flight review](../formats/aircraft-variety.md#tu-95-bear-h-flight-review-t95-8-2026-11-16).
+
+- Level top speed, military power, full tank / 300,000 lb (before to after): sea level 295 / 311 to 333 / 340 kt,
+  15,000 ft 332 / 349 to 413 / 422, 25,000 ft 357 / 375 to 467 / 476, 36,000 ft 384 / 404 to 432 / 441.
+- Climb, schedule 300 KCAS then Mach 0.77, military power: best sustained rate 1,530 / 1,560 / 1,499 to 2,175 /
+  1,805 / 2,713 ft/min (full, 388,894 lb, 300,000 lb); 5,000 ft in 167 / 196 / 138 s (was 751 s, none, 362 s);
+  highest altitude 9,611 / 130 / 15,653 to 40,395 / 39,616 / 40,476 ft.
+- Fuel: 400 kt at 25,000 ft throttle trimmed burns 2.29 lb/s (was full throttle, 3.99 lb/s, 359 kt held), so
+  7,174 nautical miles from the 148,150 lb tank at constant weight; 380 kt at 30,000 ft 2.19 lb/s, 7,134.
+- Sustained level turn, speed held, full tank (before to after): 1,000 ft 200 kt 64 to 64 degrees, 250 kt 66 to
+  66, 300 kt 30 to 66 (2.49 G); 15,000 ft 250 kt 66 to 64, 300 kt 58 to 66, 350 and 400 kt none to 64 and 52;
+  25,000 ft 300 kt 62 to 66, 350 kt 40 to 64, 400 and 450 kt none to 52 (1.63 G) and 50.
+- `--headless-flight 1200`: 265.0 kt level at 5,000 ft (was 244.7), no crash, no non-finite value, fuel 148,150
+  to 148,122 lb. `--maneuver roll`: 23.6 deg/s. `--maneuver gcurve`: the full-stick limit never falls below
+  1.67 G after reaching 2.5 G.
+- Takeoff (`--maneuver takeoff`, ground start): 388,894 lb 7,417 ft at 137.1 kt on GRE airport 1 (12,000 ft) and
+  7,762 ft on UKR airport 1 (was 3,535 and 3,697 ft at 137.0 kt); 342,329 lb 4,650 ft at 128.7 kt (was 2,498 ft at
+  128.6). Landing (`--maneuver land`, GRE 1): 337,041 lb approach 158.1 kt, touchdown 135.0 kt, rollout 4,429 ft
+  (was 131.9 kt, 1,373 ft); 292,744 lb approach 147.4 kt, touchdown 127.1 kt, rollout 4,136 ft (was 124.3 kt,
+  1,248 ft).
+- AI heavy-class scenarios: `ai-heavy-takeoff-tu95-gre-a1` and `ai-heavy-land-tu95-ukr-a2` pass (touchdown 121 kt,
+  parked at 603 s with 3.7 s off the pavement in the taxi-in).
+

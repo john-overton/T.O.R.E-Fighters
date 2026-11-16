@@ -845,10 +845,53 @@ const TU26_RETAIL_ZERO_G_TOP_FPS: f64 = 2_084.;
 /// agrees with Jane's within 3 percent, the ceiling 40,750 ft is between the
 /// cited 39,370 and 45,000). The corrected empty plus full fuel is 346,565
 /// lb, under the maximum.
-pub const TU95_THRUST_LBF: i32 = 129_000;
+///
+/// **Update (T95-8, 2026-11-16, fitted, agent decision): 100,000 lbf, not
+/// 129,000.** The model's thrust is one number that has to serve the takeoff
+/// run, the climb and the cruise (a turboprop's falls with speed, the model's
+/// does not). The review's cited-formula estimate at the 162 kt takeoff speed is
+/// 71,600 to 95,400 lbf (eta 0.6 to 0.8); 129,000 needed a rolling term of
+/// about 9.8 ft/s squared to reach the published 2,540 m run, which makes the
+/// AI's taxi throttle 0.92, and climbed at 2,100 to 2,500 ft/min; 100,000 needs
+/// 4.8 (the B-52H's 4.8, taxi throttle 0.58) and climbs at 1,800 to 2,700
+/// ft/min against the published 2,000 (Wikipedia "Tupolev Tu-95", Tu-95MS).
+pub const TU95_THRUST_LBF: i32 = 100_000;
 pub const TU95_EMPTY_LB: i32 = 198_415;
 pub const TU95_INTERNAL_FUEL_LB: i32 = 148_150;
 pub const TU95_MAX_TAKEOFF_LB: i32 = 414_470;
+/// The Tu-95's mid-altitude top speed (T95-8, **fitted**, agent decision
+/// 2026-11-16): the record's 1 G fast edge is a straight line from 355 kt
+/// (600 ft/s) at sea level to 462 kt (780 ft/s) at 36,000 ft, so 430 kt at
+/// 25,000 ft, 14 percent under the game's own Jane's text (`TU95.INF`, Bear-H:
+/// Mach 0.83, 499 kt at 25,000 ft; Mach 0.78, 447 kt at 38,000 ft; 350 kt at sea
+/// level). One vertex at 25,000 ft puts the edge at 842 ft/s (499 kt, Mach
+/// 0.83) there, 0 G row 55 ft/s over it (the record's own step at 36,000 ft).
+/// The sea-level edge (355 kt against Jane's 350), the 36,000 ft vertex and
+/// the ceiling stay. Applies only while the record's 1 G and 0 G rows are the
+/// retail ones and the thrust is the corrected one.
+const TU95_ONE_G_25K_FPS: f64 = 842.;
+const TU95_ZERO_G_25K_FPS: f64 = 897.;
+const TU95_TRIM_ALTITUDE_FT: f64 = 25_000.;
+const TU95_RETAIL_ONE_G: [[f64; 2]; 8] = [
+    [210., 0.],
+    [250., 15_000.],
+    [350., 33_500.],
+    [450., 38_750.],
+    [520., 40_750.],
+    [730., 40_375.],
+    [780., 36_000.],
+    [600., 0.],
+];
+const TU95_RETAIL_ZERO_G: [[f64; 2]; 8] = [
+    [160., 0.],
+    [200., 15_500.],
+    [300., 35_250.],
+    [440., 41_625.],
+    [520., 43_625.],
+    [750., 43_750.],
+    [835., 36_000.],
+    [650., 0.],
+];
 
 /// Su-34 Platypus (BMB-C2, **opinionated**, coordinator first pass
 /// 2026-11-15, BOMBERS-DECISIONS-C Su-34 item 1, pending John). `SU34.PT` is
@@ -1276,6 +1319,38 @@ pub(crate) fn fit_envelopes(
                         }
                     }
                 }
+            }
+            hold_to_one_g(envelopes);
+            true
+        }
+        AircraftId::Tu95 => {
+            // T95-8: the mid-altitude top speed follows the corrected `thrust`
+            // (the signal that the corrections ran) and needs the retail 0 G
+            // and 1 G polygons, like the B-1B's and the Su-34's.
+            let corrected =
+                plane.get("thrust").and_then(|t| t.number().ok()) == Some(TU95_THRUST_LBF);
+            let zero = envelopes.iter().position(|e| e.g == 0);
+            let one = envelopes.iter().position(|e| e.g == 1);
+            let (Some(zero), Some(one)) = (zero, one) else {
+                return false;
+            };
+            if !corrected
+                || envelopes[zero].points != TU95_RETAIL_ZERO_G
+                || envelopes[one].points != TU95_RETAIL_ONE_G
+            {
+                return false;
+            }
+            for (row, fps) in [(zero, TU95_ZERO_G_25K_FPS), (one, TU95_ONE_G_25K_FPS)] {
+                // The fast side runs from the 36,000 ft vertex down to sea
+                // level: the new vertex goes between them.
+                let at = envelopes[row]
+                    .points
+                    .iter()
+                    .position(|p| p[1] == 36_000.)
+                    .map_or(envelopes[row].points.len(), |i| i + 1);
+                envelopes[row]
+                    .points
+                    .insert(at, [fps, TU95_TRIM_ALTITUDE_FT]);
             }
             hold_to_one_g(envelopes);
             true
@@ -2376,6 +2451,76 @@ mod tests {
         p.get_mut("internalFuel").unwrap().value = "6241".into();
         assert!(!apply(AircraftId::F5E, &mut o, &mut p));
         assert_eq!(n(&o, "maxAlt"), 42_000);
+    }
+
+    #[test]
+    fn the_tu95_gains_one_mid_altitude_vertex_only_on_the_retail_rows() {
+        let rows = || {
+            vec![
+                Envelope {
+                    g: 0,
+                    points: TU95_RETAIL_ZERO_G.to_vec(),
+                },
+                Envelope {
+                    g: 1,
+                    points: TU95_RETAIL_ONE_G.to_vec(),
+                },
+                Envelope {
+                    g: 2,
+                    points: vec![[250., 0.], [670., 37_000.], [720., 34_000.], [590., 0.]],
+                },
+            ]
+        };
+        let object = BTreeMap::new();
+        let mut plane = BTreeMap::from([("thrust".to_string(), token(TU95_THRUST_LBF))]);
+        let mut rows_a = rows();
+        assert!(fit_envelopes(
+            AircraftId::Tu95,
+            &object,
+            &mut plane,
+            &mut rows_a
+        ));
+        let at = |rows: &[Envelope], g: i32, alt: f64| {
+            rows.iter()
+                .find(|e| e.g == g)
+                .unwrap()
+                .speeds(alt)
+                .unwrap()
+                .1
+        };
+        // 842 ft/s (499 kt, Mach 0.83) at 25,000 ft, the 0 G row 55 ft/s over
+        // it; the sea-level and 36,000 ft vertices are the record's.
+        assert_eq!(at(&rows_a, 1, 25_000.), 842.);
+        assert_eq!(at(&rows_a, 0, 25_000.), 897.);
+        assert_eq!(at(&rows_a, 1, 0.), 600.);
+        assert_eq!(at(&rows_a, 1, 36_000.), 780.);
+        assert_eq!(rows_a[1].points.len(), 9);
+        // The rows above 1 G stay inside the 1 G edge, and nothing else moved.
+        assert!(at(&rows_a, 2, 25_000.) <= 842.);
+        assert_eq!(rows_a[2].points, rows()[2].points);
+        // Another identity, the retail thrust or an edited row: unchanged.
+        let mut rows_b = rows();
+        assert!(!fit_envelopes(
+            AircraftId::Tu26,
+            &object,
+            &mut plane,
+            &mut rows_b
+        ));
+        let mut retail = BTreeMap::from([("thrust".to_string(), token(355_080))]);
+        assert!(!fit_envelopes(
+            AircraftId::Tu95,
+            &object,
+            &mut retail,
+            &mut rows_b
+        ));
+        rows_b[1].points[2][0] = 351.;
+        assert!(!fit_envelopes(
+            AircraftId::Tu95,
+            &object,
+            &mut plane,
+            &mut rows_b
+        ));
+        assert_eq!(rows_b[1].points.len(), 8);
     }
 
     fn tornado_record() -> (BTreeMap<String, Token>, Vec<Envelope>) {

@@ -19,7 +19,7 @@ from battery_scenarios._strips import ground_airport
 
 # Original roster covered by the established fixed-wing maneuver battery.
 AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su25", "mig23", "su35", "f22", "f22n", "faxx"]
-VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310", "mig25", "f16a", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc", "b52", "b2", "f117", "f111"]
+VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310", "mig25", "f16a", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc", "b52", "b2", "f117", "f111", "tu95"]
 # Aircraft whose PT disables spins (X-31 flag, F-22 family): they never enter one.
 SPIN_IMMUNE = {"x31", "f22", "f22n", "faxx"}
 
@@ -248,6 +248,10 @@ def tank_problems(output: str) -> list[str]:
 # 488,000 lb, so its scenarios run 18,000 ticks and allow 9,000 (B52-8, 2026-11-15).
 TAKEOFF_TICKS_MAX = {"b2": 10000, "b52": 9000}
 TAKEOFF_RUN_TICKS = {"b2": "12000", "b52": "18000"}
+# The Tu-95's 7,400 ft run at its 388,894 lb default gross takes 8,200 ticks
+# (T95-8, 2026-11-16): its scenarios run 18,000 ticks and allow 10,000.
+TAKEOFF_TICKS_MAX["tu95"] = 10000
+TAKEOFF_RUN_TICKS["tu95"] = "18000"
 
 
 def check_takeoff(output: str, ac: str | None = None) -> list[str]:
@@ -439,6 +443,21 @@ KNOWN_APPROACH["b52"] = 166.2
 # The B-52H's liftoff and approach scenarios start from a 12,000 ft runway (Greece, airport 1):
 # UKR airport 1 is 5,532 ft, shorter than its 7,674 ft takeoff run and its 5,000 ft rollout.
 THEATER_FOR = {"b52": "GRE"}
+# The Tu-95's run (7,400 ft) is also longer than UKR airport 1 (5,532 ft): Greece airport 1 (T95-8).
+THEATER_FOR["tu95"] = "GRE"
+# The Tu-95 Bear-H (T95-8, 2026-11-16; agent decisions, fitted windows). The game's own Jane's text
+# (`TU95.INF`, Bear-H) gives a takeoff speed of 162 kt (at the 414,470 lb maximum, about 157 kt scaled to the
+# 388,894 lb default load) and a landing speed of about 146 kt (at the 297,620 lb maximum landing weight, about
+# 155 kt at the scenario's 337,000 lb). The model's weight-scaled stall gives 137.1 kt after 7,417 ft at the
+# default load (GRE 1; the published takeoff run is 2,540 m, 8,333 ft, at the maximum weight) and an approach of
+# 158.1 kt (touchdown 135.0 kt, rollout 4,429 ft; the published landing run is 1,700 m, 5,577 ft, at the
+# maximum landing weight). The liftoff speed is 13 percent under Jane's: the stall is not refitted, because
+# the same weight-scaled stall sets the approach, which is within 2 percent. The windows bracket the Jane's
+# figure and the recorded one, so a change in either direction shows.
+LIFTOFF_TARGET["tu95"] = (135, 165)
+APPROACH_TARGET["tu95"] = (145, 170)
+KNOWN_LIFTOFF["tu95"] = 137.1
+KNOWN_APPROACH["tu95"] = 158.1
 # Internal fuel of each aircraft's default load, pounds.
 INTERNAL_FUEL_LB = {
     "f18": 11220, "rafale": 9900, "f14": 15741, "a4e": 4434, "x31": 9975, "mig29": 13000, "su27": 19000,
@@ -476,6 +495,8 @@ INTERNAL_FUEL_LB["b52"] = 312197
 INTERNAL_FUEL_LB["b2"] = 167000
 # F117.PT internal fuel, 18,500 lb (the record's own tank; the approach scenario flies 65 percent, 12,025 lb).
 INTERNAL_FUEL_LB["f117"] = 18500
+# TU95.PT internal fuel, 148,150 lb (BMB-C2, the Tu-95MS tank; the approach scenario flies 65 percent, 96,298 lb).
+INTERNAL_FUEL_LB["tu95"] = 148150
 APPROACH_FUEL_CAP_LB = 100000
 
 
@@ -591,6 +612,8 @@ LIFTOFF_AIRCRAFT += ["b52"]
 LIFTOFF_AIRCRAFT += ["b2"]
 # The F-117A joins them (F117-8, 2026-11-15).
 LIFTOFF_AIRCRAFT += ["f117"]
+# The Tu-95 joins them (T95-8, 2026-11-16).
+LIFTOFF_AIRCRAFT += ["tu95"]
 
 
 def liftoff_scenarios() -> list[Scenario]:
@@ -2866,7 +2889,7 @@ def variety_scenarios() -> list[Scenario]:
 
 # Transports and airliners: their higher G rows end well short of the 1 G row's
 # top speed, the band where they once could not pull at all (John, 2026-10-08).
-HEAVY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "b747", "a310", "b52"]
+HEAVY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "b747", "a310", "b52", "tu95"]
 
 
 # The B-52H's record has only +3 and +2 G rows, and its tank divides the 2 G row by the

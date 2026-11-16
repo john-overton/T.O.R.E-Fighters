@@ -1702,7 +1702,7 @@ def scenarios() -> list[Scenario]:
     # Takeoff alone: the B-2 and B-52 from Athens (GRE 1, 12,000 ft; at their full weights they need about
     # 7,200 ft and the scripted player's own B-2 runs off the end of Mikonos' 7,246 ft), the F-117 from
     # Mikonos (GRE 2, 7,246 ft). Each leaves the ground, climbs out and flies on.
-    for aircraft, field in (("b2", 1), ("b52", 1), ("f117", 2)):
+    for aircraft, field in (("b2", 1), ("b52", 1), ("f117", 2), ("tu95", 1)):
         out.append(probe(f"heavy-takeoff-{aircraft}-gre-a{field}", [
             "--theater", "GRE", "--ground-start", str(field),
             "--aircraft", aircraft, "--probe-friendly-aircraft", aircraft,
@@ -1710,14 +1710,16 @@ def scenarios() -> list[Scenario]:
             ticks=42000, timeout=1800, check=heavy_takeoff,
             notes="BMB-AI: the heavy takeoff (flaps and gear kept until the speed is there) at its full weight."))
     # Landing at Simferopol (UKR 2, 5,532 ft, the Ukraine's default field), sent home from the air, at a
-    # landing weight: B-2 60,000 lb of fuel, B-52 80,000 lb, F-117 7,000 lb.
-    for aircraft, fuel, kt in (("b2", 60000, 150), ("b52", 80000, 145), ("f117", 7000, 190)):
+    # landing weight: B-2 60,000 lb of fuel, B-52 80,000 lb, F-117 7,000 lb, Tu-95 60,000 lb. The Tu-95
+    # (T95-8, 2026-11-16) touches down at 121 kt and parks at 603 s, 3 s past the 600 s the others get, with
+    # 3.7 s off the pavement in its taxi-in like the B-52's, so it runs 90,000 ticks and tolerates the same.
+    for aircraft, fuel, kt in (("b2", 60000, 150), ("b52", 80000, 145), ("f117", 7000, 190), ("tu95", 60000, 150)):
         out.append(probe(f"heavy-land-{aircraft}-ukr-a2", [
             "--theater", "UKR", "--aircraft", aircraft, "--probe-friendly-aircraft", aircraft,
             "--probe-wing-size", "2", "--probe-wing-order", "600:bug-out", "--probe-fuel", str(fuel),
             "--separation", "200", "--probe-wing-only", "--probe-pavement"],
-            ticks=72000, timeout=2400,
-            check=heavy_landing(kt, pavement=aircraft != "b52"),
+            ticks=90000 if aircraft == "tu95" else 72000, timeout=2400,
+            check=heavy_landing(kt, pavement=aircraft not in ("b52", "tu95")),
             notes=f"BMB-AI: an airborne {aircraft.upper()} sent home lands at Simferopol (5,532 ft) at {kt} kt or slower "
                   f"with {fuel} lb of fuel, rolls out, clears and parks."))
     # An enemy ground start in single player (slice CL-R): Enemy Wing 1 parks

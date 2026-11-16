@@ -16018,3 +16018,171 @@ Provenance: radar and jammer records, the HUD module, panel names and cockpit ar
 the radar preset, the jammer generation, the default load, the eye and the aperture's measurement are fitted or
 opinionated, agent decisions 2026-11-16 (the load the coordinator's brief); the shape measurements are from
 `TU95.SH`. No retail bytes are committed.
+
+## Tu-95 Bear-H flight review (T95-8, 2026-11-16)
+
+Implementation mode, slice T95-8 (bomber batch C), by an agent (Claude Sonnet). The Tu-95 flies the hybrid
+adapter's `variety` configuration built from `TU95.PT` with BMB-C2's real weights (empty 198,415 lb, tank
+148,150 lb, maximum takeoff 414,470 lb), the record's own G rows (-1 to +3), fuel flow (4 lb/s) and ceiling
+(40,750 ft). What changed is the thrust number, one new vertex in the 1 G speed edge, and six per-aircraft
+flight terms in the B-52H's way ([B52-8](#b-52-flight-review-b52-8-2026-11-15)). Every number below is
+**fitted**, an agent decision of 2026-11-16, unless it is a cited real figure. The coordinator's first pass
+(`BOMBERS-DECISIONS-C.md`, "BMB-C1/C2": "T95-8 owns the thrust number and the flight fit") applies; one of its
+numbers, the 129,000 lbf, changed for the reason in the first cause below. Logs and the probe scripts are local:
+`.local/m3-aircraft/checks/T95-8/` (`run_probes.sh`, `run_ground.sh`, `before/`, `after/`).
+
+### The real figures
+
+All read 2026-11-16 unless named. The game's own Jane's text is `TU95.INF` ("Bear-H" performance block; reference
+media, quoted by figure only).
+
+| Figure | Real | Source |
+| --- | --- | --- |
+| Maximum level speed, sea level | 350 kt | `TU95.INF` |
+| Maximum level speed, 25,000 ft | Mach 0.83, 499 kt (925 km/h) | `TU95.INF`; Wikipedia "Tupolev Tu-95" (Tu-95MS) |
+| Maximum level speed, 38,000 ft | Mach 0.78, 447 kt | `TU95.INF` |
+| Nominal cruise | 384 kt (`TU95.INF`), 380 kt (Wikipedia) | as listed |
+| Service ceiling | 39,370 ft normal, 29,850 ft with the maximum weapon load (`TU95.INF`); 45,000 ft (Wikipedia, "13,716 m"); 10,500 m (airforce-technology.com, Tu-95MS, 34,450 ft) | as listed |
+| Rate of climb | 2,000 ft/min (10 m/s, no weight or altitude stated) | Wikipedia "Tupolev Tu-95" (Tu-95MS) |
+| Takeoff speed | 162 kt | `TU95.INF` (at the 414,470 lb maximum) |
+| Landing speed, approximate | 146 kt | `TU95.INF`; maximum landing weight 297,620 lb (135 t) |
+| Takeoff run, landing run | 2,540 m (8,333 ft), 1,700 m (5,577 ft) | airforce-technology.com, "Tu-95MS strategic bomber" (185 t maximum takeoff, 135 t maximum landing) |
+| Range | 15,000 km (8,100 nautical miles) Wikipedia; 10,500 km (5,670 nautical miles, 14,100 km with one refuelling) airforce-technology.com | as listed |
+| Engines | 4 x NK-12MV, 11,033 kW (14,795 ehp) each | `TU95.INF`; Wikipedia "Kuznetsov NK-12" |
+| Roll rate | none found | (the record's roll limit applies) |
+
+No published static thrust, thrust at speed, climb time or fuel burn exists in a source that could be cited, as
+the T95-0 review found; the climb and range are therefore fitted to the rate of climb and range above, not to a
+curve.
+
+### Causes
+
+1. **The thrust number.** The record's 355,080 lbf was four times 14,795 shp times six, not a thrust. BMB-C2 set
+   129,000 lbf (the AC-130U's 2.18 lbf per shp). The model has one thrust number for takeoff, climb and cruise,
+   where a turboprop's falls with speed (the review's cited-formula estimate is 71,600 to 95,400 lbf at the 162
+   kt takeoff speed and 43,500 at 355 kt). With 129,000 the 388,894 lb takeoff needs a rolling term of about 9.8
+   ft/s squared to reach the published run (6.8 gave 5,708 ft), which makes the AI's taxi throttle 0.92: the wheels
+   nearly cancel the engines; **100,000 lbf** needs 4.8, the B-52H's fit (taxi throttle 0.58), sits just above the cited takeoff-speed range, and climbs at 1,800 to 2,700 ft/min
+   against the published 2,000. 100,000 is the record value now (`TU95_THRUST_LBF`, `aircraft_corrections.rs`;
+   [aircraft records](../spec/aircraft-records.md)).
+2. **The drag law.** The shared hybrid drag is the full thrust at the 1 G top-speed edge on the square law, times
+   one plus the loading times the record's 60 percent loaded drag. A full tank (loading 0.75) makes that 1.45 times
+   the thrust at the edge, so the aircraft topped out at 0.83 of the edge: 295 kt at sea level, a 1,530 ft/min
+   best climb and a highest altitude of 9,611 ft in the bomber schedule. At 400 kt at 25,000 ft it could not even
+   cruise: full throttle gave 359 kt.
+3. **The speed edge in the middle.** The 1 G fast edge ran in a straight line from 355 kt at sea level to 462 kt
+   at 36,000 ft, so 430 kt at 25,000 ft, 14 percent under Jane's 499 kt there.
+4. **No takeoff or landing drag.** As for the B-52: the shared takeoff has no flap, gear or induced drag and no
+   thrust lost with speed, so the 388,894 lb run was 3,535 ft against a published 8,333 ft at the maximum weight,
+   and the landing rollout was 1,373 ft.
+5. **Thrust lapse.** The shared `exp(-h / 70,000)` keeps 0.70 of the sea-level thrust at 25,000 ft; a turboprop's
+   power follows about the 0.8 power of the density ratio, 0.52 there.
+
+### The fitted terms
+
+| Term | Shared value | Tu-95 | Fitted against |
+| --- | --- | --- | --- |
+| Thrust, lbf | 355,080 (retail), 129,000 (BMB-C2) | 100,000 | cause 1: the cited takeoff-speed thrust range, a takeoff run near the published one with the B-52's rolling term, the published 2,000 ft/min |
+| Clean-drag shape (`DragShape`: 0.56 of the reference drag on the square law, the rest on the 12th power of speed over the edge) | square law | 0.56 / 12 | The cruise burn: 400 kt at 25,000 ft burns 2.29 lb/s, 380 kt 2.19 lb/s, so the range is about 7,100 nautical miles against the published 8,100 (Wikipedia) and the top speed is within 5 percent of the edge at the aircraft's usual weights. 1 at the edge. 0.39 of the thrust at 0.8 of the edge, about 0.5 at 0.87 |
+| 1 G fast edge at 25,000 ft | 430 kt (straight line) | 842 ft/s, 499 kt, Mach 0.83 | `TU95.INF`. One vertex in the record's 1 G polygon (the 0 G row 55 ft/s over it, the record's own step at 36,000 ft; every higher G row stays inside the 1 G edge). Sea level (355 kt, Jane's 350) and 36,000 ft (462 kt, Mach 0.81, Jane's 447 at 38,000 ft) stay |
+| Thrust lapse height | 70,000 ft | 38,000 ft | the turboprop power lapse, 0.52 at 25,000 ft. The cruise burn is the throttle fraction, so it does not move it |
+| Rolling and takeoff-run deceleration | 0.8 ft/s squared | 4.8 | a takeoff run of 7,417 ft at 388,894 lb (the published 8,333 ft is at 414,470 lb, the same run scaled by the square of the weight is about 7,330); carries flap and gear drag and the thrust the propellers lose with speed |
+| Wheel brake deceleration | 18 ft/s squared | 1.0 | the 337,041 lb landing rolls 4,429 ft against the published 5,577 ft (at 297,620 lb); at 292,744 lb 4,136 ft |
+| Ground alignment rate | 0.7 | 0.4 | the transports' value and the B-52's (BMB-A1 open item) |
+
+Not changed: the stall reference fraction (1; see "Takeoff and landing speed" below), the fuel flow (4 lb/s), the
+G rows, the roll limit, the ceiling (40,750 ft), the sea-level and 36,000 ft speed edges.
+
+Code: `crates/tore-sim/src/models/variety/tu95.rs` (the terms and their notes), `models/variety.rs` (the hook and
+the alignment), `crates/tore-formats/src/aircraft_corrections.rs` (`TU95_THRUST_LBF`, the `Tu95` arm of
+`fit_envelopes`). The `DragShape` hook is the B-52's; no shared law moved: the B-52's loose test that no other
+aircraft has a drag shape, a fitted lapse or a fitted rolling term now lists the Tu-95 beside it and passes, and
+`the_tu95_gains_one_mid_altitude_vertex_only_on_the_retail_rows` shows the edge moves for the Tu-95's identity
+and thrust only.
+
+### Before, after and real
+
+Weights: full is a full tank with no stores (346,565 lb), max adds the default load of 16 AS-16 (388,894 lb),
+typical is 300,000 lb (fuel 101,585, no stores). Ground figures are the ground start at the default load on a
+12,000 ft runway (Greece, airport 1) unless a column says otherwise. Logs: `.local/m3-aircraft/checks/T95-8/`.
+
+| Figure | Before | After | Real (source) |
+| --- | --- | --- | --- |
+| Level top speed, sea level (full / typical) | 295.2 / 310.7 kt | 332.8 / 339.5 kt | 350 kt (`TU95.INF`) |
+| Level top speed, 15,000 ft (full / typical) | 332.3 / 349.4 kt | 413.2 / 421.6 kt | none found |
+| Level top speed, 25,000 ft (full / typical) | 356.6 / 375.3 kt | 466.8 / 476.3 kt | 499 kt, Mach 0.83 (`TU95.INF`); the edge is 499 kt |
+| Level top speed, 36,000 ft (full / typical) | 383.6 / 403.8 kt | 432.4 / 441.2 kt | 447 kt at 38,000 ft, Mach 0.78 (`TU95.INF`) |
+| Cruise, 400 kt at 25,000 ft, throttle trimmed | 3.99 lb/s at full throttle (held 359 kt); 3,700 nautical miles | 2.29 lb/s, 7,174 nautical miles | cruise 380 to 384 kt; range 8,100 nautical miles (Wikipedia), 5,670 (airforce-technology.com) |
+| Cruise, 380 kt at 30,000 ft, throttle trimmed | 4.00 lb/s at full throttle (held 369 kt); 3,809 nautical miles | 2.19 lb/s, 7,134 nautical miles | as above |
+| Climb, best sustained rate (full / max / typical) | 1,530 / 1,560 / 1,499 ft/min | 2,175 / 1,805 / 2,713 ft/min | 2,000 ft/min (Wikipedia) |
+| Climb, time to 5,000 ft (full / max / typical) | 751 s / none / 362 s | 167 / 196 / 138 s | none found |
+| Climb, time to 20,000 ft / 30,000 ft (full) | not reached | 599 s / 1,001 s | none found |
+| Highest altitude in the bomber climb schedule (full / max / typical) | 9,611 / 130 / 15,653 ft | 40,395 / 39,616 / 40,476 ft | 39,370 ft normal, 29,850 ft with the maximum weapons (`TU95.INF`); 45,000 ft (Wikipedia). The record's 40,750 ft is unchanged |
+| Takeoff ground run to liftoff, 388,894 lb | 3,535 ft (GRE 1), 3,697 ft (UKR 1) | 7,417 ft (GRE 1), 7,762 ft (UKR 1) | 8,333 ft at 414,470 lb (airforce-technology.com), about 7,300 ft scaled to this weight |
+| Liftoff speed, 388,894 lb | 137.0 kt | 137.1 kt | 162 kt at 414,470 lb, about 157 kt scaled (`TU95.INF`) |
+| Takeoff, 342,329 lb (fuel 101,585) | 2,498 ft at 128.6 kt | 4,650 ft at 128.7 kt | none found |
+| Approach, 292,744 lb (fuel 52,000, about the maximum landing weight) | 147.4 kt, touchdown 124.3 kt, rollout 1,248 ft | 147.4 kt, touchdown 127.1 kt, rollout 4,136 ft | 146 kt at 297,620 lb (`TU95.INF`); run 5,577 ft |
+| Approach, 337,041 lb (the battery's 65 percent fuel) | 158.1 kt, touchdown 131.9 kt, rollout 1,373 ft | 158.1 kt, touchdown 135.0 kt, rollout 4,429 ft | about 155 kt scaled to this weight |
+| Sustained turn, held speed, full tank: 300 kt at 1,000 ft / 350 kt at 15,000 ft / 400 kt at 25,000 ft | 30 degrees (1.15 G) / none / none | 66 degrees (2.49 G) / 64 degrees (2.30 G) / 52 degrees (1.63 G) | none found |
+| Instantaneous pull (full aft stick) | 2.5 G | 2.5 G (G rows and loading unchanged) | none found |
+| Roll rate (full stick) | 23.6 deg/s | 23.6 deg/s | none found |
+| `--headless-flight 1200` level speed at 5,000 ft | 244.7 kt | 265.0 kt | none |
+
+### Takeoff and landing speed (not refitted)
+
+The model's liftoff speed is the weight-scaled stall speed times its takeoff rule, 137 kt at 388,894 lb, against
+Jane's 162 kt at 414,470 lb (about 157 kt scaled to the default load), 13 percent under. The approach, from the
+same stall rule, is 158.1 kt at 337,041 lb against about 155 kt scaled from Jane's 146 kt, 2 percent over, and
+147.4 kt at 292,744 lb against 146 at 297,620. One stall reference cannot give both the takeoff and the landing,
+and the landing is the one the scripted approach and the AI use, so the stall was left alone (the B-52's
+`stall_reference_fraction` moved only its landing). A fraction of 0.85 would put the liftoff at 149 kt and the
+approach at 171 kt. John can choose.
+
+### Heavy-class AI laws (BMB-AI)
+
+The takeoff climb-out wait and the flaps law of BMB-AI apply to aircraft whose flaps-up minimum is above
+190.5 kt. The Tu-95's flapped minimum at the default load is 136.5 kt, so the flaps-up minimum is about 182 kt
+(the flap factor is 0.75), under the threshold: those two laws are bit for bit the shared ones for the Tu-95.
+The taxi law does apply: the rolling term of 4.8 ft/s squared makes the throttle that balances the wheels 0.58 at
+the default load, so `taxi_throttle_of` raises the taxi throttle floor, as for the B-52. Two scenarios were added
+and pass: `ai-heavy-takeoff-tu95-gre-a1` (Athens, 12,000 ft; airborne and climbing out) and
+`ai-heavy-land-tu95-ukr-a2` (Simferopol, 60,000 lb of fuel; touchdown 121 kt). The landing parks at 603.2 s, 3 s past
+the 600 s the other heavies' scenarios run, with 445 ticks (3.7 s) off the pavement in the taxi-in (the B-52's is
+1,201), so the Tu-95's runs 90,000 ticks and tolerates the off-pavement ticks the way the B-52's does. The AI's own
+handling of the Tu-95 (strike, quick mission) is T95-9's.
+
+### Engine and propeller model: the limit
+
+No per-aircraft thrust that falls with speed exists, and none was added: it is a new shared concept. The single
+number is fitted for takeoff and climb (100,000 lbf), the drag shape for the cruise, and the rolling term for the
+run. Consequences: the thrust is the same at every speed, so the climb at 400 kt is stronger than a real turboprop's,
+the level top speed is where the drag shape meets the throttle (about 0.93 to 0.99 of the edge, by weight), and the
+number means roughly the propellers' thrust at the takeoff speed. The engine count is the record's 4 (the Tu-95 has four engines, unlike the B-52).
+
+### Open for John
+
+1. **Thrust 100,000 lbf, not the first pass's 129,000.** A fit to takeoff and climb with no cited thrust curve.
+   129,000 works for the climb (2,100 to 2,500 ft/min) but the takeoff run then needs a rolling term of about 9.8
+   ft/s squared (the AI taxi throttle 0.92). Which?
+2. **The 1 G edge at 25,000 ft raised to 499 kt** (Jane's Mach 0.83). It is a record change, **fitted**; the first
+   pass said the speeds stay. Without it the aircraft reaches 430 kt at 25,000 ft.
+3. **Liftoff 137 kt against Jane's 162 kt** (13 percent under) and approach 158 kt (2 percent over): one stall rule
+   serves both. A fraction of 0.85 splits the difference (149 and 171 kt).
+4. **Takeoff and landing runs** rest on one source (airforce-technology.com's 2,540 m and 1,700 m), at the
+   maximum weights. The brake term (1.0 ft/s squared) is below the rolling term (4.8), as the B-52's (2.6 and 4.8);
+   a hands-off rollout stops sooner than a braked one.
+5. **Range** 7,100 nautical miles (steady burn from a full tank, no weight loss) against 8,100 (Wikipedia) or 5,670
+   (airforce-technology.com): the fuel flow (4 lb/s at full throttle) stays.
+6. **Ceiling** 40,750 ft kept (the climb schedule gets to 39,600 to 40,500 ft). Jane's 29,850 ft with the
+   maximum weapon load is not modelled: the model's ceiling does not fall with the stores.
+7. **Roll rate** 23.6 deg/s is the record's limit; no real figure was found.
+8. **The model has no thrust that falls with speed or propeller efficiency** (see above).
+
+### Checks
+
+All through `.local/m3-imports/light3.sh`, profile `.local/m3-aircraft/profile-tu95` refreshed first, logs in
+`.local/m3-aircraft/checks/T95-8/`: see the T95-8 entry in `.local/m3-aircraft/PLAN-T95.md` for the counts.
+
+Provenance: the real figures are cited above (Jane's text in `TU95.INF`, Wikipedia "Tupolev Tu-95" and "Kuznetsov
+NK-12", airforce-technology.com "Tu-95MS strategic bomber"); the thrust, drag shape, edge vertex, lapse,
+rolling and brake terms and the alignment are fitted, agent decisions of 2026-11-16. No retail bytes are committed.

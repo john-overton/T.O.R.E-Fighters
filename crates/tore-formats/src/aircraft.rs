@@ -3202,7 +3202,7 @@ mod profile_tests {
             (110_230., 60_000.)
         );
         assert_eq!(env(&a, 1).points[7], [1_933., 36_000.]);
-        // Tu-95: thrust 129,000, empty 198,415, fuel 148,150, maximum 414,470.
+        // Tu-95: thrust 100,000, empty 198,415, fuel 148,150, maximum 414,470.
         let tu95 = [
             ("engines", 4),
             ("weight", 264_550),
@@ -3229,7 +3229,7 @@ mod profile_tests {
         );
         assert_eq!(
             (a.number("thrust"), a.number("maxTakeoffWeight")),
-            (129_000., 414_470.)
+            (100_000., 414_470.)
         );
         assert_eq!(a.number("fuelConsumption"), 4.);
         assert!(a.number("weight") + a.number("internalFuel") < a.number("maxTakeoffWeight"));
