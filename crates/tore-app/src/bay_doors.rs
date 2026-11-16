@@ -3,7 +3,7 @@
 //! [`tore_sim::combat::bays::OPENINGS`] (the F-117 and the B-2, the latter with
 //! its face addresses in its own rig), and for the B-52's one centred bay (its
 //! `OPENINGS` row has `centre` and `inner` 0, B52-5, folded onto the shared
-//! table at the batch A integration): two doors hinged on the outer edges, a
+//! table at the batch A integration; the Tu-26's is the same kind, T26-5): two doors hinged on the outer edges, a
 //! lined recess and a rail per store lane.
 //! See docs/spec/stores-on-pylons.md, "F-117 weapon bays" and "B-52 bay".
 //!
@@ -98,10 +98,25 @@ pub(crate) fn centre_lining(
     rails: &[[f64; 3]],
     posts: &[[f64; 2]],
 ) -> Vec<Face> {
+    centre_lining_from(template, o, unit, rails, posts, o.belly)
+}
+
+/// [`centre_lining`] with the walls and posts standing from `floor` feet up
+/// instead of the opening's belly plane: a belly that hangs lower than the
+/// hinge plane along its keel (the Tu-26's, T26-5) has its recess closed
+/// down to the keel line.
+pub(crate) fn centre_lining_from(
+    template: &Face,
+    o: &Opening,
+    unit: f64,
+    rails: &[[f64; 3]],
+    posts: &[[f64; 2]],
+    floor: f64,
+) -> Vec<Face> {
     const N: f32 = 32765.;
     let u = |feet: f64| units_at(feet, unit);
     let (aft, fore, half) = (u(o.aft), u(o.fore), u(o.outer));
-    let (floor, roof) = (u(o.belly), u(o.belly + o.depth));
+    let (floor, roof) = (u(floor), u(o.belly + o.depth));
     let mut faces = vec![
         panel(
             template,
@@ -497,6 +512,51 @@ mod tests {
             })
             .count();
         assert_eq!(tall, 4 + 4);
+    }
+
+    /// T26-5: a lining that stands from a floor lower than the hinge plane (the
+    /// Tu-26's keel strip is 1.33 ft under the outer panels) reaches that floor
+    /// with its four walls and keeps the ceiling where the opening puts it.
+    #[test]
+    fn a_centred_lining_can_stand_from_a_lower_floor() {
+        let o = tore_sim::combat::bays::opening(AircraftId::Tu26).unwrap();
+        let unit = 4. / 3.;
+        let template = face(0x2000, vec![[0.; 3]; 3]);
+        let floor = -4. * unit;
+        let lining = centre_lining_from(&template, &o, unit, &[], &[], floor);
+        assert_eq!(lining.len(), 5);
+        assert_eq!(
+            lining.len(),
+            centre_lining(&template, &o, unit, &[], &[]).len()
+        );
+        let roof = units_at(o.belly + o.depth, unit);
+        let low = units_at(floor, unit);
+        assert!((low + 4.).abs() < 1e-4);
+        let walls: Vec<_> = lining
+            .iter()
+            .filter(|f| f.positions.iter().any(|p| p[2] == low))
+            .collect();
+        assert_eq!(walls.len(), 4);
+        assert!(
+            walls
+                .iter()
+                .all(|f| f.positions.iter().any(|p| p[2] == roof))
+        );
+        // The ceiling is the opening's, not the floor's.
+        assert_eq!(
+            lining
+                .iter()
+                .filter(|f| f.positions.iter().all(|p| p[2] == roof))
+                .count(),
+            1
+        );
+        // The same lining from the hinge plane stands 1 unit higher.
+        let above = centre_lining(&template, &o, unit, &[], &[]);
+        assert!(
+            above
+                .iter()
+                .any(|f| f.positions.iter().any(|p| (p[2] + 3.).abs() < 1e-4))
+        );
     }
 
     #[test]

@@ -1397,6 +1397,31 @@ def slot_scenarios() -> list[Scenario]:
         timeout=300,
         notes="B-52 pylon release: a Mk 82 leaves the underwing beam with the bay doors shut (18 loaded, nine a wing; the Harpoon default needs a target the preview does not give it, its live-fire slot scenario covers it).",
     ))
+    # T26-5 (2026-11-16): the Tu-26's one bay row (row 5, eight Mk 82 on the shared grid) opens its
+    # doors before the bomb leaves and closes them after it; the glove row (row 7) releases with the
+    # doors shut. The default Kh-15 need a target the preview does not give them.
+    out.append(Scenario(
+        name="flight-bay-fire-tu26-row5", lane="flight",
+        args=["--stores-preview", "{work}/frames"], window=True,
+        env={"TORE_STORES_PREVIEW_AIRCRAFT": "tu26",
+             "TORE_STORES_PREVIEW_RECORDS": "5=MK82.JT:8",
+             "TORE_STORES_PREVIEW_FUEL": "100000",
+             "TORE_STORES_PREVIEW_FIRE": "5"},
+        expect=["Stores firing: tu26 row=5 PASS"],
+        outputs=["frames/tu26-fire-row5-t000.png", "frames/tu26-fire-row5-t400.png"],
+        timeout=300,
+        notes="Tu-26 bay release: the doors open before the Mk 82 leaves and close after it, as the B-52's and F-117's do.",
+    ))
+    out.append(Scenario(
+        name="flight-bay-fire-tu26-pylon-row7", lane="flight",
+        args=["--stores-preview", "{work}/frames"], window=True,
+        env={"TORE_STORES_PREVIEW_AIRCRAFT": "tu26", "TORE_STORES_PREVIEW_FIRE": "7",
+             "TORE_STORES_PREVIEW_RECORDS": "7=MK82.JT:2", "TORE_STORES_PREVIEW_FUEL": "100000"},
+        expect=["Stores firing: tu26 row=7 PASS"],
+        outputs=["frames/tu26-fire-row7-t000.png", "frames/tu26-fire-row7-t400.png"],
+        timeout=300,
+        notes="Tu-26 glove release: a Mk 82 leaves the fixed glove pylon with the bay doors shut (the glove rows do not swing; the default Kh-15 need a target the preview does not give them).",
+    ))
     return out
 
 
@@ -2155,7 +2180,8 @@ def capture_scenarios() -> list[Scenario]:
     # AL1 and refuses a ground start ("an enemy airfield").
     for ac in AIRCRAFT:
         add(f"groundstart-{ac}", ["--free-flight", "--aircraft", ac, "--theater", "UKR", "--ground-start", "9", "--flight-view", "1", "--flight-look", "150,-15", "--flight-zoom", "1.5"])
-    for ac in ("f22", "f22n", "b52", "f117", "b2"):
+    # T26-5 (2026-11-16): the Tu-26's fitted bay joins the bay-door poses (closed, half, open).
+    for ac in ("f22", "f22n", "b52", "f117", "b2", "tu26"):
         for bay in ("0", "0.5", "1"):
             add(f"bay-{ac}-{bay}", ["--free-flight", "--aircraft", ac, "--flight-view", "1", "--flight-look", "150,-30", "--flight-bay", bay])
     return out

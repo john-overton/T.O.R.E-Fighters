@@ -2255,6 +2255,53 @@ mod tests {
         );
     }
 
+    /// T26-5: the Tu-26's one bay row (record row 5, 8 stores at class 120) is a
+    /// magazine on the shared grid, on the belly plane and the centre line,
+    /// with the Kh-15 centred between the end walls; its glove and intake rows
+    /// are not (they hang as the record places them) and none of them rides
+    /// the swing wing.
+    #[test]
+    fn the_tu26_bay_row_is_a_grid_magazine_and_no_external_row_swings() {
+        use super::super::bays::{T26_BELLY, opening};
+        let o = opening(AircraftId::Tu26).unwrap();
+        let mut h = hardpoint(Location::InternalBay.byte(), 0x1120);
+        h.position = [0, -40, 72];
+        h.count = 8;
+        let (mount, rack) = placed_on(AircraftId::Tu26, 5, &h, None);
+        assert_eq!(rack.location(), Location::Magazine);
+        assert!(rack.location().drawn() && rack.location().bay());
+        assert_eq!((mount[0], mount[1]), (0., T26_BELLY));
+        assert_eq!(rack.tip, Some([5.9, 22.97]));
+        // Four Kh-15 (the class 120 holds four of the 2,640 lb): three abreast
+        // at the missile's 1.59 ft pitch and one on a second tier, the first to
+        // leave the bottom tier's outermost column, each inside the end walls.
+        let size = StoreSize::of_shape(Some("KIKBK.SH"));
+        let places: Vec<_> = (0..4)
+            .map(|slot| rack.store_point(mount, 4, 0, slot, size))
+            .collect();
+        assert!(places.iter().all(|p| p[2] == mount[2]));
+        assert_eq!(
+            places.iter().filter(|p| p[1] > places[1][1] + 1.).count(),
+            1
+        );
+        assert!(mount[2] - 3.47 > o.aft && mount[2] + 12.23 < o.fore);
+        let order: Vec<_> = (0..4)
+            .rev()
+            .map(|slot| rack.release_point(mount, 4, u32::from(slot), slot, size))
+            .collect();
+        assert!(order[0][0] < 0. && order[1][0] > 0.);
+        assert!(order.windows(2).all(|w| w[1][1] >= w[0][1] - 1e-9));
+        // The glove and intake rows keep the record's places (no bay, no swing).
+        let wing = hardpoint(Location::Wing.byte(), 0x1185);
+        for row in [6, 7, 8] {
+            assert!(!crate::combat::swing::swivels(AircraftId::Tu26, row));
+            assert_ne!(
+                placed_on(AircraftId::Tu26, row, &wing, None).1.location(),
+                Location::Magazine
+            );
+        }
+    }
+
     #[test]
     fn the_b52_pylon_pair_stands_where_measured_and_hangs_its_stores_from_one_beam() {
         // The wing's underside 3.8 ft above the reference point, flat over the

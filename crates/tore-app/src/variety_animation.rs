@@ -1130,6 +1130,7 @@ impl Rig {
             Some(SpecificRig::F14(rig)) => rig.faces(source, state),
             Some(SpecificRig::B2(rig)) => rig.faces(source, state),
             Some(SpecificRig::B52(rig)) => rig.faces(source, state),
+            Some(SpecificRig::Tu26(rig)) => rig.faces(source, state),
             Some(SpecificRig::F117(rig)) => rig.faces(source, state),
             _ => vec![source.clone()],
         }

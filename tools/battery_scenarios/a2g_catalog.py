@@ -45,6 +45,8 @@ AIRCRAFT = re.compile(
 # joined (the Su-34's two 0x07e5 rows take 8 tank placements). Batches A, B and C integration
 # (2026-11-16): 23 recovered stations (21 plus the Tu-26 and Tu-95 empty rows) and 278 Cheat-only
 # placements (260 plus batch C's 18).
+# T26-5 (2026-11-16): 5,350 weapon placements measured (the Tu-26's bay, intake and glove refusals, 129 to 84);
+# the recovered (23) and Cheat-only (278) counts are unchanged.
 AUDIT = re.compile(r"^ordnance audit: 54 aircraft, 23 recovered weapon stations, \d+ weapon placements, "
                    r"257 tank placements, (\d+) weapon and 9 tank records; passed$", re.M)
 # Aircraft with a bomb or rocket station the A2G records fit; the cargo and

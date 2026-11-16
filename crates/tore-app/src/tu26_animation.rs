@@ -2,13 +2,15 @@
 //! whole faces a side, flap strips included, turned as one rigid panel about
 //! the glove-corner vertex), the two whole tailplane quads (pitch plus
 //! differential roll), the signed aft rudder strip, the two flap strips, the
-//! rigid plate gear, the two afterburner plumes and, interim until T26-5, the
-//! bay-door plates. See docs/formats/aircraft-variety.md "Tu-26 shape and rig
-//! (T26-2/3, 2026-11-15)".
+//! rigid plate gear, the two afterburner plumes and (T26-5, 2026-11-16) the
+//! weapon bay: the belly cut into two door leaves, a lined recess behind them.
+//! See docs/formats/aircraft-variety.md "Tu-26 shape and rig (T26-2/3,
+//! 2026-11-15)" and "Tu-26 bay, stations and pylons (T26-5, 2026-11-16)".
 //!
 //! `TU26.SH` ships six state words: 0x7880 the afterburner plumes (four prisms,
 //! two per engine), 0x788c the two belly plates (read as the bay doors open,
-//! not an airbrake, decision 5), 0x7892 the gear (12 faces), 0x789e and 0x78a4
+//! not an airbrake, decision 5; since T26-5 reviewed but no longer drawn, one
+//! of them is the lining's material), 0x7892 the gear (12 faces), 0x789e and 0x78a4
 //! the left and right flap words (each deletes the outer trailing strip and, at
 //! -1, draws it drooped) and 0x78aa the rudder (swaps the aft strip of the fin
 //! for a copy turned to one side). There is no sweep word, aileron, spoiler,
@@ -24,6 +26,7 @@ use crate::{AppResult, additional_animation::turn, flight::State};
 use std::collections::BTreeSet;
 use std::f64::consts::FRAC_PI_2;
 use tore_formats::shape::{Face, Shape};
+use tore_sim::combat::bays::Opening;
 use tore_sim::combat::swing::TU26 as SWING;
 
 const WORDS: [usize; 6] = [0x7880, 0x788c, 0x7892, 0x789e, 0x78a4, 0x78aa];
@@ -80,8 +83,30 @@ const BAY_R: [usize; 4] = [0x4711, 0x4728, 0x473f, 0x4756];
 pub(crate) const BAY: [usize; 8] = [
     0x47a6, 0x47bd, 0x47d4, 0x47eb, 0x4711, 0x4728, 0x473f, 0x4756,
 ];
-/// The belly line the interim plates drop from (the plates' upper edge).
-const BAY_TOP: f32 = -2.;
+/// The belly faces the bay is cut from (T26-5): the 17 faces of the keel strip
+/// (z -4, x +-1), its slopes (x 1 to 2) and the outer belly panels (z -3,
+/// rising to -2 forward of y 19) that the opening (x +-2.21 units, y 9.39 to
+/// 26.61 units, the Jane's 5.9 by 22.97 ft about the record's y 18) crosses,
+/// measured in `TU26.SH`. Each is cut where the opening crosses it and the
+/// pieces inside turn about the hinge lines (x +-2.21 units, z -3 units, the
+/// belly plane) as two rigid leaves.
+pub(crate) const BELLY: [usize; 17] = [
+    0x261f, 0x2664, 0x2687, 0x270a, 0x272d, 0x276b, 0x2ace, 0x2b15, 0x2b70, 0x2ec6, 0x2ee9, 0x2f57,
+    0x2fb8, 0x2fdb, 0x3019, 0x3477, 0x352c,
+];
+/// The first address of the lining's faces (above every face of the shape).
+pub(crate) const LINING_BASE: usize = 0x7000;
+
+fn lining(address: usize) -> bool {
+    address >= LINING_BASE
+}
+
+/// The shape's feet a unit (header exponent 10).
+pub(crate) const UNIT: f64 = 4. / 3.;
+/// The lining's end walls stand from the keel strip's line, z -4 units (-5.33
+/// ft), not from the hinge plane, so the recess is closed under the keel (the
+/// side walls are hidden by the open doors that hang against them).
+const LINING_FLOOR: f64 = -4. * UNIT;
 
 /// The wing pivots, shape units: the glove's leading-edge corner, the one
 /// vertex the panel shares with the fixed airframe (measured, T26-0). The
@@ -270,6 +295,53 @@ fn branch(
     Ok(pose)
 }
 
+const ID: tore_formats::aircraft::AircraftId = tore_formats::aircraft::AircraftId::Tu26;
+
+/// The area, shape units squared, of the part of the belly face `face` (plan
+/// view) inside the centred opening `o` drawn at [`UNIT`] feet a unit: the
+/// polygon clipped by the rectangle (Sutherland-Hodgman, convex or not as long
+/// as the part inside is one piece, true for every reviewed belly face).
+fn overlap(face: &Face, o: &Opening) -> f32 {
+    let half = (o.outer / UNIT) as f32;
+    let (aft, fore) = ((o.aft / UNIT) as f32, (o.fore / UNIT) as f32);
+    let mut poly: Vec<[f32; 2]> = face.positions.iter().map(|p| [p[0], p[1]]).collect();
+    for (axis, bound, keep_above) in [
+        (0, -half, true),
+        (0, half, false),
+        (1, aft, true),
+        (1, fore, false),
+    ] {
+        let inside = |p: [f32; 2]| {
+            if keep_above {
+                p[axis] >= bound
+            } else {
+                p[axis] <= bound
+            }
+        };
+        let mut next = Vec::new();
+        for (i, &a) in poly.iter().enumerate() {
+            let b = poly[(i + 1) % poly.len()];
+            if inside(a) {
+                next.push(a);
+            }
+            if inside(a) != inside(b) {
+                let t = (bound - a[axis]) / (b[axis] - a[axis]);
+                next.push([a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])]);
+            }
+        }
+        poly = next;
+        if poly.is_empty() {
+            return 0.;
+        }
+    }
+    let n = poly.len();
+    (0..n)
+        .map(|i| poly[i][0] * poly[(i + 1) % n][1] - poly[(i + 1) % n][0] * poly[i][1])
+        .sum::<f32>()
+        .abs()
+        / 2.
+}
+
 fn bits(p: &[f32; 3]) -> [u32; 3] {
     p.map(f32::to_bits)
 }
@@ -298,7 +370,9 @@ fn turn_angle(bottom: [f32; 3], top: [f32; 3], from: [f32; 3], to: [f32; 3]) -> 
     dot(u, cross).atan2(dot(v, w))
 }
 
-pub struct Rig;
+pub struct Rig {
+    bay: Opening,
+}
 impl Rig {
     pub fn load(bytes: &[u8], mut shape: Shape) -> AppResult<(Self, Shape)> {
         if tore_formats::module::code(bytes)?.0.len() != 26812
@@ -464,19 +538,64 @@ impl Rig {
         if root != NOZZLE_PLANE || tip != FLAME_TIP {
             return Err("unreviewed TU26.SH plume extent".into());
         }
+        // The belly faces the fitted bay is cut from: whole faces on the belly
+        // (z -4 to -2, x within the fuselage's 5 units), none shared with a
+        // plate, the gear or the tail, and together they cover the opening, so
+        // the cut leaves no hole in the skin (checked by area).
+        let opening = tore_sim::combat::bays::opening(ID).ok_or("Tu-26 bay opening missing")?;
+        let mut belly_area = 0.;
+        for &address in &BELLY {
+            let face = one(&shape, address)?;
+            if face
+                .positions
+                .iter()
+                .any(|p| p[0].abs() > 5. || p[2] < -4. || p[2] > -2.)
+            {
+                return Err(format!("unreviewed TU26.SH belly face {address:x}").into());
+            }
+            belly_area += overlap(face, &opening);
+        }
+        let want = (2. * opening.outer / UNIT * (opening.fore - opening.aft) / UNIT) as f32;
+        if (belly_area - want).abs() > 1e-2 * want {
+            return Err("unreviewed TU26.SH belly skin (the opening is not covered)".into());
+        }
+        // The recess, drawn only while the doors are open, takes the material
+        // of one of the shape's own bay plates (no longer drawn itself).
+        let template = one(&bay, BAY_R[0])?.clone();
+        let lining_faces =
+            crate::bay_doors::centre_lining_from(&template, &opening, UNIT, &[], &[], LINING_FLOOR)
+                .into_iter()
+                .enumerate()
+                .map(|(k, mut f)| {
+                    f.address = LINING_BASE + k;
+                    f
+                });
         shape.faces.extend(
             gear.faces
                 .into_iter()
                 .filter(|f| GEAR.contains(&f.address))
-                .chain(bay.faces.into_iter().filter(|f| BAY.contains(&f.address)))
                 .chain(
                     flame
                         .faces
                         .into_iter()
                         .filter(|f| FLAME.contains(&f.address)),
-                ),
+                )
+                .chain(lining_faces),
         );
-        Ok((Self, shape))
+        Ok((Self { bay: opening }, shape))
+    }
+    /// The faces a source face becomes: with the bay doors off their seat the
+    /// belly faces are cut into the two door leaves, turned down about their
+    /// hinges by `state.bay`; the lining draws only then.
+    pub fn faces(&self, source: &Face, state: &State) -> Vec<Face> {
+        let a = source.address;
+        if BELLY.contains(&a) && state.bay > 0. {
+            return crate::bay_doors::centre_doors(source, state.bay, &self.bay, UNIT);
+        }
+        if lining(a) && state.bay <= 0. {
+            return Vec::new();
+        }
+        vec![source.clone()]
     }
     pub fn animate(&self, source: &Face, state: &State) -> Option<Face> {
         let a = source.address;
@@ -530,16 +649,8 @@ impl Rig {
                 return None;
             }
             gear_positions(&mut result, state.gear, state.nosewheel_angle());
-        } else if BAY.contains(&a) {
-            // Interim bay-door pose (T26-5 cuts the real bay): the plates hang
-            // from the belly line as the bay opens.
-            let bay = state.bay.clamp(0., 1.) as f32;
-            if bay <= 0. {
-                return None;
-            }
-            for p in &mut result.positions {
-                p[2] = BAY_TOP + (p[2] - BAY_TOP) * bay;
-            }
+        } else if lining(a) && state.bay <= 0. {
+            return None;
         } else if FLAME.contains(&a) {
             if state.exhaust <= 0. {
                 return None;
@@ -609,7 +720,9 @@ mod tests {
     /// rudder, the gear and the interim plates, the plume and the vapor point.
     #[test]
     fn the_tu26_rig_turns_whole_panels_about_their_hinges() {
-        let rig = Rig;
+        let rig = Rig {
+            bay: tore_sim::combat::bays::opening(ID).unwrap(),
+        };
         let moved = |s: &State, f: &Face| rig.animate(f, s).unwrap();
         let mut s0 = state();
         s0.speed = 0.;
@@ -908,23 +1021,71 @@ mod tests {
             assert!(p[0] >= -5.2 && p[2] <= 4., "left main {p:?}");
         }
 
-        // Bay plates: hidden shut, the source pose open, dropping from the belly
-        // line between. Plume: grows from the nozzle plane, hidden at 0.
-        let plate = face(
-            0x47a6,
+        // Bay (T26-5): shut, a belly face is whole and no lining draws; open, the
+        // faces the opening crosses are cut and the pieces inside hang as two
+        // leaves on the hinge lines (x +-2.2125 units at the belly plane z -3), the
+        // rest of the skin kept whole, and the lining draws. Plume: grows from
+        // the nozzle plane, hidden at 0.
+        let belly = face(
+            0x276b,
             &[
-                [-2., 11., -5.],
-                [-2., 11., -2.],
-                [-2., 18., -2.],
-                [-2., 18., -5.],
+                [-8., -20., -3.],
+                [8., -20., -3.],
+                [8., 60., -3.],
+                [-8., 60., -3.],
             ],
         );
         let mut s = s0.clone();
-        assert!(rig.animate(&plate, &s).is_none());
+        assert_eq!(rig.faces(&belly, &s).len(), 1);
+        let liner = face(LINING_BASE, &[[0.; 3]; 3]);
+        assert!(rig.faces(&liner, &s).is_empty() && rig.animate(&liner, &s).is_none());
         s.bay = 1.;
-        assert_eq!(moved(&s, &plate).positions, plate.positions);
+        assert!(rig.faces(&liner, &s).len() == 1 && rig.animate(&liner, &s).is_some());
+        let open = rig.faces(&belly, &s);
+        let hanging: Vec<_> = open
+            .iter()
+            .filter(|f| f.positions.iter().any(|p| p[2] < -3.5))
+            .collect();
+        assert_eq!(hanging.len(), 2, "two leaves");
+        let half = (rig.bay.outer / UNIT) as f32;
+        for leaf in hanging {
+            // Hung on an outer edge, the free edge a half width below it.
+            let low = leaf.positions.iter().map(|p| p[2]).fold(f32::MAX, f32::min);
+            assert!((low - (-3. - half)).abs() < 1e-3, "{low}");
+            assert!(
+                leaf.positions
+                    .iter()
+                    .all(|p| (p[0].abs() - half).abs() < 1e-3)
+            );
+        }
+        let area = |f: &Face| {
+            let n = f.positions.len();
+            (0..n)
+                .map(|i| {
+                    let (a, b) = (f.positions[i], f.positions[(i + 1) % n]);
+                    a[0] * b[1] - b[0] * a[1]
+                })
+                .sum::<f32>()
+                .abs()
+                / 2.
+        };
+        let (fore, aft) = ((rig.bay.fore / UNIT) as f32, (rig.bay.aft / UNIT) as f32);
+        let flat: f32 = open
+            .iter()
+            .filter(|f| f.positions.iter().all(|p| p[2] == -3.))
+            .map(area)
+            .sum();
+        assert!(
+            (flat - (16. * 80. - 2. * half * (fore - aft))).abs() < 0.5,
+            "skin left {flat}"
+        );
         s.bay = 0.5;
-        assert!((moved(&s, &plate).positions[0][2] + 3.5).abs() < 1e-6);
+        let half_open = rig.faces(&belly, &s);
+        let mid = half_open
+            .iter()
+            .flat_map(|f| f.positions.iter().map(|p| p[2]))
+            .fold(f32::MAX, f32::min);
+        assert!((mid - (-3. - half * std::f32::consts::FRAC_PI_4.sin())).abs() < 1e-3);
         let flame = face(
             0x5495,
             &[

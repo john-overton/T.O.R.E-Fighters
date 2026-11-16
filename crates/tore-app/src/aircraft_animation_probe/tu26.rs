@@ -1,7 +1,8 @@
 //! Independent Tu-26 whole-panel witnesses (T26-3): the two swing panels (the
 //! pivot vertex stays, the panel is rigid, the tip goes aft), the two flap
 //! strips, the tailplane quads, the rudder strip, the gear (rigid legs that
-//! stow inside the fuselage section), the interim bay plates and the plumes.
+//! stow inside the fuselage section), the fitted bay (T26-5: doors cut from the
+//! belly, a lined recess) and the plumes.
 //! Measures the shared Airframe output and never repeats the rig's algorithm:
 //! the witnesses are named source vertices and rigid-body distances. Points
 //! are shape units at 4/3 ft a unit (the probe's `scale`), the identity
@@ -24,9 +25,14 @@ const RUDDER: [usize; 2] = [0x517d, 0x51a4];
 const MAIN_R: [usize; 4] = [0x5210, 0x5237, 0x525e, 0x527d];
 const MAIN_L: [usize; 4] = [0x52e1, 0x5308, 0x532f, 0x534e];
 const NOSE: [usize; 4] = [0x53b2, 0x53d1, 0x53f0, 0x540f];
-const BAY: [usize; 8] = [
-    0x47a6, 0x47bd, 0x47d4, 0x47eb, 0x4711, 0x4728, 0x473f, 0x4756,
+/// The 17 belly faces the fitted bay is cut from and the first address of its
+/// lining, which is five faces (a ceiling and four walls).
+const BELLY: [usize; 17] = [
+    0x261f, 0x2664, 0x2687, 0x270a, 0x272d, 0x276b, 0x2ace, 0x2b15, 0x2b70, 0x2ec6, 0x2ee9, 0x2f57,
+    0x2fb8, 0x2fdb, 0x3019, 0x3477, 0x352c,
 ];
+const LINING_BASE: usize = 0x7000;
+const LINING: usize = 5;
 const FLAME: [usize; 8] = [
     0x5495, 0x54bc, 0x54e3, 0x550a, 0x5531, 0x5558, 0x557f, 0x55a6,
 ];
@@ -266,22 +272,38 @@ const GEAR_ALL: [usize; 12] = [
     0x5210, 0x5237, 0x525e, 0x527d, 0x52e1, 0x5308, 0x532f, 0x534e, 0x53b2, 0x53d1, 0x53f0, 0x540f,
 ];
 
-/// Bay plates: the source pose at value 1, the lowest edge between the belly
-/// line (z -2) and the source's -5 in proportion.
-fn bay(value: f64, reference: &[Face], pose: &[Face], _scale: f32, m: &mut Metrics) {
-    let low = |faces: &[Face]| {
-        faces
-            .iter()
-            .filter(|f| BAY.contains(&f.address))
-            .flat_map(|f| f.positions.iter().map(|p| p[2]))
-            .fold(f32::INFINITY, f32::min)
-    };
+/// The fitted bay: shut (0) every belly face is whole, nothing hangs below the
+/// keel line (z -4) and no lining draws; open (above 0) the lining draws, a
+/// vertex of the cut belly stays on each hinge line (x +-2.2125 units at the
+/// belly plane z -3) and the lowest point of the two leaves, the keel's
+/// centre edge (2.2125 units inboard of the hinge and one unit under it), is
+/// `-3 - 2.2125 sin(a) - cos(a)` for the door angle `a` of 90 degrees times
+/// the value.
+fn bay(value: f64, _reference: &[Face], pose: &[Face], _scale: f32, m: &mut Metrics) {
+    let o = tore_sim::combat::bays::opening(AircraftId::Tu26).expect("Tu-26 bay");
+    let half = (o.outer / (4. / 3.)) as f32;
+    let lining = pose.iter().filter(|f| f.address >= LINING_BASE).count();
+    let skin: Vec<&Face> = pose.iter().filter(|f| BELLY.contains(&f.address)).collect();
+    let lowest = skin
+        .iter()
+        .flat_map(|f| f.positions.iter())
+        .map(|p| p[2])
+        .fold(f32::MAX, f32::min);
     if value == 0. {
-        want(m, low(pose).is_infinite());
-    } else {
-        let want_low = -2. + (low(reference) + 2.) * value as f32;
-        want(m, (low(pose) - want_low).abs() < 1e-4);
+        want(m, lining == 0 && skin.len() == BELLY.len() && lowest == -4.);
+        return;
     }
+    want(m, lining == LINING);
+    for x in [half, -half] {
+        want(
+            m,
+            skin.iter()
+                .flat_map(|f| f.positions.iter())
+                .any(|p| (p[0] - x).abs() < 1e-3 && (p[2] + 3.).abs() < 1e-3),
+        );
+    }
+    let a = value as f32 * std::f32::consts::FRAC_PI_2;
+    want(m, (lowest - (-3. - half * a.sin() - a.cos())).abs() < 2e-3);
 }
 
 /// Plumes: scaled from the nozzle plane y -29 to the source's -53.

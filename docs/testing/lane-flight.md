@@ -1039,3 +1039,13 @@ at least 0.05 ft with the doors open, and no two touch).
 Update (B2-5, 2026-11-15): the B-2's default load is the two Mk 82 bays alone (64 bombs, 32,000 lb), so
 `flight-liftoff-b2` records 155.2 kt after 7,232 ft (was 158.1 kt) and `flight-approach-b2` 167.5 kt (was 166.2 kt);
 the windows (140 to 165 kt and 140 to 170 kt) are unchanged.
+
+Update (T26-5, 2026-11-16): the Tu-26's bay sweep (`bay` control of `flight-animation-tu26`) now checks the
+fitted bay (17 belly faces whole at 0 with nothing under the keel line and no lining; open, 5 lining
+faces, a vertex on each of the two hinge lines at the outer panels' plane, the lowest leaf point
+`-3 - 2.2125 sin(a) - cos(a)` shape units). New scenarios: `flight-bay-fire-tu26-row5` (windowed, the
+one-press release of eight Mk 82 through the Tu-26's bay: doors open before the bomb leaves, closed
+after), `flight-bay-fire-tu26-pylon-row7` (a Mk 82 from the fixed glove with the doors shut),
+`bay-tu26-0`, `-0.5` and `-1` (the `--flight-bay` frames) and `render-tu26-clearance` (headless: the four
+Kh-15 clear the open bay's doors, walls, roof and floor by 0.05 ft, the six default Kh-15 clear the swing
+panel at every sweep and the gear).
