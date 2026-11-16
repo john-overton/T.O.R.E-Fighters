@@ -357,3 +357,15 @@ and `REL 0:14` with `PIN`, `ZOOM 3` and `LASE` on the target camera, and the RCS
 reads `SIG 1` with a dot for a contour (an F/A-18 reads `SIG 154` with an oval). Not run:
 an RWR with a plotted emitter (no scripted path exists). See [the B-2
 section](../formats/aircraft-variety.md#b-2-sensors-hud-and-cockpit-b2-7-2026-11-15).
+
+## F-117 sensors: no radar, IRADS and FLIR, 2026-11-15 (F117-6, F117-7)
+
+The F-117 has no radar row (retail already right), so its radar window reads `NOT INSTALLED` and
+`--sensor-summary` reads `F117: radar none; infrared AV8IR.SEE search 15 nmi 60x60 deg track 15 nmi 45x45
+deg; visual VIS340.SEE ...; jammer none; signature radar 1 infrared 20`. John's decision 26: the
+`PAVESPK.SEE` row is the IRADS turret and the `AV8IR.SEE` row the FLIR, in text only (the target
+camera window's title, the Load Ordnance sensor line, the radar window's infrared channel and the replay's
+Sensor View name; no other aircraft changed). The jammer row is gone (BMB-A2), so there is no `JAM`, no
+chaff and no flare line. The laser works from the fixed row with a GBU-27 released from the bay (`a2g-laser-f117`:
+lased, released, guided, the tank destroyed). The RCS page reads `SIG 1` closed and `SIG 2` with the bay open.
+See [the F-117 section](../formats/aircraft-variety.md#f-117-ordnance-sensors-and-cockpit-f117-67-2026-11-15).

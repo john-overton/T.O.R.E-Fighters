@@ -345,3 +345,13 @@ new seat is at the windscreen's start, 2.7 feet above the roof, so Back looks ov
 spine and wings (frame `cockpit-view-back-f2`). The replay's Back, cockpit and HUD
 cameras and the listening seat use the same table; the mirror rear feed stays on the
 shared seat (the B-2 art has no mirrors). Evidence in [the B-2 section](../formats/aircraft-variety.md#b-2-sensors-hud-and-cockpit-b2-7-2026-11-15).
+
+## Pilot's eye on the F-117 (2026-11-15, F117-7)
+
+The per-identity Back eye table (`mirrors::eye_offset`, B2-7) gains the F-117: 6 feet up and 14
+feet ahead of the model origin (fitted, agent decision), where every other aircraft except the B-2
+(10 and 20) keeps 7 and 10. Measured on the real-size F-117 shape, the faceted canopy runs from 10.5
+to 18.8 feet ahead with its crown 4.6 feet up at 14.6 feet; the seat is the canopy's middle, 1.4
+feet over the crown, so Back looks over the glass and down the spine (frame
+`cockpit-view-back-f2`). The replay's Back, cockpit and HUD cameras and the listening seat use the
+same table. Evidence in [the F-117 section](../formats/aircraft-variety.md#f-117-ordnance-sensors-and-cockpit-f117-67-2026-11-15).

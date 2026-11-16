@@ -152,6 +152,9 @@ creator's field 20):
 The night and stealth rule: conditions index 6 (night) with `F117.PT` or
 `B2.PT` in a friendly wing replaces every manned `<aaa>` pick with ZSU23 and
 writes skill 0 (novice). Neither aircraft is imported, so the rule is dormant.
+Update (F117-6, 2026-11-15): both aircraft are imported, so the rule is live
+(`AircraftId::pt()` supplies the matched name; see
+[surface defenses](../spec/surface-defenses.md#templates-and-defended-slots)).
 
 The template names per theater, in creator menu order with their retail labels,
 targets and slot counts, are in

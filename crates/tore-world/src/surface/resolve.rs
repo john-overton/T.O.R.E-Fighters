@@ -92,7 +92,7 @@ pub struct AreaDefense {
     /// Creator nationality index of the enemy, field 20.
     pub enemy_nationality: usize,
     /// Night, and a friendly wing flies an F-117 or a B-2 (the template
-    /// rule's guns, dormant while neither is imported).
+    /// rule's guns; live since both are imported, F117-6).
     pub night_stealth: bool,
     /// How the sites are counted: `true` rolls ten site slots per kind like
     /// a template's defense slots (nr-b23b, 2026-10-13); `false` is the
@@ -117,7 +117,8 @@ impl AreaDefense {
 }
 
 /// The night and stealth rule's condition: night, with an F-117 or a B-2 in
-/// any friendly wing (retail data; dormant while neither is imported).
+/// any friendly wing (retail data; live since the F-117 and the B-2 were
+/// imported, F117-6, 2026-11-15).
 pub fn night_stealth(spec: &MissionSpec) -> bool {
     spec.condition == Condition::Night
         && spec.wings[..3]

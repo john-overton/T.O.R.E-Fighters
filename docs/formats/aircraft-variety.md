@@ -7514,6 +7514,8 @@ match is clean: `F117.HUD` exists (4,608 bytes) and names `~f117`, `~f117h`,
 (Eurofighter HUD). `hud_aperture.rs` has no F-117 arm, so the glass mask fails
 closed (empty) until a slice measures `~F117H.PIC` (the Gripen, F-5E and Tornado
 precedent). The bomb sight type of `F117.HUD` is not read here.
+Update (F117-7, 2026-11-15): the glass is measured now, on the 1673 x 508 art; see
+[F-117 ordnance, sensors and cockpit](#f-117-ordnance-sensors-and-cockpit-f117-67-2026-11-15).
 
 ### F-117 record against the other records
 
@@ -7812,6 +7814,11 @@ No pod body is ever drawn for these rows: they name no shape. The fixed-pod
 body path in `crates/tore-app/src/pylons.rs` draws a fitted body only on
 a station; rows 0 to 3 are not stations, so nothing hangs anywhere.
 
+Update (BMB-A2 and F117-7, 2026-11-15): John chose decision 26. `F18.ECM` is dropped
+(BMB-A2 cleared its default: no jammer, no chaff, no flares), `PAVESPK.SEE` stays as the
+IRADS turret and `AV8IR.SEE` as the FLIR, with the F-117's own text labels; see
+[F-117 ordnance, sensors and cockpit](#f-117-ordnance-sensors-and-cockpit-f117-67-2026-11-15).
+
 ### F-117 stealth finding (standing decision 4)
 
 **The code already has a radar and an infrared signature concept, and the record
@@ -7844,6 +7851,8 @@ carries a stealth signature.**
   novice crew (`NIGHT_STEALTH_AIRCRAFT`, `crates/tore-formats/src/quick_template/tables.rs`;
   [surface-defenses.md](../spec/surface-defenses.md), dormant until the aircraft
   is imported; `docs/formats/quick-mission.md`).
+  Update (F117-6, 2026-11-15): the rule is live now that both aircraft are
+  imported; see [F-117 ordnance, sensors and cockpit](#f-117-ordnance-sensors-and-cockpit-f117-67-2026-11-15).
 
 So decision 4 resolves without a new fitted value: the **real signature is
 already the record's own** (radar 1, retail data; not an invented value). The
@@ -7931,6 +7940,7 @@ identities at the end needs no protocol change.
 | Choice | Interim | Why |
 | --- | --- | --- |
 | HUD glass of the B-2 and F-117 | `hud_aperture.rs` fails closed (an empty mask) | `~B2H.PIC` and `~F117H.PIC` have no measured polygon. Their cockpit slices measure them. |
+| (Update, F117-7, 2026-11-15) | The F-117's glass is measured (B2-7 did the B-2's) | See [F-117 ordnance, sensors and cockpit](#f-117-ordnance-sensors-and-cockpit-f117-67-2026-11-15). |
 | HUD glass of the B-52 | The AC-130 family's whole-picture aperture (the arm the C-130, E-3, IL-76 and the airliners use) | The B-52 flies the same `~AC130H.PIC` picture, so it takes the shared reviewed glass; it needs no polygon of its own. Switch it to an empty mask if John wants it closed until a B-52 cockpit slice. |
 | Rig | Gear word only; the other words pinned, unmapped | As batch 5: the shared fitted gear law until each aircraft's rig slice. |
 | B-52 empty bay rows | Rows 5 and 6 keep an empty Mk 82 selection | The Harpoon and the M61 (the only defaults) fit neither row, so without a fallback the audit found the rows hiding compatible weapons (`live.rs`, the same device as the Mirage F1's belly pair). |
@@ -9694,3 +9704,182 @@ press, 0.958 in the actual one-press probe), the doors stay 1 s after the releas
 reads `State::bay` on the RCS page only (no change to a row a radar reads), so it now applies
 to the F-117 at 1.5 times with the doors fully open, and the F-22's values are unchanged.
 Update to [F117-3 bay (interim)](#bay-interim-f117-4-f117-5-replaces-it): replaced.
+
+## F-117 ordnance, sensors and cockpit (F117-6/7, 2026-11-15)
+
+Slices F117-6 (ordnance, default load, countermeasures) and F117-7 (sensors, HUD, cockpit,
+instruments) ran together (implementation mode, bomber batch A). They apply John's accepted
+decisions of 2026-11-15: **3** (switch the retail night rule on with the import), **25**
+(default two GBU-27 in the bays; F117-5 cut them), **26** (keep `PAVESPK.SEE` relabelled as
+the IRADS turret, keep `AV8IR.SEE` as the FLIR, drop the jammer row; BMB-A2 dropped it) and
+**28** (`F117.HUD` and the F117 cockpit art). Earlier F-117 sections stay as written (B11);
+they carry Update lines that point here. Frames are under
+`.local/m3-aircraft/frames/F117-6/`, logs under `.local/m3-aircraft/checks/F117-6/`.
+
+### F117-6: the load, the bays and the sights
+
+**Default load (unchanged by this slice, checked).** Rows 4 and 5, the two bay stations (F117-5),
+each hold one `PAVEWA3` (GBU-27) by default: 4,000 lb of stores, 52,000 of the 52,500 lb maximum
+with the 18,500 lb of fuel. Rows 0 to 3 are the fixed equipment rows (`VIS340.SEE`,
+`PAVESPK.SEE`, the cleared `F18.ECM` row, `AV8IR.SEE`): they are not stations, hold no
+weapon, and the Load Ordnance page shows only the two bays (frames `load-ordnance`,
+`load-ordnance-laser`; the four lower frames of the right-hand panel are empty by design, there
+is nothing to put in them). `--validate-ordnance` reads `F117.PT: 2 source rows, 0 optional weapon
+rows, 46 compatible weapon placements, 0 tank placements; defaults and restart passed; catalog 23
+normal, 83 Cheat`, and the whole audit passes (48 aircraft, 20 recovered stations, 4,784 weapon
+placements, 233 tank placements, 80 pod placements, 240 Cheat-only; no pin moved).
+
+**What the page offers.** Each bay admits the same 23 stores, one a bay (F117-5: the retail mask
+`0x1100`'s 19 plus the four Paveway II laser bombs `GBU10`, `GBU10A`, `PAVEWAY` and `GBU12`). The
+air-to-surface page lists them over three screens: the page's first screen with the laser bombs
+and the cluster and Russian bombs is the frame `load-ordnance-laser`. **There are no presets**:
+Load Ordnance has no named loads for any aircraft, so the default load (two GBU-27) is the only
+one, and a bay takes one store from the list at a time (the Tornado and F-15E slices had none
+either). The retail mask also admits the AGM-88, AGM-45 and AT-2, which the real F-117 does not carry
+(F117-5 listed them for John; unchanged here).
+
+**Live fire, the target camera and the laser all work from the bays.**
+- `--live-fire --aircraft f117 --weapon-slot 1` releases the left bay's GBU-27 (one shot, ammo
+  `[0, 1]`, payload 4,000 to 2,000 lb) once the doors are open; with `--flight-bay 1` it leaves at
+  once. The HUD reads `ARM`, `1 GBU-27`, the reach scale (`R 4.6`, `4.9`, `1.0`) and the new `BAY` cue
+  while the bay is available (frame `target-cam-irads-gbu27-laser`).
+- Designation and the laser run through the fixed `PAVESPK.SEE` row, as the F-16C's and the B-2's: with
+  `--combat-command sight-pin` the target camera reads `PIN`, `ZOOM 3`, then `LASE` (it blinks twice a
+  second, so a frame at the wrong phase misses it) with `4.7 NM`, and the HUD reads `IN RNG` and
+  `LSR 4.7`. A hand-off with the laser key (`laze`) reads `NO LASER` and `LSR RDY` (frame
+  `hud-slot1-gbu27-no-laser-laze-off`).
+- The scripted run (new battery scenario `a2g-laser-f117`, `--a2g-run UKR QUCOL --attack laser --aircraft
+  f117 --load PAVEWA3 --station 0 --count 1`, 15,000 ft at 480 kt): designated at 8.0 s (`laser Lasing`),
+  released from the left bay at 16.2 s inside the reach (`in-reach yes`, mode `Guiding`, spot owner 0),
+  tracked to the tank, which is destroyed (`hp 0/200`), as the F-15E's belly Paveway does. (A count of 2
+  on the one station is refused: with the other bay's bomb it is over the take-off limit.)
+
+**Countermeasures: none, as decided.** BMB-A2 cleared the `F18.ECM` default row (no source was found
+that the real F-117 carried dispensers). Nothing shows: the Weapons window reads `2 GBU-27` with no
+`CHAFF` or `FLARE` line (the window's `no_countermeasures` rule, which TOR-13 wrote for the Tornado IDS
+(Clean), keys on the record's counts), the RWR never lights `JAM` (`no_jammer`: there is no
+jammer row), and the systems page shows engine, fuel and no countermeasures. Pressing the chaff and
+flare commands and `--jammer-on` with `--countermeasure-preview 60` changes nothing and breaks nothing
+(frame `countermeasure-keys-no-dispenser-strip`, no panic in the log). `--sensor-summary` reads `jammer
+none`.
+
+### F117-7: sensors
+
+**Sensor rows.** `VIS340.SEE`, `PAVESPK.SEE` and `AV8IR.SEE`: `--sensor-summary` reads `F117: radar none;
+infrared AV8IR.SEE search 15 nmi 60x60 deg track 15 nmi 45x45 deg; visual VIS340.SEE search 10 nmi
+170x140 deg track 5 nmi 170x140 deg; jammer none; signature radar 1 infrared 20`. The records, the sight
+and the channel behave as the shared ones; decision 26 is text only.
+
+**Labels (text only, nothing else changed).** One new table entry, `AircraftId::sensor_names()` (`SensorNames
+{ sight: "IRADS", infrared: "FLIR" }`, `None` for every other aircraft, the B-2 included), and four readers:
+
+| Where | Every other aircraft | The F-117 |
+| --- | --- | --- |
+| Window 4's title (`instruments.rs`, `CombatReadout::sight_title`) | `TARGET CAM` | `IRADS`; a weapon's seeker picture (and its lost feed) keeps `TARGET CAM`, as it is the weapon's view |
+| Load Ordnance sensor line (`ordnance::sensor_helper`) | `Built-in laser designator: no pod needed for laser ordnance.` or `Aircraft laser pod equipped` | `Built-in IRADS: no pod needed for laser ordnance.` (the shared hemisphere-gimbal rule would have said `Aircraft laser pod equipped`) |
+| Radar window, infrared channel (`combat_view.rs`) | `IR` | `FLIR` (frame `crop-flir-irads-radar-page`: `FLIR`, `10`, the contact) |
+| Replay Sensor View's sight name (`replay/viewer/views.rs::sight_record`) | the sensor record's own name (`PAVE SPIKE`, `AAS-38`) | `IRADS` for the laser row, `FLIR` for the infrared row |
+
+Everything else says what the shared code says: the HUD's `LSR`, `IN RNG`, `ARM`, the page's `PIN`, `ZOOM`,
+`LASE`, the keys. `--sensor-summary`'s record names and the logs keep the retail file names. Tests:
+`aircraft::tests::only_the_f117_has_its_own_sensor_names`, `instruments::tests::the_target_page_title_is_the_aircraft_sight_name_when_it_has_one`
+and the extension of `ordnance::tests::the_helper_line_says_what_the_aircraft_brings_from_its_data`.
+
+**Radar: none, as the record says.** The radar window reads `NOT INSTALLED` (frame
+`cockpit-front-view`), the channel key still reaches the infrared channel (the FLIR above), and nothing in
+the sim, the data link or the AI assumes a radar for the F-117 (`has_radar` is false, BMB-A1's datalink
+test lists it as the eighth type without one; `radar()` is `None`). **No ground-mapping mode**
+exists in the shared radar, as for the B-2 (a sensor change, John's call).
+
+**RCS page: `SIG 1`, and the open bay raises it.** Page 0 reads `SIG 1` with a dot for the exposure contour
+with the doors closed and `SIG 2` with the bay open (frames `rcs-page-closed`, `rcs-page-bay-open`; the
+second frame has released its GBU-27, which the stores term does not count against, since the
+real figure the page rounds is 1 x 1.5). Against a 90 nmi radar nose-on that is 9.0 nmi closed and
+11.0 nmi open (F117-0, F117-5; the page prints the rounded figure). Nothing in the signature code changed.
+
+### F117-7: the cockpit
+
+**Bindings (spec-derived names, opinionated, decision 28).**
+
+| Item | Value |
+| --- | --- |
+| Record `hudName` | null pointer (as retail; never read) |
+| `AircraftId::hud()` | `F117.HUD`, naming the instrument frame `~f117_p`, read as `~F117_P.PIC` |
+| Cockpit stem, shape stem | `F117`, `F117` |
+| Forward art | `~F117H.PIC`, **1673 x 508** (wider than the B-2's 1394 x 508 and the 1280 x 490 of the older families, so the aperture is keyed to this size) |
+| Other pictures | `~F117.PIC` and `~F117S.PIC` (the other two resolutions, which TORE does not read) |
+| Overlays | none: `~F117_LH.PIC`, `~F117_CH.PIC` and `~F117_RH.PIC` do not exist, so the F-117 is a no-overlay stem (BMB-A1) |
+| Record `viewOffset` | 0, 20, 60 (the Tornado's, no host code reads it) |
+
+All of it is pinned by the retail-reading test `crates/tore-import/tests/f117_cockpit.rs` (the three sensor
+rows, `radar()` none, the names, the HUD module and its panel frame, the four-picture family, the art size,
+no other aircraft on the family, `viewOffset`).
+
+**The glass aperture (fitted, measured).** `~F117H.PIC` has no combiner. Its transparent pixels are four
+panes: a left pane (x 5 to 572, y 21 to 480, 189,456 pixels) and a right pane (x 1100 to 1667, 189,970
+pixels), the open sky strip above the bar (x 735 to 940, above y 118), and the **windscreen** between the
+two bow posts, under a thin bar: x 712 to 962, y 129 to 366, **56,572 pixels** (a flood fill from the
+middle). The console's vent block and two teeth break its lower edge from y 346. `hud_aperture::mask` had
+failed closed for the F-117 (BMB-A1's interim). It now has a 16-vertex polygon one pixel outside the
+windscreen (the bar's lower edge at y 128, the posts' inner edges widening from x 725 and 949 at y 141 to
+x 712 and 962 at y 224 and back in to x 714 and 960 from y 308, the foot at y 367 for the opaque console to
+trim). It covers **56,562 of the 56,572 pixels** (99.98 percent): no opaque pixel, no other pane, one
+connected region. Two tests pin it: a synthetic one (centre and the lower corner in; the sky strip, both
+panes and the foot out; an opaque pixel inside left out; any other picture size, the B-2's included, fails
+closed) and a retail-reading one (the same four panes by flood fill, the exact coverage, no opaque pixel, no
+other pane, connected, at least 98 percent). The HUD is the windscreen's, narrow (250 pixels wide), and the
+symbols sit well inside it (frame `cockpit-front-view`); drawing it in the side panes too would be a
+polygon change.
+
+**Views.** Front (the art with the HUD in its glass and the six small-layout windows, bezel
+`~F117_P.PIC`), look left and right 45 degrees (the art turns away with the look; nothing replaces it, as for
+the B-2, F-16 and AC-130), look up 60 degrees (open sky), F2 Back from the pilot's eye (below) and F3 Up (does
+not use the eye). The ten instrument pages (0 to 9) draw with the F-117 bezel (frame `instrument-pages-0-to-9`,
+a headless panel snapshot, so its window 4 reads the generic title: the labels are a combat-readout feature).
+No mirror seeds exist for the family, so no mirror draws (`--cockpit-sheet` prints `NO MIRRORS FITTED`; the
+rear feed stays on the shared seat for every aircraft).
+
+**The eye (fitted, from the scaled shape).** `mirrors::eye_offset` gains the F-117: **6 ft up and 14 ft
+ahead** of the model origin (the shared seat is 7 up and 10 ahead; the B-2 is 10 and 20). Measured on `F117.SH`
+after F117-2's per-axis real-size factors (x 0.7647, y 1.0463, z 0.8869, 1/3 ft a unit): the centre line top
+surface rises evenly from the tail (0 ft at about 26 ft aft of the origin, 3.9 ft at 9 ft ahead), then the
+faceted canopy runs from 10.5 to 18.8 ft ahead with its crown 4.6 ft up at 14.6 ft ahead (4.4 ft at 12 ft,
+3.6 ft at 17.4 ft, 2.9 ft at the base of the windscreen at 18.8 ft). The seat is the middle of the canopy, 14
+ft ahead, and 1.4 ft over the crown, so F2 Back looks over the glass and down the spine to the ruddervators
+(frame `cockpit-view-back-f2`; the shared seat's frame is `pre-view-back-f2-shared-eye`, 4 ft too far aft of the
+cockpit). The record's `viewOffset` (0, 20, 60), read at the shape's 1/3 ft a unit, would put the eye 6.7 ft up
+and 20 ft ahead, at the front of the glass; that reading of its units is unproven and is not used. Every other
+aircraft keeps the shared seat: the test `mirrors::tests::only_the_b2_and_the_f117_have_their_own_pilot_eye`
+(the renamed B2-7 test) checks the table for every identity. Readers are the ones B2-7 listed (F2 Back, replay
+Back, cockpit and HUD cameras and the listening seat); the forward cockpit, the padlock and the target
+camera never read the eye.
+
+### F117-6: the night rule is live (decision 3)
+
+The retail rule, in `tore-formats/src/quick_template/tables.rs` (`NIGHT_STEALTH_AIRCRAFT` `F117.PT` and `B2.PT`,
+`NIGHT_AAA` `ZSU23.NT`, `NIGHT_AAA_SKILL` 0), was written as dormant because neither aircraft was flyable.
+The matching code (`tore_world::surface::resolve::night_stealth`) compares each friendly wing's
+`AircraftId::pt()`, so it woke by itself when BMB-A1 added the identities. This slice made it deliberate:
+the stale "dormant" comments are corrected, the old "dormant today" assertion in
+`surface::tests::the_night_rule_mans_every_aaa_slot_with_a_novice_zsu23` is replaced, and one new test
+(`the_night_rule_wakes_for_a_friendly_f117_or_b2_at_night`) pins the condition for both aircraft: night
+only (clear by day stays off); any of friendly wings 1 to 3 with planes in it (a wing of zero planes does
+not count, an enemy wing never does); and that the creator's AAA strength carries it into both
+`GroundTarget::from_spec` (a template's `<aaa>` slots) and `AreaDefense::from_spec` (the enemy's gun sites).
+**It applies to the B-2 the same way.** No data, behaviour or digest changed for a mission with another
+aircraft or by day. See [surface defenses](../spec/surface-defenses.md#templates-and-defended-slots).
+A wing the lobby fills per plane (`plane_aircraft`) is not read, as retail's rule keys on the wings.
+
+### Checks
+
+`cargo fmt --all -- --check` clean; `cargo clippy --workspace --all-targets --locked -- -D warnings` clean;
+`cargo test --locked --workspace --no-fail-fast`: 7,766 passed, 0 failed, 108 ignored; `--validate-ordnance`
+passes; `--aircraft f117 --headless-flight 600`: 600 samples, 0 non-finite, 389.8 kt, 5,000 to 5,003 ft, fuel
+18,500 to 18,493 lb, no loss; the F-117 battery scenarios and the surface and quick-template scenarios as
+the plan's Session log lists them; `check_docs` passes. Not done: the flight model (F117-8), AI and
+multiplayer (F117-9), the AI bay doors (F117-5).
+
+Provenance: sensor rows, HUD module, panel names, cockpit art and the night rule spec-derived (retail); the
+bindings opinionated (John, 2026-11-15, decisions 26 and 28), the night rule switch on John's decision 3;
+the glass polygon, the eye entry and the label text fitted or agent decisions 2026-11-15. No retail bytes
+committed.

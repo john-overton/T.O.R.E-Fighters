@@ -135,9 +135,21 @@ const DEFAULT_EYE: [f64; 2] = [7., 10.];
 /// reads, gives the same figure read at the shape's 1/3 ft a unit (30 up, 60
 /// ahead); that reading of its units is unproven. A seat inside the skin
 /// (6 ft up) draws the inside of the spine and was rejected.
+///
+/// F-117 (F117-7, 2026-11-15, fitted from the scaled shape: `F117.SH` after
+/// the per-axis real-size factors, 1/3 ft a unit times 0.7647, 1.0463 and
+/// 0.8869): the faceted canopy runs from 10.5 to 18.8 ft ahead of the origin,
+/// its crown on the centre line 4.6 ft up at 14.6 ft ahead (4.4 ft at 12 ft,
+/// 3.6 ft at 17.4 ft), on a back that rises evenly from the tail (0 ft at 26
+/// ft aft of the origin, 3.9 ft at 9 ft ahead). The seat is the canopy's
+/// middle, 14 ft ahead, and 6 ft up, 1.4 ft over the crown, so the back view
+/// looks over the canopy and down the spine to the ruddervators, not out of
+/// the inside of the glass. The shared seat (10 ft ahead, 3 ft above the back
+/// at that point) is 4 ft too far aft of the cockpit.
 pub(crate) fn eye_offset(id: Option<AircraftId>) -> [f64; 2] {
     match id {
         Some(AircraftId::B2) => [10., 20.],
+        Some(AircraftId::F117) => [6., 14.],
         _ => DEFAULT_EYE,
     }
 }
@@ -464,15 +476,16 @@ mod tests {
         }
     }
 
-    /// B2-7: only the B-2 has a seat of its own; every other aircraft, and an
-    /// unknown type, keeps the shared one (7 ft up, 10 ft ahead).
+    /// B2-7 and F117-7: only the B-2 and the F-117 have a seat of their own;
+    /// every other aircraft, and an unknown type, keeps the shared one (7 ft
+    /// up, 10 ft ahead).
     #[test]
-    fn only_the_b2_has_its_own_pilot_eye() {
+    fn only_the_b2_and_the_f117_have_their_own_pilot_eye() {
         for id in AircraftId::ALL {
-            let want = if id == AircraftId::B2 {
-                [10., 20.]
-            } else {
-                [7., 10.]
+            let want = match id {
+                AircraftId::B2 => [10., 20.],
+                AircraftId::F117 => [6., 14.],
+                _ => [7., 10.],
             };
             assert_eq!(eye_offset(Some(id)), want, "{id:?}");
         }
@@ -488,6 +501,12 @@ mod tests {
         let forward = level.forward;
         for i in 0..3 {
             let moved = (b2[i] - shared[i]) - (up[i] * 3. + forward[i] * 10.);
+            assert!(moved.abs() < 1e-9, "axis {i}");
+        }
+        // The F-117: 1 ft lower and 4 ft further forward than the shared seat.
+        let f117 = at(Some(AircraftId::F117));
+        for i in 0..3 {
+            let moved = (f117[i] - shared[i]) - (-up[i] + forward[i] * 4.);
             assert!(moved.abs() < 1e-9, "axis {i}");
         }
     }
