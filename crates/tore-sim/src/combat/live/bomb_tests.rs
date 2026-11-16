@@ -204,6 +204,106 @@ fn a_b2_ripple_alternates_its_bays_and_empties_each_from_the_bottom_tier_up() {
     assert!(bays[0][0] < 0. && bays[1][0] > 0.);
 }
 
+/// The B-2's two bays, as the ripple test above builds them.
+fn b2_bays(count: u16) -> State {
+    use tore_formats::aircraft::{AircraftId, Hardpoint};
+    let row = Hardpoint {
+        location: 3,
+        flags: 0x1100,
+        position: [0; 3],
+        store: None,
+        count: i32::from(count),
+        weight_class: 160,
+        slew: [0; 4],
+    };
+    let mut config = fixture(false).own().configuration().clone();
+    config.stations = [5, 6]
+        .map(|hardpoint| {
+            let (mount, rack) =
+                crate::combat::hardpoints::placed_on(AircraftId::B2, hardpoint, &row, None);
+            let mut weapon = mk82();
+            weapon.shape = Some("MK82.SH".into());
+            Station {
+                slew: Default::default(),
+                weapon,
+                mount,
+                count,
+                internal: false,
+                rack,
+            }
+        })
+        .to_vec();
+    State::new(config, true).unwrap()
+}
+
+/// Presses `presses` times, one tick each, `gap` ticks apart with the doors
+/// shut, then opens them at tick `open`; returns the ticks (from the first
+/// press) at which a store left, and the rounds spent.
+fn tapped_ripple(mut s: State, presses: usize, gap: usize, open: usize) -> (Vec<usize>, u32) {
+    let rounds = |s: &State| -> u32 { (0..2).map(|i| u32::from(s.own().rounds(i))).sum() };
+    let before = rounds(&s);
+    let mut shut = pass(5_000., 450., 0.);
+    shut.bay_ready = false;
+    let ready = pass(5_000., 450., 0.);
+    let mut left = Vec::new();
+    for tick in 0..open + presses * gap + 40 {
+        let launcher = if tick < open { shut } else { ready };
+        let held = tick < presses * gap && tick % gap == 0;
+        let events = step(&mut s, held, launcher);
+        for e in events {
+            if matches!(e, Event::Fired { .. }) {
+                left.push(tick);
+            }
+        }
+    }
+    (left, before - rounds(&s))
+}
+
+/// BMB-AI2: a press made while the bay doors are still opening is held, not
+/// folded into the one before it. Eight taps 0.1 s apart (the doors take
+/// about 0.8 s) gave one release; now the doors' opening lets all eight go,
+/// a tick apart, on the one bay and on the B-2's two.
+#[test]
+fn presses_made_while_the_bay_doors_open_are_held_and_fire_one_a_tick() {
+    let one = carrying(mk82(), 12, [0.; 3]);
+    let (left, spent) = tapped_ripple(one, 8, 12, 100);
+    assert_eq!(spent, 8, "{left:?}");
+    assert_eq!(left, (100..108).collect::<Vec<_>>());
+    let (left, spent) = tapped_ripple(b2_bays(16), 8, 12, 100);
+    assert_eq!(spent, 8, "{left:?}");
+    assert_eq!(left, (100..108).collect::<Vec<_>>());
+    // Presses after the doors are open are one store each, as before.
+    let (left, spent) = tapped_ripple(carrying(mk82(), 12, [0.; 3]), 8, 12, 0);
+    assert_eq!((spent, left.len()), (8, 8));
+    // A press that never sees the doors open lapses with every press behind
+    // it, after 3 seconds, and holds nothing for the next time.
+    let mut s = carrying(mk82(), 12, [0.; 3]);
+    let mut shut = pass(5_000., 450., 0.);
+    shut.bay_ready = false;
+    for tick in 0..400 {
+        step(&mut s, tick < 36 && tick % 12 == 0, shut);
+    }
+    assert!(!s.bay_demand(400));
+    assert_eq!(s.own().rounds(0), 12);
+    step(&mut s, false, pass(5_000., 450., 0.));
+    assert_eq!(s.own().rounds(0), 12, "nothing was held");
+}
+
+/// A station that is not in a bay never waits: its presses are one store each
+/// and nothing is held (BMB-AI2: no non-bay aircraft changes).
+#[test]
+fn a_station_outside_a_bay_holds_no_presses() {
+    let mut s = carrying(mk82(), 12, [0.; 3]);
+    s.own_mut().config.stations[0].rack.location = 0;
+    let mut shut = pass(5_000., 450., 0.);
+    shut.bay_ready = false;
+    for tick in 0..60 {
+        step(&mut s, tick % 6 == 0 && tick < 48, shut);
+    }
+    assert_eq!(s.own().rounds(0), 12 - 8);
+    assert!(!s.bay_demand(60));
+}
+
 #[test]
 fn a_released_bomb_follows_the_shared_flight_model() {
     let mut s = carrying(mk82(), 4, [0.; 3]);

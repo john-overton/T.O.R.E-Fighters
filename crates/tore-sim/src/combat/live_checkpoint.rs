@@ -580,6 +580,7 @@ crate::checkpoint_struct!(Ownship {
     triggers,
     gun_cadence,
     bay_release,
+    bay_presses,
     bay_hold_until,
 } shared { config } skip { delivery = None, guided_sight = None, gun_key = false });
 

@@ -140,6 +140,13 @@ const DUD_PUFF: u8 = 15;
 const DROP_SEPARATION_T: u64 = 4;
 /// Fitted: a trigger press waits this long, 3 seconds, for the bay to open.
 const BAY_RELEASE_TICKS: u64 = 360;
+/// Fitted (BMB-AI2, 2026-11-16): the most trigger presses a closed bay holds
+/// besides the first. A press made while the doors are still opening is kept
+/// and fires, one store a tick, once they are open; the doors take about 0.8 s
+/// and a ripple tapped faster than that lost every press after the first
+/// (8 one-tick presses gave 5 releases on the B-1B and 4 of 8 at a 0.2 s gap
+/// on the B-52 and B-2). 32 is the most a bay holds.
+const BAY_PRESS_QUEUE: u16 = 32;
 /// Fitted: the bay stays open 1 second after a release so the weapon clears.
 const BAY_HOLD_TICKS: u64 = super::bays::DOORS_HOLD_TICKS;
 
@@ -2008,6 +2015,9 @@ pub struct Ownship {
     /// A trigger press waiting for the weapon bay to open: the station and
     /// the tick it was pressed.
     bay_release: Option<(usize, u64)>,
+    /// The further presses of the same station that came while it waited
+    /// (BMB-AI2): each fires one store, a tick apart, when the doors are open.
+    bay_presses: u16,
     /// The bay stays open until this tick after a bay release.
     bay_hold_until: u64,
     /// The bomb or rocket sight's solution for the selected station, worked
@@ -2429,6 +2439,7 @@ impl Ownship {
             gun_cadence,
             gun_key: false,
             bay_release: None,
+            bay_presses: 0,
             bay_hold_until: 0,
             delivery: None,
         })
@@ -2524,6 +2535,7 @@ impl Ownship {
     }
     pub fn release(&mut self) {
         self.bay_release = None;
+        self.bay_presses = 0;
         for t in &mut self.triggers {
             t.release();
         }
@@ -5293,6 +5305,9 @@ impl State {
             // to the other bay, so a ripple alternates bays: the station and
             // whether the trigger is held.
             let mut next_bay: Option<(usize, bool)> = None;
+            // The held presses still to fire after a bay release that used
+            // one (BMB-AI2).
+            let mut requeue: Option<u16> = None;
             for (index, held, key_pass) in passes {
                 own.selected = index;
                 let selected_readiness = own.release_readiness;
@@ -5330,6 +5345,7 @@ impl State {
                     })
                 {
                     own.bay_release = None;
+                    own.bay_presses = 0;
                 }
                 // Guns and missiles retain advisory cues without inhibiting release.
                 let allowed = if grouped {
@@ -5375,13 +5391,28 @@ impl State {
                     }
                     None => polled,
                 };
-                if polled && bay_waits && own.release_readiness.player_missile_may_fire(w) {
+                // A press while one waits for the doors is held too (BMB-AI2).
+                // The waiting press shows the bay closed, which used to
+                // refuse every press behind it.
+                let waiting = own.bay_release.is_some_and(|(station, _)| station == index);
+                if polled
+                    && bay_waits
+                    && (own.release_readiness.player_missile_may_fire(w)
+                        || (waiting && own.release_readiness == Readiness::BayClosed))
+                {
+                    own.bay_presses = if waiting {
+                        (own.bay_presses + 1).min(BAY_PRESS_QUEUE)
+                    } else {
+                        0
+                    };
                     own.bay_release = Some((index, self.tick));
                     own.release_readiness = Readiness::BayClosed;
                 }
                 let bay_open = !key_pass && own.bay_release.is_some() && !bay_waits;
+                let mut held_presses = 0;
                 if bay_open {
                     own.bay_release = None;
+                    held_presses = std::mem::take(&mut own.bay_presses);
                 }
                 let due = polled || bay_open
                 // A gun repress uses the retained physical-round deadline,
@@ -5626,6 +5657,9 @@ impl State {
                     }
                 }
                 if fired {
+                    if held_presses > 0 {
+                        requeue = Some(held_presses - 1);
+                    }
                     if station.rack.location().bay() && !gun {
                         own.bay_hold_until = self.tick + BAY_HOLD_TICKS;
                         if !key_pass && index == selected {
@@ -5650,6 +5684,12 @@ impl State {
                 // bay's is held too, so one press is one store.
                 own.triggers[bay].was_held = held;
                 self.choose_delivery(own, launcher);
+            }
+            // The next held press fires on the next tick, from whichever bay
+            // is selected now (a gridded bay hands over to its sister).
+            if let Some(left) = requeue {
+                own.bay_release = Some((own.selected, self.tick));
+                own.bay_presses = left;
             }
             if grouped {
                 own.release_readiness = view(self, own).readiness(launcher);
