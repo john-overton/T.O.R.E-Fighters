@@ -98,9 +98,18 @@ fn an_ai_tail_gun_engages_a_fighter_astern_and_fires_back_at_it() {
     assert_eq!(wings.mission.actor(3).unwrap().rounds_remaining(), 2);
     let direction = rounds[0].direction;
     assert!(direction[2] < -0.95, "fired astern: {direction:?}");
-    for (got, want) in direction.iter().zip(solution.aim.direction) {
-        assert!((got - want).abs() < 1e-9);
-    }
+    // BMB-AI: the barrel is laid by a gunner with an aim error and a lag, so the
+    // round leaves near the exact lead (a few degrees at most), not along it.
+    let off = direction
+        .iter()
+        .zip(solution.aim.direction)
+        .map(|(got, want)| got * want)
+        .sum::<f64>()
+        .clamp(-1., 1.)
+        .acos()
+        .to_degrees();
+    assert!(off < 6., "{off} degrees off the lead");
+    assert!(off > 0., "the exact lead is no longer fired along");
     assert_eq!(wings.mission.actor(3).unwrap().flight().yaw, yaw);
 }
 

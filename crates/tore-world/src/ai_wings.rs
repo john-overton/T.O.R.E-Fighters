@@ -3356,9 +3356,21 @@ impl AiWings {
             if !solution.is_some_and(|s| s.aligned) {
                 return 0;
             }
-            swung = solution
-                .filter(|_| slew.is_slewed())
-                .map(|s| s.aim.direction);
+            // The exact lead is the gunner's aim; what leaves the barrel is
+            // laid by a gunner who lags it and misses a little (fitted,
+            // BMB-AI, 2026-11-16: `Slew::laid_direction`). Deterministic in
+            // the actor, the station, the half-second and the round.
+            let burst = (u64::from(event.actor) << 40)
+                ^ (u64::from(event.station.0) << 32)
+                ^ (self.mission.tick() / tore_sim::ai::gunnery::BURST_TICKS);
+            swung = solution.filter(|_| slew.is_slewed()).map(|s| {
+                tore_sim::combat::slew::Slew::laid_direction(
+                    s.aim.direction,
+                    [s.aim.heading_rate, s.aim.pitch_rate],
+                    burst,
+                    gun_ordinal.unwrap_or(0),
+                )
+            });
         }
         let launch_velocity = flight.velocity;
         let observed = actor
