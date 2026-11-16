@@ -506,12 +506,10 @@ def scenarios() -> list[Scenario]:
             # B1B-5 (2026-11-16): 5,344 weapon placements, the B-1B's three bay rows refuse 17 stores (B-1B 63 to 12); the other pins stand.
             # T160-5 (2026-11-16): 5,385, the Tu-160's two bay rows refuse five stores that do not fit (Tu-160 70 to 60).
             # F111-5 (2026-11-16): 5,398 weapon placements, the F-111F from 228 to 231 (its bay admits three bombs, its two AIM-9 rails seven missiles each, and its inner pylons refuse 14 stores that enter the airframe); dated in ordnance_audit.rs.
-            # Batch B merge (2026-11-16, interim, before the measured total): 5,337 = 5,395 - 51 (B-1B) - 10 (Tu-160) + 3 (F-111F).
             # T26-5 (2026-11-16): 5,350 weapon placements, the Tu-26's bay row refuses 19 stores, its intake pair 17 and its glove rows 4 and 5 (Tu-26 129 to 84, minus 45; measured; the coordinator recomputes the total at integration).
-            # Batch B and C merge (2026-11-16, interim, before the measured total): 5,292 = 5,395 - 51 (B-1B) - 10 (Tu-160) + 3 (F-111F) - 45 (Tu-26).
             # T95-5 (2026-11-16): 5,365 weapon placements, measured: the Tu-95's bay row refuses 30 stores that do not clear the opened bay (TU95.PT 36 to 6); every other pin is unchanged.
             # SU34-5 (2026-11-16): 5,357 weapon placements and 80 designator pod placements, measured: the Su-34 holds 99 (from 137); its rows 6 and 7 lose the designator bit 0x400 (B7), which also admits the multi-pod rocket stores (8 placements), and 30 stores are refused by name (22 on row 6, four on row 7, four on the tips). The coordinator recomputes the total at integration (B4).
-            # Batch B and C merge (2026-11-16, interim, before the measured total): 5,228 = 5,395 - 51 (B-1B) - 10 (Tu-160) + 3 (F-111F) - 45 (Tu-26) - 30 (Tu-95) - 34 (Su-34); 22 recovered stations (T95-6).
+            # Batch B and C integration (round 7, 2026-11-16, measured): 54 aircraft, 22 recovered stations, 5,228 weapon (5,395 - 51 B-1B - 10 Tu-160 + 3 F-111F - 45 Tu-26 - 30 Tu-95 - 34 Su-34), 257 tank, 81 designator pod and 284 Cheat-only placements; dated in ordnance_audit.rs.
             expect=[r"ordnance audit: 54 aircraft, 22 recovered weapon stations, 5228 weapon placements, 257 tank placements, 82 weapon and 9 tank records; passed"],
             notes="All reviewed source stations, compatible supported weapons/tanks, empty defaults and accepted-load restoration. The audit fails when a supported weapon or tank record is missing or a pinned count moves (ordnance_audit.rs).",
         )

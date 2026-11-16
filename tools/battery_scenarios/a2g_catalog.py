@@ -52,6 +52,8 @@ AIRCRAFT = re.compile(
 # to 5,365); the recovered, tank and Cheat-only counts are unchanged.
 # T95-6 (2026-11-16): the Tu-95's pylon row starts loaded with ten AS-16, so it is no longer an optional
 # empty row: 22 recovered stations (from 23); weapon, tank and Cheat-only placements are unchanged.
+# Batch B and C integration (round 7, 2026-11-16, measured): 5,228 weapon placements, 22 recovered stations,
+# 81 designator pod placements and 284 Cheat-only placements on the merged tree; dated in ordnance_audit.rs.
 AUDIT = re.compile(r"^ordnance audit: 54 aircraft, 22 recovered weapon stations, \d+ weapon placements, "
                    r"257 tank placements, (\d+) weapon and 9 tank records; passed$", re.M)
 # Aircraft with a bomb or rocket station the A2G records fit; the cargo and

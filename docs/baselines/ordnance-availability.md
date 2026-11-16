@@ -1349,3 +1349,32 @@ ordnance audit: 54 aircraft, 23 recovered weapon stations, 5361 weapon placement
 
 The `menus-ordnance-availability` expected line carries 5,361. At the next integration the
 coordinator recomputes the totals (B4); this section is the slice's own count.
+
+## Bomber batch B and C integration: merged pins (round 7, 2026-11-16)
+
+The six batch B and C aircraft branches (B-1B, Tu-160, F-111F, Tu-26, Tu-95, Su-34) are merged
+into `m3-aircraft` on top of BMB-AI2. Each slice recorded its own total from the earlier
+5,395, so none of those totals is added. Each aircraft moves only its own rows, so the changes
+stack with no overlap. Measured by `--validate-ordnance` on the merged tree
+(`.local/m3-aircraft/checks/bomber-merge7/validate-ordnance.log`), against the figure expected
+from the slices:
+
+| Count | Before (BMB-AI2) | Expected | Measured | Why |
+| --- | ---: | ---: | ---: | --- |
+| Weapon placements | 5,395 | 5,228 | 5,228 | B-1B 63 to 12 (-51), Tu-160 70 to 60 (-10), F-111F 228 to 231 (+3), Tu-26 129 to 84 (-45), Tu-95 36 to 6 (-30), Su-34 137 to 103 (-34) |
+| Recovered stations | 23 | 22 | 22 | the Tu-95's pylon row starts loaded (T95-6) |
+| Designator pod placements | 82 | 81 | 81 | the F-111F's Pave Tack bay row adds one (+1), the Su-34's rows 6 and 7 lose theirs (-2) |
+| Cheat-only placements | 278 | 284 | 284 | the F-111F's bay and two AIM-9 rails take the two novelty bombs (+6) |
+| Tank placements | 257 | 257 | 257 | unchanged: the F-111F's 16 and the Su-34's 8 were already in |
+| Aircraft, records | 54, 82 / 9 | | 54, 82 / 9 | unchanged |
+
+There is no difference between the expected and the measured totals.
+
+```text
+ordnance audit: 54 aircraft, 22 recovered weapon stations, 5228 weapon placements, 257 tank placements, 82 weapon and 9 tank records; passed
+ordnance audit: 1 designator pods, 81 pod placements, one to an aircraft, loaded and restored through the saved mission; passed
+ordnance audit: 2 novelty records, 284 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
+```
+
+The `menus-ordnance-availability` expected line carries 5,228 and 22 recovered stations. The
+`a2g-catalog` and `test_battery_a2g.py` lines match any weapon and pod count.

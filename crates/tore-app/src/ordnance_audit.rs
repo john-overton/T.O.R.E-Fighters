@@ -170,9 +170,6 @@ const TANK_RECORDS: usize = 9;
 /// 60 placements (minus 10). The bays' grid caps no count: the retail six a row
 /// stays under the roof (`grid_capacity` 12 for the Kh-15). The pylon and
 /// aircraft counts do not move (the Tu-160 has no pylon row).
-/// 5,334 from 5,395 with the B-1B (-51) and the Tu-160 (-10) merged (2026-11-16,
-/// batch B integration; the merged total is measured by `--validate-ordnance` at the end of
-/// the round and recorded below).
 /// 5,398 from 5,395 (F111-5, 2026-11-16, measured by `--validate-ordnance`): the
 /// F-111F goes from 228 to 231 placements. Its bay (new row 9, flags `0x1500`)
 /// admits three bombs (`MK82`, `FAB250`, `LAU10`; 15 refused for fit), its two
@@ -180,8 +177,6 @@ const TANK_RECORDS: usize = 9;
 /// refused), and its inner pylons refuse the stores that enter the airframe:
 /// row 5 ten (`AA6`, `AM39`, `GBU10`, `GBU10A`, `GBU16`, the GBU-27 class and
 /// `PAVEWAY`) and row 6 four (the GBU-27 class): 228 + 3 + 14 - 14 = 231.
-/// 5,337 with the F-111F (+3) on top of the B-1B and the Tu-160 (2026-11-16, batch B
-/// integration; the merged total is measured by `--validate-ordnance` at the end of the round).
 /// 5,350 from 5,395 (T26-5, 2026-11-16, measured by `--validate-ordnance`): the
 /// Tu-26's bay row refuses 19 stores (`T26_BAY_REFUSED`: the Harpoon and AM-39
 /// the active-radar bit admits, by name, and 17 that do not fit the measured
@@ -190,8 +185,6 @@ const TANK_RECORDS: usize = 9;
 /// `T26_OUTER_GLOVE_REFUSED`), so `TU26.PT` goes from 129 to 84 placements
 /// (minus 45: 19 + 17 + 4 + 5). The normal catalog is 31 stores. At the
 /// integration the coordinator recomputes (B4).
-/// 5,292 with the Tu-26 (-45) on top of the B-1B, the Tu-160 and the F-111F (2026-11-16,
-/// batch B and C integration; the merged total is measured by `--validate-ordnance` at the end of the round).
 /// 5,365 from 5,395 (T95-5, 2026-11-16, measured by `--validate-ordnance`): the
 /// Tu-95's belly bay row (row 7, `0x1180`) refuses 30 of the 35 stores its mask
 /// admitted because they do not clear the opened bay at the row's count
@@ -200,8 +193,6 @@ const TANK_RECORDS: usize = 9;
 /// `MK82P3.JT`, and the pylon row keeps its one AS-16. Normal catalog 5 stores
 /// (was 35). Batch C's merge with the Tu-26's own bay refusals (T26-5) is for the
 /// coordinator to recompute (B4).
-/// 5,262 with the Tu-95 (-30) on top of the B-1B, the Tu-160, the F-111F and the Tu-26 (2026-11-16,
-/// batch B and C integration; the merged total is measured by `--validate-ordnance` at the end of the round).
 /// 5,357 from 5,395 (SU34-5, 2026-11-16, measured by `--validate-ordnance`): the
 /// Su-34's rows 6 and 7 lose the designator bit `0x400` (B7), and that bit is
 /// also the one that admits the multi-pod rocket stores, so B-8, B-13, LAU-10
@@ -213,9 +204,14 @@ const TANK_RECORDS: usize = 9;
 /// guarded extra weapon (`extra_weapon`, the F-117's Paveway II precedent), four
 /// placements; row 6 stays without them. The Su-34 holds 103 placements, the
 /// normal catalog 58 of the 83 Cheat.
-/// 5,228 with the Su-34 (-34) on top of the B-1B, the Tu-160, the F-111F, the Tu-26 and the Tu-95
-/// (2026-11-16, batch B and C integration; the merged total is measured by `--validate-ordnance`
-/// at the end of the round).
+/// 5,228 from 5,395 (batch B and C integration, round 7, 2026-11-16, measured by
+/// `--validate-ordnance` on the merged tree): the six per-aircraft changes
+/// stack with no overlap, since each moves only its own aircraft's rows:
+/// B-1B -51 (B1B-5), Tu-160 -10 (T160-5), F-111F +3 (F111-5), Tu-26 -45 (T26-5),
+/// Tu-95 -30 (T95-5), Su-34 -34 (SU34-5 and SU34-6): 5,395 - 51 - 10 + 3 - 45 -
+/// 30 - 34 = 5,228. The slices' own totals (5,344, 5,385, 5,398, 5,350, 5,365,
+/// 5,361) were each from 5,395 and are not added. Recovered stations 22 (the
+/// Tu-95's pylon row, T95-6), tank placements 257, pods 81 and Cheat-only 284.
 const WEAPON_PLACEMENTS: usize = 5228;
 /// 188 from 182: the F-16A's centreline tank row (F150.GAS or F250.GAS) plus
 /// the tank selection its two 0x07e5 wing rows accept, 6 tank placements.
