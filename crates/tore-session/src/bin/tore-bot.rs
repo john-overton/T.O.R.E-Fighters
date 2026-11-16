@@ -171,6 +171,8 @@
 //! the Stores events told, their coded bytes summed and the largest, the
 //! most other aircraft one frame drew with stores, and the aircraft it drew
 //! with a station holding fewer stores than when it first drew it.
+//! A bot also prints "NAME: bay doors [ID=W ...]" (BMB-AI): the widest each other
+//! aircraft's bay doors stood open in its frames, 0 to 1, for those it saw open.
 //!
 //! `--load STORE[,STORE]...` (protocol 23, slice NA) makes every bot hang
 //! each store on its aircraft before it readies, a Cheat loading the host's
@@ -183,7 +185,8 @@
 //! GBU-10 on another plane's spot when its guided sight says IN RNG, then
 //! fires an AGM-88 in BORE at the HARM cue's candidate; `strike` (slice
 //! ST-K) sets up a Mk 82 pass in LVL at the nearest enemy ground object and
-//! flies it without releasing; `bomb` (slice BP3) selects its Mk 82s and
+//! flies it without releasing; `bomb` (slice BP3) selects the first bomb of its
+//! load (its Mk 82s, or a bomb-only jet's GBU-27 or Mk 82, BMB-AI) and
 //! drops one in CCIP every four seconds; `watch` presses nothing and reports its
 //! cockpit. All print what their screens show, "NAME: a2g: ..." lines. `--players N` on a joined
 //! bot that wears the crown makes its start wait until N players hold
@@ -1992,6 +1995,7 @@ fn main() -> ExitCode {
                 }
                 // The other aircraft's stores (protocol 27).
                 println!("{}: stores: {}", r.name, bot.stores.line());
+                println!("{}: bay {}", r.name, bot.stores.doors_line());
                 // A ground target (protocol 22), or the enemy's area
                 // defenses (B23): what the frames showed.
                 if let Some(world) = bot.client.mission().filter(|w| {

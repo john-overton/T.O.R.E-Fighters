@@ -194,15 +194,15 @@ COCKPIT = re.compile(
 )
 
 
-def handback_problems(strike: str, watch: str, back: str) -> list[str]:
+def handback_problems(strike: str, watch: str, back: str, weapon: str = "MK82.JT") -> list[str]:
     """What the three bots printed against `net-ai-strike-handback`'s rules: the pass set up, the AI's release
     seen from plane 1, and the rejoined cockpit as left with fewer bombs."""
     problems: list[str] = []
     set_up = STRIKE_SET.search(strike)
     if set_up is None:
         return ["the Strike bot never set up its pass (no `strike set` line)"]
-    if re.search(r"^Stay: a2g: saw MK82\.JT \d+ from plane 0 ", watch, re.M) is None:
-        problems.append("Stay never saw a Mk 82 leave plane 0: the AI did not continue the pass")
+    if re.search(rf"^Stay: a2g: saw {re.escape(weapon)} \d+ from plane 0 ", watch, re.M) is None:
+        problems.append(f"Stay never saw a {weapon} leave plane 0: the AI did not continue the pass")
     found = [m.groupdict() for m in COCKPIT.finditer(back)]
     if not found:
         return problems + ["the rejoined game never read its cockpit (no `cockpit` line)"]
@@ -220,14 +220,17 @@ def handback_problems(strike: str, watch: str, back: str) -> list[str]:
     return problems
 
 
-def drive_strike_handback(d: Drive) -> None:
-    """A bomber's game dropped mid-pass: the AI finishes the pass, the game rejoins and finds its cockpit."""
+def drive_strike_handback(
+    d: Drive, mission: str = STRIKE_MISSION, load: str = "MK82.JT", doors: bool = False
+) -> None:
+    """A bomber's game dropped mid-pass: the AI finishes the pass, the game rejoins and finds its cockpit. With
+    `doors` (a bay aircraft) the other client also sees the AI's bay doors open for the release (BMB-AI)."""
     port = d.port()
-    server = start_server(d, port, STRIKE_MISSION, king="first-player", loadouts="any")
+    server = start_server(d, port, mission, king="first-player", loadouts="any")
     token_file = d.work / "strike.token"
     # Strike wears the crown and its start waits for both players, so its Cheat loading goes with its ready.
     strike = start_bots(
-        d, port, "strike", 120, "--callsign", "Strike", "--slot", "0", "--a2g", "strike", "--load", "MK82.JT",
+        d, port, "strike", 120, "--callsign", "Strike", "--slot", "0", "--a2g", "strike", "--load", load,
         "--token-file", str(token_file), "--king", "loadouts=any", "--players", "2",
     )
     if not server.wait_for(r"Strike wears the crown", 60):
@@ -237,8 +240,8 @@ def drive_strike_handback(d: Drive) -> None:
         raise DriveError("the Strike bot never set up its pass")
     # On a straight line at the target before the drop.
     d.sleep(8)
-    if re.search(r"^Stay: a2g: saw MK82\.JT \d+ from plane 0 ", stay.text(), re.M):
-        d.problem("a Mk 82 left plane 0 before the drop")
+    if re.search(rf"^Stay: a2g: saw {re.escape(load)} \d+ from plane 0 ", stay.text(), re.M):
+        d.problem(f"a {load} left plane 0 before the drop")
     d.log("killing Strike (SIGKILL)")
     strike.stopped = True
     strike.popen.kill()
@@ -247,7 +250,7 @@ def drive_strike_handback(d: Drive) -> None:
         d.problem("the server did not keep plane 0 for the dropped Strike")
     # The pass the human set up, or the re-attack after it (the level run's cue does not always come
     # inside the gate on the first pass from the human's line).
-    if not stay.wait_for(r"^Stay: a2g: saw MK82\.JT \d+ from plane 0 ", 240):
+    if not stay.wait_for(rf"^Stay: a2g: saw {re.escape(load)} \d+ from plane 0 ", 240):
         d.problem("the AI never released on the human's target")
     d.sleep(15)
     back = d.start(
@@ -264,8 +267,11 @@ def drive_strike_handback(d: Drive) -> None:
     server.finish(40, 0)
     for bot in (stay, back):
         bot.forbid(NET_BAD, "a network problem")
-    for problem in handback_problems(strike.text(), stay.text(), back.text()):
+    for problem in handback_problems(strike.text(), stay.text(), back.text(), load):
         d.problem(problem)
+    if doors:
+        for problem in doors_problems(stay.text(), "Stay", 0, "the AI bomber"):
+            d.problem(problem)
     log_must(
         d,
         server_log(d),
@@ -282,6 +288,40 @@ STORES_MISSION = STRIKE_MISSION.replace(
 # B2-9: the same two-player stores mission with both players in B-2s (one wing of two), so each client
 # must draw the other's bay stores (a gridded magazine: 32 Mk 82 a bay) and see them leave.
 B2_STORES_MISSION = STORES_MISSION.replace("wing friendly 1 F16C.PT 2 average\n", "wing friendly 1 B2.PT 2 average\n")
+
+# BMB-AI (2026-11-16): the same two-player stores mission with both players in F-117s, bomb-only jets
+# whose bomb is a GBU-27 (`tore-bot --a2g bomb` takes the first bomb of its load, not the Mk 82 by
+# name). Each client must see the other's bay doors open for the release.
+F117_STORES_MISSION = STORES_MISSION.replace("wing friendly 1 F16C.PT 2 average\n", "wing friendly 1 F117.PT 2 average\n")
+# The strike handback with a B-2 (the F-117 has no radar to set up a pass with), airborne at 20,000 ft so the heavy needs no climb to its release floor: the human's pass is
+# continued by the AI, whose bay doors must open for the release and be seen to open from the other client.
+B2_STRIKE_MISSION = STRIKE_MISSION.replace(
+    "wing friendly 1 F16C.PT 2 average\n", "wing friendly 1 B2.PT 2 average\n"
+).replace("start airborne 5000\n", "start airborne 20000\n")
+
+DOORS_LINE = re.compile(r"^(?P<name>\w+): bay doors \[(?P<doors>[\d.= ]*)\]$", re.M)
+
+
+def last_doors(text: str) -> dict[str, dict[int, float]]:
+    """Each bot's last `bay doors [ID=WIDEST ...]` line (BMB-AI), by callsign: the widest each other aircraft's
+    doors stood open on that bot's screen, 0 to 1."""
+    found: dict[str, dict[int, float]] = {}
+    for m in DOORS_LINE.finditer(text):
+        found[m.group("name")] = {
+            int(k): float(v) for k, v in (pair.split("=") for pair in m.group("doors").split())
+        }
+    return found
+
+
+def doors_problems(text: str, watcher: str, plane: int, who: str) -> list[str]:
+    """`watcher` saw `plane`'s (`who`) bay doors open wide (0.95 or more) on its screen."""
+    seen = last_doors(text).get(watcher)
+    if seen is None:
+        return [f"{watcher} printed no bay doors line"]
+    if seen.get(plane, 0.0) < 0.95:
+        return [f"{watcher} saw {who}'s (plane {plane}) bay doors open at most {seen.get(plane, 0.0):.2f}, want 0.95 or more"]
+    return []
+
 
 STORES_LINE = re.compile(
     r"^(?P<name>\w+): stores: told (?P<told>\d+), bytes (?P<bytes>\d+), largest (?P<largest>\d+), "
@@ -322,12 +362,19 @@ def stores_problems(text: str, players: tuple[int, ...]) -> list[str]:
     return problems
 
 
-def drive_stores(d: Drive, mission: str = STORES_MISSION) -> None:
-    """Another player's and an AI's stores empty on a client's screen as they release (protocol 27)."""
+def drive_strike_handback_b2(d: Drive) -> None:
+    """`net-ai-strike-handback` with a B-2 (BMB-AI): the human's Mk 82 pass is finished by the AI, which opens
+    the bay doors for the release, and the other client sees the doors open on the AI's plane."""
+    drive_strike_handback(d, B2_STRIKE_MISSION, "MK82.JT", doors=True)
+
+
+def drive_stores(d: Drive, mission: str = STORES_MISSION, load: str = "MK82.JT", doors: bool = False) -> None:
+    """Another player's and an AI's stores empty on a client's screen as they release (protocol 27). With
+    `doors` (a bay aircraft) the watching client also sees the bomber's bay doors open (BMB-AI)."""
     port = d.port()
     server = start_server(d, port, mission, king="first-player", loadouts="any")
     bomber = start_bots(
-        d, port, "bomber", 120, "--callsign", "Bomber", "--slot", "0", "--a2g", "bomb", "--load", "MK82.JT",
+        d, port, "bomber", 120, "--callsign", "Bomber", "--slot", "0", "--a2g", "bomb", "--load", load,
         "--king", "loadouts=any", "--players", "2",
     )
     if not server.wait_for(r"Bomber wears the crown", 60):
@@ -339,12 +386,22 @@ def drive_stores(d: Drive, mission: str = STORES_MISSION) -> None:
     server.finish(40, 0)
     bomber.expect(r"^Bomber: seat \d+, plane 0, at tick \d+$", "plane 0")
     watch.expect(r"^Watch: seat \d+, plane 1, at tick \d+$", "plane 1")
-    watch.expect(r"^Watch: a2g: saw MK82\.JT \d+ from plane 0 ", "a Mk 82 leaving plane 0")
+    watch.expect(rf"^Watch: a2g: saw {re.escape(load)} \d+ from plane 0 ", f"a {load} leaving plane 0")
     for bot in (bomber, watch):
         bot.forbid(NET_BAD, "a network problem")
     for problem in stores_problems(bomber.text() + watch.text(), (0, 1)):
         d.problem(problem)
+    if doors:
+        for problem in doors_problems(watch.text(), "Watch", 0, "the Bomber"):
+            d.problem(problem)
     log_must(d, server_log(d), r"joined as Bomber", r"joined as Watch", forbid=r"protocol error|bad packets|\bfault\b")
+
+
+def drive_stores_f117(d: Drive) -> None:
+    """`net-a2g-stores` with both players in F-117s (BMB-AI): `tore-bot --a2g bomb` takes the first bomb of its
+    load, the GBU-27, so a bomb-only jet bombs over the wire, and the watching client sees the bomber's bay
+    doors open for each release."""
+    drive_stores(d, F117_STORES_MISSION, "PAVEWA3.JT", doors=True)
 
 
 def drive_stores_b2(d: Drive) -> None:
@@ -369,5 +426,13 @@ def scenarios() -> list[Scenario]:
         Scenario(
             name="net-a2g-stores-b2", lane="net", args=[], driver=drive_stores_b2, uses=("server", "bot"),
             timeout=420,
+        ),
+        Scenario(
+            name="net-a2g-stores-f117", lane="net", args=[], driver=drive_stores_f117, uses=("server", "bot"),
+            timeout=420,
+        ),
+        Scenario(
+            name="net-ai-strike-handback-b2", lane="net", args=[], driver=drive_strike_handback_b2,
+            uses=("server", "bot"), timeout=900,
         ),
     ]
