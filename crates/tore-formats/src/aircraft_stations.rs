@@ -130,6 +130,41 @@ pub const B52_BAY_REFUSED: [&str; 22] = [
     "RBK250.JT",
     "RBK500.JT",
 ];
+/// Stores the B-1B's three bay rows refuse though the retail mask `0x1100`
+/// admits them (B1B-5, fitted, 2026-11-16): the 17 of the 21 the rows offer
+/// that the measured grid (the shared magazine grid of B2-5: 4 abreast at the
+/// fin span plus 0.03 ft capped at 1.3 ft, one long, five tiers under a flat
+/// roof 6.7 ft over the belly plane, an 8.0 ft wide bay, stores hung by their
+/// shape's origin 0.7 ft aft of each bay's middle) leaves under 0.05 ft to an
+/// end wall or to another store, or runs through a wall: the HARM class, the AT-2
+/// and the cluster, rocket and Snakeye bombs and the GBU-38, whose fins are
+/// wider than the 1.3 ft pitch or touch their neighbours, the 250 kg bomb and the
+/// RBK-250 (0.8 to 1.0 ft through the forward bay's end), and the GBU-27 class
+/// (`GBU29`, `GBU29P`, `GBU30`: 5.4 ft fins in an 8.0 ft bay, 0.65 ft through the
+/// walls). **`MK84.JT` is refused by decision, not by fit** (coordinator first
+/// pass, 2026-11-16: the heavy stores need the combined forward and intermediate
+/// bay, a follow-up): it measures 0.33 ft through the 13.33 ft forward bay's end
+/// but clears the other two. Four stay: `MK82`, `MK82AIR` (the default, a
+/// seven-pack), `MK82P3` and `FAB1000`. See `docs/formats/aircraft-variety.md`.
+pub const B1B_BAY_REFUSED: [&str; 17] = [
+    "AGM45.JT",
+    "AGM88.JT",
+    "AT2.JT",
+    "CBU87.JT",
+    "CBU89.JT",
+    "FAB250.JT",
+    "FAB500.JT",
+    "GBU29.JT",
+    "GBU29P.JT",
+    "GBU30.JT",
+    "GBU38.JT",
+    "MK20.JT",
+    "MK82HD.JT",
+    "MK82P.JT",
+    "MK84.JT",
+    "RBK250.JT",
+    "RBK500.JT",
+];
 /// The B-2's four internal bay rows (`B2.PT` rows 5 to 8, flags `0x1504`):
 /// [`adjust_defaults`] clears the designator bit `0x400` on them (BMB-A2) and
 /// the pair flag `0x4` (B2-5).
@@ -155,8 +190,19 @@ pub const PAIRED_BIT: i32 = 0x4;
 /// The designator bit of a station's flags (a targeting or laser pod may sit
 /// there, and a multi-store pod: `loading.rs`).
 pub const DESIGNATOR_BIT: i32 = 0x400;
-/// The B-1B's three bay rows (`B1.PT` rows 5 to 7; BMB-B2).
+/// The B-1B's three bay rows (`B1.PT` rows 5 to 7; BMB-B2). [`adjust_defaults`]
+/// clears the designator bit (BMB-B2) and, since B1B-5, raises each row's
+/// capacity from the record's 4 to [`B1B_BAY_ITEMS`] (the shared bay grid:
+/// four abreast, five tiers); [`default_counts`] keeps the default load at the
+/// record's [`B1B_BAY_DEFAULT`] a row.
 pub const B1B_BAY_ROWS: std::ops::Range<usize> = 5..8;
+/// A B-1B bay row's capacity: 4 abreast and 5 tiers of the 500 lb class stores
+/// the measured bay holds (B1B-5, fitted; the record's 4 are one tier). 60 in
+/// all. The weight class stays the record's 140 (14,000 lb a bay, the real
+/// 28 Mk 82 a bay of 84).
+pub const B1B_BAY_ITEMS: i32 = 20;
+/// The default load of a B-1B bay row: the record's 4 Mk 82 AIR (12 in all).
+pub const B1B_BAY_DEFAULT: i32 = 4;
 /// The F-111F's four wing pair rows (`F111.PT` rows 5 to 8; BMB-B2).
 pub const F111_WING_ROWS: std::ops::Range<usize> = 5..9;
 /// The real F-111 pylon rating as a weight class (class x 100 lb, BMB-B2):
@@ -352,7 +398,8 @@ pub fn tank_allowed(id: AircraftId, row: usize, name: &str) -> bool {
 /// mask (0x85) admits, as the F-14's glove-pylon rail does). The F-117's two bay
 /// rows refuse only [`F117_BAY_REFUSED`] (F117-5: the measured bay clearances
 /// leave every store the mask and [`extra_weapon`] admit clear of the doors).
-/// The B-2's two Mk 82 rows refuse [`B2_MK82_REFUSED`] (B2-5).
+/// The B-2's two Mk 82 rows refuse [`B2_MK82_REFUSED`] (B2-5); the B-1B's three
+/// bay rows refuse [`B1B_BAY_REFUSED`] (B1B-5).
 /// The Tu-95's wing pylon row (row 8) refuses everything but `AS16.JT`
 /// (BMB-C2).
 pub fn weapon_allowed(id: AircraftId, row: usize, source: &str) -> bool {
@@ -369,6 +416,7 @@ pub fn weapon_allowed(id: AircraftId, row: usize, source: &str) -> bool {
         },
         AircraftId::F117 => !(F117_BAY_ROWS.contains(&row) && F117_BAY_REFUSED.contains(&source)),
         AircraftId::B2 => !(B2_MK82_ROWS.contains(&row) && B2_MK82_REFUSED.contains(&source)),
+        AircraftId::B1b => !(B1B_BAY_ROWS.contains(&row) && B1B_BAY_REFUSED.contains(&source)),
         AircraftId::B52 => {
             let refused = if row == B52_PYLONS {
                 &B52_PYLON_REFUSED[..]
@@ -1013,6 +1061,7 @@ pub fn adjust_defaults(id: AircraftId, rows: &mut Vec<Hardpoint>) {
         AircraftId::B1b => {
             for row in &mut rows[B1B_BAY_ROWS] {
                 row.flags &= !DESIGNATOR_BIT;
+                row.count = B1B_BAY_ITEMS;
             }
         }
         AircraftId::F111 => {
@@ -1075,6 +1124,22 @@ pub fn default_counts(id: AircraftId, rows: &mut [Hardpoint]) {
                 && row.flags == 0x1100
             {
                 row.count = 0;
+            }
+        }
+        return;
+    }
+    // The B-1B's three bay rows hold up to 20 (the grid), the default 4 each
+    // (B1B-5, coordinator first pass: "default load stays the record's 12 Mk 82
+    // AIR"). Guarded on the rows `adjust_defaults` made.
+    if id.source() == AircraftId::B1b {
+        for row in B1B_BAY_ROWS {
+            if let Some(row) = rows.get_mut(row)
+                && row.store.as_deref() == Some("MK82AIR.JT")
+                && row.location == 3
+                && row.flags == 0x1100
+                && row.count == B1B_BAY_ITEMS
+            {
+                row.count = B1B_BAY_DEFAULT;
             }
         }
         return;
@@ -2058,19 +2123,44 @@ mod tests {
         adjust_defaults(AircraftId::B2, &mut edited);
         assert_eq!(key(&edited), before);
     }
-    /// BMB-B2 (2026-11-15): the B-1B's three bay rows lose only the designator
-    /// bit; the F-111F's four wing rows lose it and cap their weight class at
-    /// 50 (5,000 lb); an edited record or another identity is left alone.
+    /// B1B-5: the B-1B's three bay rows refuse the 17 stores that clip, and the
+    /// four that stay (the default retarded Mk 82 among them) load on each row;
+    /// no other row, and no other aircraft, is touched.
+    #[test]
+    fn the_b1b_bay_rows_refuse_what_clips_and_keep_the_default() {
+        for row in B1B_BAY_ROWS {
+            for refused in B1B_BAY_REFUSED {
+                assert!(!weapon_allowed(AircraftId::B1b, row, refused), "{refused}");
+            }
+            for kept in ["MK82AIR.JT", "MK82.JT", "MK82P3.JT", "FAB1000.JT"] {
+                assert!(weapon_allowed(AircraftId::B1b, row, kept), "{kept}");
+            }
+        }
+        // The sensor rows and every other aircraft keep their stores.
+        assert!(weapon_allowed(AircraftId::B1b, 0, "MK84.JT"));
+        assert!(weapon_allowed(AircraftId::B2, 5, "MK84.JT"));
+        assert!(weapon_allowed(AircraftId::B1b, 5, "AIM9M.JT"));
+        let mut sorted = B1B_BAY_REFUSED;
+        sorted.sort_unstable();
+        assert_eq!(sorted, B1B_BAY_REFUSED);
+    }
+    /// BMB-B2 (2026-11-15): the B-1B's three bay rows lose the designator bit
+    /// (B1B-5: and gain the grid's capacity of 20, the default load staying the
+    /// record's 4 a row); the F-111F's four wing rows lose the bit and cap their
+    /// weight class at 50 (5,000 lb); an edited record or another identity is
+    /// left alone.
     #[test]
     fn the_b1b_bay_rows_and_the_f111_wing_rows_are_corrected_and_nothing_else_moves() {
         let retail = default_rows(AircraftId::B1b);
         assert_eq!(retail.len(), 8);
         assert!(retail[B1B_BAY_ROWS].iter().all(|h| h.flags == 0x1500));
+        assert!(retail[B1B_BAY_ROWS].iter().all(|h| h.count == 4));
         let mut rows = retail.clone();
         adjust_defaults(AircraftId::B1b, &mut rows);
         let mut expected = key(&retail);
         for row in &mut expected[5..8] {
             row.1 = 0x1100;
+            row.4 = B1B_BAY_ITEMS;
         }
         assert_eq!(key(&rows), expected);
         assert!(
@@ -2082,6 +2172,29 @@ mod tests {
         // Repeated application is a no-op (the signature no longer matches).
         adjust_defaults(AircraftId::B1b, &mut rows);
         assert_eq!(key(&rows), expected);
+        // The default load keeps the record's 4 a row (12 in all) and nothing
+        // else moves; an edited row keeps its own count.
+        let mut start = rows.clone();
+        default_counts(AircraftId::B1b, &mut start);
+        assert!(
+            start[B1B_BAY_ROWS]
+                .iter()
+                .all(|h| h.count == B1B_BAY_DEFAULT)
+        );
+        assert_eq!(
+            start.iter().map(|h| h.count).sum::<i32>(),
+            rows.iter().map(|h| h.count).sum::<i32>() - 3 * (B1B_BAY_ITEMS - B1B_BAY_DEFAULT)
+        );
+        let mut edited = rows.clone();
+        edited[6].count = 7;
+        default_counts(AircraftId::B1b, &mut edited);
+        assert_eq!(
+            edited[B1B_BAY_ROWS]
+                .iter()
+                .map(|h| h.count)
+                .collect::<Vec<_>>(),
+            [B1B_BAY_DEFAULT, 7, B1B_BAY_DEFAULT]
+        );
         let retail = default_rows(AircraftId::F111);
         assert_eq!(retail.len(), 9);
         let classes: Vec<_> = retail[F111_WING_ROWS]

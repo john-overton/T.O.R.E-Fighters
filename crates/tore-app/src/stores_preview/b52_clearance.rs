@@ -2,7 +2,9 @@
 //! (`TORE_STORES_PREVIEW_B52CLEAR=1`): how close each drawn store comes to the
 //! parts of the airframe and to its neighbours, in feet, positive clear and
 //! zero touching or crossing (the screening gap of [`pod_clearance`], sampled a
-//! quarter foot apart, both ways).
+//! quarter foot apart, both ways). B1B-5: the same report for the B-1B's three
+//! centred bays (each store measured against its own bay, the door leaves of
+//! all three, no rails or posts, and no pylons).
 //!
 //! - **Bay**, doors fully open: for each bay store, the room to the two door
 //!   leaves (which hang on the recess walls, 3 ft out), the end walls, the
@@ -20,7 +22,7 @@ use super::pod_clearance::{Tri, drawn, gap};
 use super::{AircraftId, CombatArt, StorePose};
 use crate::{aircraft::Airframe, flight::State};
 use tore_sim::attitude::Vector;
-use tore_sim::combat::bays::opening;
+use tore_sim::combat::bays::openings;
 
 /// One store's triangles at `centre` (feet right, up, forward): the weapon
 /// shape's faces as `pylons::mesh` draws them.
@@ -105,7 +107,10 @@ pub(super) fn report(
     start: &State,
 ) {
     bay(short, id, airframe, art, stores, start);
-    pylons(short, airframe, art, stores, start);
+    // The B-1B has no external station (B1B-5): the pylon report is the B-52's.
+    if id.source() == AircraftId::B52 {
+        pylons(short, airframe, art, stores, start);
+    }
 }
 
 fn bay(
@@ -116,34 +121,62 @@ fn bay(
     stores: &[StorePose],
     start: &State,
 ) {
-    use crate::b52_animation::{BELLY, LINING_BASE};
-    let Some(o) = opening(id) else {
+    use crate::{b1b_animation, b52_animation};
+    let bays: Vec<_> = openings(id).collect();
+    if bays.is_empty() {
         println!("Bay clearance: {short} has no centred bay");
         return;
+    }
+    // The belly skins the doors are cut from and where the rails and posts
+    // begin in the lining (the B-52's lining is a ceiling and four walls, then
+    // furniture; the B-1B's has none).
+    let (belly, furniture_from): (&[usize], usize) = match id.source() {
+        AircraftId::B1b => (&b1b_animation::BELLY, usize::MAX),
+        _ => (&[b52_animation::BELLY], b52_animation::LINING_BASE + 5),
     };
     let mut state = start.clone();
     state.bay = 1.;
-    let roof = o.belly + o.depth;
-    println!(
-        "Bay clearance: {short} opening x +/-{:.2} ft, {:.2} to {:.2} ft forward, belly {:.3} ft, roof {roof:.3} ft (depth {:.2}), doors hang to {:.2} ft",
-        o.outer,
-        o.aft,
-        o.fore,
-        o.belly,
-        o.depth,
-        o.belly - o.outer
-    );
-    // The leaves, and the rails and posts (the first five lining faces are the
-    // ceiling and walls).
+    for (k, o) in bays.iter().enumerate() {
+        let name = if bays.len() == 1 {
+            String::new()
+        } else {
+            format!("bay {k} ")
+        };
+        println!(
+            "Bay clearance: {short} {name}opening x +/-{:.2} ft, {:.2} to {:.2} ft forward, belly {:.3} ft, roof {:.3} ft (depth {:.2}), doors hang to {:.2} ft",
+            o.outer,
+            o.aft,
+            o.fore,
+            o.belly,
+            o.belly + o.depth,
+            o.depth,
+            o.belly - o.outer
+        );
+    }
+    // The leaves, and the rails and posts.
     let leaves = faces(airframe, &state, |f, p| {
-        f.address == BELLY && p.iter().any(|v| v[1] < o.belly - 0.05)
+        belly.contains(&f.address) && p.iter().any(|v| v[1] < bays[0].belly - 0.05)
     });
-    let furniture = faces(airframe, &state, |f, _| f.address >= LINING_BASE + 5);
-    let mut placed: Vec<(String, Vec<Tri>)> = Vec::new();
+    let furniture = faces(airframe, &state, |f, _| f.address >= furniture_from);
+    // Each placed store with the bay it hangs in.
+    let mut placed: Vec<(String, usize, Vec<Tri>)> = Vec::new();
     for store in stores.iter().filter(|s| s.rack.location().bay()) {
         for place in crate::pylons::hung(store).iter().filter(|p| p.held) {
             let tris = body(store, art, place.centre);
             let (low, high) = extremes(&tris);
+            let middle = (low[2] + high[2]) / 2.;
+            let k = bays
+                .iter()
+                .enumerate()
+                .min_by(|a, b| {
+                    let off = |o: &tore_sim::combat::bays::Opening| {
+                        (middle - (o.aft + o.fore) / 2.).abs()
+                    };
+                    off(a.1).total_cmp(&off(b.1))
+                })
+                .map_or(0, |(k, _)| k);
+            let o = &bays[k];
+            let roof = o.belly + o.depth;
             let name = format!(
                 "row{} {} slot{}",
                 store.hardpoint,
@@ -154,24 +187,27 @@ fn bay(
             let (leaf, _) = gap(&tris, &leaves);
             let (rail, _) = gap(&tris, &furniture);
             println!(
-                "Bay clearance: {name}: side wall {side:.2}, door leaf {leaf:.2}, aft end {:.2}, fore end {:.2}, roof {:.2}, above the belly plane {:.2}, rails and posts {rail:.2}",
+                "Bay clearance: {name}: side wall {side:.2}, door leaf {leaf:.2}, aft end {:.2}, fore end {:.2}, roof {:.2}, above the belly plane {:.2}, rails and posts {:.2}",
                 low[2] - o.aft,
                 o.fore - high[2],
                 roof - high[1],
-                low[1] - o.belly
+                low[1] - o.belly,
+                rail.min(99.)
             );
-            placed.push((name, tris));
+            placed.push((name, k, tris));
         }
     }
     let mut nearest = f64::MAX;
     let mut worst = String::new();
     for (a, one) in placed.iter().enumerate() {
         let mut best = (f64::MAX, "");
+        // Stores of other bays stand behind a wall and a bulkhead: only a
+        // bay's own stores can touch.
         for (b, two) in placed.iter().enumerate() {
-            if a == b {
+            if a == b || one.1 != two.1 {
                 continue;
             }
-            let (d, _) = gap(&one.1, &two.1);
+            let (d, _) = gap(&one.2, &two.2);
             if d < best.0 {
                 best = (d, two.0.as_str());
             }

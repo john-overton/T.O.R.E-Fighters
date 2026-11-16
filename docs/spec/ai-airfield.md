@@ -555,3 +555,15 @@ The B-52 is bit-identical (floor above zero at every weight, so the same aircraf
 out because they pass `ai-heavy-*` and `ai-merged-airfield-*` on the shared laws (B1B-9, T160-8); a later aircraft
 gets the laws by an arm in `is_heavy_airfield_aircraft`, not by its ground fit.
 
+**Update (B1B-9, 2026-11-16): the B-1B needs neither of the B-52's laws.** The gate is `taxi_throttle_floor`
+above zero, and the B-1B's is zero (at 477,000 lb the throttle that balances its wheels is about 0.17, under
+the 0.2 bar; the B-2 about 0.13), so the B-1B flies the shared 1,500 ft lookahead and the shared taxi throttle
+and no airfield code changed. Measured on Simferopol (UKR 2, 5,532 ft), centre line x 1,107,331, the AI B-1B
+sent home with 40,000, 80,000 and 100,000 lb of fuel (the probe's limit): it touches down at x 1,107,331 each
+time (0 ft off the line; the final swings 112 ft right of it at 224 s and settles by 236 s, where the 80,000 lb
+B-52 swung 190 ft), at 158, 168 and 169 kt, rolls out and parks with 0 ticks off the pavement in all three
+(14,964 to 15,669 ground samples). The taxi throttle sits at its 0.40 ceiling or under, never at a floor. The
+whole Southampton cycle (`ai-merged-airfield-b1b-wing2`) and the Athens takeoff stay on the pavement. A
+B-52-style 3,000 ft lookahead is therefore not applied to the B-1B, and no baseline comparison of the other
+aircraft was needed (nothing in the sim changed since B52-9). Evidence:
+[aircraft variety](../formats/aircraft-variety.md#b-1b-lancer-ai-missions-multiplayer-and-replay-b1b-9-2026-11-16).

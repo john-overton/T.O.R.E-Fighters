@@ -14681,9 +14681,10 @@ point -8 units at 1. The 202-value dense sweep passes rigid, never below gear do
 (z -1 to 6, nose within x 2).
 
 **Bay walls (`7b16`), interim.** The four walls (x +-3, y 10 to 21 and 22 to 32, z -1 to -4, two
-windings) drop from the belly polygon line as `State::bay` opens (hidden at 0); the closed belly
-stays drawn over the opening. B1B-5 replaces them with doors and the bay machinery.
-(`State::bay_available` is F-22 only, so nothing raises the B-1B bay in play yet.)
+windings) dropped from the belly polygon line as `State::bay` opened (hidden at 0); the closed belly
+stayed drawn over the opening. **Update (B1B-5, 2026-11-16):** replaced by two door leaves a bay cut
+from the belly polygons and a lined recess ([B-1B Lancer stations, bays and pylons](#b-1b-lancer-stations-bays-and-pylons-b1b-5-2026-11-16));
+the walls are no longer drawn, and `State::bay_available` is true for the B-1B, so its doors move on a release.
 
 **Plumes (`7b10`).** Sixteen plates, a vertical and a flat pair per engine, y -17 to -28; they
 scale from the nozzle plane y -17 with `State::exhaust` (hidden at 0), so the plates sharing the
@@ -14711,7 +14712,7 @@ as the Tornado's does.
 
 **Open items for John.** (1) The rudder travel is the retail word's 43 degrees and opens a 4.4 ft
 gap at the taileron roots at full pedal; a smaller fitted limit (0.45 rad, 2.6 ft) is a one-line
-change. (2) The swept span is 74.2 ft against the real 78 (decision 2, accepted). (3) The flap
+change (**Update, B1B-5, 2026-11-16: applied**, `RUDDER_LIMIT` 0.45 rad). (2) The swept span is 74.2 ft against the real 78 (decision 2, accepted). (3) The flap
 slot (0.66 ft) and the spoilers staying on the glove are visible simplifications. (4) The default
 loadout of the B-1B is refused at start with `payload outside aircraft mass limits` (free flight
 and ground start, at the base commit 7bd8048e, before this slice); `--loadout none` and
@@ -14719,7 +14720,10 @@ and ground start, at the base commit 7bd8048e, before this slice); `--loadout no
 under the 477,000 lb maximum), and `--headless-flight` without a ground start sets no payload and
 flies. The default stores' weight was not traced; it belongs to B1B-6 (default load) and B1B-8, and
 `Loadout::cap_default_fuel` caps only the loadout's own fuel. The frames were taken with
-`--loadout none`.
+`--loadout none`. **Update (B1B-5, 2026-11-16): fixed** by the start-fuel fix (`6f0277d8`): the
+default load (12 `MK82AIR.JT` seven-packs, 42,000 lb) starts with 243,000 lb of fuel, 477,000 lb gross
+of the 477,000 lb maximum (`--ground-start 1 --headless-flight 600`: no crash, 0 non-finite); the B1B-5
+frames are taken with it.
 
 ## Tu-160 shape and rig (T160-2/3, 2026-11-15)
 
@@ -15962,3 +15966,660 @@ timestamps, commit hashes, ports and stall notes (`replay-a2g`, `replay-rec-b2-2
 times; the three `net-*` logs). Not run: the Tu-26 and Tu-95 (their branches are not merged), the F-111F scenarios of
 `m3-f111`, a `--headless-flight` pass (no flight-model change).
 
+## B-1B Lancer stations, bays and pylons (B1B-5, 2026-11-16)
+
+Implementation mode. The decisions are the coordinator's first pass of 2026-11-15
+(`BOMBERS-DECISIONS-B`, "B-1B Lancer" 3 and 4 and "B-1B rig"), not John's; every number
+below is **fitted** (agent, 2026-11-16) from the measurements in
+[B-1B bay and station survey](#b-1b-bay-and-station-survey) unless it says it is the
+record's, retail's or cited. The machinery is batch A's: the shared bay grid
+([B-2 weapon bays](#b-2-weapon-bays-b2-5-2026-11-15)), the centred bay and its door helper
+([B-52 bay, pylons and tail gun](#b-52-bay-pylons-and-tail-gun-b52-5-2026-11-15)) and the
+shared stores preview. Earlier sections stay as written; the interim bay walls and the
+rudder travel of [B-1B shape and rig](#b-1b-shape-and-rig-b1b-23-2026-11-15) are
+superseded here and carry a dated Update line.
+
+**What the record's store is.** `MK82AIR.JT` is the retail **MK-82 AIR 7-Pack**
+([air-to-ground baseline](../baselines/air-to-ground.md)): one store of seven retarded
+Mk 82 weighing 3,500 lb, which a release sends off as seven bombs staggered 2 ft apart
+sideways. The record's four a bay are therefore 28 bombs a bay, **84 in all, the real
+load** (the B-1B's 84 Mk 82), and the weight class 140 (14,000 lb a bay) is exactly four
+packs. This is why the default load is 12 stores, why `MK82AIR.JT` is capped at 4 a row
+whatever the grid holds (14,000 lb over 3,500 lb), and why the "60" of the B1B-0 proposal
+is a count of *single-bomb* stores (the plain Mk 82 and its kin: 4 abreast, 5 tiers, 20 a
+bay) and not of the default.
+
+**Stations (`bays::STATIONS`, `GRIDS`).** `B1.PT` rows 5, 6 and 7 (Internal Bay, flags
+`0x1100` once BMB-B2 cleared the designator bit) are `Location::Magazine` stations on the
+centre line. The record's capacity of 4 becomes 20
+(`aircraft_stations::B1B_BAY_ITEMS`, `adjust_defaults`), the weight class stays 140, and the
+default load stays the record's 4 a row (`B1B_BAY_DEFAULT`, `default_counts`, as the B-52's
+12 Harpoons of 18): **12 retarded Mk 82 packs, 42,000 lb**. The pair flag was never set, so
+there is nothing to clear; `Rack::grid` and the ceiling ride in the rack as for the B-2.
+
+| Row | Bay | Opening forward, feet | Length | Grid floor | Mount (right / up / forward) |
+| ---: | --- | --- | ---: | --- | --- |
+| 5 | forward (the shape's walls y 22 to 32 units) | 29.33 to 42.67 | 13.33 ft | 5.3 x 13.33 ft | 0 / -1.333 / 35.30 |
+| 6 | intermediate (walls y 10 to 21 units) | 13.33 to 28.00 | 14.67 ft | 5.3 x 14.67 ft | 0 / -1.333 / 19.97 |
+| 7 | aft (**not drawn**: the real 15 ft, B1.INF "4.57 m", centred on the record's -12.33 ft) | -19.83 to -4.83 | 15.00 ft | 5.3 x 15.00 ft | 0 / -1.333 / -13.03 |
+
+Every bay is 8.0 ft wide (the `7b16` walls stand at x +-3 units, 4/3 ft a unit; no public
+source gave a width), with the belly plane at -1.333 ft (z -1 unit) as the floor of the grid
+and a **flat roof 6.7 ft over it** (z 4.025 units). The forward and intermediate bays are 1.33 ft
+apart (the movable bulkhead). The roof is fitted: five tiers of Mk 82 stand 6.55 ft
+(0.08 ft, a 1.27 ft body and four 1.3 ft pitches) so a sixth (7.85 ft) cannot, and the top
+skin over the stores' columns (x within 2.6 ft) is 8.5 to 9.3 ft above the belly plane, 6.9 ft at
+the aft bay's outer wall (z 4.16 units), so the roof stands under the skin everywhere. The
+grid floor is the B-2's 5.3 ft width (four stores of 1.3 ft and 0.1 ft over); a Mk 82 (7.3 ft,
+1.27 ft fins) hangs **4 abreast, 1 long, 5 tiers = 20 a bay, 60 in all** (the length is
+13.33 ft / 7.55 ft: one long); a Mk 82 pack, the default, one tier of four.
+
+**Where the stores hang.** Stores hang by their shape's origin, which is not their middle:
+the retarded Mk 82 (`MK82A.SH`, the default) spans -1.39 to +5.91 ft about its origin and the
+plain Mk 82 (`MK82.SH`) -4.52 to +2.78 ft. For the 13.33 ft forward bay, the shortest, both clear
+the two ends by at least 1.45 ft for any mount between -2.15 and +0.76 ft of the bay's middle
+(`bays::B1B_MOUNT_OFFSET`, -0.7 ft, balances them: Mk 82 1.45 ft aft and 4.59 fore, retarded Mk 82
+4.58 aft and 1.46 fore). Centring the retarded Mk 82 alone (an offset of -2.26 ft) leaves the
+plain Mk 82 0.11 ft through the forward bay's aft wall, the reason for the compromise. The record's rows
+(36.67, 21.0 and -12.33 ft) are the bays' middles within 0.7 ft; the retail hangs the pack by
+its origin there, which puts it flush against the forward bay's front wall (0.09 ft clear).
+
+**Doors and belly.** Two door leaves a bay (**fitted**: no public source gave a number),
+six in all, each 4.0 ft wide and 90 degrees down to -5.33 ft, hinged on the outer edges of the
+opening, cut from the flat belly with `bay_doors::centre_doors_all` (the B-52's leaves, several
+bays one behind another). The belly is **two polygons, not one**: `3617` (8 vertices, y -16
+to 29 units) holds the aft and intermediate bays and the forward bay up to y 29, and `362e`
+(y 29 to 48) the last 3 units of the forward bay, so both are cut and the forward bay's leaves come in
+two pieces on one hinge line (the B1B-5 brief said `3617` alone; the forward bay does not fit in it).
+The recess is a closed lined box (ceiling and four walls a bay, 15 faces) in the grey of the
+shape's own bay plate (palette 144), drawn only while the doors are off their seat, so the
+belly polygons stay whole shut and no sky shows through open. The `7b16` interim wall plates
+are no longer drawn (one is the lining's material). **All three bays open together**:
+`State::bay` is one fraction, as for the B-2's two bays; the real jet opens the bay in use
+(open for John). `State::bay_available` is true for every aircraft with a row in
+`bays::STATIONS`, so the B-1B's doors now move on a release and the open-bay term of the
+signature page applies. Release timing, the 0.95 gate and the hold are the F-22's.
+
+**Release.** A press releases from the selected row and the selection stays on it until it is
+empty: the three bays are on the centre line, so `Ownship::sister_bay` (which alternates
+opposite sides) hands over nothing, as for the B-52's rows. A row empties bottom tier first, the
+stores of a row abreast outermost first alternating sides (columns -1.95, +1.95, -0.65, +0.65 ft),
+then the next tier up (battery scenario `flight-bay-ripple-b1b`: 20 Mk 82 from the forward bay,
+first release at tick 116 with the doors at 0.958, then every 12 ticks). The AI releases through
+the shared strike release, which does not wait for doors (as the other bays'); the test
+`an_ai_bomb_leaves_each_b1b_bay_grid_inside_its_own_opening` pins it for each bay.
+A seven-pack leaves as seven bombs staggered up to 6 ft sideways (retail's `pack_offset`),
+which is wider than the 8.0 ft bay's half width by 2 ft; unchanged shared code, listed for John.
+
+**Clearance, feet, doors open** (`TORE_STORES_PREVIEW_B52CLEAR=1`, which now reports every
+opening of an aircraft with several; scenarios `render-b1b-clearance` and
+`render-b1b-clearance-default`; positive is clear). Worst of each bay:
+
+| Load | Bay | Side wall | Door leaf | Aft end | Fore end | Roof | Above the belly plane | Nearest store |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 12 packs (default, four a bay) | forward | 1.60 | 1.62 | 4.58 | 1.46 | 5.53 | 0.26 | 0.40 |
+| | intermediate | 1.60 | 1.62 | 5.24 | 2.12 | 5.53 | 0.26 | 0.40 |
+| | aft | 1.60 | 1.62 | 5.41 | 2.29 | 5.53 | 0.26 | 0.40 |
+| 60 Mk 82 (20 a bay) | forward | 1.60 | 1.62 | 1.45 | 4.59 | 0.34 | 0.25 | 0.39 |
+| | intermediate | 1.60 | 1.62 | 2.11 | 5.25 | 0.34 | 0.25 | 0.39 |
+| | aft | 1.60 | 1.62 | 2.28 | 5.42 | 0.34 | 0.25 | 0.39 |
+
+**What each row admits.** The retail mask `0x1100` admits 21 stores on each row. The sweep
+(`.local/m3-aircraft/checks/B1B-5/bay-sweep.txt`, `summ.py`: every store at its catalog
+capacity in all three bays, doors open, worst of the three) leaves **four**:
+
+| Store | Capacity a row | Ends (worst, aft / fore) | Nearest store |
+| --- | ---: | ---: | ---: |
+| `MK82AIR.JT` (the default seven-pack) | 4 (14,000 lb / 3,500 lb) | 4.58 / 1.46 | 0.40 |
+| `MK82.JT` | 20 (grid) | 1.45 / 4.59 | 0.39 |
+| `MK82P3.JT` (three-bomb pack) | 9 | 1.45 / 4.59 | 0.39 |
+| `FAB1000.JT` | 4 | 1.12 / 2.81 | 0.33 |
+
+The other 17 are refused by name (`aircraft_stations::B1B_BAY_REFUSED`, one list for the three
+rows, the shared 0.05 ft rule of the B-52's): `AGM45`, `AGM88` (HARM class, 13.7 ft, 0.9 to 1.8 ft
+through the bays' front walls, touching), `AT2` (0.19 ft through the forward bay's aft wall, touching),
+`CBU87`, `CBU89`, `FAB500`, `GBU38`, `MK20`, `RBK500` (fins wider than the 1.3 ft pitch or touching their
+neighbours), `FAB250` and `RBK250` (0.8 and 1.0 ft through the forward bay's aft wall, 0.1 to 0.4 ft
+through the intermediate bay's), `MK82HD` and `MK82P` (Snakeye, 0.03 ft from a neighbour), `GBU29`,
+`GBU29P` and `GBU30` (the GBU-27 class: 5.4 ft fins 0.65 ft through the side walls and 1.1 to 2.0 ft
+through the aft walls) and **`MK84` by decision, not by fit**: the Mk 84 measures 0.33 ft through the
+forward bay's aft wall but 0.33 and 0.50 ft clear of the other two bays' (seven a bay by the
+weight class, 0.11 ft from its neighbour), refused with the rest of the "heavy stores" (the Mk 84,
+JASSM and GBU-31 of the sources) until the combined forward and intermediate bay exists. The
+roster has no JASSM, and the GBU-31's nearest records are the three GBU-27 class refused above.
+Real cluster, JDAM and Mk 20 loads (30 CBU-87, 24 GBU-31, 15 GBU-38) are out of reach of the shared
+grid, whose pitch is capped at 1.3 ft: they come back with a wider pitch for fat stores or the
+combined bay (follow-up, B1B-6). `--validate-ordnance`: weapon placements **5,395 to 5,344**
+(`B1.PT` 63 to 12), every other pin unchanged (see
+[ordnance availability](../baselines/ordnance-availability.md#b-1b-bay-rows-refuse-17-stores-b1b-5-2026-11-16)).
+
+**No external stations, no pods.** The record has none and none is authored: the real jet's
+six to eight fuselage hardpoints are not in the record or the shape and no source says they were
+fitted, so Load Ordnance offers three rows (Internal Bay x3) and nothing under the wing or fuselage
+(frames `closed-default-under`, `closed-mk82x60-under`). The five sensor rows (`VIS340.SEE`,
+`F18R.SEE`, `F18.ECM`, `PAVESPK.SEE`, `AV8IR.SEE`, flags `0x1008`, no designator bit) stay as rows
+and draw no pod body: a designator pod can only be hung where the row carries `0x400` and these
+do not. Pave Spike stays the targeting row.
+
+**Rudder travel capped (decision "B-1B rig").** Full pedal is now **0.45 rad** (25.8 degrees), not
+the retail word's 0.75 rad (43 degrees): `b1b_animation::RUDDER_LIMIT`, applied to the turn the rig
+measures from the word (the pedal still scales the whole travel linearly, signed, rigid). The
+vertex shared with both taileron roots opens **2.6 ft** at full pedal (4.4 ft before). Frames
+`tail-rudder-right`, `-left`, `-neutral` and `tail-rudder-43deg-vs-0.45rad-sheet` (columns: old
+right, new right, old left, new left; rear three-quarter view). The probe's rudder rows pass
+unchanged (direction, rigidity and the hinge).
+
+**Update (B1B-5, 2026-11-16) to [B-1B shape and rig](#b-1b-shape-and-rig-b1b-23-2026-11-15):**
+the "Bay walls (`7b16`), interim" paragraph is superseded by the fitted bays above (the walls
+are no longer drawn; the probe's bay row checks the door leaves, the 15 lining faces and the
+hinge lines instead of the plates), `State::bay_available` is now true for the B-1B, and open
+item (1), the rudder's 43 degrees, is closed by the 0.45 rad cap.
+
+**Probe and frames.** `--aircraft b1b --animation-probe`: bay shut, belly polygons whole and no
+lining; open, 15 lining faces and the hinge vertices on the belly plane at every bay's four
+corners; half open, the leaves hang on a sine of the fraction. Frames
+(`.local/m3-aircraft/frames/B1B-5/`, `capture.sh` and `cap.sh`): `closed-default`, `opening-half-default`,
+`open-default` and `open-mk82x60` x `under`, `oblique`, `side`, `close`, `front`;
+`closed-mk82x60-under`; the rudder frames above.
+
+**Open for John.** (1) The Mk 84, JASSM and GBU-31 (the heavy stores): refused until the combined
+forward and intermediate bay; options are alternatives (`bays::ALTERNATIVES` of rows 5 and 6 as one
+long row) or a 29.3 ft bay row. (2) The refusals are strict (17 of 21); the shared grid's 1.3 ft
+pitch cap is what refuses the cluster, rocket, JDAM and Mk 20 loads the real jet carries.
+(3) All three bays open at once. (4) The aft bay is not drawn: it is the real 15 ft on the record
+row, between the nacelles' inner walls (x +-4 ft, where the nacelle underside reaches z -2 units
+beside the doors' hinge line). (5) The fitted door count (two a bay) and the 6.7 ft roof. (6) The
+bay stores hang 0.7 ft aft of each bay's middle to suit two different shape origins.
+(7) Real external stations: none authored.
+
+## B-1B Lancer ordnance, sensors, HUD and cockpit (B1B-6/7, 2026-11-16)
+
+Slices B1B-6 (ordnance, default load, countermeasures) and B1B-7 (sensors, HUD, cockpit, instruments)
+ran together (implementation mode, bomber batch B). They apply the coordinator's first-pass decisions of
+2026-11-15 (`BOMBERS-DECISIONS-B`, "B-1B Lancer" 5, 7 and 9, and "B-1B stations"), not John's; every
+number below is **fitted** (agent, 2026-11-16) unless it says it is the record's or retail's. The machinery
+is batch A's (the B-52's and B-2's slices): the shared bay grid and doors of
+[B-1B stations](#b-1b-lancer-stations-bays-and-pylons-b1b-5-2026-11-16), the B-2's measured glass
+([B-2 sensors, HUD and cockpit](#b-2-sensors-hud-and-cockpit-b2-7-2026-11-15)) and the per-identity eye
+table. Earlier sections stay as written (B11). Frames are in `.local/m3-aircraft/frames/B1B-6/`, logs in
+`.local/m3-aircraft/checks/B1B-6/`.
+
+### B1B-6: the load, the bays and the release
+
+- **Load Ordnance (checked, frame `load-ordnance`).** Three `Internal Bay` rows and nothing else (no gun, no
+  pylon, no pod): each `MK-82 AIR 7-Pack, 4 loaded (max 4)`, vehicle weight 477,000 of 477,000 lb (carried
+  42,000 lb), internal fuel 243,000 lb (92 percent), and the page's line `Aircraft laser pod equipped` for the fixed
+  Pave Spike row. The 12 packs are the record's 12 and are **84 Mk 82**, the real load (B1B-5). Changing a row to the plain
+  `MK82` offers 20 a row (4 abreast, 5 tiers, 60 in all). No code changed: B1B-5's page is the page.
+- **Default counts.** 4, 4 and 4, the same through a saved load and a restart (`--validate-ordnance` still
+  reads `B1.PT: 3 source rows, 12 compatible weapon placements, defaults and restart passed`).
+- **Live fire (battery, B1B-5's scenarios, rerun).** `flight-livefire-b1b-slot1` to `-slot3` fire one pack a press, seven bombs
+  each (`SHOTS_PER_ROUND` counts them), and empty the row at four packs. **New:** `flight-jettison-b1b-slot1` (the
+  forward bay: the generator starts at slot 2 because slot 1 is a gun elsewhere; the B-1B has none), beside B1B-5's
+  `-slot2` and `-slot3`.
+- **Release origin, the human against the AI (new scenarios).** `a2g-release-origin-b1b` (the human trigger, six runs
+  through `--a2g-run --attack release`): each bay's plain Mk 82 row leaves its first nine places from the grid's own cells
+  (4 abreast, columns -1.95, +1.95, -0.65, +0.65 ft, outermost first alternating sides, the bottom tier 0.62 ft under the
+  reference, the next tier 1.3 ft up) at 35.30, 19.97 and -13.03 ft ahead, and each default seven-pack row leaves four packs
+  of seven, each pack's bombs from the pack's own place and then staggered by the retail pack offset (right 0, -2, +2, -4, +4, -6,
+  +6 ft and down 0, -2, -6, -12, -20, -30, -42 ft, so a pack streams 12 ft wide and 42 ft deep in the first
+  instants: shared code, unchanged, B1B-5's open item). `ai-strike-b1b-stick` (an AI B-1B, `--load MK82 --count 20`,
+  20,000 ft) drops a stick of eight 0.25 s apart from **the same cells** (the `ai-strike: ORIGIN` lines match the human's to 0.1 ft),
+  doors read open at every release and shut again 1.5 to 6 s after the last, an impact and egress; `ai-strike-b1b-pack` (the default
+  load) drops four packs of seven, the first bomb of each from the row's own place. The human's and the AI's cells match; the
+  B-2's precedent checks the same two runs.
+- **Guided stores: none to fire.** The four stores the bay rows admit (`MK82AIR`, `MK82`, `MK82P3`, `FAB1000`) are all
+  unguided; the laser-guided and GPS-guided records (`GBU29`/`30`, `GBU38`, JDAM class) are refused by B1B-5's clearance list,
+  so there is no guided release to measure against a target and no `a2g-laser-b1b` scenario. The fixed Pave Spike row still
+  lases (the B-2's `a2g-laser-b2` path); it waits on a guided store. Listed for John (the same open item as B1B-5's refusals).
+- **Countermeasures (checked, new scenario `flight-countermeasures-b1b`).** The retail `F18.ECM` row (`LateColdWar`, strength 0.30)
+  gives **30 chaff and 30 flares** (the Weapons window `30 CHAFF 30 FLARE`) and a jammer: after five chaff and three flare
+  commands the page reads `25 CHAFF 27 FLARE`, six flares burn and 170 chaff puffs are in the air at 60 ticks, and `--jammer-on` lights `JAM`
+  on the RWR window (frames `countermeasures-external`, `countermeasures-jammer`). The cartridges leave from the shared
+  tail origin. The real B-1B's ALQ-161 is a jammer and its dispensers are in the tail; the record gives the counts.
+
+### B1B-7: sensors
+
+`--sensor-summary` reads `B1b: radar F18R.SEE search 90 nmi 60x60 deg track 50 nmi 45x45 deg look-down 0 ADVANCED;
+infrared AV8IR.SEE search 15 nmi 60x60 deg track 15 nmi 45x45 deg; visual VIS340.SEE search 10 nmi 170x140 deg track 5 nmi 170x140
+deg; jammer F18.ECM LATE strength 0.30; signature radar 40 infrared 60`.
+
+| Row | Record | What the game draws | Against the real aircraft |
+| --- | --- | --- | --- |
+| 1 | `VIS340.SEE` | the visual channel | any aircraft has one |
+| 2 | `F18R.SEE` | the radar, the F/A-18's air-to-air RWS and TWS (`Preset::Advanced`) | the real jet has a ground-mapping radar, which the shared radar does not have (no ground-map mode, as for the B-2 and B-52) |
+| 3 | `F18.ECM` | chaff, flares and the jammer | the real jet's ALQ-161 is a jammer: kept |
+| 4 | `PAVESPK.SEE` | a fixed laser row, no pod body | the real jet carried no Pave Spike (a pod came much later): kept as retail by decision, **never drawn** |
+| 5 | `AV8IR.SEE` | the infrared channel on M, no pod body | the real jet had no infrared sensor of its own: kept as retail by decision, never drawn |
+
+- **Radar profile (agent decision, no change): Advanced, the record's.** The row is `F18R.SEE`, already reviewed
+  `Preset::Advanced` (60 ft/s notch, burn-through 10 nmi; [radar](../radar.md#presets)). The B-52's row needed a new preset
+  because `B52R.SEE` was unreviewed and the B-52 flew blind; the B-1B's does not, so nothing was added and the B-1B
+  flies the F/A-18's radar as the B-2 does. A new test (`the_b1b_radar_row_is_the_reviewed_advanced_f18_record`)
+  pins the record and the preset. If John prefers a bomber-class set, the Transitional class of `B52R.SEE` is the one-line
+  alternative (a new record name has no row to rename).
+- **No pod body on any station.** The record has no external station; a designator pod can only hang on a row with the
+  `0x400` bit, and none of the five rows has it (asserted by the new retail-reading test `b1b_cockpit`). Frames
+  `external-*` of B1B-5 and the rear view show no pod.
+- **RCS page (checked, frame `crop2x-rcs-closed-vs-bay-open`).** `SIG 40` with the bays shut (the record's 40) and `SIG 60` with
+  them open (`--flight-bay 1`; the open-bay term of 1.5, `Deployment::bay`), the open bays reaching only the RCS page as for the
+  F-22, F-117, B-2 and B-52. The oval is the exposure contour.
+
+### B1B-7: HUD and cockpit
+
+- **HUD and art (decision 7): the record.** `bmbrcc.HUD` names the instrument frame `~B2_P.PIC` (the new retail-reading
+  test checks it) and the cockpit art is the B-2's `~B2H.PIC` (1394 x 508, stem `B2`, no overlays). The HUD draws as the B-2's:
+  flight data, the weapon and count (`4 MK-82AIR7`), the level-bomb cue, `NO TARGET`, the gear, brake and flap column, and
+  (B1B-5 made the bays real) the `BAY` cue while the doors move, with `R 1.1` and `IMP 0:24` once a pack is away (frame `live-fire-hud-bay-slot1`). The
+  window frames are the B-2's bezel (frames `cockpit-front-view`, `before-cockpit-front`).
+- **Glass aperture: measured, not fail closed.** `hud_aperture::mask` already routes the B-1B and the Tu-160 to the B-2's
+  20-vertex polygon, keyed to the 1394 x 508 picture (BMB-B1 added the arm; B2-7 measured it): the main window between the two
+  struts, 246,986 of its 247,572 transparent pixels (99.76 percent), no opaque pixel, no side pane. This slice **verifies it
+  for the B-1B** rather than assuming it: the retail-reading test `the_b2_glass_is_the_main_window_of_the_imported_art` now also
+  asserts the B-1B's cockpit art is `~B2H.PIC` and its mask is pixel-identical to the B-2's on the real art, and a synthetic test
+  (`the_b1b_glass_is_the_b2_glass_for_the_shared_picture`) pins the inside, the side panes and the fail-closed size. The frame
+  `cockpit-front-view` shows the HUD drawn through the main window only.
+- **Eye (fitted, measured).** `mirrors::eye_offset` gains the B-1B: **11.3 ft up and 66 ft ahead** of the model origin
+  (the shared seat is 7 up and 10 ahead). Measured on `B1.SH` (4/3 ft a unit): the fuselage crown rises along the centre line from 8 ft (z 6 units) at 38.7 ft ahead of the origin to
+  10.7 ft (z 8) at 64 ft (y 48 units); there the **flight deck** begins: the nose roof drops to 6.7 ft (z 5) and a canopy ridge 2.7 ft wide
+  runs on from the crown (10.7 ft at 64 ft, 9.3 ft at 68 ft) and slopes down to the roof at 72 ft (y 54); the nose cone ends at 86.7 ft. The
+  shared seat is 54 ft aft of the deck, inside the fuselage, so F2 Back looked at its inner walls (frame `before-cockpit-back-f2`). A seat inside
+  the ridge (8.7 ft up, the deck's middle) looked at the ridge's own back wall 2.7 ft behind it (the skin draws from inside): rejected. The seat
+  is the deck's middle in plan, 66 ft ahead, 0.6 ft over the 10.7 ft crown behind it, so F2 Back clears the spine and looks down the length of the aircraft
+  to the fins and the wing panels (frame `cockpit-back-f2`). Readers and tests are the B2-7 and B52-7 ones
+  (`mirrors::tests::only_the_b2_the_f117_and_the_b52_have_their_own_pilot_eye`, extended). The forward cockpit, mirrors, padlock and target
+  camera do not read the eye; the record's `viewOffset` (0, 30, 60) is the B-2's template value and is **not used** (at 4/3 ft a unit it would be
+  40 and 80 ft, not the drawn deck; pinned by the new test).
+- **Rear view.** F2 Back is the shared rear view from that seat; no rear-view HUD exists (the B-52's open item 3), and the aircraft has no
+  tail gun to cue (it has no gun). The Back view at rest shows the wings spread (the sweep follows speed).
+- **Instruments.** The Systems window shows one engine readout (the shared page; the aircraft has four engines) and `FUEL 243000 LBS`, the
+  Weapons window `12 MK-82AIR7` and `30 CHAFF 30 FLARE`, and the Target Cam, RWR, Radar and Nav pages draw in the B-2's bezel.
+
+### Tests (this slice)
+
+`tore-app`: `hud_aperture::tests::the_b1b_glass_is_the_b2_glass_for_the_shared_picture` (new), the retail-reading B-2 glass test (extended to the B-1B),
+`mirrors::tests::only_the_b2_the_f117_and_the_b52_have_their_own_pilot_eye` (extended: the B-1B's 4.3 ft up and 56 ft ahead of the shared seat).
+`tore-sim`: `sensors::profile::tests::the_b1b_radar_row_is_the_reviewed_advanced_f18_record` (new). `tore-import`:
+`tests/b1b_cockpit.rs` (new, retail-reading, skips without an install: the five rows with no designator bit, `F18R.SEE`, `BMBRCC.HUD`, its panel and
+the B-2's art, no overlays, 1394 x 508, the unused `viewOffset`). Battery (new): `a2g-release-origin-b1b`, `ai-strike-b1b-stick`, `ai-strike-b1b-pack`,
+`flight-countermeasures-b1b`, `flight-jettison-b1b-slot1`.
+
+### Open for John
+
+1. **Guided stores.** The bay rows admit four unguided stores, so the fixed Pave Spike has nothing to guide; the JDAM, GBU and cluster loads wait on
+   B1B-5's open item (a wider pitch for fat stores, or the combined bay).
+2. **Radar.** The F/A-18's Advanced radar as the record gives it (no ground-mapping mode, as for the B-2 and B-52); a bomber-class preset would be a
+   new record or an override.
+3. **Pave Spike and IR rows** stay as retail rows with no pod body, as the B-2's.
+4. **Eye** at 11.3 ft up, 66 ft ahead (over the deck's hump): fitted, change in `mirrors::eye_offset`.
+5. **HUD** draws in the B-2's main window only; whole-picture (the AC-130 choice) is a one-line change.
+6. **Pack stagger** (12 ft wide, 42 ft deep): shared retail release code, listed in B1B-5.
+
+Provenance: sensor rows, HUD module, art, panel names and the countermeasure counts spec-derived (retail records); the
+radar choice, the eye, the glass reuse and the release checks fitted, agent decisions 2026-11-16 on the coordinator's first pass. No retail bytes
+committed.
+
+### Checks
+
+All through `.local/m3-imports/light3.sh` (away mode), profile `.local/m3-aircraft/profile-b1b` refreshed first, windows through
+`tools/agent-run.sh` (logs in `.local/m3-aircraft/checks/B1B-6/`): `cargo fmt --all -- --check` clean; `cargo clippy --workspace --all-targets
+--locked -- -D warnings` clean; `cargo test --locked --workspace --no-fail-fast` 7,875 passed, 0 failed, 108 ignored (7,864 at B1B-5; three new tests, two
+unit and one retail-reading, and the merge's), the retail-reading tests against the install; `--validate-ordnance` passed with **no pin moved** (54 aircraft, 23 recovered
+stations, 5,344 weapon placements, 257 tank placements, 82 weapon and 9 tank records, pods 82, Cheat-only 278; `B1.PT` 3 source rows, 12 placements);
+`--aircraft b1b --headless-flight 600`: 435.5 kt level at 5,001 ft, 0 non-finite, no crash (fuel 265,274 to 265,253 lb; no payload on that path);
+`--cockpit-sheet ... b1b`: `NO MIRRORS FITTED`; battery (`--jobs 2 --windows 1`) **23 of 23**: every `*b1b*` scenario (21: B1B-5's 14, with the new
+`a2g-release-origin-b1b`, `ai-strike-b1b-stick`, `ai-strike-b1b-pack`, `flight-countermeasures-b1b` and `flight-jettison-b1b-slot1`), `menus-ordnance-availability`
+and `a2g-catalog`; `python3 -B -m unittest discover -s tools` 587 OK (5 skipped); `tools/check_docs.py` passed (382 files). **Not run:** the guns and live fire of every
+aircraft (no shared gun or sight code was touched: the changes are the B-1B's eye entry, a test and battery scenarios), the full battery, `--smoke-test`,
+`check_assets`, a networked B-1B release, replay scenarios for the B-1B (B1B-9), `flight-liftoff` and approach for the B-1B (B1B-8).
+
+Frames (`.local/m3-aircraft/frames/B1B-6/`, png; `cap.sh`, `live.sh` and `cm.sh` in `checks/B1B-6/`): `load-ordnance`, `before-cockpit-front`, `cockpit-front-view`,
+`cockpit-look-left-45`, `cockpit-look-right-45`, `before-cockpit-back-f2` (the shared seat: inside the fuselage), `cockpit-back-f2`, `rcs-page-closed`,
+`rcs-page-bay-open`, `crop2x-rcs-closed-vs-bay-open`, `countermeasures-external`, `countermeasures-jammer`, `live-fire-hud-bay-slot1`, `external-threequarter`. The HUD draws inside the
+main window, the pages draw with the B-2 bezel, and no pod appears on the airframe.
+
+
+## B-1B Lancer flight review (B1B-8, 2026-11-16)
+
+Validation and fitting, slice B1B-8 (bomber batch B), Claude Sonnet (sonnet-high). Implementation mode. The B-1B flies
+the hybrid adapter's `variety` configuration built from `B1.PT` and `B1.SH` with BMB-B2's real thrust (69,560 lbf dry,
+123,120 lbf with afterburner), weights (empty 192,000 lb, fuel 265,274 lb, maximum takeoff 477,000 lb) and the record's own
+G rows (-2 to +5), 55,000 ft ceiling and flight-tuning block. The question was which of the record's authored values
+the real figures show to be clearly wrong, and what the coordinator's two named items give: the fuel flows and the
+sea-level edge of Mach 1.00. Four things changed, all through `aircraft_corrections.rs` or one per-aircraft hook; no
+shared law moved. Raw output is local: `.local/m3-aircraft/checks/B1B-8/` (`before/`, `after/`, `run_perf.sh`,
+`run_probes.sh`, `ai/`).
+
+### What was found
+
+| Term | Retail record | Verdict |
+| --- | --- | --- |
+| `fuelConsumption` 6 and `aftFuelConsumption` 16 lb/s | 0.311 and 0.468 lb/(lbf h) at the corrected thrust | **corrected** to 11 and 84 (below) |
+| 1 G fast edge at sea level, 1,120 ft/s | 664 kt, Mach 1.00 | **fitted** to 1,027 ft/s, Mach 0.92 (below) |
+| `airBrakesDrag` 256 | the fighter airbrake the family carries: 0.33 G of extra deceleration at 306 kt | **fitted** to 52 (below) |
+| clean drag (the shared square law about the 1 G edge) | with the real flows, Mach 0.8 at 36,000 ft burns 10.3 lb/s: 3,700 nautical miles | **fitted** per aircraft: a drag shape (below) |
+| `_gpullDrag` 12 | induced drag 12 / 256 = 0.047 W a G; a lifting-line estimate for 137 ft span, 1,950 square feet and e 0.9 gives 0.03 to 0.06 W a G | inside the band; kept |
+| `flapsDrag` 38, `flapsLift` 51, `gearDrag` 23 | fleet-level levers | not touched |
+| `rudderDrag` 128, `bayDrag` 12, `wheelBrakesDrag` 12, `coefDrag` 256 | read by the native diagnostic only, not the hybrid step | no effect |
+| sweep | the flight model has no sweep, swing-wing or wing-area term for any aircraft (`tore-sim` reads none; the Tornado review found the same, TOR-8) | **recorded**: sweep does not change the drag, lift or stall; no term was added |
+| `loadedElevator` 40 | divides the G limit by 1 + 0.4 x (fuel + stores) / empty weight: +5 G becomes 3.6 G at 406,000 lb | kept (no real G limit was found; Wikipedia gives none) |
+
+### What was fitted
+
+1. **Fuel flows, 6 and 16 to 11 and 84 lb/s (opinionated, coordinator first pass BMB-B1/B2 "about 11 / 84 lb/s, from the
+   cited TSFC").** The F101-GE-102's thrust-specific fuel consumption is 0.562 lb/(lbf h) dry and 2.46 with afterburner
+   (Wikipedia "General Electric F101", specifications, read 2026-11-16). 69,560 x 0.562 / 3,600 = 10.86, so 11; 123,120 x
+   2.46 / 3,600 = 84.13, so 84. The retail flows were the B-52's family's (6) and a fifth of the real afterburner burn (16);
+   a full tank on full afterburner lasted 276 minutes, now 52.6, and the real engines burn it in about that (84 lb/s x
+   3,600 = 302,400 lb/h). `fuelConsumption` and `aftFuelConsumption` rows, `B1B_FUEL_LB_PER_S` and `B1B_AB_FUEL_LB_PER_S`,
+   with the batch test that checks flow against thrust times SFC extended by two rows.
+2. **Sea-level fast edge, 1,120 to 1,027 ft/s (fitted; the figure is real).** The low-level speed of the B-1B is Mach 0.92
+   (Wikipedia, "Design": "its low-level speed increased to Mach 0.92"; the specification gives 608 kt at 200 to 500 ft,
+   from Pace 1998; Mach 0.92 at the sea-level speed of sound, 1,116.4 ft/s, is 608.4 kt). The record's edge was Mach 1.00
+   (664 kt). The `fit_envelopes` arm moves the sea-level vertex of the 1 G polygon to 1,027 ft/s and of the 0 G polygon to
+   1,087 (its 60 ft/s step over the 1 G edge kept); every other G row's fast side is held to the new 1 G edge by the
+   existing `hold_to_one_g`. The straight edge up to the 1,210 ft/s trim at 36,000 ft is the record's own shape: it now reads
+   Mach 0.96 at 5,000 ft, 1.00 at 10,000 ft, 1.04 at 15,000 ft and 1.09 at 20,000 ft. Afterburner at sea level now tops out at
+   608 kt, Mach 0.92 (was 663 kt). Higher up nothing moves: 716 kt, Mach 1.25 at 36,000 ft (real: Mach 1.25 at altitude,
+   721 kt at 50,000 ft, Pace 1998; the model gives 710 kt at 50,000 ft). The shared drag law ties the clean drag to the edge
+   (drag is the full thrust at the edge speed), so the lower edge raises the drag at a given speed near the ground by up to
+   19 percent; the shape below takes that back.
+3. **Speed brake, `airBrakesDrag` 256 to 52 (fitted from the drawn plates).** The real jet has no airbrake of its own; its
+   spoilers do the work. The rig (B1B-3) opens the two raised wing-root plates (`7b1c`, 6.7 ft along the hinge, 5.3 ft of
+   chord at 4/3 ft a unit, opened 43 degrees: about 49 square feet of frontal plate for both, a drag coefficient of 1.2): q
+   S Cd over the 325,000 lb weight is 0.056 G at 306 kt, 0.11 G at 428 kt and 0.18 G at 550 kt at sea level. The template's 256
+   gave a 325,000 lb bomber 0.33, 0.54 and 0.73 G (a fighter's airbrake, 71 kt lost in ten seconds at 306 kt); 52 is a fifth
+   of it, the B-2's 64 being a quarter for larger plates, and the probe reads 0.08, 0.13 and 0.17 G. Not a cited figure.
+4. **Drag shape (fitted, the B-52's per-aircraft hook).** With the real flows the shared square law burned 10.3 lb/s at
+   Mach 0.8 and 36,000 ft (520 kt): 3,700 nautical miles from the full tank against a published 5,100 (Wikipedia, Pace 1998)
+   and the game's own Jane's 6,475 (`B1.INF`; Aerocorner 6,478). The retail 6 lb/s gave 6,779 nautical miles at the
+   same point, which the authors' flow had been tuned around, so correcting the flow alone cost the range. The cause is
+   the drag law (as for the B-52, B52-8): the drag is the afterburner thrust times the square of the speed over the edge,
+   about 39,000 lbf at Mach 0.8 and 36,000 ft for a 326,000 lb aircraft whose lift-to-drag ratio of about 12 needs about
+   27,000. The new `models/variety/b1b.rs` gives the B-1B the existing `DragShape` with 0.72 of the reference drag on the square law
+   and 0.28 on the twelfth power (the B-52's exponent): 1 at the edge, so **no top speed moves**, and 0.38 at 0.726 of the
+   edge (520 kt at 36,000 ft), which holds the speed at 0.76 throttle and 7.6 lb/s: **5,026 nautical miles** (5,299 at the
+   probe's 65 percent cruise at 20,000 ft). Nothing else of the B-52's hook is taken (thrust lapse, rolling and brake
+   deceleration, stall reference, alignment all stay the shared values); `the_b52_flies_its_fitted_terms_and_no_other_aircraft_does`
+   now reads "the B-52 and the B-1B have a drag shape and no other aircraft does".
+
+### Before, after and real
+
+Probe: `performance_probe` on the corrected record (326,000 lb is the published gross weight, fuel 134,000 lb; 457,274 lb is
+the free-flight full tank; 477,000 lb is the Load Ordnance default, 42,000 lb of stores and 243,000 lb of fuel) and
+`tore-app --headless-flight` and `--ground-start`. "Before" is the repository at 7ada079b. Climb schedules are
+`PROBE_CLIMB=350,0.90` and `300,0.77` (full thrust with afterburner, from sea level).
+
+| Quantity | Before | After | Real (source) |
+| --- | --- | --- | --- |
+| Level top speed, sea level, afterburner | 663 kt (Mach 1.00) | 608 kt (Mach 0.92) | 608 kt at 200 to 500 ft, Mach 0.92 (Wikipedia, Pace 1998) |
+| Level top speed, 15,000 ft / 36,000 ft / 50,000 ft, afterburner | 685 kt (Mach 1.09) / 716 kt (1.25) / 710 kt | 653 kt (1.04) / 717 kt (1.25) / 711 kt | Mach 1.25 at altitude, 721 kt at 50,000 ft (Wikipedia, Pace 1998; `B1.INF` "approx Mach 1.25", 832 kt) |
+| Level top speed, military power: sea level / 36,000 ft (326,000 lb) | 498 kt (Mach 0.75) / 538 kt (Mach 0.94) | 519 kt (Mach 0.78) / 611 kt (Mach 1.06) | no figure found (the retail cap is the afterburner edge) |
+| Ceiling | 55,000 ft record; 55,005 ft on the 350 KCAS schedule | the same (55,101 ft) | 60,000 ft (Wikipedia, Aerocorner); the Air Force says "above 30,000 ft"; not changed (BMB-B2 kept the record's 55,000 ft) |
+| Climb, time to 5,000 ft / 20,000 ft / 36,000 ft, 350 KCAS to Mach 0.90, 326,000 lb | 46 / 170 / 353 s (6,500 ft/min to 5,000 ft) | 43 / 152 / 298 s (7,000 ft/min) | 5,678 ft/min, weight and conditions not stated (Wikipedia; Aerocorner) |
+| The same at 457,274 lb (full tank) / 477,000 lb (default load) | 59 / 244 / 490 s; 61 / 254 / 511 s (5,090 and 4,920 ft/min to 5,000 ft) | 56 / 218 / 414 s; 58 / 228 / 431 s (5,360 and 5,170 ft/min) | the same 5,678 ft/min |
+| Climb, 300 KCAS to Mach 0.77, 326,000 lb, time to 5,000 / 36,000 ft | 46 / 318 s | 44 / 286 s | none |
+| Acceleration at sea level, afterburner, 364 to 400 / 460 / 600 kt (326,000 lb) | 8 / 22 / 82 s | 8 / 21 / 88 s | none |
+| Peak specific excess power, sea level / 15,000 ft / 36,000 ft, afterburner (326,000 lb) | 168 / 139 / 107 ft/s | 180 / 155 / 125 ft/s | none |
+| Thrust to weight, 326,000 lb gross, afterburner | 0.378 | 0.378 | 0.38 at gross weight (Wikipedia) |
+| Cruise, Mach 0.8 at 36,000 ft (520 kt), burn and range from the 265,274 lb tank | 5.6 lb/s, 6,779 nm (6 lb/s flow) | 7.6 lb/s, **5,026 nm** (11 lb/s flow; 3,698 nm with the real flow and the shared square law) | range 5,100 nmi (Wikipedia, USAF, Pace 1998); 6,475 nm (`B1.INF`, Britannica; Aerocorner 6,478); 7,600 km with 16,800 kg of weapons (Britannica) |
+| Cruise at 65 percent of the edge, 20,000 ft, 435 kt | 4.5 lb/s, 7,321 nm | 6.0 lb/s, 5,299 nm | the same figures |
+| Military power / afterburner burn, endurance from the full tank | 6 and 16 lb/s: 737 and 276 min | 11 and 84 lb/s: 402 and 52.6 min | 0.562 and 2.46 lb/(lbf h) (Wikipedia, F101-GE-102) |
+| Sustained turn, held speed, 326,000 lb: 300 kt at 1,000 ft / 400 kt at 15,000 ft / 450 kt at 30,000 ft | 3.63 G, 74 degrees / 3.63 G / 2.29 G, 64 degrees | 3.63 G / 3.63 G / 2.29 G (G limit, not thrust) | none found |
+| Instantaneous pull, 300 kt at 1,000 ft | 3.89 G | 3.89 G (G rows and loading unchanged) | none (record +5 G, not sourced) |
+| Roll rate, full stick | 60.0 deg/s | 60.0 deg/s | no figure found |
+| Rudder, full pedal, 5,000 ft | sideslip -4.50 degrees | -4.49 degrees | none |
+| Speed brake, extra deceleration, idle throttle, 306 kt / 428 kt / 550 kt at 1,000 ft | 0.34 / 0.55 / 0.74 G | 0.08 / 0.13 / 0.17 G | plate estimate 0.06 / 0.11 / 0.18 G (not a cited figure) |
+| Takeoff, ground start, 477,000 lb (Athens, 12,000 ft) | liftoff 168.9 kt after 5,520 ft, rotation 160.0 kt, 100 ft at 5,545 ticks | liftoff 168.5 kt after 5,472 ft, rotation 159.5 kt, 100 ft at 5,512 ticks | roll about 4,000 ft at the "400,000 pound weight class", wings at 25 degrees (Air & Space Forces Magazine, "Pilot Report: B-1B", 1986); 6,400 ft at maximum afterburner with the full mission load, sea level, standard day (Florida Tech flight test thesis, from a search summary: the thesis would not open); no liftoff speed published |
+| Takeoff on Simferopol (UKR 1, 5,532 ft), 477,000 lb | liftoff after 5,720 ft | liftoff after 5,671 ft: **the run is longer than the runway** | the same figures |
+| Takeoff, `--retail-stall-speeds` | 133.2 kt after 3,231 ft | 132.9 kt after 3,211 ft | n/a (the imported polygon speeds) |
+| Approach, scripted, 65 percent fuel (406,428 lb), Simferopol: speed / touchdown / stop past the threshold | 166.2 kt / 159.7 kt / 4,294 ft | 166.2 kt / 158.8 kt / 4,769 ft (rollout from touchdown 2,722 ft, was 2,378) | "can land as slowly as 155 knots" (Air & Space Forces Magazine, 1986); no landing distance found |
+| The same at Athens (GRE 1) | not run | 166.2 kt / 153.1 kt / 4,614 ft | the same |
+| Scripted approach at the full 477,000 lb default load | crashes at touchdown (sink 19 ft/s, forward 270 ft/s) | the same | a real landing weighs far less (not tested) |
+| `--headless-flight 1200`, level at 5,000 ft | 435.5 kt | 409.3 kt (the level speed is 0.656 of the edge, and the edge at 5,000 ft is lower) | none |
+| Wing sweep at those speeds (rig only, no flight law) | 15 degrees at 169 kt | 15 degrees; 30 degrees at 350 kt; 41 at 400 kt; 67.5 degrees from 520 kt | 15 to 67.5 degrees (`B1.INF`, Wikipedia); 25 degrees for takeoff and climb (Air & Space Forces, 1986) |
+
+The scripted landing rolls 14 percent further (2,378 to 2,722 ft) because the airbrake lever is out on the rollout and the fit
+takes most of its drag away; the B-2's review found the same (19 percent). The takeoff run is 1 percent shorter (48 ft); the
+small change was not traced (the rolling takeoff has no aerodynamic drag term, the fuel burned on the roll is 200 lb more).
+
+### The swing schedule, the rudder and the AI laws
+
+- **Swing schedule (B1B-3, unchanged).** The wing is spread to 280 kt, fully swept (67.5 degrees, a 52.5 degree turn) from
+  520 kt, linear between, and the flaps hold it spread; no flight law reads it. Takeoff (168.5 kt at liftoff, 179 kt at 100 ft),
+  the scripted approach (166.2 kt) and the 160 to 200 kt climb-out are all spread (15 degrees), as the real jet flies them
+  (the real takeoff and climb use 25 degrees, Air & Space Forces, 1986; the rig has no 25 degree stop). The climb at 350
+  KCAS (370 to 420 kt below 10,000 ft) reads 30 to 45 degrees, and the supersonic dash (608 kt at sea level, 717 kt at
+  36,000 ft) is fully swept. Two things are not real: the schedule is speed only, so a Mach 0.8 cruise at 520 kt reads fully
+  swept, where the real jet cruises economically at high altitude with the wings forward (Wikipedia, Design); and **sweep does
+  not change the drag, the lift or the stall in the flight model** (no aircraft has such a term). Recorded, no sweep term added.
+- **Rudder.** The 0.45 radian cap (B1B-5, `RUDDER_LIMIT`) is in `b1b_animation.rs` only; the flight model reads the record's
+  `rudderYaw` words. The full-pedal probe (`--maneuver rudder`, sideslip -4.50 degrees, bank 20 degrees, before) reads
+  -4.49 degrees after: yaw authority is untouched.
+- **AI heavy-class laws (BMB-AI).** The B-1B's flaps-up minimum is 209 kt at full fuel, 194 at 75 percent (the BMB-AI table),
+  above the 190.5 kt where the laws change, so the flaps law and the climb-out wait apply to it. They work: an AI B-1B wing
+  of two from Athens (`ai-heavy-takeoff-b1b-gre-a1`) rolls at 68 s, climbs out from 136.6 s, is airborne (flaps and gear up) at 205.7 s and flies on;
+  from Southampton (12,000 ft) the full cycle (`ai-merged-airfield-b1b-wing2`) is airborne at 210.7 s, takes the land order,
+  touches down at 168 kt at the default load, rolls out, clears and parks at 1,137 s, all on the pavement (0 off-pavement
+  samples, 0 anomalies); sent home with 80,000 lb of fuel (`ai-heavy-land-b1b-ukr-a2`, Simferopol, 5,532 ft) it touches down at
+  168 kt (158 kt with 40,000 lb, 169 kt with 100,000 lb), parks on the pavement. All three pass cleanly and are new battery
+  scenarios. The takeoff needs the 12,000 ft fields (about 5,500 ft run at the default load).
+
+### Tests and scenarios added
+
+| Name | What it pins |
+| --- | --- |
+| `aircraft::the_b1b_tu160_and_f111_read_their_real_figures_only_while_retail` (extended) | the 11 and 84 lb/s flows, the 52 brake, the 1,027 and 1,087 ft/s sea-level edges, every one only while the record is retail |
+| `aircraft_corrections::the_batch_fuel_flows_are_the_corrected_thrust_times_the_cited_sfc_to_the_whole_pound` (two rows) | 11 = 69,560 x 0.562 / 3,600 and 84 = 123,120 x 2.46 / 3,600 |
+| `variety::the_b1b_tops_out_at_its_edges_and_its_cruise_burn_gives_the_published_range` | afterburner tops out at 608 kt at sea level and 716 kt at 36,000 ft; Mach 0.8 at 36,000 ft holds on 0.7 to 0.8 throttle (range 4,500 to 6,000 nm); the drag shape is 1 at the edge; the brake is 0.03 to 0.12 G |
+| `variety::the_b52_flies_its_fitted_terms_and_no_other_aircraft_does` (changed) | exactly two aircraft have a drag shape, the B-52 and the B-1B; every other fitted term is the B-52's alone |
+| `flight-variety-b1b`, `flight-liftoff-b1b`, `flight-liftoff-retail-b1b`, `flight-approach-b1b` | the B-1B in the variety, liftoff, retail-stall and approach scenarios: windows 155 to 185 kt liftoff and 145 to 170 kt approach, recorded 168.5 and 166.2 kt, a 7,000 tick takeoff allowance, Athens |
+| `ai-heavy-takeoff-b1b-gre-a1`, `ai-heavy-land-b1b-ukr-a2`, `ai-merged-airfield-b1b-wing2` | the AI heavy-class laws for the B-1B |
+
+### Open for John
+
+1. **The drag shape.** Fitted so the corrected flows keep the real range (5,026 nautical miles against Wikipedia's 5,100; the
+   game's own Jane's says 6,475). Without it the real flows cost a quarter to a third of the range (3,700 nautical miles) and
+   the shared law stays as for every other aircraft but the B-52. It also lowers the clean
+   drag at every speed under the edge: the climb is 5 to 15 percent faster, and the military-power top speed at 36,000 ft
+   is Mach 1.06 (it was Mach 0.94; the real figure was not found). The alternative is to delete `b1b.rs` and its one line.
+2. **The real fuel flows** halve the full-afterburner endurance to 52.6 minutes, and the range follows the fit above: the
+   coordinator's decision; one correction row each.
+3. **The sea-level edge** at Mach 0.92 is real; the edge between sea level and 36,000 ft is the record's straight line, so
+   Mach 1.00 arrives at 10,000 ft and 1.09 at 20,000 ft. A constant-equivalent-airspeed shape (a placard) would fit the
+   structure better; no real envelope was found.
+4. **Ceiling** 55,000 ft (record) against 60,000 ft (Wikipedia, Aerocorner) and "above 30,000 ft" (Air Force): left.
+5. **Roll rate** 60 degrees a second at full stick for a 400,000 lb bomber: no real figure was found; the B-52 review found
+   23.6 deg/s for its record; not fitted.
+6. **Wheel brakes and the landing roll** (2,722 ft from 159 kt at 406,000 lb, a bomber with spoilers and brakes): no real
+   landing distance was found for the B-1B (Aerocorner's 3,450 ft is the B-2's); not fitted. A scripted approach at the full
+   477,000 lb takeoff weight crashes at touchdown (sink 19 ft/s), as before; the battery flies 65 percent fuel.
+7. **Takeoff run** 5,472 ft at 477,000 lb (real: about 4,000 ft at 400,000 lb, 6,400 ft calculated at the full mission load):
+   inside the real range; no takeoff drag is modelled, as for the other bombers.
+8. **The wing schedule** is speed only (a Mach 0.8 cruise reads fully swept), and has no 25 degree stop for takeoff and climb.
+9. **Simferopol (UKR 1, 5,532 ft)** is shorter than the B-1B's takeoff run: the scenarios start from Athens.
+
+Sources (read 2026-11-16 unless dated): Wikipedia "Rockwell B-1 Lancer" (raw article: Design, "Mach 0.92 low-level speed",
+Specifications (B-1B) from Pace 1998 and Jenkins 1999: 721 kt at 50,000 ft, 608 kt at 200 to 500 ft, range 5,100 nmi, ceiling 60,000 ft,
+climb 5,678 ft/min, thrust to weight 0.38 at 326,000 lb, wing loading 167 lb/sqft); Wikipedia "General Electric F101"
+(F101-GE-102: 17,390 and 30,780 lbf, 0.562 and 2.46 lb/(lbf h)); aerocorner.com "B-1B Lancer" and its B-1 versus B-2 comparison
+(721 kt, 5,678 ft/min, 60,000 ft, 6,478 nm; takeoff and landing "not listed" for the B-1B, the 6,700 and 3,450 ft are the
+B-2's); Air & Space Forces Magazine, "Pilot Report: B-1B" (June 1986: 4,000 ft takeoff roll, wings at 25 degrees for takeoff and
+climb, "can land as slowly as 155 knots", the 400,000 lb weight class); a Florida Tech flight test thesis (6,400 ft, 403 on fetch,
+read only through a search-result summary, a weak figure); the game's own Jane's text `B1.INF` (retail media, not committed:
+Mach 1.25, 832 kt, 6,475 nm, 521 kt low-level penetration, 192,000 lb empty, 477,000 lb). The Air Force fact sheet could
+not be fetched (403). No takeoff or landing speed was found in any primary source.
+
+Provenance: fuel flows opinionated (coordinator first pass on the cited TSFC); sea-level edge, speed brake and drag shape fitted
+(agent decisions 2026-11-16); real figures public pages and the game's own Jane's text (comparison only); battery windows fitted. No
+retail bytes committed.
+
+### Checks (B1B-8)
+
+All through `.local/m3-imports/light3.sh` (away mode), profile `.local/m3-aircraft/profile-b1b` refreshed first, windows through
+`tools/agent-run.sh` (logs in `.local/m3-aircraft/checks/B1B-8/`): `cargo fmt --all -- --check` clean; `cargo clippy --workspace
+--all-targets --locked -- -D warnings` clean; `cargo test --locked --workspace --no-fail-fast` 7,876 passed, 0 failed, 108 ignored (7,875
+at B1B-6, plus the new B-1B performance test; the B-1B record test and the batch fuel-flow test extended);
+`--aircraft b1b --headless-flight 1200` 409.3 kt level at 5,005 ft, 0 non-finite, no crash; the ground-start takeoff
+(`--ground-start 1 --theater GRE --maneuver takeoff`) liftoff 168.5 kt after 5,472 ft, 100 ft at 5,512 ticks, 0 non-finite;
+battery (`--jobs 2 --windows 1`) **115 of 115 passed**: every `*b1b*` scenario (28), every `flight-approach-*` and `flight-liftoff-*`
+(the other aircraft's recorded windows hold: nothing shared moved), and the `ai-heavy-*` set with the three new B-1B scenarios;
+`python3 -B -m unittest discover -s tools` 587 OK (5 skipped); `tools/check_docs.py` passed (382 files). **Not run:** the full battery,
+the other AI, net and replay lanes, `--smoke-test`, `tools/check_assets.py`, windowed frames (no rig or art changed), a guided-store
+release (none carried). The shared drag, lapse, rolling, brake and stall terms were not touched, so no B52-8 style comparison of the
+other aircraft was needed: `the_b52_flies_its_fitted_terms_and_no_other_aircraft_does` pins that exactly the B-52 and the B-1B
+have a drag shape.
+
+## B-1B Lancer AI, missions, multiplayer and replay (B1B-9, 2026-11-16)
+
+Implementation and verification mode, slice B1B-9 (the B-1B's counterpart of B52-9, B2-9 and F117-9). The AI work
+was asked for by John through the bomber program (AGENTS.md: no AI work unless John asks). Everything here is
+`fitted`, agent decisions of 2026-11-16, except where a number is a record's. The branch carries `m3-aircraft`
+at B52-9 (merge 08bc6cb7), so the shared heavy-bomber rules of
+[BMB-AI](#ai-fixes-for-the-bombers-bmb-ai-2026-11-16) and the B-52's two airfield laws are all present. **No game
+code changed in this slice**: it adds scenarios and checks, one unit test, and settles with evidence that the
+B-1B needs no airfield law of its own.
+
+### The strike class (B1B-0 decision 8)
+
+`B1.PT` keeps the retail script `f.BI` and its strike class comes from the rule, not a table:
+maximum takeoff 477,000 lb is over the 150,000 lb Heavy bar, so the class is Heavy with no override
+(`strike_class::tests` already pin `B1.PT` as Heavy against the retail media, and the F-111F stays the only
+override). The runs show it: every B-1B strike log reads `PROFILE name=level`, and the Heavy rules apply
+(level release from altitude only, the 1.3 x minimum-speed stick, the 5,000 ft heavy floor, the bay doors of
+BMB-AI). Nothing about `f.BI` reaches the strike.
+
+### The AI strike from the bays
+
+The B-2's and B-52's stick rules read the station rows, and the B-1B's rows are the three shared-grid bays of
+B1B-5, so no code was needed. B1B-6 added `ai-strike-b1b-stick` (forward bay) and `-pack` (the default
+seven-packs); this slice adds the other two bays and a Quick Mission wing (`--a2g-run UKR QUCOL --pilot ai
+--aircraft b1b --load MK82 --station N --count 20`):
+
+| Run | What the log shows |
+| --- | --- |
+| `ai-strike-b1b-mid`: 20 Mk 82 in the intermediate bay (station 1), 20,000 ft, 12 nm | `BAY` open at 66.8 s (0.96), eight releases 67.34 to 69.09 s, 0.25 s apart, each `bay=1.00`, from right -1.95, 1.95, -0.65, 0.65 ft then the second tier (up -0.62, then 0.68), forward 19.97; doors read shut 1.95 s after the last; eight impacts (325 to 1,185 ft from the aim), egress at 110 s, not lost |
+| `ai-strike-b1b-aft`: the same in the aft bay (station 2) | the same cells at forward -13.03 ft (inside the 15 ft bay, -19.83 to -4.83), `BAY` open at 66.9 s, shut 71.1 s, eight impacts (379 to 1,391 ft from the aim), egress |
+| `ai-strike-b1b-quick-wing`: a Quick Mission with the Ukraine factory as target (`--quick-wing`) | `ROLE strike`, the forward bay's stick of eight at 5,079 ft (the 5,000 ft heavy floor) at 336 kt, doors open 56.4 s and shut 60.7 s, impacts 177 to 935 ft from the aim, egress at 88 s, not lost |
+
+The check (`b1b_bay_stick_problems`, shared by all four stick scenarios) now reads: stick of eight 0.25 s apart,
+every cell the grid's own place and inside that bay's opening, every release from the bay's station, the doors
+open at every release and shut after (`bay_door_problems`), impacts, egress, not lost, the Heavy level
+profile. Unit tests: `tools/test_battery_ai_strike.py` (`B1BTests`: a full stick from each bay passes; a short
+stick, a repeated cell, a shifted cell, a shut door, the wrong bay, the wrong aircraft and a dive profile each fail).
+
+**Anti-ship: no scenario, a limit.** The B-1B carries no anti-ship store: its Load Ordnance page admits four
+unguided bombs (`MK82AIR`, `MK82`, `MK82P3`, `FAB1000`, B1B-5) and no Harpoon, JSOW or guided store fits the
+bays' 1.3 ft pitch (B1B-6). `--a2g-run` fits any record on a station, so an AGM-84E on the forward row does leave
+and sink the Krivak in a driver run, but that is not a loadout the game can make, so it is not pinned. The real
+B-1B's heavy-store options (JASSM, Mk 84, GBU-31 on the combined bay) are the B1B-5 follow-up.
+
+**Air-to-air: nothing to fly.** The record has no gun and no air-to-air store, so a B-1B engages nobody;
+`ai-b1b-quick-mission-2v2` and `ai-b1b-vs-su27-2v2` (below) pin that. There is no tail gun to aim.
+
+### The airfield laws: decided with evidence, not needed
+
+B52-9's two laws (a 3,000 ft lateral lookahead on the final, and coasting over the taxi speed) apply only where
+`Situation::taxi_throttle_floor` is above zero, and B52-9 left open whether the B-1B needs them. It does not:
+
+- **The gate does not fire.** The floor is 1.1 x the throttle that balances the wheels' rolling deceleration
+  (0.8 ft/s squared shared value) against military thrust at the aircraft's weight, only when that throttle is over
+  0.2. At the full 477,000 lb it is 0.8 x 477,000 / (69,560 x 32.174) = 0.17 (a B-2 about 0.13, the B-52 0.53), so
+  the B-1B's floor is zero at every weight and the shared taxi law runs unchanged.
+- **The final is on the line.** The AI B-1B sent home to Simferopol (UKR 2, 5,532 ft, centre line x 1,107,331) at 40,000, 80,000 and
+  100,000 lb of fuel (the probe's own limit; the aircraft is then 274,000 to 334,000 lb) touches down at
+  x 1,107,331 every time, 0 ft off the centre line, at 158, 168 and 169 kt. The final overshoots the line once
+  (112 ft right at 224 s) and is back on it by 236 s, 5 s before the 190 ft the 80,000 lb B-52 swung either side.
+  Rolling out, it stays at x 1,107,327 to 1,107,344.
+- **The taxi-in is on the pavement.** All three rolls reach `TaxiClear` and `Parked` with `AI probe pavement:
+  off_pavement=0` (14,964 to 15,669 ground samples). The throttle runs at its 0.40 ceiling and falls away as it nears the
+  target speed (0.40, 0.34, 0.29 ... 0.00); it never holds a floor, so it never overshoots an anchor.
+- **The takeoff cycle** (`ai-merged-airfield-b1b-wing2`, Southampton, and `ai-heavy-takeoff-b1b-gre-a1`, Athens)
+  was already pinned on the pavement at B1B-8 and passes on this branch.
+
+So no airfield code changed and no baseline comparison of the other aircraft was needed (nothing in the sim
+differs from B52-9's merge). **The full-load landing.** B1B-8's scripted landing at 477,000 lb crashes at the touchdown. The AI is not
+affected: `ai-merged-airfield-b1b-wing2` takes the AI B-1B off Southampton at the default load (477,000 lb gross, 243,000 lb
+of fuel, the three rows of seven-packs), climbs out (airborne at 210.7 s), holds, and lands it 5.5 minutes later with almost all of that fuel
+still aboard (about 11 lb/s of burn plus the takeoff's afterburner): the threshold at 176 kt (the 175 kt bound), a
+touchdown, rollout, taxi and park with `off_pavement=0` over 97,986 ground samples, no crash. So the AI lands at a near-full load without
+the scripted landing's crash; the cause of that one (a flight-model touchdown, not the AI) stays B1B-8's open item.
+
+### Quick Mission
+
+`quick_mission::tests::the_b1b_is_a_quick_mission_player_and_a_wing_choice`: `B1.PT` is offered as the player's
+aircraft by its own selection key under its retail name "B- 1B Lancer" (with the space, kept by decision) and in every AI wing field; a draft
+carries it as the player and in every wing, never the B-2 or the B-52; the night stealth rule (the B-2 and the
+F-117) does not take it. The strike is `ai-strike-b1b-quick-wing`. Two 2 v 2 probes: `ai-b1b-quick-mission-2v2` (all
+B-1B: every actor holds its 12 store rounds as three rows of `MK-82AIR7 x4`, and the probe's whole shot total is
+zero: no gun, no air-to-air store) and `ai-b1b-vs-su27-2v2` (the probe's usual checks hold, the B-1B player
+fires nothing; the Su-27s fire eight times in the recorded run).
+
+### Multiplayer
+
+`net-a2g-stores-b1b`: both players in B-1Bs (`B1B_STORES_MISSION`, one wing of two), `tore-bot --a2g bomb --load
+MK82.JT`. The Mk 82 goes on the first station that takes it, the forward bay row (station 0), and the other two
+rows keep the default seven-packs. The watching client draws the bomber's stores (a Stores event of 16 bytes at most, 21
+events and 252 bytes in all, three aircraft's stores drawn), sees a Mk 82 leave plane 0 and the bomber's
+emptied stations (0 2 3), and reads plane 0's bay doors at 1.00 on its screen. The bomber's doors follow the
+human's `Switch::Bay`, so no wire byte was added. There is no gun to cover.
+
+### Replay
+
+`replay-rec-b1b-2v2`: the B-1B as the player and in both wings, a 2 v 2 recorded three times; `--verify-render`
+passes (2,401 ticks, none missing or differing) and two runs record the same (969 flight and aircraft events each),
+so the `B1.PT` identity, the three bay rows and the swing wing (whose sweep is a function of speed, rebuilt on
+playback) round-trip. `replay-a2g-b1b-ripple`: a human ripple of eight 0.1 s presses from the forward bay row (`--attack
+release --station 0 --count 20 --hold 0.1`), recorded and replayed with `--verify-render` (6,329 ticks, none
+missing or differing), read back as seven releases and outcomes (the first press is spent opening the doors),
+the recorded bay device shut at the start and the end and at 0.95 or more at every release.
+
+**A one-tick tap loses presses on the B-1B.** With the default one-tick press (`--hold` unset, 0.5 s apart)
+a run of eight gives 5 releases and one of twelve gives 9; the lost taps fall after the second and the fifth
+bomb. The B-52's identical run loses only the first. At a 1 s gap (recorded) the B-1B loses the taps that land
+just after the doors' one-second hold ends: 13.95 s, then nothing until 16.9 s, while the door device closes
+fully (15.0 to 16.0 s) and opens again; a 0.1 s press gives seven of eight at 0.5 s. This is the human release path, not the AI's (the AI's sticks are exact), and it was
+not traced; B1B-5's `flight-bay-ripple-b1b` (a 20-press ripple through its own driver) is unaffected. Listed for John.
+
+### Scenarios and files
+
+| Scenario or test | What it covers |
+| --- | --- |
+| `ai-strike-b1b-mid`, `ai-strike-b1b-aft`, `ai-strike-b1b-quick-wing` | the heavy stick from the other two bays, the Quick Mission wing |
+| `ai-b1b-quick-mission-2v2`, `ai-b1b-vs-su27-2v2` | the B-1B in both wings, nothing fired by it |
+| `net-a2g-stores-b1b` | bay stores, the Mk 82 leaving, the doors, on a watching client |
+| `replay-rec-b1b-2v2`, `replay-a2g-b1b-ripple` | the identity in a recording, the bay ripple and its door device, verify-render clean |
+| `quick_mission::tests::the_b1b_is_a_quick_mission_player_and_a_wing_choice` | the player and wing choice |
+| `tools/test_battery_ai_strike.py` (`B1BTests`), `tools/test_battery_ai.py` | the new checks, on synthetic logs, including the failing cases |
+
+Files: `crates/tore-app/src/quick_mission.rs` (one test); `tools/battery_scenarios/ai_strike.py` (the shared
+`b1b_bay_stick_problems`, three scenarios; the earlier `b1b_stick_problems` now calls it), `ai.py` (the two 2 v 2
+probes and `b1b_no_air_to_air_checker`), `net_a2g.py`, `_replay_record.py`, `_replay_a2g.py`,
+`tools/battery_selection.py` (`ai-b1b-*`, `replay-a2g-b1b-ripple`), `tools/test_battery_ai_strike.py`,
+`tools/test_battery_ai.py`; docs `spec/ai-strike.md`, `spec/ai-airfield.md`, `testing/lane-ai.md`, `lane-flight.md`,
+`lane-net.md`, `lane-replay.md`. `docs/features.md` reviewed (no row names the B-1B's AI), not edited.
+
+### Open for John
+
+1. **No anti-ship or guided strike for the B-1B** (nothing admitted on the bays beyond four unguided bombs): the
+   heavy-store bay and a wider grid pitch are the B1B-5 follow-up.
+2. **Tap presses lose bombs on the B-1B** (5 of 8, not traced; 0.1 s presses are clean).
+3. **The stick walks on beyond the aim** (impacts 177 to 1,391 ft), as the B-2's and B-52's; centring it needs a
+   checkpointed field.
+4. **The full 477,000 lb touchdown** still crashes in a scripted landing (B1B-8); the AI lands from a near-full load without it (`ai-merged-airfield-b1b-wing2`), so the cause is not the AI.
+5. **The post-kill loss** B52-9 saw after a ship kill was not exercised (no anti-ship store).
+
+### Checks (B1B-9)
+
+All through `.local/m3-imports/light3.sh` (away mode), profile `.local/m3-aircraft/profile-b1b` refreshed first,
+logs in `.local/m3-aircraft/checks/B1B-9/`. `cargo fmt --all -- --check` clean; `cargo clippy --workspace --all-targets --locked -- -D warnings` clean;
+`cargo test --locked --workspace --no-fail-fast` 7,880 passed, 0 failed, 108 ignored (with the new quick-mission test); `--validate-ordnance` passed (no pin moved: nothing in the ordnance changed);
+`python3 -B -m unittest discover -s tools` 597 OK (5 skipped); `tools/check_docs.py` passed (382 files). Battery
+(`--jobs 2 --windows 1`, profile-b1b): **93 of 93 pass** after one check fix: every `*b1b*` scenario, every `ai-heavy-*`,
+`ai-strike-*`, `ai-merged-airfield-*`, `net-a2g-*`, `net-ai-strike-*` and `replay-a2g*` scenario, with `replay-rec-b1b-2v2`
+(the first run's `ai-b1b-vs-su27-2v2` failed on the checker's own rule that every actor holds its store rounds, which a
+B-1B the Su-27s shoot down does not; the rule now applies to the all-B-1B fight only, and the two `ai-b1b-*` scenarios
+were rerun, 2 of 2). The first run of the new scenarios also found two check bugs, both mine: the actor regex missed
+"In formation", and the ripple's one-tick presses (above). **Not run:** the rest of the AI lane, `--smoke-test`,
+`tools/check_assets.py`, a before and after comparison of the other aircraft's airfield logs (no sim code changed
+since B52-9's merge, whose own comparison, 128 of 129 identical, stands).

@@ -347,6 +347,7 @@ class HeavyBomberTests(unittest.TestCase):
             "ai-merged-airfield-b2-wing2", "ai-merged-airfield-b52-wing2",
             "ai-heavy-takeoff-b2-gre-a1", "ai-heavy-takeoff-b52-gre-a1", "ai-heavy-takeoff-f117-gre-a2",
             "ai-heavy-land-b2-ukr-a2", "ai-heavy-land-b52-ukr-a2", "ai-heavy-land-f117-ukr-a2",
+            "ai-merged-airfield-b1b-wing2", "ai-heavy-takeoff-b1b-gre-a1", "ai-heavy-land-b1b-ukr-a2",
         ):
             self.assertIn(name, names)
 
@@ -363,6 +364,29 @@ class HeavyBomberTests(unittest.TestCase):
         self.assertFalse([p for p in problems if "Harpoon" in p or "shot" in p or "stores" in p], problems)
         self.assertTrue(any("Harpoons" in p for p in ai.b52_gun_fight_problems(text.replace("AGM-84E x12", "AGM-84E x11", 1))))
         self.assertTrue(any("never fired" in p for p in ai.b52_gun_fight_problems(text.replace("shots=251", "shots=0"))))
+
+    def test_the_b1b_mission_scenarios_exist_and_the_check_reads_guns_stores_and_shots(self):
+        names = {s.name for s in ai.scenarios()}
+        self.assertIn("ai-b1b-quick-mission-2v2", names)
+        self.assertIn("ai-b1b-vs-su27-2v2", names)
+        actors = "\n".join(
+            f"actor={n} Friendly 1-{n} B1b activity=In formation alive=true rounds={r} x=1.0 y=2.0 z=3.0 hdg=4.0"
+            for n, r in ((1, 12), (2, 12), (3, 12))
+        )
+        stores = "\n".join(
+            f"AI stores: actor={n} tanks=0 external_fuel=0 payload=42000 stations=[MK-82AIR7 x4, MK-82AIR7 x4, MK-82AIR7 x4]"
+            for n in (1, 2, 3)
+        )
+        text = actors + "\n" + stores + "\nAI probe attack: player missiles=0 gun_bursts=0 gun_rounds=0 \nAI probe totals: wings=3 ticks=7200 shots=0 dropped=0 warnings=0\n"
+        check = ai.b1b_no_air_to_air_checker()
+        problems = check(text)
+        self.assertFalse([p for p in problems if "B-1B" in p], problems)
+        self.assertTrue(any("store rounds" in p for p in check(text.replace("rounds=12", "rounds=1254", 1))))
+        self.assertTrue(any("carries" in p for p in check(text.replace("MK-82AIR7 x4, MK-82AIR7", "AGM-84E x4, MK-82AIR7", 1))))
+        self.assertTrue(any("no B-1B actor" in p for p in check(stores)))
+        self.assertTrue(any("a shot was fired" in p for p in check(text.replace("shots=0", "shots=4"))))
+        self.assertFalse(any("a shot was fired" in p for p in ai.b1b_no_air_to_air_checker(False)(text.replace("shots=0", "shots=4"))))
+        self.assertFalse(any("store rounds" in p for p in ai.b1b_no_air_to_air_checker(False)(text.replace("rounds=12", "rounds=0", 1))))
 
 
 if __name__ == "__main__":

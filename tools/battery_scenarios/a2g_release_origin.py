@@ -454,6 +454,62 @@ def tap_problems(output: str) -> list[str]:
     return problems
 
 
+# The B-1B's bays (B1B-6, 2026-11-16; B1B-5's grid, `bays::GRIDS` and `B1B_MOUNT_OFFSET`): three centre line
+# bays, each 4 abreast and one long (columns -1.95, +1.95, -0.65, +0.65 ft, outermost first alternating
+# sides), the bottom tier 0.62 ft under the reference and each tier 1.3 ft up from the last. Per run:
+# (station, store, count, presses, the bay's forward ft, how many places to check). A seven-pack
+# (the default, 4 a row) leaves as seven bombs from one press: the first from the hung place, the rest
+# staggered by the retail pack offset (right 0, -2, +2, -4, +4, -6, +6 ft; down 0, -2, -6, -12, -20, -30,
+# -42 ft). The AI's release uses the same places (`ai-strike-b1b-cells`).
+B1B_COLUMNS = (-1.95, 1.95, -0.65, 0.65)
+B1B_PACK_RIGHT = (0.0, -2.0, 2.0, -4.0, 4.0, -6.0, 6.0)
+B1B_PACK_UP = (0.0, -2.0, -6.0, -12.0, -20.0, -30.0, -42.0)
+B1B_RUNS = [
+    (0, "MK82", "20", 12, 35.30, 9),
+    (1, "MK82", "20", 12, 19.97, 9),
+    (2, "MK82", "20", 12, -13.03, 9),
+    (0, "MK82AIR", "4", 4, 35.30, 28),
+    (1, "MK82AIR", "4", 4, 19.97, 28),
+    (2, "MK82AIR", "4", 4, -13.03, 28),
+]
+
+
+def b1b_args(station: int, load: str, count: str, presses: int) -> list[str]:
+    return ["--a2g-run", "UKR", "QUCOL", "--attack", "release", "--from", "1", "--altitude", "20000",
+            "--speed", "300", "--repeat", str(presses + 4 if load == "MK82AIR" else presses), "--gap", "0.5",
+            "--aircraft", "b1b", "--station", str(station), "--load", load, "--count", count]
+
+
+def b1b_origin_problems(output: str) -> list[str]:
+    parts = runs(output)
+    if len(parts) != len(B1B_RUNS):
+        return [f"{len(parts)} runs finished, want {len(B1B_RUNS)}"]
+    problems: list[str] = []
+    for part, (station, load, _, _, forward, checked) in zip(parts, B1B_RUNS):
+        label = f"B-1B station {station} {load}"
+        found = ORIGIN.findall(part)
+        if len(found) < checked:
+            problems.append(f"{label}: {len(found)} releases, want at least {checked}")
+        for n, (_, r, u, f, _station, _after, hr, hu, hf, _depth) in enumerate(found[:checked]):
+            r, u, f, hr, hu, hf = (float(v) for v in (r, u, f, hr, hu, hf))
+            if load == "MK82AIR":
+                press, bomb = divmod(n, 7)
+                want_r, want_u = B1B_COLUMNS[press % 4] + B1B_PACK_RIGHT[bomb], -0.62 + B1B_PACK_UP[bomb]
+                # Every bomb of a pack hangs at the pack's own place; it leaves staggered from it.
+                if abs(hu - -0.62) > 0.05 or abs(hf - forward) > 0.5 or abs(hr - B1B_COLUMNS[press % 4]) > 0.05:
+                    problems.append(f"{label}: release {n} hung at {hr:.2f} {hu:.2f} {hf:.2f}")
+                tol = 0.05 if bomb == 0 else 0.3
+            else:
+                want_r = B1B_COLUMNS[n % 4]
+                want_u = -0.62 + 1.3 * (n // 4)
+                tol = 0.06
+                if abs(r - hr) > 0.05 or abs(u - hu) > 0.05 or abs(f - hf) > 0.5:
+                    problems.append(f"{label}: release {n} left from {r:.2f} {u:.2f} {f:.2f}, hung at {hr:.2f} {hu:.2f} {hf:.2f}")
+            if abs(r - want_r) > tol or abs(u - want_u) > max(tol, 0.1) or abs(f - forward) > 0.6:
+                problems.append(f"{label}: release {n} at {r:.2f} {u:.2f} {f:.2f}, want {want_r:.2f} {want_u:.2f} {forward:.2f}")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     base = ["--a2g-run", "UKR", "QUCOL", "--attack", "release", "--from", "1", "--altitude", "3000",
             "--speed", "420"]
@@ -573,6 +629,17 @@ def scenarios() -> list[Scenario]:
             notes="The B-2's bay grids (B2-5): the left and right bays' Mk 82 rows leave nine presses from the grid's own "
                   "places (front row of the bottom tier first, outermost first, alternating sides, then the back row, then "
                   "the next tier up) and the Paveway III rows three from their one row, each from where it hangs.",
+        ),
+        Scenario(
+            name="a2g-release-origin-b1b", lane="flight",
+            args=b1b_args(*B1B_RUNS[0][:3], B1B_RUNS[0][3]),
+            timeout=600,
+            then=[Step(b1b_args(*r[:3], r[3]), timeout=300) for r in B1B_RUNS[1:]],
+            check=b1b_origin_problems,
+            notes="The B-1B's bay grids (B1B-5, B1B-6): each of the three bays' Mk 82 rows leaves nine presses from the "
+                  "grid's own places (4 abreast, outermost first, alternating sides, then the next tier up, 1.3 ft each) and "
+                  "each bay's default seven-pack row leaves four packs of seven from the hung place, each bomb staggered by "
+                  "the retail pack offset, all from where it hangs.",
         ),
         Scenario(
             name="a2g-release-origin-tornado-rail", lane="flight",

@@ -183,6 +183,14 @@ load, an internal fuel of 18,500 lb (the approach flies 65 percent, 12,025 lb) a
 ordinary takeoff allowance. Evidence: the
 [F-117 flight review](../formats/aircraft-variety.md#f-117-flight-review-f117-8-2026-11-15).
 
+Update (B1B-8, 2026-11-16): the B-1B (`b1b`) joins the variety, liftoff, retail-stall and approach scenarios of
+`flight.py` (fitted windows 155 to 185 kt liftoff and 145 to 170 kt approach, recorded 168.5 and 166.2 kt at the 477,000 lb
+default load; an internal fuel of 265,274 lb, the approach flying 65 percent of it, 172,428 lb; a 7,000 tick takeoff
+allowance; Athens, GRE 1, because Simferopol's 5,532 ft is shorter than the 5,472 to 5,671 ft run). The AI lane gains
+`ai-heavy-takeoff-b1b-gre-a1`, `ai-heavy-land-b1b-ukr-a2` and `ai-merged-airfield-b1b-wing2`
+([lane-ai](lane-ai.md)). Evidence: the
+[B-1B flight review](../formats/aircraft-variety.md#b-1b-lancer-flight-review-b1b-8-2026-11-16).
+
 `flight-variety-gcurve-*` sweeps the full-stick G limit of the seven transports
 and airliners from 100 to 750 kt at 5,000 ft (`--maneuver gcurve`). Once the
 limit has passed 1.4 G it must not fall below 1.3 G, through the top speed and
@@ -374,6 +382,10 @@ adds order kinds.
 | `ai-strike-b52-quick-wing` (B52-9) | A Quick Mission with the Ukraine factory as the ground target and a B-52 wing (`--quick-wing --station 2 --count 9`) | `ROLE strike`, the same bay stick of eight with the doors open for it at the 5,000 ft heavy floor, egress, not lost |
 | `ai-strike-b52-antiship` (B52-9) | An AI B-52 with two AGM-84E on the pylons (`--station 1 --count 2`), 15 nm from the Ukraine surface fleet's Krivak at 20,000 ft, 60 s | One Harpoon leaves each wing (right -17.33 and 17.33 ft, up 2.3, forward 10.33), the doors never move, both hit the Krivak and it is destroyed. The run stops at 60 s: after the kill the AI searches on and is lost at about 137 s within 8,000 ft of the fleet (cause not traced) |
 | `a2g-ripple-taps` (BMB-AI2) | The human trigger on the B-52's forward bay row (`--a2g-run --attack release`, 8 one-tick presses of a Mk 82 row at 0.2, 0.1 and 0.05 s apart, faster than the doors open) | Eight releases each (4, 1 and 1 before): a press made while the doors open is held and fires when they are open |
+
+| `ai-strike-b1b-mid` (B1B-9, 2026-11-16) | An AI B-1B (Heavy) on `~QUCOL` at 20,000 ft, 12 nm out, 20 Mk 82 in the intermediate bay (`--station 1 --count 20`) | The doors open before the first bomb (a `BAY` line), eight releases 0.25 s apart each with `bay=1.00`, from that bay's first eight places (4 abreast, outermost first, bottom tier first: right -1.95, 1.95, -0.65, 0.65 ft, up -0.62 then 0.68, forward 19.97), every release from station 1, the doors read shut 1.9 s after the last, an impact, egress, not lost, the level profile |
+| `ai-strike-b1b-aft` (B1B-9) | The same B-1B with 20 Mk 82 in the aft bay (`--station 2 --count 20`) | The same stick of eight from the aft bay's grid (forward -13.03 ft), station 2, doors open for it and shut after, an impact, egress, not lost |
+| `ai-strike-b1b-quick-wing` (B1B-9) | A Quick Mission with the Ukraine factory as the ground target and a B-1B wing (`--quick-wing --count 20`) | `ROLE strike`, the forward bay's stick of eight with the doors open for it at 5,079 ft (the 5,000 ft heavy floor), egress, not lost, the level profile (the Heavy class the rule gives a 477,000 lb record) |
 | `a2g-release-origin-b2` (B2-6) | The human trigger on the B-2's four bay rows (`--a2g-run --attack release`, 12 presses a Mk 82 row, 4 a Paveway row) | Each release leaves where it hangs: outermost first, alternating sides, front row before back, bottom tier first |
 | `a2g-laser-b2` (B2-6) | A GBU-27 from the left bay at 20,000 ft on the B-2's own laser spot | Guides to within a second of the ground, kills the tank |
 | `flight-livefire-b2-slot1` to `slot4`, `flight-countermeasures-b2` (B2-6) | `--live-fire --aircraft b2`, `STATIONS["b2"] = [32, 32, 0, 0]` | One Mk 82 a slot (the empty Paveway slots fall to the sister bay), 30 chaff and 30 flares |
@@ -1044,3 +1056,23 @@ at least 0.05 ft with the doors open, and no two touch).
 Update (B2-5, 2026-11-15): the B-2's default load is the two Mk 82 bays alone (64 bombs, 32,000 lb), so
 `flight-liftoff-b2` records 155.2 kt after 7,232 ft (was 158.1 kt) and `flight-approach-b2` 167.5 kt (was 166.2 kt);
 the windows (140 to 165 kt and 140 to 170 kt) are unchanged.
+
+Update (B1B-5, 2026-11-16): the B-1B's three fitted bays. `flight-animation-b1b`'s bay row now checks the door
+leaves (belly polygons `3617` and `362e` whole and no lining at 0; 15 lining faces, a vertex on each bay's four
+hinge corners and the lowest edge `3 units * sin(90 degrees * value)` below the belly plane; the old `7b16`
+plates never drawn). `STATIONS["b1b"] = [4, 4, 4]` adds `flight-livefire-b1b-slot1` to `slot3` and
+`flight-jettison-b1b-slot2` and `slot3` (one retarded Mk 82 seven-pack a slot). New scenarios:
+`flight-bay-fire-b1b-row5`, `-row6` and `-row7` (the one-press release through each bay: the doors open to 0.95
+before the pack leaves, then close), `flight-bay-ripple-b1b` (20 Mk 82 in the forward bay, 20 presses: one bomb a
+press from the bottom tier up, outermost first alternating sides; the row's own release points),
+`bay-b1b-0`, `-0.5` and `-1` (the `--flight-bay` frames), `render-b1b-clearance` (headless: 60 Mk 82, 20 a bay, clear
+the door leaves, ends, roof and floor and each other by at least 0.05 ft with the doors open) and
+`render-b1b-clearance-default` (the default 12 seven-packs, centred in the bays). `render-b1b-skin` keeps
+`--loadout none` (its skin check needs no stores; the default load now starts since the start-fuel fix, 6f0277d8).
+
+Update (B1B-6, 2026-11-16): new scenarios for the B-1B's ordnance. `a2g-release-origin-b1b` (six `--a2g-run --attack release` runs: each of the three bays' plain Mk 82 rows, 12
+presses, the first nine places from the grid's cells, 4 abreast, outermost first alternating sides, 1.3 ft a tier; each bay's default seven-pack row, four packs of seven bombs from the
+pack's own place and the retail pack stagger), `ai-strike-b1b-stick` (an AI B-1B, `--load MK82 --count 20` at 20,000 ft: a stick of eight 0.25 s apart from the same cells, the doors open at
+every release) and `ai-strike-b1b-pack` (the default load: four packs of seven, the first bomb of each from the row's own place), `flight-countermeasures-b1b` (the retail `F18.ECM`: 30 chaff
+and 30 flares, five and three released) and `flight-jettison-b1b-slot1` (the forward bay, which the generator's slot-2 start leaves out). No guided store is admitted on the bay rows, so
+there is no `a2g-laser-b1b`.

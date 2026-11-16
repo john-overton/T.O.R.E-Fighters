@@ -39,6 +39,7 @@ from __future__ import annotations
 import dataclasses
 import math
 import re
+from collections.abc import Callable
 
 from battery import Scenario, Step
 from battery_scenarios.a2g_guided import IMPACT as A2G_IMPACT, KILL as A2G_KILL, RELEASE as A2G_RELEASE, SIGHT as A2G_SIGHT, TARGET as A2G_TARGET
@@ -1215,6 +1216,116 @@ def b2_stick_problems(output: str) -> list[str]:
     return problems
 
 
+# B1B-6 (2026-11-16): the B-1B's three bays, one centre line each (B1B-5): 4 abreast, 1 long, the bottom
+# tier 0.62 ft under the reference and 1.3 ft a tier; the forward bay's mount is 35.30 ft ahead, the
+# intermediate's 19.97 and the aft bay's -13.03 ft. The opening of each is 8 ft wide.
+B1B_BAYS = {0: (35.30, 29.33, 42.67), 1: (19.97, 13.33, 28.00), 2: (-13.03, -19.83, -4.83)}
+
+
+def b1b_origins(output: str) -> list[tuple[float, float, float]]:
+    return [(float(m[3]), float(m[4]), float(m[5])) for m in ORIGIN_LINE.findall(output)]
+
+
+def b1b_bay_stick_problems(run: Run, output: str, label: str, bay: int = 0) -> list[str]:
+    """A B-1B bay stick: eight Mk 82 from the first eight places of bay row `bay`'s grid (4 abreast, outermost
+    first, bottom tier then the next), 0.25 s apart, the doors open before the first and shut after the last,
+    impacts, egress, not lost, the Heavy class's level profile (B1B-9)."""
+    problems = consistency_problems(run, label)
+    problems += bay_door_problems(run, label)
+    releases = run.of("RELEASE")
+    if len(releases) != 8:
+        problems.append(f"{label}: {len(releases)} releases, want a stick of 8")
+    times = run.times("RELEASE")
+    if any(abs((b - a) - 0.25) > 0.02 for a, b in zip(times, times[1:])):
+        problems.append(f"{label}: the stick is not 0.25 s apart: {times}")
+    origins = b1b_origins(output)
+    if len(origins) != len(releases):
+        problems.append(f"{label}: {len(origins)} origin lines for {len(releases)} releases")
+    forward, lo, hi = B1B_BAYS[bay]
+    for n, origin in enumerate(origins[:8]):
+        want = (B2_COLUMNS[n % 4], -0.62 + 1.3 * (n // 4), forward)
+        if abs(origin[0] - want[0]) > 0.1 or abs(origin[1] - want[1]) > 0.1 or abs(origin[2] - want[2]) > 1.0:
+            problems.append(f"{label}: bomb {n + 1} left from {origin}, the grid's place is {want}")
+        if not lo < origin[2] < hi or not -4.0 < origin[0] < 4.0:
+            problems.append(f"{label}: bomb {n + 1} left from {origin}, outside bay {bay}'s opening")
+    if len(set(origins)) != len(origins):
+        problems.append(f"{label}: two bombs left from one place")
+    if any(r.get("station") != str(bay) for r in releases):
+        problems.append(f"{label}: released from stations {sorted({r.get('station') for r in releases})}, want bay row {bay}")
+    if not run.of("IMPACT"):
+        problems.append(f"{label}: no bomb landed")
+    if not run.of("EGRESS"):
+        problems.append(f"{label}: no EGRESS after the stick")
+    if run.of("LOST"):
+        problems.append(f"{label}: the B-1B was lost")
+    if run.setup.get("aircraft") != "B1b":
+        problems.append(f"{label}: flew {run.setup.get('aircraft')}, want B1b")
+    # The strike class is the rule's (maximum takeoff 477,000 lb: Heavy), and a Heavy flies the level run.
+    chosen = {p.get("name") for p in run.of("PROFILE") if p.get("name") not in (None, "none")}
+    if chosen and chosen != {"level"}:
+        problems.append(f"{label}: flew the {sorted(chosen)} profile, the Heavy class's is level")
+    return problems
+
+
+def b1b_stick_problems(output: str) -> list[str]:
+    """`ai-strike-b1b-stick`: an AI B-1B at 20,000 ft drops a stick of eight Mk 82 from its forward bay's
+    grid, one every 0.25 s from the grid's own first eight places (B1B-6): the cells a human's press
+    leaves from (`a2g-release-origin-b1b`)."""
+    runs = parse_runs(output)
+    if len(runs) != 1:
+        return [f"expected one strike run, got {len(runs)}"]
+    return b1b_bay_stick_problems(runs[0], output, "B-1B stick", 0)
+
+
+def b1b_bay_row_problems(bay: int, label: str) -> Callable[[str], list[str]]:
+    """`ai-strike-b1b-mid` and `-aft` (B1B-9): the same stick from the intermediate (row 1) or aft (row 2) bay."""
+    def check(output: str) -> list[str]:
+        runs = parse_runs(output)
+        if len(runs) != 1:
+            return [f"expected one strike run, got {len(runs)}"]
+        return b1b_bay_stick_problems(runs[0], output, label, bay)
+    return check
+
+
+def b1b_quick_wing_problems(output: str) -> list[str]:
+    """`ai-strike-b1b-quick-wing`: a Quick Mission with the Ukraine factory as the ground target: the B-1B
+    wing takes the Strike role (the Heavy class's default) and flies the same stick from its forward bay
+    at the 5,000 ft heavy floor."""
+    runs = parse_runs(output)
+    if len(runs) != 1:
+        return [f"expected one strike run, got {len(runs)}"]
+    problems = b1b_bay_stick_problems(runs[0], output, "B-1B quick wing", 0)
+    role = (runs[0].first("ROLE") or {}).get("role")
+    if role != "strike":
+        problems.append(f"B-1B quick wing: the wing was given role {role}, want strike")
+    return problems
+
+
+def b1b_pack_problems(output: str) -> list[str]:
+    """`ai-strike-b1b-pack`: the default load's seven-packs leave the forward bay a pack at a time, the
+    first bomb of each pack from the grid's own place (columns -1.95, +1.95, -0.65, +0.65 ft)."""
+    runs = parse_runs(output)
+    if len(runs) != 1:
+        return [f"expected one strike run, got {len(runs)}"]
+    run = runs[0]
+    problems = consistency_problems(run, "B-1B pack")
+    problems += bay_door_problems(run, "B-1B pack")
+    origins = b1b_origins(output)
+    if len(origins) % 7 or len(origins) < 28:
+        problems.append(f"{len(origins)} bombs, want whole packs of seven, four packs")
+    forward = B1B_BAYS[0][0]
+    for pack in range(len(origins) // 7):
+        first = origins[pack * 7]
+        want = (B2_COLUMNS[pack % 4], -0.62, forward)
+        if abs(first[0] - want[0]) > 0.1 or abs(first[1] - want[1]) > 0.1 or abs(first[2] - want[2]) > 1.0:
+            problems.append(f"pack {pack + 1} left from {first}, the row's place is {want}")
+    if not run.of("IMPACT"):
+        problems.append("no bomb landed")
+    if run.of("LOST"):
+        problems.append("the B-1B was lost")
+    return problems
+
+
 def b2_climb_problems(output: str) -> list[str]:
     """`ai-strike-b2-climb`: from 5,000 ft 30 nm out an AI B-2 climbs to its release floor (10,000 ft
     or more) before it bombs, then bombs and gets out; it never gets low."""
@@ -1732,6 +1843,52 @@ def scenarios() -> list[Scenario]:
         notes="An AI B-2 (a Heavy) on the column at 20,000 ft, 12 nm out: a stick of eight Mk 82 from the left "
               "bay's grid, 0.25 s apart, from the grid's own first eight places (front row, bottom tier, "
               "outermost first), then egress. Doors stay shut for the AI's release (coordinator decision).",
+    ))
+    extra.append(Scenario(
+        name="ai-strike-b1b-stick", lane="flight",
+        args=pilot_run("UKR", "QUCOL", "--aircraft", "b1b", "--load", "MK82", "--count", "20", "--altitude", "20000",
+                       "--from", "12", "--seconds", "200", "--follow-egress"),
+        timeout=600, expect=[r"RELEASE", r"ORIGIN", r"IMPACT", r"EGRESS"], check=b1b_stick_problems,
+        notes="An AI B-1B (a Heavy) on the column at 20,000 ft, 12 nm out, 20 Mk 82 in its forward bay: a stick of "
+              "eight 0.25 s apart from the grid's own first eight places (4 abreast, outermost first, bottom tier "
+              "then the next), the cells a human's press leaves from, then egress (B1B-6).",
+    ))
+    extra.append(Scenario(
+        name="ai-strike-b1b-pack", lane="flight",
+        args=pilot_run("UKR", "QUCOL", "--aircraft", "b1b", "--load", "MK82AIR", "--altitude", "20000",
+                       "--from", "12", "--seconds", "200", "--follow-egress"),
+        timeout=600, expect=[r"RELEASE", r"ORIGIN", r"IMPACT"], check=b1b_pack_problems,
+        notes="An AI B-1B with the default load's seven-packs (four in the forward bay): four packs of seven, the first "
+              "bomb of each from the row's own place, doors read open at every release (B1B-6).",
+    ))
+    # B1B-9 (2026-11-16): the other two bays, and a Quick Mission wing strike (docs/formats/aircraft-variety.md,
+    # "B-1B Lancer AI, missions, multiplayer and replay"). The B-1B carries no anti-ship store (the Load
+    # Ordnance page admits four unguided bombs), so there is no anti-ship scenario for it.
+    extra.append(Scenario(
+        name="ai-strike-b1b-mid", lane="flight",
+        args=pilot_run("UKR", "QUCOL", "--aircraft", "b1b", "--load", "MK82", "--station", "1", "--count", "20",
+                       "--altitude", "20000", "--from", "12", "--seconds", "200", "--follow-egress"),
+        timeout=600, expect=[r"RELEASE", r"ORIGIN", r"IMPACT", r"EGRESS"], check=b1b_bay_row_problems(1, "B-1B mid bay"),
+        notes="An AI B-1B (a Heavy) with 20 Mk 82 in its intermediate bay (row 1): the doors open before the first "
+              "bomb, a stick of eight leaves 0.25 s apart from that bay's grid (4 abreast, 19.97 ft forward), the "
+              "doors shut after the last, then egress (B1B-9).",
+    ))
+    extra.append(Scenario(
+        name="ai-strike-b1b-aft", lane="flight",
+        args=pilot_run("UKR", "QUCOL", "--aircraft", "b1b", "--load", "MK82", "--station", "2", "--count", "20",
+                       "--altitude", "20000", "--from", "12", "--seconds", "200", "--follow-egress"),
+        timeout=600, expect=[r"RELEASE", r"ORIGIN", r"IMPACT", r"EGRESS"], check=b1b_bay_row_problems(2, "B-1B aft bay"),
+        notes="An AI B-1B with 20 Mk 82 in its aft bay (row 2, the 15 ft bay behind the wing): the same stick from "
+              "that bay's grid (13.03 ft aft of the reference), doors open for it (B1B-9).",
+    ))
+    extra.append(Scenario(
+        name="ai-strike-b1b-quick-wing", lane="flight",
+        args=pilot_run("UKR", "QUFACT", "--aircraft", "b1b", "--load", "MK82", "--count", "20",
+                       "--quick-wing", "--seconds", "400", "--follow-egress"),
+        timeout=900, expect=[r"ROLE", r"RELEASE", r"IMPACT", r"EGRESS"], check=b1b_quick_wing_problems,
+        notes="A Quick Mission with the Ukraine factory as the ground target: a B-1B wing gets the Strike role from "
+              "the Heavy class's default, opens its doors and drops the stick of eight from its forward bay at the "
+              "5,000 ft heavy floor, then egresses (B1B-9).",
     ))
     extra.append(Scenario(
         name="ai-strike-b2-climb", lane="flight",

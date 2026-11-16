@@ -933,6 +933,27 @@ Not changed: the top-speed edges (515 kt at 36,000 ft against a published 560 to
 the 55,000 ft ceiling (published 50,000), the G rows and the roll limit. Engines stay
 clamped to four in the live configuration (see the review).
 
+## Rockwell B-1B Lancer (B1B-8, 2026-11-16)
+
+The B-1B flies the `variety` configuration built from `B1.PT` with the BMB-B2 values (69,560 lbf dry, 123,120 lbf
+with afterburner, empty 192,000 lb, tank 265,274 lb, 477,000 lb maximum takeoff) and the record's own G rows and
+flight tuning. Four terms are the aircraft's own, all **fitted** or **opinionated** (agent decisions, 2026-11-16);
+every other aircraft keeps the shared value ([review and table](../formats/aircraft-variety.md#b-1b-lancer-flight-review-b1b-8-2026-11-16)):
+
+- **Fuel flows** 11 lb/s dry and 84 lb/s with afterburner (were 6 and 16): four F101-GE-102 at 0.562 and 2.46 lb/(lbf h).
+  A full tank lasts 402 minutes at full military power and 52.6 minutes on full afterburner.
+- **Sea-level top speed** Mach 0.92, 608 kt with afterburner (was Mach 1.00, 663 kt), the published low-level speed. The
+  1 G edge rises in a straight line to Mach 1.25 (716 kt) at 36,000 ft, so Mach 1.00 comes at 10,000 ft.
+- **Clean-drag shape**, the B-52's hook: 0.72 of the reference drag on the square law and 0.28 on the twelfth power of
+  speed over the edge. 1 at the edge, so no top speed moves; Mach 0.8 at 36,000 ft holds on 0.76 throttle and burns 7.6
+  lb/s (about 5,000 nautical miles from the tank, published 5,100). No other term of the B-52's hook is taken.
+- **Speed brake** a fifth of the fighter airbrake (the two spoiler plates the rig opens): 0.08 to 0.17 G of extra deceleration
+  at 306 to 550 kt at 1,000 ft (was 0.34 to 0.74 G).
+
+Not changed: the 55,000 ft ceiling (published 60,000), the G rows (-2 to +5), the roll limit (60 degrees a second), the
+yaw authority (the rudder cap of 0.45 radian is a drawing limit), the takeoff and landing laws. The wing sweep (spread to
+280 kt, fully swept from 520 kt) is drawn only: no flight law reads it, and sweep adds no drag, lift or stall term.
+
 ## Unknown evidence
 
 Retail hover power, altitude ceiling, nozzle travel/rate, rotor torque, lift

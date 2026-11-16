@@ -326,6 +326,45 @@ def b2_no_air_to_air_checker() -> Callable[[str], list[str]]:
     return check
 
 
+B1B_ACTOR = re.compile(r"^actor=(\d+) (\S+ [\d-]+) B1b activity=.*? alive=\w+ rounds=(\d+) ", re.M)
+
+
+def b1b_no_air_to_air_checker(nobody_shoots: bool = True) -> Callable[[str], list[str]]:
+    """The B-1B wing in a fight (slice B1B-9): the probe's usual checks, and the B-1Bs hold nothing but Mk 82 bombs
+    (the default load's 12 seven-packs, `MK-82AIR7`, on their three bay rows: the actor's `rounds` is the store
+    count, a gun would add its own rounds) and no gun, so no shot is fired; the player's own run (also a B-1B)
+    fires no missile or gun burst either. With `nobody_shoots` (an all-B-1B fight) the probe's whole shot total
+    is zero and every actor still holds its 12 store rounds; against Su-27s the shots are theirs and a B-1B
+    they shoot down has none left, so only the B-1B player's own shots are held at zero."""
+    base = checker()
+
+    def check(output: str) -> list[str]:
+        problems = base(output)
+        ids = {m.group(1) for m in B1B_ACTOR.finditer(output)}
+        if not ids:
+            problems.append("no B-1B actor in the probe")
+        for m in B1B_ACTOR.finditer(output):
+            if nobody_shoots and int(m.group(3)) != 12:
+                problems.append(f"{m.group(2)} (B-1B) holds {m.group(3)} store rounds, want its 12 seven-packs")
+        totals = SHOTS.search(output)
+        if nobody_shoots and (totals is None or int(totals.group(1)) != 0):
+            problems.append("a shot was fired in an all-B-1B fight: no gun, no air-to-air store")
+        for m in STORES_LINE.finditer(output):
+            if m.group(1) in ids:
+                names = re.findall(r"([A-Z0-9-]+) x\d+", m.group(2))
+                other = [n for n in names if n not in ("MK-82AIR7", "MK-82")]
+                if other:
+                    problems.append(f"B-1B actor {m.group(1)} carries {other}")
+                if len(names) != 3:
+                    problems.append(f"B-1B actor {m.group(1)} holds {len(names)} bay rows, want 3")
+        shots = SHOT_AT_STATION.search(output)
+        if shots and (int(shots.group(1)), int(shots.group(2)), int(shots.group(3))) != (0, 0, 0):
+            problems.append(f"the B-1B player fired {shots.groups()} (missiles, gun bursts, gun rounds)")
+        return problems
+
+    return check
+
+
 DATALINK_LINE = re.compile(r"^t=(\d+) data link: (member|lock|unlock) plane=(\d+)(?: radar=(true|false)| target=(\d+))$", re.M)
 
 
@@ -1704,7 +1743,9 @@ def scenarios() -> list[Scenario]:
     # full takeoff weights, and every one of the three flies the pieces at the field lengths of the
     # retail missions (docs/spec/ai-airfield.md, "Heavy bombers"). The land order comes after the
     # climb-out (a B-2 is airborne at 205 s, a B-52 at 200 s).
-    for aircraft, order, ticks, kt, pavement in (("b2", 30000, 150000, 175, True), ("b52", 36000, 150000, 175, True)):
+    # B1B-8 (2026-11-16): the B-1B joins them (airborne at 211 s, touches down at 168 kt at the default
+    # load, parks on the pavement; its flaps-up minimum is over 190.5 kt at full fuel).
+    for aircraft, order, ticks, kt, pavement in (("b2", 30000, 150000, 175, True), ("b52", 36000, 150000, 175, True), ("b1b", 30000, 150000, 175, True)):
         out.append(probe(f"merged-airfield-{aircraft}-wing2", [
             "--theater", "FRA", "--ground-start", "14",
             "--aircraft", aircraft, "--probe-friendly-aircraft", aircraft,
@@ -1719,7 +1760,7 @@ def scenarios() -> list[Scenario]:
     # Takeoff alone: the B-2 and B-52 from Athens (GRE 1, 12,000 ft; at their full weights they need about
     # 7,200 ft and the scripted player's own B-2 runs off the end of Mikonos' 7,246 ft), the F-117 from
     # Mikonos (GRE 2, 7,246 ft). Each leaves the ground, climbs out and flies on.
-    for aircraft, field in (("b2", 1), ("b52", 1), ("f117", 2)):
+    for aircraft, field in (("b2", 1), ("b52", 1), ("f117", 2), ("b1b", 1)):
         out.append(probe(f"heavy-takeoff-{aircraft}-gre-a{field}", [
             "--theater", "GRE", "--ground-start", str(field),
             "--aircraft", aircraft, "--probe-friendly-aircraft", aircraft,
@@ -1728,7 +1769,7 @@ def scenarios() -> list[Scenario]:
             notes="BMB-AI: the heavy takeoff (flaps and gear kept until the speed is there) at its full weight."))
     # Landing at Simferopol (UKR 2, 5,532 ft, the Ukraine's default field), sent home from the air, at a
     # landing weight: B-2 60,000 lb of fuel, B-52 80,000 lb, F-117 7,000 lb.
-    for aircraft, fuel, kt in (("b2", 60000, 150), ("b52", 80000, 145), ("f117", 7000, 190)):
+    for aircraft, fuel, kt in (("b2", 60000, 150), ("b52", 80000, 145), ("f117", 7000, 190), ("b1b", 80000, 175)):
         out.append(probe(f"heavy-land-{aircraft}-ukr-a2", [
             "--theater", "UKR", "--aircraft", aircraft, "--probe-friendly-aircraft", aircraft,
             "--probe-wing-size", "2", "--probe-wing-order", "600:bug-out", "--probe-fuel", str(fuel),
@@ -2121,6 +2162,24 @@ def scenarios() -> list[Scenario]:
                                               "--separation", "5", *attack), ticks=7200,
                      notes="The B-52 wing against Su-27s: the probe's usual checks hold for the B-52s and the "
                            "Su-27s, whoever wins."))
+    # 13l. The B-1B Lancer in a mission (slice B1B-9, 2026-11-16): the strike class is Heavy by the rule
+    # (maximum takeoff 477,000 lb), the record has no gun and no air-to-air store, and the Load Ordnance default
+    # is the three bays' seven-packs (12 packs, 42,000 lb). Against its own kind and against Su-27s the B-1Bs
+    # fire nothing. The strike itself is `ai-strike-b1b-*` (ai_strike.py).
+    out.append(probe("b1b-quick-mission-2v2", fight(2, 2, "--aircraft", "b1b",
+                                                     "--probe-friendly-aircraft", "b1b",
+                                                     "--probe-enemy-aircraft", "b1b",
+                                                     "--separation", "5", *attack), ticks=7200,
+                     check=b1b_no_air_to_air_checker(),
+                     notes="All B-1B: the player's wing and the enemy wing fly the B1.PT identity (four F101 class "
+                           "engines, the swing wing, three bay rows of Mk 82 seven-packs, no gun, no air-to-air "
+                           "store) in a 2 v 2. Nobody can shoot."))
+    out.append(probe("b1b-vs-su27-2v2", fight(2, 2, "--aircraft", "b1b",
+                                               "--probe-friendly-aircraft", "b1b",
+                                               "--probe-enemy-aircraft", "su27",
+                                               "--separation", "5", *attack), ticks=7200,
+                     check=b1b_no_air_to_air_checker(nobody_shoots=False),
+                     notes="The B-1B wing against Su-27s: the B-1Bs fire nothing (no air-to-air store, no gun)."))
     # 14. The fixed acceptance probes.
     out.append(Scenario(name="ai-roster-probe", lane="ai", args=["--ai-roster-probe-ticks", "3600", "--no-audio"], timeout=1800))
     out.append(Scenario(name="ai-probe-matrix", lane="ai",

@@ -103,6 +103,54 @@ pub const B52_ROW_FLOOR_WIDTH: f64 = 2. * B52_BAY_HALF;
 pub const B52_ROW_LENGTH: f64 = B52_SLAB;
 pub const B52_ROW_CEILING: f64 = B52_BAY_DEPTH;
 
+/// The B-1B's belly plane, feet up: the flat belly polygon `3617` (and `362e`
+/// ahead of it) of `B1.SH` at z -1 unit, 4/3 ft a unit (measured, B1B-5). A
+/// store's lowest fin tip sits on it, so the floor of the magazine is here, and
+/// the doors hinge here.
+pub const B1B_BELLY: f64 = -4. / 3.;
+/// Half the width of each B-1B bay opening, feet: the `7b16` wall plates stand
+/// at x +/-3 units, so 8.0 ft wide (measured, B1B-5; no public source gave a
+/// bay's width).
+pub const B1B_BAY_HALF: f64 = 4.0;
+/// How deep the B-1B's recess is under the belly plane, feet (fitted, B1B-5):
+/// five tiers of Mk 82 stand 6.55 ft high (0.08 ft over the floor, a 1.27 ft
+/// body and four 1.3 ft pitches). The top skin over the stores' columns (x
+/// within 2.6 ft) is 8.5 to 9.3 ft above the belly plane and 6.9 ft at the aft
+/// bay's outer wall (4.16 units above z -1, x +/-3 units), so a flat roof at
+/// 6.7 ft is under the skin everywhere and over the stack by 0.15 ft; a sixth
+/// tier (7.85 ft) cannot stand.
+pub const B1B_BAY_DEPTH: f64 = 6.7;
+/// The usable floor width of a B-1B bay, feet: four stores of 1.3 ft abreast
+/// and 0.1 ft over, as the B-2's (B2-5), in the 8.0 ft bay.
+pub const B1B_GRID_WIDTH: f64 = 5.3;
+/// The B-1B's three bays, in record row order (rows 5, 6 and 7: forward,
+/// intermediate, aft): where each opens along the belly, feet forward, aft end
+/// then fore end. The forward and intermediate bays are the shape's own wall
+/// plates (`7b16`: y 22 to 32 and 10 to 21 units, 13.33 and 14.67 ft, with the
+/// movable bulkhead's 1.33 ft between them); the aft bay is not drawn, so it is
+/// the real 15 ft (B1.INF "4.57 m") centred on the record row's -12.33 ft
+/// (fitted, B1B-5).
+pub const B1B_BAYS: [[f64; 2]; 3] = [
+    [22. * 4. / 3., 32. * 4. / 3.],
+    [10. * 4. / 3., 21. * 4. / 3.],
+    [-12. - 1. / 3. - 7.5, -12. - 1. / 3. + 7.5],
+];
+/// How far ahead of its bay's middle a B-1B row hangs its stores, feet
+/// (negative: behind it; fitted by the clearance sweep, B1B-5). Stores hang by
+/// their shape's origin, which is not their middle: the retarded Mk 82 (the
+/// default, `MK82AIR.JT`, `MK82A.SH`) spans -1.39 to +5.91 ft about its origin
+/// and the plain Mk 82 (`MK82.SH`) -4.52 to +2.78 ft, so against the 13.33 ft
+/// forward bay (the shortest) both clear the two ends by at least 1.45 ft only
+/// for an offset between -2.15 and +0.76 ft, and -0.7 ft balances them (1.45 and
+/// 4.59 ft for the Mk 82, 4.58 and 1.46 ft for the retarded one).
+pub const B1B_MOUNT_OFFSET: f64 = -0.7;
+/// Where a B-1B bay row hangs its stores, feet forward: the middle of its bay
+/// plus [`B1B_MOUNT_OFFSET`]. (The record's rows, 36.7, 21.0 and -12.3 ft, are
+/// the bays' middles within 0.7 ft.)
+pub const fn b1b_bay_forward(bay: usize) -> f64 {
+    (B1B_BAYS[bay][0] + B1B_BAYS[bay][1]) / 2. + B1B_MOUNT_OFFSET
+}
+
 /// Every bay station, in aircraft and row order. Add a row per station.
 pub const STATIONS: &[BayStation] = &[
     BayStation {
@@ -186,6 +234,24 @@ pub const STATIONS: &[BayStation] = &[
         row: 6,
         mount: [0., B52_BELLY, B52_ROW_FORWARD[2] + B52_ORIGIN_AHEAD],
     },
+    // The B-1B's three bays (B1B-5): the record's rows 5, 6 and 7 (forward,
+    // intermediate, aft) on the centre line, at the belly plane, each the grid
+    // of [`GRIDS`] over its own bay.
+    BayStation {
+        aircraft: AircraftId::B1b,
+        row: 5,
+        mount: [0., B1B_BELLY, b1b_bay_forward(0)],
+    },
+    BayStation {
+        aircraft: AircraftId::B1b,
+        row: 6,
+        mount: [0., B1B_BELLY, b1b_bay_forward(1)],
+    },
+    BayStation {
+        aircraft: AircraftId::B1b,
+        row: 7,
+        mount: [0., B1B_BELLY, b1b_bay_forward(2)],
+    },
 ];
 
 /// A bay station whose stores hang in a grid: as many abreast (across the bay)
@@ -267,6 +333,30 @@ pub const GRIDS: &[BayGrid] = &[
         width: B52_ROW_FLOOR_WIDTH,
         length: B52_ROW_LENGTH,
         ceiling: B52_BELLY + B52_ROW_CEILING,
+    },
+    // The B-1B's three bays (B1B-5): 5.3 ft wide as the B-2's, each its own
+    // bay's length, under a flat roof 6.7 ft over the belly plane. A Mk 82
+    // (7.3 ft) hangs 4 abreast, 1 long, 5 tiers: 20 a bay.
+    BayGrid {
+        aircraft: AircraftId::B1b,
+        row: 5,
+        width: B1B_GRID_WIDTH,
+        length: B1B_BAYS[0][1] - B1B_BAYS[0][0],
+        ceiling: B1B_BELLY + B1B_BAY_DEPTH,
+    },
+    BayGrid {
+        aircraft: AircraftId::B1b,
+        row: 6,
+        width: B1B_GRID_WIDTH,
+        length: B1B_BAYS[1][1] - B1B_BAYS[1][0],
+        ceiling: B1B_BELLY + B1B_BAY_DEPTH,
+    },
+    BayGrid {
+        aircraft: AircraftId::B1b,
+        row: 7,
+        width: B1B_GRID_WIDTH,
+        length: B1B_BAYS[2][1] - B1B_BAYS[2][0],
+        ceiling: B1B_BELLY + B1B_BAY_DEPTH,
     },
 ];
 
@@ -409,12 +499,62 @@ pub const OPENINGS: &[Opening] = &[
         inner_depth: B52_BAY_DEPTH,
         rail: [0., 0.],
     },
+    // The B-1B's three bays (B1B-5, measured and fitted): three centred
+    // openings in row order (forward, intermediate, aft), each 8.0 ft wide with
+    // two doors hinged on the outer edges (drawn by `bay_doors::centre_doors`),
+    // in the flat belly polygons (`3617`, and `362e` ahead of y 29 units, which
+    // the forward bay crosses) at -1.33 ft, under a flat roof 6.7 ft over them.
+    // No rail.
+    Opening {
+        aircraft: AircraftId::B1b,
+        centre: 0.,
+        inner: 0.,
+        outer: B1B_BAY_HALF,
+        aft: B1B_BAYS[0][0],
+        fore: B1B_BAYS[0][1],
+        belly: B1B_BELLY,
+        depth: B1B_BAY_DEPTH,
+        inner_depth: B1B_BAY_DEPTH,
+        rail: [0., 0.],
+    },
+    Opening {
+        aircraft: AircraftId::B1b,
+        centre: 0.,
+        inner: 0.,
+        outer: B1B_BAY_HALF,
+        aft: B1B_BAYS[1][0],
+        fore: B1B_BAYS[1][1],
+        belly: B1B_BELLY,
+        depth: B1B_BAY_DEPTH,
+        inner_depth: B1B_BAY_DEPTH,
+        rail: [0., 0.],
+    },
+    Opening {
+        aircraft: AircraftId::B1b,
+        centre: 0.,
+        inner: 0.,
+        outer: B1B_BAY_HALF,
+        aft: B1B_BAYS[2][0],
+        fore: B1B_BAYS[2][1],
+        belly: B1B_BELLY,
+        depth: B1B_BAY_DEPTH,
+        inner_depth: B1B_BAY_DEPTH,
+        rail: [0., 0.],
+    },
 ];
 
-/// The opening of `id`, if the shared helper draws its doors.
+/// The first opening of `id`, if the shared helper draws its doors (the only
+/// one for every aircraft but the B-1B, whose three are [`openings`]).
 pub fn opening(id: AircraftId) -> Option<Opening> {
     let id = id.source();
     OPENINGS.iter().find(|o| o.aircraft == id).copied()
+}
+
+/// Every opening of `id`, in table order (one bay or pair of bays for each
+/// aircraft but the B-1B, which has three, forward to aft: B1B-5).
+pub fn openings(id: AircraftId) -> impl Iterator<Item = Opening> {
+    let id = id.source();
+    OPENINGS.iter().filter(move |o| o.aircraft == id).copied()
 }
 
 #[cfg(test)]
@@ -500,6 +640,87 @@ mod tests {
         assert!((rows[1][2] - rows[2][2] - B52_SLAB).abs() < 1e-9);
         assert_eq!(grid(AircraftId::B52, 4), None);
         assert_eq!(alternative(AircraftId::B52, 5), None);
+    }
+
+    #[test]
+    fn the_b1b_has_three_centred_bays_a_grid_each_and_the_forward_one_crosses_the_belly_seam() {
+        let bays: Vec<_> = openings(AircraftId::B1b).collect();
+        assert_eq!(bays.len(), 3);
+        assert_eq!(opening(AircraftId::B1b), Some(bays[0]));
+        assert!(reviewed(AircraftId::B1b) && station(AircraftId::B1b, 4).is_none());
+        assert_eq!(station(AircraftId::B1b, 8), None);
+        assert_eq!(alternative(AircraftId::B1b, 5), None);
+        // Forward, intermediate, aft: the measured plates (22 to 32 and 10 to 21
+        // units) and the real 15 ft aft bay on the record row.
+        let units = |a: f64, b: f64| [a * 4. / 3., b * 4. / 3.];
+        assert_eq!(B1B_BAYS[0], units(22., 32.));
+        assert_eq!(B1B_BAYS[1], units(10., 21.));
+        assert!((B1B_BAYS[2][1] - B1B_BAYS[2][0] - 15.).abs() < 1e-9);
+        assert!(((B1B_BAYS[2][0] + B1B_BAYS[2][1]) / 2. + 37. / 3.).abs() < 1e-9);
+        // The bulkhead between the forward and intermediate bays is 1.33 ft.
+        assert!((B1B_BAYS[0][0] - B1B_BAYS[1][1] - 4. / 3.).abs() < 1e-9);
+        for (k, (row, o)) in [5, 6, 7].into_iter().zip(&bays).enumerate() {
+            // One centred bay, 8.0 ft wide, two doors hinged on the outer edges,
+            // a flat roof 6.7 ft over the belly plane, no rail.
+            assert_eq!((o.centre, o.inner, o.outer), (0., 0., B1B_BAY_HALF));
+            assert_eq!(o.inner_depth, o.depth);
+            assert_eq!((o.aft, o.fore), (B1B_BAYS[k][0], B1B_BAYS[k][1]));
+            assert_eq!((o.belly, o.depth), (B1B_BELLY, B1B_BAY_DEPTH));
+            assert!(o.rail[0] == o.rail[1]);
+            // The row's store hangs on the centre line, on the belly plane, at
+            // the fitted offset from its bay's middle (which is within 0.7 ft of
+            // the record row).
+            let mount = station(AircraftId::B1b, row).unwrap();
+            assert_eq!((mount[0], mount[1]), (0., B1B_BELLY));
+            let middle = (o.aft + o.fore) / 2.;
+            assert!((mount[2] - B1B_MOUNT_OFFSET - middle).abs() < 1e-9);
+            let record = [110. / 3., 63. / 3., -37. / 3.][k];
+            assert!((middle - record).abs() < 0.7, "{row}: {middle}");
+            assert_eq!(
+                grid(AircraftId::B1b, row),
+                Some([B1B_GRID_WIDTH, o.fore - o.aft, B1B_BELLY + B1B_BAY_DEPTH])
+            );
+        }
+        // The bays do not overlap, and the forward one runs on past the belly
+        // polygon's fore edge (y 29 units, 38.7 ft) into the one ahead.
+        assert!(bays[1].fore < bays[0].aft && bays[2].fore < bays[1].aft);
+        assert!(bays[0].fore > 29. * 4. / 3.);
+    }
+
+    #[test]
+    fn a_b1b_bay_hangs_twenty_mk82_four_abreast_five_tiers_and_the_roof_stops_a_sixth() {
+        use super::super::hardpoints::{grid_capacity, grid_cells, grid_point};
+        use super::super::store_sizes::StoreSize;
+        let mk82 = StoreSize::of_shape(Some("MK82.SH"));
+        for row in [5, 6, 7] {
+            let [width, length, ceiling] = grid(AircraftId::B1b, row).unwrap();
+            let mount = station(AircraftId::B1b, row).unwrap();
+            let ([abreast, along], pitch) = grid_cells(mk82, [width, length]);
+            assert_eq!((abreast, along), (4, 1), "row {row}");
+            assert!((pitch - 1.3).abs() < 1e-9);
+            assert_eq!(
+                grid_capacity(mk82, [width, length], ceiling - mount[1]),
+                20,
+                "row {row}"
+            );
+            // The top fin tip of the fifth tier stands under the roof; a sixth
+            // would not.
+            let top = |tiers: f64| mount[1] + 0.08 + mk82.width + (tiers - 1.) * pitch;
+            assert!(top(5.) < ceiling && top(6.) > ceiling);
+            // Twenty fill four abreast and five tiers, every cell its own and
+            // inside the 8.0 ft bay's walls.
+            let mut places: Vec<_> = (0..20)
+                .map(|k| grid_point(mount, 20, k, mk82, [width, length]))
+                .collect();
+            places.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            places.dedup();
+            assert_eq!(places.len(), 20);
+            assert!(
+                places
+                    .iter()
+                    .all(|p| p[0].abs() + mk82.width / 2. < B1B_BAY_HALF)
+            );
+        }
     }
 
     #[test]

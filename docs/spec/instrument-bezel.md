@@ -342,3 +342,7 @@ is 1673 x 508). Its window 4 is titled `IRADS` rather than `TARGET CAM` while it
 seeker picture keeps `TARGET CAM`), and its radar window reads `NOT INSTALLED` or, on the infrared channel,
 `FLIR`. Its Systems window shows one engine readout and its own fuel (`FUEL 18500 LBS`), and its Weapons
 window no `CHAFF` or `FLARE` line (it carries no dispenser).
+
+The B-1B flies the B-2's cockpit family by its record (coordinator first pass, 2026-11-15; B1B-7): `bmbrcc.HUD` names the panel `~b2_p`, so it draws the `~B2_P.PIC` bezel
+over `~B2H.PIC`, with the B-2's measured glass. Its Systems window shows one engine readout, as every aircraft's does (it has four engines), and its own fuel: `FUEL 243000
+LBS` and `(+ EXT 0 LBS)`; its Weapons window reads `12 MK-82AIR7` with `30 CHAFF` and `30 FLARE` (B1B-7 frames).

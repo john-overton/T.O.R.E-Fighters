@@ -626,6 +626,20 @@ def scenarios() -> list[Scenario]:
         )
     )
 
+    # The B-1B Lancer as the player and in both wings (slice B1B-9): a 2 v 2 recorded three times, so the B1.PT
+    # identity (the checkpoint code, four engines, the three bay rows and the swing wing's sweep, which is a
+    # function of speed and so is rebuilt from the recorded state) round-trips through the recording, plays back
+    # with nothing missing and records the same twice. Its bay-release recording is `replay-a2g-b1b-ripple`.
+    out.append(
+        record_scenario(
+            "replay-rec-b1b-2v2",
+            ["--ai-probe-ticks", "2400", "--aircraft", "b1b", "--probe-friendly-aircraft", "b1b",
+             "--probe-enemy-aircraft", "b1b", "--probe-fight", "2:2", "--separation", "5",
+             "--probe-attack", "300:10"],
+            timeout=500,
+        )
+    )
+
     # Every imported aircraft as the enemy and as the player.
     for ac in AIRCRAFT:
         out.append(

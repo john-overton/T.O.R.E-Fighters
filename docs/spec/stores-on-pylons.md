@@ -3819,3 +3819,57 @@ centring are this slice's: the AIM-9 shoulder rails, the outer rows' real places
 degree sweep limit while the outer rows carry stores (the spec carries it, nothing applies
 it yet) and the bay are F111-5's. Test:
 `hardpoints.rs` `the_f111_inner_pylons_swivel_about_the_f111_pivot_and_the_tornados_stay_put`.
+
+## B-1B weapon bays (B1B-5, 2026-11-16)
+
+Implementation specification, **opinionated** (the coordinator's first pass, 2026-11-15,
+`BOMBERS-DECISIONS-B` "B-1B Lancer" 3 and 4) and **fitted**, agent-authored, B1B-5. A game
+configuration, not a claim of original behaviour. The measurements and the choices are in
+[B-1B Lancer stations, bays and pylons](../formats/aircraft-variety.md#b-1b-lancer-stations-bays-and-pylons-b1b-5-2026-11-16).
+It is the shared machinery again: `bays::STATIONS`, `GRIDS` and `OPENINGS` rows read by
+`placed_on`, the B-52's centred-bay door drawing, the F-22's door timing.
+
+**Stations (feet right / up / forward).** `B1.PT` rows 5, 6 and 7, `Location::Magazine` on the
+centre line, no pair flag, designator bit cleared (BMB-B2): forward bay 0 / -1.333 / +35.30,
+intermediate 0 / -1.333 / +19.97, aft 0 / -1.333 / -13.03. Capacity 20 a row (the record's 4,
+raised by `adjust_defaults`), weight class 140 (14,000 lb) kept, **default 4 a row** (the
+record's; `default_counts`), so the default load is 12 `MK82AIR.JT` (a seven-pack of 3,500 lb:
+84 bombs, 42,000 lb). `MK82AIR.JT` stays 4 a row by its weight whatever the grid holds. There is no
+external station and no pod: the five sensor rows are fixed rows (`0x1008`) with no pod body.
+
+**Bays.** Three openings in `bays::OPENINGS` (`bays::openings(id)` returns all of an aircraft's;
+`bays::opening(id)` still returns the first), each `centre` 0, `inner` 0, `outer` 4.0 ft (8.0 ft wide),
+flat roof 6.7 ft over the belly plane (-1.333 ft; `inner_depth` equals `depth`), no rail: forward
+29.33 to 42.67 ft, intermediate 13.33 to 28.00 ft, aft -19.83 to -4.83 ft. Two doors a bay, 4.0 ft wide,
+hinged on the outer edges, 90 degrees down in the flight's 1.00 s travel (to -5.33 ft), cut by
+`bay_doors::centre_doors_all` from both belly polygons (`3617` and `362e`, which the forward bay
+crosses); one lined recess a bay (15 faces in all, palette 144), drawn only while the doors are off their
+seat. `State::bay` is one fraction for all three bays.
+
+**Grid (`bays::GRIDS`, the shared magazine grid of B2-5).** Floor 5.3 ft wide (as the B-2's) by the
+bay's own length (13.33, 14.67 and 15.00 ft), ceiling the roof: a Mk 82 (7.3 ft, 1.27 ft fins) hangs
+**4 abreast, 1 long, 5 tiers = 20 a bay**; a sixth tier (top at 7.85 ft) does not fit under the 6.7
+ft roof. Release order is the shared one (bottom tier first, the stores of a row abreast outermost
+first alternating sides); the three rows are on the centre line, so `Ownship::sister_bay` (opposite
+sides only) hands over nothing and a row empties before the next is selected.
+Mounts are each bay's middle less 0.7 ft (`bays::B1B_MOUNT_OFFSET`), which keeps both the retarded and the
+plain Mk 82 at least 1.45 ft off a bay end although their shapes' origins are 3.1 ft apart.
+
+**Admitted and refused.** The retail mask `0x1100` admits 21 stores a row; four stay (`MK82AIR`,
+`MK82`, `MK82P3`, `FAB1000`) and 17 are refused by name, one list for the three rows
+(`aircraft_stations::B1B_BAY_REFUSED`, `weapon_allowed`): the HARM class, the AT-2, the cluster, rocket and
+Snakeye bombs, the GBU-38, the 250 kg bomb, the RBK-250 and the GBU-27 class clip a wall or touch
+their neighbours on the shared grid (the 0.05 ft rule of the B-52's), and the Mk 84 is refused by decision
+(the heavy stores need the combined forward and intermediate bay, a follow-up). Cheat loading skips the
+refusals. Clearances and the sweep: the aircraft-variety section above (`render-b1b-clearance`).
+
+**Rudder.** `b1b_animation::RUDDER_LIMIT` 0.45 rad caps full pedal (retail's word: 0.75 rad), opening a 2.6 ft
+gap at the taileron roots (4.4 ft before).
+
+Tests: `bays.rs` (`the_b1b_has_three_centred_bays_a_grid_each_and_the_forward_one_crosses_the_belly_seam`,
+`a_b1b_bay_hangs_twenty_mk82_four_abreast_five_tiers_and_the_roof_stops_a_sixth`),
+`aircraft_stations.rs` (the bay rows' capacity and default, the refusals), `b1b_animation.rs`
+(six door leaves from the belly polygons, the rudder cap), `ai_wings/release.rs`
+(`an_ai_bomb_leaves_each_b1b_bay_grid_inside_its_own_opening`), `bomber_batch_b.rs` (retail rows).
+Provenance: bays, grid, roof, doors, mounts and refusals fitted (agent, 2026-11-16); the 1 s travel, the
+0.95 gate and the hold are the F-22's; the record's counts and masks are retail's.

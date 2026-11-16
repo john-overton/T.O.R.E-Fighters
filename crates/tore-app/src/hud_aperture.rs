@@ -953,6 +953,26 @@ mod tests {
         assert_eq!(connected.iter().filter(|v| **v).count(), covered);
     }
 
+    /// B1B-7: the B-1B flies the B-2's 1394x508 picture by its record, so it
+    /// takes the B-2's measured glass (no fail-closed empty aperture); any other
+    /// size still fails closed.
+    #[test]
+    fn the_b1b_glass_is_the_b2_glass_for_the_shared_picture() {
+        let source = transparent(1394, 508);
+        let b1b = mask(&source, AircraftId::B1b);
+        assert_eq!(b1b, mask(&source, AircraftId::B2));
+        let at = |x: usize, y: usize| b1b[y * 1394 + x];
+        assert_eq!(at(697, 250), 1);
+        assert_eq!(at(100, 250), 0);
+        assert_eq!(at(697, 80), 0);
+        assert!(b1b.iter().filter(|v| **v == 1).count() > 240_000);
+        assert!(
+            mask(&transparent(1280, 490), AircraftId::B1b)
+                .iter()
+                .all(|v| *v == 0)
+        );
+    }
+
     /// Transparent pixels of the retail `~B2H.PIC`'s main window and the mask's
     /// coverage of them (B2-7).
     const B2_MAIN_WINDOW_PIXELS: usize = 247_572;
@@ -988,6 +1008,15 @@ mod tests {
             rgba: pic.rgba(&[[0; 3]; 256]),
             glyphs: vec![],
         };
+        // B1B-7: the B-1B (`bmbrcc.HUD`) and the Tu-160 (`b2.HUD`) draw this
+        // same picture by the record, so they take the same measured glass.
+        assert_eq!(AircraftId::B1b.cockpit(), name);
+        assert_eq!(AircraftId::Tu160.cockpit(), name);
+        assert_eq!(
+            mask(&source, AircraftId::B1b),
+            mask(&source, AircraftId::B2),
+            "the B-1B's glass is the B-2's on the shared art"
+        );
         let mask = mask(&source, AircraftId::B2);
         let (width, height) = (source.width, source.height);
         let flood = |start: usize, allowed: &dyn Fn(usize) -> bool| -> Vec<bool> {

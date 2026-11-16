@@ -2941,6 +2941,7 @@ mod profile_tests {
             ("internalFuel", 105_000),
             ("fuelConsumption", 6),
             ("aftFuelConsumption", 16),
+            ("airBrakesDrag", 256),
         ];
         let text = batch_text("B1.PT", "B-1B", "B- 1B Lancer", 636, (-2, 5), &rows, &b1b);
         let a = Aircraft::parse(text.as_bytes()).unwrap();
@@ -2953,9 +2954,15 @@ mod profile_tests {
             (a.number("internalFuel"), a.number("maxTakeoffWeight")),
             (265_274., 477_000.)
         );
-        // Weight, ceiling and the flows stay.
+        // Weight and ceiling stay; the flows are four F101-GE-102 at the cited
+        // thrust-specific fuel consumption (B1B-8, 11 and 84 lb/s).
         assert_eq!(a.number("weight"), 192_000.);
-        assert_eq!(a.number("fuelConsumption"), 6.);
+        assert_eq!(
+            (a.number("fuelConsumption"), a.number("aftFuelConsumption")),
+            (11., 84.)
+        );
+        // The speed brake is sized from the two drawn spoiler plates (B1B-8).
+        assert_eq!(a.number("airBrakesDrag"), 52.);
         assert!(a.number("weight") + a.number("internalFuel") < a.number("maxTakeoffWeight"));
         let env = |g: i32| a.envelopes.iter().find(|e| e.g == g).unwrap();
         assert_eq!(
@@ -2964,17 +2971,18 @@ mod profile_tests {
                 [1_200., 50_000.],
                 [1_210., 41_500.],
                 [1_210., 36_000.],
-                [1_120., 0.]
+                [1_027., 0.]
             ]
         );
-        // The 0 G polygon keeps its 65 ft/s step over the 1 G edge.
+        // The 0 G polygon keeps its 65 ft/s step over the 1 G edge at altitude
+        // and its 60 ft/s step at sea level (B1B-8: Mach 0.92 at sea level).
         assert_eq!(
             env(0).points[6..],
             [
                 [1_235., 52_750.],
                 [1_275., 42_375.],
                 [1_275., 36_000.],
-                [1_180., 0.]
+                [1_087., 0.]
             ]
         );
         // The -1 G row repeated the 1 G row and is held to the new edge.
@@ -2998,6 +3006,10 @@ mod profile_tests {
         assert_eq!(
             a.envelopes.iter().find(|e| e.g == 1).unwrap().points[8],
             [1_410., 36_000.]
+        );
+        assert_eq!(
+            (a.number("fuelConsumption"), a.number("airBrakesDrag")),
+            (6., 256.)
         );
         // Tu-160: empty 242,500, fuel 326,285, thrust 123,600 / 220,400; the
         // maximum, engines and ceiling stay.

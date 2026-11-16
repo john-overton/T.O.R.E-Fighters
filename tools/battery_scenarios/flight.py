@@ -19,7 +19,7 @@ from battery_scenarios._strips import ground_airport
 
 # Original roster covered by the established fixed-wing maneuver battery.
 AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su25", "mig23", "su35", "f22", "f22n", "faxx"]
-VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310", "mig25", "f16a", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc", "b52", "b2", "f117", "f111"]
+VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310", "mig25", "f16a", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc", "b52", "b2", "f117", "f111", "b1b"]
 # Aircraft whose PT disables spins (X-31 flag, F-22 family): they never enter one.
 SPIN_IMMUNE = {"x31", "f22", "f22n", "faxx"}
 
@@ -123,6 +123,10 @@ STATIONS["faxx"] = STATIONS["f22n"]
 # six a wing); its three bay rows (3, 5 and 6, nine Mk 82 each) start empty and keep an
 # empty Mk 82 selection, so three never-loaded slots follow.
 STATIONS["b52"] = [1242, 12, 0, 0, 0]
+# The B-1B (B1B-5, 2026-11-16) carries no gun and no external station: its three weapon rows are the
+# bays' (rows 5 to 7, forward, intermediate and aft), four retarded Mk 82 each by default (12), up to
+# 20 a bay on the shared grid.
+STATIONS["b1b"] = [4, 4, 4]
 
 
 def _numbers(output: str, prefix: str) -> dict:
@@ -241,6 +245,10 @@ def tank_problems(output: str) -> list[str]:
 # 488,000 lb, so its scenarios run 18,000 ticks and allow 9,000 (B52-8, 2026-11-15).
 TAKEOFF_TICKS_MAX = {"b2": 10000, "b52": 9000}
 TAKEOFF_RUN_TICKS = {"b2": "12000", "b52": "18000"}
+# The B-1B at its 477,000 lb default gross lifts off at 4,659 ticks after 5,472 ft and reaches 100 ft at
+# 5,512 ticks (46 s), so it runs 9,000 ticks like the ordinary aircraft and allows 7,000 (B1B-8,
+# 2026-11-16, agent decision); 4,500 would fail it.
+TAKEOFF_TICKS_MAX["b1b"] = 7000
 
 
 def check_takeoff(output: str, ac: str | None = None) -> list[str]:
@@ -380,6 +388,19 @@ APPROACH_TARGET["b2"] = (140, 170)
 # approach window of 150 to 180 kt.
 LIFTOFF_TARGET["f117"] = (155, 185)
 APPROACH_TARGET["f117"] = (150, 180)
+# The B-1B's windows (B1B-8, 2026-11-16) are fitted, agent decisions, from secondary figures
+# (docs/formats/aircraft-variety.md, "B-1B Lancer flight review"): "the B-1B can land as slowly as
+# 155 knots" and a takeoff roll of about 4,000 ft in a 400,000 lb class takeoff with the wings at 25
+# degrees (Air & Space Forces Magazine, "Pilot Report: B-1B", June 1986), a calculated 6,400 ft at
+# maximum afterburner with the full mission load (a Florida Tech flight test thesis, read through a
+# search summary). The scripted runs fly the 477,000 lb default load (42,000 lb of Mk 82 AIR and
+# 243,000 lb of fuel): liftoff 168.5 kt after 5,472 ft (1.09 times the 154.1 kt flapped, weight
+# scaled stall) and the approach at the model's cap, 0.85 times the 195.5 kt landing limit (166.2 kt),
+# touching down at 153 to 159 kt. The liftoff window is 155 to 185 kt, the approach window 145 to
+# 170 kt. The runs start on Athens (GRE 1, 12,000 ft): the 5,532 ft Simferopol runway is shorter
+# than the 5,671 ft run there.
+LIFTOFF_TARGET["b1b"] = (155, 185)
+APPROACH_TARGET["b1b"] = (145, 170)
 # The figures the model gives with the fitted per-aircraft stall references
 # (`STALL_REFERENCE_FRACTIONS`, 2026-09-30), for the aircraft whose figure is not
 # exactly inside John's range, kept as a regression window of plus or minus 6
@@ -408,6 +429,9 @@ KNOWN_APPROACH["b2"] = 167.5
 # The F-117A's measured liftoff and approach at its default load (F117-8, 2026-11-15).
 KNOWN_LIFTOFF["f117"] = 177.2
 KNOWN_APPROACH["f117"] = 166.2
+# The B-1B's measured liftoff and approach at its default load (B1B-8, 2026-11-16).
+KNOWN_LIFTOFF["b1b"] = 168.5
+KNOWN_APPROACH["b1b"] = 166.2
 # TOR-6 (2026-11-11): the Tornado's default load is lighter than TOR-8 measured (one centreline tank, 1,650
 # lb of external fuel, not two): liftoff 146.4 kt (was 150.6), approach 155.1 kt (was 160.1), both inside the
 # windows and the plus or minus 6 percent regression band, so no window was refitted and the known values above
@@ -431,7 +455,7 @@ KNOWN_LIFTOFF["b52"] = 158.7
 KNOWN_APPROACH["b52"] = 166.2
 # The B-52H's liftoff and approach scenarios start from a 12,000 ft runway (Greece, airport 1):
 # UKR airport 1 is 5,532 ft, shorter than its 7,674 ft takeoff run and its 5,000 ft rollout.
-THEATER_FOR = {"b52": "GRE"}
+THEATER_FOR = {"b52": "GRE", "b1b": "GRE"}
 # Internal fuel of each aircraft's default load, pounds.
 INTERNAL_FUEL_LB = {
     "f18": 11220, "rafale": 9900, "f14": 15741, "a4e": 4434, "x31": 9975, "mig29": 13000, "su27": 19000,
@@ -469,6 +493,9 @@ INTERNAL_FUEL_LB["b52"] = 312197
 INTERNAL_FUEL_LB["b2"] = 167000
 # F117.PT internal fuel, 18,500 lb (the record's own tank; the approach scenario flies 65 percent, 12,025 lb).
 INTERNAL_FUEL_LB["f117"] = 18500
+# B1.PT internal fuel, 265,274 lb (BMB-B2: the Air Force fact sheet). The approach scenario flies 65
+# percent, 172,428 lb, a gross weight of 406,428 lb with the 42,000 lb default load.
+INTERNAL_FUEL_LB["b1b"] = 265274
 APPROACH_FUEL_CAP_LB = 100000
 
 
@@ -584,6 +611,8 @@ LIFTOFF_AIRCRAFT += ["b52"]
 LIFTOFF_AIRCRAFT += ["b2"]
 # The F-117A joins them (F117-8, 2026-11-15).
 LIFTOFF_AIRCRAFT += ["f117"]
+# The B-1B joins them (B1B-8, 2026-11-16).
+LIFTOFF_AIRCRAFT += ["b1b"]
 
 
 def liftoff_scenarios() -> list[Scenario]:
@@ -1241,8 +1270,10 @@ REFUSED_SLOTS = {
 
 # Stations whose one round is a pack of several bodies: the shots counted are the bodies, the
 # station's ammunition falls by one pack. The Tornado's MK82P3.JT row (inner wing) is the only
-# one: each release sends three Mk 82s (1,500 lb) and takes one round (TOR-6, 2026-11-11).
-SHOTS_PER_ROUND = {("tornado", 3): 3, ("tornadoc", 3): 3}
+# one: each release sends three Mk 82s (1,500 lb) and takes one round (TOR-6, 2026-11-11). The B-1B's
+# three bay rows hold the retail MK-82 AIR 7-Pack (`MK82AIR.JT`, 3,500 lb): a release sends seven
+# bombs and takes one round (B1B-5, 2026-11-16).
+SHOTS_PER_ROUND = {("tornado", 3): 3, ("tornadoc", 3): 3, ("b1b", 1): 7, ("b1b", 2): 7, ("b1b", 3): 7}
 
 
 def check_slot(ac: str, slot: int):
@@ -1397,7 +1428,57 @@ def slot_scenarios() -> list[Scenario]:
         timeout=300,
         notes="B-52 pylon release: a Mk 82 leaves the underwing beam with the bay doors shut (18 loaded, nine a wing; the Harpoon default needs a target the preview does not give it, its live-fire slot scenario covers it).",
     ))
+    # B1B-5 (2026-11-16): the B-1B's three fitted bays (rows 5, 6 and 7, four retarded Mk 82 seven-packs
+    # each by default) through the same actual one-press release: the doors open to 0.95 before the pack
+    # leaves, then close; and a 20-press ripple from the forward bay (a full bay of 20 Mk 82: the bottom
+    # tier first, the stores of a row abreast outermost first alternating sides).
+    for row in (5, 6, 7):
+        out.append(Scenario(
+            name=f"flight-bay-fire-b1b-row{row}", lane="flight",
+            args=["--stores-preview", "{work}/frames"], window=True,
+            env={"TORE_STORES_PREVIEW_AIRCRAFT": "b1b",
+                 "TORE_STORES_PREVIEW_FIRE": str(row)},
+            expect=[f"Stores firing: b1b row={row} PASS"],
+            outputs=[f"frames/b1b-fire-row{row}-t000.png", f"frames/b1b-fire-row{row}-t400.png"],
+            timeout=300,
+            notes="B-1B bay release: the doors open before the retarded Mk 82 pack leaves and close after it, as the F-22's, F-117's and B-2's do (forward, intermediate and aft bay).",
+        ))
+    out.append(Scenario(
+        name="flight-bay-ripple-b1b", lane="flight",
+        args=["--stores-preview", "{work}/frames"], window=True,
+        env={"TORE_STORES_PREVIEW_AIRCRAFT": "b1b",
+             "TORE_STORES_PREVIEW_RECORDS": "5=MK82.JT:20",
+             "TORE_STORES_PREVIEW_FIRE": "5",
+             "TORE_STORES_PREVIEW_PRESSES": "20"},
+        expect=["Stores firing: b1b row=5 PASS", "Stores ripple: b1b"],
+        check=b1b_ripple_problems,
+        timeout=300,
+        notes="20 presses through the B-1B's forward bay holding 20 Mk 82: one bomb a press, the bottom tier first, outermost first alternating sides.",
+    ))
     return out
+
+
+def b1b_ripple_problems(output: str) -> list[str]:
+    """A full B-1B bay (20: 4 abreast, 5 tiers) empties one bomb a press from the bottom tier up (B1B-5)."""
+    rows = [(int(m.group(1)), tuple(float(v) for v in m.group(2).split()))
+            for m in re.finditer(r"Stores ripple: b1b tick=\d+ station=(\d+) at \[([-\d. ]+)\]", output)]
+    if len(rows) != 20:
+        return [f"{len(rows)} releases, expected 20"]
+    problems = []
+    if len({station for station, _ in rows}) != 1:
+        problems.append(f"the ripple left one bay: {[station for station, _ in rows]}")
+    points = [p for _, p in rows]
+    tiers = [round(p[1], 3) for p in points]
+    for tier in range(5):
+        row = tiers[tier * 4:tier * 4 + 4]
+        if len(set(row)) != 1:
+            problems.append(f"tier {tier} was not four stores at one height: {row}")
+    if tiers != sorted(tiers):
+        problems.append("the ripple did not go up a tier at a time from the bottom")
+    first = [p[0] for p in points[:4]]
+    if not (first[0] < first[2] < first[3] < first[1] and first[0] < 0 < first[1]):
+        problems.append(f"the first row was not outermost first alternating sides: {first}")
+    return problems
 
 
 def b2_ripple_problems(output: str) -> list[str]:
@@ -1484,6 +1565,18 @@ def jettison_scenarios() -> list[Scenario]:
                     timeout=180,
                 )
             )
+    # B1B-6: the B-1B has no gun, so its first slot is the forward bay (4 seven-packs): jettisoned
+    # like the other two.
+    out.append(
+        Scenario(
+            name="flight-jettison-b1b-slot1",
+            lane="flight",
+            args=["--live-fire", "--aircraft", "b1b", "--weapon-slot", "1", "--combat-command", "jettison", "--combat-probe-ticks", "300", "--capture-flight", "{work}/j.ppm", "--no-audio"],
+            window=True,
+            check=check_jettison("b1b", 1),
+            timeout=180,
+        )
+    )
     return out
 
 
@@ -1525,6 +1618,13 @@ def countermeasure_scenarios() -> list[Scenario]:
     out.append(Scenario(name="flight-countermeasures-b2", lane="flight", args=args, window=True,
                         check=check_countermeasures, timeout=180,
                         notes="The B-2's retail F18.ECM row: 30 chaff and 30 flares, five and three released (B2-6)."))
+    # B1B-6: the B-1B keeps the same retail F18.ECM row (B1.PT names it; its real ALQ-161 is a jammer).
+    args = ["--live-fire", "--aircraft", "b1b"] + ["--combat-command", "chaff"] * 5
+    args += ["--combat-command", "flare"] * 3
+    args += ["--countermeasure-preview", "240", "--capture-flight", "{work}/cm.ppm", "--no-audio"]
+    out.append(Scenario(name="flight-countermeasures-b1b", lane="flight", args=args, window=True,
+                        check=check_countermeasures, timeout=180,
+                        notes="The B-1B's retail F18.ECM row: 30 chaff and 30 flares, five and three released (B1B-6)."))
     out.extend(tornado_countermeasure_scenarios())
     return out
 
@@ -2155,7 +2255,7 @@ def capture_scenarios() -> list[Scenario]:
     # AL1 and refuses a ground start ("an enemy airfield").
     for ac in AIRCRAFT:
         add(f"groundstart-{ac}", ["--free-flight", "--aircraft", ac, "--theater", "UKR", "--ground-start", "9", "--flight-view", "1", "--flight-look", "150,-15", "--flight-zoom", "1.5"])
-    for ac in ("f22", "f22n", "b52", "f117", "b2"):
+    for ac in ("f22", "f22n", "b52", "f117", "b2", "b1b"):
         for bay in ("0", "0.5", "1"):
             add(f"bay-{ac}-{bay}", ["--free-flight", "--aircraft", ac, "--flight-view", "1", "--flight-look", "150,-30", "--flight-bay", bay])
     return out

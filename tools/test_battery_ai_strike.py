@@ -1443,6 +1443,42 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class B1BTests(unittest.TestCase):
+    """The B-1B strike checks (slices B1B-6 and B1B-9)."""
+
+    def cells(self, bay=0, count=8):
+        forward = s.B1B_BAYS[bay][0]
+        return [(s.B2_COLUMNS[n % 4], -0.62 + 1.3 * (n // 4), forward) for n in range(count)]
+
+    def stick(self, bay=0, cells=None, **kwargs):
+        cells = self.cells(bay) if cells is None else cells
+        out = b2_run(cells, station=bay, **kwargs).replace("aircraft=B2", "aircraft=B1b")
+        return out.replace("note=chosen", "note=chosen\nai-strike: PROFILE t=0.008 name=level", 1)
+
+    def test_a_full_stick_from_each_bay_passes(self):
+        self.assertEqual(s.b1b_stick_problems(self.stick(0)), [])
+        self.assertEqual(s.b1b_bay_row_problems(1, "mid")(self.stick(1)), [])
+        self.assertEqual(s.b1b_bay_row_problems(2, "aft")(self.stick(2)), [])
+
+    def test_the_quick_wing_wants_the_strike_role(self):
+        quick = self.stick().replace("PROFILE t=0.000 name=none", "ROLE t=0.000 plane=1 role=strike\nai-strike: PROFILE t=0.000 name=none")
+        self.assertEqual(s.b1b_quick_wing_problems(quick), [])
+        self.assertTrue(any("role" in p for p in s.b1b_quick_wing_problems(self.stick())))
+
+    def test_a_short_stick_a_wrong_bay_a_shut_door_or_a_dive_fails(self):
+        cells = self.cells(0)
+        self.assertTrue(any("stick of 8" in p for p in s.b1b_stick_problems(self.stick(cells=cells[:2]))))
+        self.assertTrue(any("one place" in p for p in s.b1b_stick_problems(self.stick(cells=[cells[0]] * 8))))
+        wrong = [(c[0] + 3.0, c[1], c[2]) for c in cells]
+        self.assertTrue(any("grid's place" in p for p in s.b1b_stick_problems(self.stick(cells=wrong))))
+        shut = self.stick().replace("bay=1.00", "bay=0.00")
+        self.assertTrue(any("doors at 0.00" in p for p in s.b1b_stick_problems(shut)))
+        self.assertTrue(any("bay row 2" in p for p in s.b1b_bay_row_problems(2, "aft")(self.stick(1))))
+        self.assertTrue(any("B1b" in p for p in s.b1b_stick_problems(b2_run(cells, station=0))))
+        dive = self.stick().replace("name=level", "name=dive")
+        self.assertTrue(any("Heavy" in p for p in s.b1b_stick_problems(dive)))
+
+
 class ManeuverTests(unittest.TestCase):
     """ST-T2: the dive angle, release height, first pass, lead and burst checks."""
 
