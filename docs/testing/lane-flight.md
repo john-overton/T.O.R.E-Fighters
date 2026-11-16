@@ -147,8 +147,8 @@ Update (T95-8, 2026-11-16): `tu95` joins `VARIETY_AIRCRAFT`, `LIFTOFF_AIRCRAFT` 
 approach scenarios) and `HEAVY_AIRCRAFT` (`flight-variety-gcurve-tu95`) in `flight.py`, with fitted windows (liftoff
 135 to 165 kt, recorded 137.1; approach 145 to 170 kt, recorded 158.1), a 10,000 tick takeoff limit and 18,000 tick
 run (`TAKEOFF_TICKS_MAX`, `TAKEOFF_RUN_TICKS`) and Greece airport 1 (`THEATER_FOR`). `ai.py` adds
-`ai-heavy-takeoff-tu95-gre-a1` and `ai-heavy-land-tu95-ukr-a2` (90,000 ticks, off-pavement ticks tolerated like the
-B-52's). Results: the
+`ai-heavy-takeoff-tu95-gre-a1` and `ai-heavy-land-tu95-ukr-a2` (90,000 ticks; the landing tolerated off-pavement ticks like
+the B-52's until T95-9, 2026-11-16, which closed its taxi-in: it now demands the pavement). Results: the
 [variety flight baseline](../baselines/variety-flight.md#tupolev-tu-95-bear-h-validation-2026-11-16).
 
 Update (MF1-8, 2026-11-11): the Mirage F1 results, clean and with the default load,
@@ -381,6 +381,9 @@ adds order kinds.
 | `ai-strike-b52-pylon` (B52-9) | The same B-52 with six Mk 82 on the wing pylons (`--station 1 --count 6`) | Six releases 0.25 s apart from the two beams, left and right alternating (right -15.96, 15.96, -18.70, 18.70, -17.33, 17.33 ft, up 2.4, forward 10.33), every `bay=0.00` and no `BAY` line, an impact, egress, not lost |
 | `ai-strike-b52-quick-wing` (B52-9) | A Quick Mission with the Ukraine factory as the ground target and a B-52 wing (`--quick-wing --station 2 --count 9`) | `ROLE strike`, the same bay stick of eight with the doors open for it at the 5,000 ft heavy floor, egress, not lost |
 | `ai-strike-b52-antiship` (B52-9) | An AI B-52 with two AGM-84E on the pylons (`--station 1 --count 2`), 15 nm from the Ukraine surface fleet's Krivak at 20,000 ft, 60 s | One Harpoon leaves each wing (right -17.33 and 17.33 ft, up 2.3, forward 10.33), the doors never move, both hit the Krivak and it is destroyed. The run stops at 60 s: after the kill the AI searches on and is lost at about 137 s within 8,000 ft of the fleet (cause not traced) |
+| `ai-strike-tu95-stick` (T95-9, 2026-11-16) | An AI Tu-95 (Heavy) on `~QUCOL` at 20,000 ft, 12 nm out, six Mk 82 in the belly bay (`--station 1 --count 6`) | The doors open before the first bomb (a `BAY` line), six releases 0.25 s apart each with `bay=1.00`, from the row's six places (right -1.95, 1.95, -0.65, 0.65 ft at 16.19 ft forward, then -1.95 and 1.95 ft at 8.64 ft; up -2.98), station 1, the doors read shut 1.5 to 6 s after the last, an impact, egress, not lost |
+| `ai-strike-tu95-quick-wing` (T95-9) | A Quick Mission with the Ukraine factory as the ground target and a Tu-95 wing (`--quick-wing --station 1 --count 6`) | `ROLE strike`, the same bay stick of six with the doors open for it at the 5,000 ft heavy floor, the factory killed, egress, not lost |
+| `ai-strike-tu95-antiship`, `ai-strike-tu95-antiship-beams` (T95-9) | An AI Tu-95 with two AS-16 on the bay row (`--station 1`) or the wing beams (`--station 2`), 15 nm from the Ukraine surface fleet's Krivak at 20,000 ft, 90 s | **Pins a known limit**: the radar missile is selected (`SELECTION kind=RadarAgm`, the station asked for) and aimed at the Krivak, and **nothing is released**, no `BAY` line, not lost. The run fails by design the day the AI can fire the AS-16 (see aircraft variety, T95-9) |
 | `a2g-release-origin-b2` (B2-6) | The human trigger on the B-2's four bay rows (`--a2g-run --attack release`, 12 presses a Mk 82 row, 4 a Paveway row) | Each release leaves where it hangs: outermost first, alternating sides, front row before back, bottom tier first |
 | `a2g-laser-b2` (B2-6) | A GBU-27 from the left bay at 20,000 ft on the B-2's own laser spot | Guides to within a second of the ground, kills the tank |
 | `flight-livefire-b2-slot1` to `slot4`, `flight-countermeasures-b2` (B2-6) | `--live-fire --aircraft b2`, `STATIONS["b2"] = [32, 32, 0, 0]` | One Mk 82 a slot (the empty Paveway slots fall to the sister bay), 30 chaff and 30 flares |

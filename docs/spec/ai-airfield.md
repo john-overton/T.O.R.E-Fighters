@@ -538,3 +538,14 @@ B-52 at every weight, nobody else in the roster), so every other aircraft's law 
 Evidence is in the [aircraft variety](../formats/aircraft-variety.md#b-52-ai-missions-multiplayer-and-replay-b52-9-2026-11-16)
 B52-9 section: the full Southampton cycle is on the pavement from takeoff to parking (743 ticks off before, none
 after), the 80,000 lb landing at Simferopol is on it from the touchdown (1,201 ticks off before, none after).
+
+**Update (T95-9, 2026-11-16): the taxi-in stop of an aircraft whose wheels need power.** **Fitted**, agent decision.
+One more rule, gated on `Situation::taxi_throttle_floor > 0` like the two above (the B-52 and the Tu-95; every
+other aircraft's law is as it was, bit for bit).
+
+| Rule | Value | Why |
+| --- | --- | --- |
+| While `stopping` at a taxi anchor, steer along the leg's own course (the bearing from the leg's start to its anchor), not at the anchor from where it is | the leg's course | The Tu-95's brakes (1.0 ft/s squared) let it roll 20 to 30 ft past an anchor it is stopping at; steering for the anchor behind it turned it 150 degrees at 5 kt and 30 ft off the taxiway, at two corners of the Simferopol taxi-in (1,357 ticks, 11.3 s off the pavement, parked at 607.1 s). Held to the leg's course it rolls straight on and stops: 0 ticks off, parked at 599.9 s |
+
+Evidence and the baseline comparison are in the [aircraft variety](../formats/aircraft-variety.md#tu-95-bear-h-ai-missions-multiplayer-and-replay-t95-9-2026-11-16)
+T95-9 section.

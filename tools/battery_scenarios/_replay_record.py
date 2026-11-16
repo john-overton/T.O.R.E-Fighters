@@ -626,6 +626,22 @@ def scenarios() -> list[Scenario]:
         )
     )
 
+    # The Tu-95 Bear-H as the player and in both wings (slice T95-9): a 2 v 2 recorded three times, so the
+    # TU95.PT identity (four turboprops, the belly bay and the slewed tail turret, 16 AS-16 on the bay row and
+    # the beams) round-trips through the recording, plays back with nothing missing and records the same
+    # twice. The tail guns fire in an all-Tu-95 fight (230 shots by 4,800 ticks, none by 2,400), so the slewed
+    # rounds are in the recording too. Its
+    # bay-release recording is `replay-a2g-tu95-ripple`.
+    out.append(
+        record_scenario(
+            "replay-rec-tu95-2v2",
+            ["--ai-probe-ticks", "4800", "--aircraft", "tu95", "--probe-friendly-aircraft", "tu95",
+             "--probe-enemy-aircraft", "tu95", "--probe-fight", "2:2", "--separation", "5",
+             "--probe-attack", "300:10"],
+            timeout=500,
+        )
+    )
+
     # Every imported aircraft as the enemy and as the player.
     for ac in AIRCRAFT:
         out.append(

@@ -298,6 +298,23 @@ def b52_gun_fight_problems(output: str) -> list[str]:
     return problems
 
 
+def tu95_gun_fight_problems(output: str) -> list[str]:
+    """`ai-tu95-quick-mission-2v2` (slice T95-9): the probe's usual checks, every Tu-95 still holds all
+    sixteen AS-16 (a surface missile is refused against an aircraft, so nothing fires one: six in the
+    bay row and ten on the beams), and the tail guns did shoot (the fight has shots in it)."""
+    problems = probe_problems(output)
+    lines = STORES_LINE.findall(output)
+    if len(lines) < 3:
+        problems.append(f"{len(lines)} AI stores lines, want one per Tu-95")
+    for actor, stations in lines:
+        if "AS-16 x6" not in stations or "AS-16 x10" not in stations:
+            problems.append(f"actor {actor} lost AS-16: {stations}")
+    total = SHOTS.search(output)
+    if total is None or int(total.group(1)) == 0:
+        problems.append("no shot in an all-Tu-95 fight: the tail guns never fired")
+    return problems
+
+
 def b2_no_air_to_air_checker() -> Callable[[str], list[str]]:
     """The B-2 wing in a fight (slice B2-9): the probe's usual checks, and the B-2s carry no gun (rounds=0) and
     nothing but Mk 82 and GBU-27 on their stations, so they fire no air-to-air shot; the player's own run
@@ -1704,7 +1721,9 @@ def scenarios() -> list[Scenario]:
     # full takeoff weights, and every one of the three flies the pieces at the field lengths of the
     # retail missions (docs/spec/ai-airfield.md, "Heavy bombers"). The land order comes after the
     # climb-out (a B-2 is airborne at 205 s, a B-52 at 200 s).
-    for aircraft, order, ticks, kt, pavement in (("b2", 30000, 150000, 175, True), ("b52", 36000, 150000, 175, True)):
+    # The Tu-95 (T95-9, 2026-11-16) flies it too, land order after its climb-out (airborne at about 150 s).
+    for aircraft, order, ticks, kt, pavement in (("b2", 30000, 150000, 175, True), ("b52", 36000, 150000, 175, True),
+                                                 ("tu95", 36000, 150000, 175, True)):
         out.append(probe(f"merged-airfield-{aircraft}-wing2", [
             "--theater", "FRA", "--ground-start", "14",
             "--aircraft", aircraft, "--probe-friendly-aircraft", aircraft,
@@ -1728,15 +1747,17 @@ def scenarios() -> list[Scenario]:
             notes="BMB-AI: the heavy takeoff (flaps and gear kept until the speed is there) at its full weight."))
     # Landing at Simferopol (UKR 2, 5,532 ft, the Ukraine's default field), sent home from the air, at a
     # landing weight: B-2 60,000 lb of fuel, B-52 80,000 lb, F-117 7,000 lb, Tu-95 60,000 lb. The Tu-95
-    # (T95-8, 2026-11-16) touches down at 121 kt and parks at 603 s, 3 s past the 600 s the others get, with
-    # 3.7 s off the pavement in its taxi-in like the B-52's, so it runs 90,000 ticks and tolerates the same.
+    # (T95-8, 2026-11-16) touches down at 121 kt and parks at 603 s, 3 s past the 600 s the others get, so it
+    # runs 90,000 ticks. T95-9 (2026-11-16): its taxi-in had 11 s off the pavement at two anchors (it rolled on
+    # past an anchor with its weak brakes and steered back for it); a heavy now holds the leg's course while it
+    # stops, so it parks at 600 s with 0 ticks off the pavement and the check demands the pavement.
     for aircraft, fuel, kt in (("b2", 60000, 150), ("b52", 80000, 145), ("f117", 7000, 190), ("tu95", 60000, 150)):
         out.append(probe(f"heavy-land-{aircraft}-ukr-a2", [
             "--theater", "UKR", "--aircraft", aircraft, "--probe-friendly-aircraft", aircraft,
             "--probe-wing-size", "2", "--probe-wing-order", "600:bug-out", "--probe-fuel", str(fuel),
             "--separation", "200", "--probe-wing-only", "--probe-pavement"],
             ticks=90000 if aircraft == "tu95" else 72000, timeout=2400,
-            check=heavy_landing(kt, pavement=aircraft != "tu95"),
+            check=heavy_landing(kt),
             notes=f"BMB-AI: an airborne {aircraft.upper()} sent home lands at Simferopol (5,532 ft) at {kt} kt or slower "
                   f"with {fuel} lb of fuel, rolls out, clears and parks, on the pavement all the way (the B-52's "
                   "touchdown used to be 140 ft left of the runway's edge: B52-9)."))
@@ -2122,6 +2143,24 @@ def scenarios() -> list[Scenario]:
                                               "--probe-enemy-aircraft", "su27",
                                               "--separation", "5", *attack), ticks=7200,
                      notes="The B-52 wing against Su-27s: the probe's usual checks hold for the B-52s and the "
+                           "Su-27s, whoever wins."))
+    # 13l. The Tu-95 Bear-H in a mission (slice T95-9, 2026-11-16): the strike class is Heavy by the rule, the
+    # record's tail turret is a slewed mount (it fires astern, with BMB-AI's aim error), and its AS-16 are
+    # refused against an aircraft. In an all-Tu-95 fight the tail guns are the only weapons: the probe's usual
+    # checks must hold and the guns must have been used. The strike is `ai-strike-tu95-*` (ai_strike.py).
+    out.append(probe("tu95-quick-mission-2v2", fight(2, 2, "--aircraft", "tu95",
+                                                     "--probe-friendly-aircraft", "tu95",
+                                                     "--probe-enemy-aircraft", "tu95",
+                                                     "--separation", "5", *attack), ticks=7200,
+                     check=tu95_gun_fight_problems,
+                     notes="All Tu-95: the player's wing and the enemy wing fly the TU95.PT identity (four turboprops, "
+                           "tail turret, six AS-16 in the bay and ten on the beams) in a 2 v 2. The AS-16 are refused "
+                           "against aircraft; the tail guns do the shooting."))
+    out.append(probe("tu95-vs-su27-2v2", fight(2, 2, "--aircraft", "tu95",
+                                               "--probe-friendly-aircraft", "tu95",
+                                               "--probe-enemy-aircraft", "su27",
+                                               "--separation", "5", *attack), ticks=7200,
+                     notes="The Tu-95 wing against Su-27s: the probe's usual checks hold for the Tu-95s and the "
                            "Su-27s, whoever wins."))
     # 14. The fixed acceptance probes.
     out.append(Scenario(name="ai-roster-probe", lane="ai", args=["--ai-roster-probe-ticks", "3600", "--no-audio"], timeout=1800))

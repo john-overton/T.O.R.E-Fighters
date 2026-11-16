@@ -16286,8 +16286,11 @@ the default load, so `taxi_throttle_of` raises the taxi throttle floor, as for t
 and pass: `ai-heavy-takeoff-tu95-gre-a1` (Athens, 12,000 ft; airborne and climbing out) and
 `ai-heavy-land-tu95-ukr-a2` (Simferopol, 60,000 lb of fuel; touchdown 121 kt). The landing parks at 603.2 s, 3 s past
 the 600 s the other heavies' scenarios run, with 445 ticks (3.7 s) off the pavement in the taxi-in (the B-52's is
-1,201), so the Tu-95's runs 90,000 ticks and tolerates the off-pavement ticks the way the B-52's does. The AI's own
-handling of the Tu-95 (strike, quick mission) is T95-9's.
+1,201), so the Tu-95's runs 90,000 ticks and tolerates the off-pavement ticks the way the B-52's does. (Update, T95-9,
+2026-11-16: after B52-9's coasting law the 445 became 1,357; T95-9's stopping law took it to 0, parked at 599.9 s, and
+the scenario now demands the pavement; see
+[Tu-95 AI, missions, multiplayer and replay](#tu-95-bear-h-ai-missions-multiplayer-and-replay-t95-9-2026-11-16).)
+The AI's own handling of the Tu-95 (strike, quick mission) is T95-9's.
 
 ### Engine and propeller model: the limit
 
@@ -16324,3 +16327,110 @@ All through `.local/m3-imports/light3.sh`, profile `.local/m3-aircraft/profile-t
 Provenance: the real figures are cited above (Jane's text in `TU95.INF`, Wikipedia "Tupolev Tu-95" and "Kuznetsov
 NK-12", airforce-technology.com "Tu-95MS strategic bomber"); the thrust, drag shape, edge vertex, lapse,
 rolling and brake terms and the alignment are fitted, agent decisions of 2026-11-16. No retail bytes are committed.
+
+## Tu-95 Bear-H AI, missions, multiplayer and replay (T95-9, 2026-11-16)
+
+Implementation and verification mode, slice T95-9 (the Tu-95's counterpart of B52-9, B2-9 and F117-9). The AI
+work was asked for by John through the program (AGENTS.md: no AI work unless John asks). Everything here is
+`fitted`, agent decisions of 2026-11-16, except where a number is a record's. The shared heavy-bomber rules of
+[BMB-AI](#ai-fixes-for-the-bombers-bmb-ai-2026-11-16) and the B-52's two airfield laws of
+[B52-9](#b-52-ai-missions-multiplayer-and-replay-b52-9-2026-11-16) (a 3,000 ft final lookahead and a coast over
+the taxi speed, both gated on `Situation::taxi_throttle_floor > 0`, which the Tu-95 meets at 0.58) carry the
+Tu-95; this slice adds one more gated airfield law, scenarios and one unit test.
+
+### The taxi-in is now clean (one more gated airfield law)
+
+T95-8 left the heavy landing with 3.7 s off the pavement and a 90,000 tick run. After the merge with B52-9 the
+landing at Simferopol (60,000 lb of fuel) had **1,357 ticks (11.3 s) off the pavement at two anchors** (legs 2
+and 4 of the taxi-in), and parked at 607.1 s. The cause was the one B52-9 found in the B-52's taxi-in, one step
+later: the Tu-95's brakes are weak (1.0 ft/s squared, T95-8), so it rolled 20 to 30 ft past an anchor it had
+been told to stop at, and while stopping it steered for the anchor *behind* it, turned 150 degrees at 5 kt and
+swung 30 ft off the taxiway before the next leg began.
+
+The law (`ai/airfield.rs`, `Sequence::command`): while `stopping` at an anchor, an aircraft with
+`taxi_throttle_floor > 0` steers along the leg's own course (the bearing from the leg's start to its anchor)
+instead of the bearing from where it is to the anchor. A fighter, a transport or any aircraft with no floor
+steers as before, so their runs are unchanged. Unit test
+`a_heavy_stopping_past_an_anchor_holds_the_legs_course`. Result at Simferopol: **0 of 57,086 ground ticks off the
+pavement, parked at 599.9 s** (was 1,357 and 607.1 s). The Southampton cycle (`ai-merged-airfield-b52-wing2`) is
+unchanged bit for bit, parked at 1,177.5 s.
+
+**The baseline comparison** (the brief's: ai-takeoff, ground, theater, records-land, merged-airfield, ils-terrain,
+taxi and lost-lead, plus every `ai-heavy-*`: 170 scenarios) on the binary before this slice's change (the merge
+`e3be7164`) and after it, `--jobs 3`, logs compared line for line apart from the command and the clock:
+**165 identical, 5 different**. The five: the two Tu-95 scenarios (the point of the change: before, 1,357 and 433
+ticks off the pavement and `FAIL` against the tightened check; after, 0 and `pass`), `ai-ils-terrain-fra-a9` (its
+only difference is the session clock; it fails the same way on both, `land order was never given`, a failure that
+predates this slice), and the **two B-52 scenarios**, which the law reaches because the B-52 has a taxi floor too:
+`ai-heavy-land-b52-ukr-a2` parks at the same spot 0.9 s earlier (533.2 s against 534.1 s) and
+`ai-merged-airfield-b52-wing2` parks at the same spot 5 ticks later (141,302 against 141,297); both still pass with 0
+ticks off the pavement. The B-1B and Tu-160 (no taxi floor) are bit-identical in a ground takeoff with a land order at
+Southampton on both binaries (`checks/T95-9/cyc/`). Logs: `.local/m3-aircraft/checks/T95-9/cmp-base/`, `cmp-new/`,
+`compare.txt`.
+
+### The AI strike from the bay (and the beams)
+
+`--a2g-run UKR QUCOL --pilot ai --aircraft tu95 --load MK82 --station 1 --count 6` (the Tu-95's bay row is
+station 1, the wing beams station 2; the beams take the AS-16 only, so there is no bomb stick from them). The
+B-2's and B-52's stick rules needed no change:
+
+| Run | What the log shows |
+| --- | --- |
+| Six Mk 82 in the belly bay, 20,000 ft, 12 nm | `BAY` open at 81.7 s (0.96), six releases 82.2 to 83.5 s, 0.25 s apart, each `bay=1.00`, from right -1.95, 1.95, -0.65, 0.65 ft (front row, 16.19 ft forward) then -1.95 and 1.95 ft (back row, 8.64 ft forward), up -2.98 ft; the doors read shut at 85.4 s, 1.95 s after the last; impacts at 118.8 to 119.9 s, 184 to 719 ft from the aim (the stick walks on, as the B-2's and B-52's do); egress at 131.4 s; not lost. The human's own run leaves from the same six places (`a2g-run --station 1`, checked by hand) |
+| Quick Mission, factory target, `--quick-wing` | `ROLE strike` for the wing (the bomber-class default), doors open at 285.0 s, the same six leave at 5,007 ft and 193 kt, the factory is destroyed (0 of 100 left), egress at 322.7 s |
+| Two AS-16 on the bay row or the beams against the Krivak (`ai-strike-tu95-antiship`, `-antiship-beams`) | **A known limit, pinned.** The AI selects the Krivak with the radar missile (`SELECTION kind=RadarAgm`), flies at it, and has released nothing at 90 s; the doors never move. Run on, it turns to defend at 123 s and is hurt from 140 s |
+
+**Why the AS-16 never leaves** (no code changed; the evidence is in `.local/m3-aircraft/checks/T95-9/strike-as16-*.log`):
+
+1. The AI fires a seeker missile inside half its zone-1 maximum (20,000 ft slant for the AS-16's 6.58 nmi, 39,990
+   ft) and only with the target inside the zone's angles and altitude band
+   (`ai_wings/strike.rs`, `seeker_lock`). At 20,000 ft the slant is never under 19,993 ft, so the run never
+   comes due; the AI's bay doors open (`COMMIT open=yes`) and shut again over a cargo ship with no release.
+2. Lower, the fleet ends it first. The Ukraine and Vladivostok fleets' defences kill the 393 hit point Tu-95
+   from about 25,000 to 30,000 ft out (a Krivak, a Kirov, a Sovremennyy and the Jianghus all carry missiles and
+   guns): over `~QUSFLT`, `~QULFLT` and `~QVSFLT` at 3,000, 8,000, 10,000, 12,000 and 20,000 ft (and from four
+   headings at the Vladivostok support ship) it was lost 52 to 90 s in with no release. The cargo-ship stem
+   `~QWTCARG` of the WTA theater has no ship defences but is ringed by SA-6 and AAA sites that end a Tu-95 at
+   1,500 and 10,000 ft too; at 12,000 to 17,000 ft it flies over the ship (closest 105 to 156 ft) and releases
+   nothing.
+3. The B-52's AGM-84E sinks the Krivak from 15 nm because the Harpoon outranges the fleet; the AS-16 does not.
+   Real Kh-15 range is about 150 km; the retail record's 6.58 nmi is a weapon-data question outside this slice
+   (see the T95-0 note on the Kh-15).
+
+Open item for John: give the AS-16 a longer reach (a record edit), or let the heavy AI drop to the missile's band
+when no defence covers the target.
+
+### The AI in a 2 v 2 (the tail turret)
+
+`ai-tu95-quick-mission-2v2` flies every wing as the Tu-95 (Heavy strike class, the slewed tail turret, 6 AS-16
+in the bay and 10 on the beams): the probe's usual checks hold, every Tu-95 still holds all sixteen AS-16 (a
+surface missile is refused against an aircraft) and the tail guns shoot (**263 shots in 7,200 ticks, 230 by
+4,800**). `ai-tu95-vs-su27-2v2` flies the Tu-95 wing against two Su-27s (8 shots; the probe's usual checks hold
+whoever wins).
+
+### Quick Mission, multiplayer, replay
+
+- **Quick Mission.** `the_tu95_is_a_quick_mission_player_and_a_wing_choice` (`quick_mission.rs`) pins that the
+  Tu-95 is the player's choice and every AI wing field's, by its own key `TU95.PT` and name "Tu- 95 Bear-H"
+  (retail's spacing), that the drafted mission carries it as the player and in every wing and never another
+  bomber, and that the stealth night rule is not its. `ai-strike-tu95-quick-wing` is the live run above.
+- **Multiplayer.** `net-a2g-stores-tu95`: both players in Tu-95s, `tore-bot --a2g bomb --load MK82.JT` (the bay
+  row is the only station that takes a Mk 82): the watcher sees a Mk 82 leave plane 0, its stores empty, the bay
+  stores drawn (3, from 7 stores events of 76 bytes, the largest 16) and plane 0's bay doors at 1.00. The tail
+  turret is not covered over the wire: `tore-bot` has no gun role (the B-52's limit).
+- **Replay.** `replay-rec-tu95-2v2` records the all-Tu-95 2 v 2 (4,800 ticks, with the turret's rounds in
+  flight) three times: `--verify-render` passes with nothing missing or differing and two runs record the same.
+  `replay-a2g-tu95-ripple` records the six-Mk 82 bay ripple (`--station 1 --count 6 --repeat 6 --gap 0.5`), 6,154
+  ticks compared with none missing or differing, read back as six releases and outcomes, with the recorded bay
+  device shut at both ends and at 0.95 or more at every release.
+
+### Not done, open
+
+- The AS-16 limit above, and with it any AI anti-ship strike by the Tu-95.
+- The AI Tu-95 at the heavy floor and the missile's zone altitude band were not traced further.
+- The turret over the wire (no `tore-bot` gun role).
+- The Tu-95 at 388,894 lb needs 7,417 ft to take off (T95-8): a 5,532 ft field overruns it, as BMB-AI item 2
+  says of the B-52. Unchanged.
+
+Provenance: the airfield law, the scenarios and their windows are fitted agent decisions of 2026-11-16; the
+stations, ordnance and AS-16 record are T95-5 to T95-7's; no retail bytes are committed.
