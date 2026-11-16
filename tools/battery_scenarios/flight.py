@@ -114,6 +114,11 @@ STATIONS = {
 STATIONS["tornadoc"] = STATIONS["tornado"]
 STATIONS["f22n"] = [750, 2, 2, 4, 0]
 STATIONS["faxx"] = STATIONS["f22n"]
+# The B-52H (B52-5, 2026-11-15): the M61 tail gun (row 4, 1,242 rounds, now at the
+# drawn tail cone) and the 12 default AGM-84E Harpoons on the underwing pylons (row 7,
+# six a wing); its three bay rows (3, 5 and 6, nine Mk 82 each) start empty and keep an
+# empty Mk 82 selection, so three never-loaded slots follow.
+STATIONS["b52"] = [1242, 12, 0, 0, 0]
 
 
 def _numbers(output: str, prefix: str) -> dict:
@@ -414,6 +419,11 @@ KNOWN_APPROACH["f117"] = 166.2
 LIFTOFF_TARGET["b52"] = (150, 175)
 APPROACH_TARGET["b52"] = (150, 170)
 KNOWN_LIFTOFF["b52"] = 158.6
+# B52-5 (2026-11-15): the default load now carries 12 AGM-84E on the pylons (16,588 lb counted, so the
+# default tank starts at 286,412 lb, not 303,000 lb: the gross weight is the same 488,000 lb). Measured
+# liftoff 158.7 kt after 7,324 ft (GRE, was 158.6 kt), approach 166.2 kt (the model's cap, unchanged,
+# at 404,516 lb gross, was 387,928 lb), touchdown 153.7 kt: both stay in their windows, none refitted.
+KNOWN_LIFTOFF["b52"] = 158.7
 KNOWN_APPROACH["b52"] = 166.2
 # The B-52H's liftoff and approach scenarios start from a 12,000 ft runway (Greece, airport 1):
 # UKR airport 1 is 5,532 ft, shorter than its 7,674 ft takeoff run and its 5,000 ft rollout.
@@ -1353,6 +1363,32 @@ def slot_scenarios() -> list[Scenario]:
         timeout=300,
         notes="16 presses through both B-2 bays: one bomb a press, the bays alternate, the bottom tier goes first, front to back.",
     ))
+    # B52-5 (2026-11-15): the B-52's fitted bay rows (3, 5 and 6) hold nine Mk 82 each in a
+    # grid; one press opens the doors, the bomb leaves from its cell once they are at 0.95 and
+    # the doors close; the pylon row 7 (default 12 Harpoons) releases with the doors shut.
+    for row in (3, 5, 6):
+        out.append(Scenario(
+            name=f"flight-bay-fire-b52-row{row}", lane="flight",
+            args=["--stores-preview", "{work}/frames"], window=True,
+            env={"TORE_STORES_PREVIEW_AIRCRAFT": "b52",
+                 "TORE_STORES_PREVIEW_RECORDS": f"{row}=MK82.JT:9",
+                 "TORE_STORES_PREVIEW_FUEL": "150000",
+                 "TORE_STORES_PREVIEW_FIRE": str(row)},
+            expect=[f"Stores firing: b52 row={row} PASS"],
+            outputs=[f"frames/b52-fire-row{row}-t000.png", f"frames/b52-fire-row{row}-t400.png"],
+            timeout=300,
+            notes="B-52 bay release: the doors open before the Mk 82 leaves and close after it, as the F-22's and F-117's do.",
+        ))
+    out.append(Scenario(
+        name="flight-bay-fire-b52-pylon-row7", lane="flight",
+        args=["--stores-preview", "{work}/frames"], window=True,
+        env={"TORE_STORES_PREVIEW_AIRCRAFT": "b52", "TORE_STORES_PREVIEW_FIRE": "7",
+             "TORE_STORES_PREVIEW_RECORDS": "7=MK82.JT:18", "TORE_STORES_PREVIEW_FUEL": "150000"},
+        expect=["Stores firing: b52 row=7 PASS"],
+        outputs=["frames/b52-fire-row7-t000.png", "frames/b52-fire-row7-t400.png"],
+        timeout=300,
+        notes="B-52 pylon release: a Mk 82 leaves the underwing beam with the bay doors shut (18 loaded, nine a wing; the Harpoon default needs a target the preview does not give it, its live-fire slot scenario covers it).",
+    ))
     return out
 
 
@@ -2104,7 +2140,7 @@ def capture_scenarios() -> list[Scenario]:
     # AL1 and refuses a ground start ("an enemy airfield").
     for ac in AIRCRAFT:
         add(f"groundstart-{ac}", ["--free-flight", "--aircraft", ac, "--theater", "UKR", "--ground-start", "9", "--flight-view", "1", "--flight-look", "150,-15", "--flight-zoom", "1.5"])
-    for ac in ("f22", "f22n", "f117", "b2"):
+    for ac in ("f22", "f22n", "b52", "f117", "b2"):
         for bay in ("0", "0.5", "1"):
             add(f"bay-{ac}-{bay}", ["--free-flight", "--aircraft", ac, "--flight-view", "1", "--flight-look", "150,-30", "--flight-bay", bay])
     return out

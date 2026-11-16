@@ -34,7 +34,10 @@ const AIRCRAFT: usize = 48;
 /// is a third batch-5 optional weapon row (B5-2, John 2026-11-10).
 /// 20 from 18: the B-52's two empty bay rows (rows 5 and 6, no default weapon)
 /// keep an empty Mk 82 selection (BMB-A1, 2026-11-15).
-const RECOVERED_STATIONS: usize = 20;
+/// 21 from 20: the B-52's bay row 3 no longer holds the Harpoons (they move to
+/// the new underwing pylon row 7), so it is a third empty bay row with an empty
+/// Mk 82 selection (B52-5, 2026-11-15).
+const RECOVERED_STATIONS: usize = 21;
 const TANK_RECORDS: usize = 9;
 /// 3,817 from 3,684: the F-16A's four wing and wingtip rows join the roster
 /// (slice F16A-4, 133 compatible supported-weapon placements: two 0x07e5 rows
@@ -101,7 +104,13 @@ const TANK_RECORDS: usize = 9;
 /// capacities also fall to what fits under the roof (four tiers of Mk 82, one
 /// tier of Paveway III); that moves no placement. The audit caps a gridded
 /// row's expected count the same way.
-const WEAPON_PLACEMENTS: usize = 4776;
+/// 4,746 from 4,784: the B-52's three bay rows hold five stores (`MK82`,
+/// `MK82P3`, `FAB250`, `GBU38`, `RBK250`; 20 refused for fit, the 3 ft span
+/// missiles among them) and the new underwing pylon row (row 7) takes 22 less
+/// the five long stores it refuses, so `B52.PT` goes from 71 to 33 placements
+/// (B52-5, 2026-11-15, fitted; normal catalog 18 stores). Dated note, B4: the
+/// coordinator recomputes the total at integration with the B-2's bay rows.
+const WEAPON_PLACEMENTS: usize = 4746; // TBD
 /// 188 from 182: the F-16A's centreline tank row (F150.GAS or F250.GAS) plus
 /// the tank selection its two 0x07e5 wing rows accept, 6 tank placements.
 /// 192 from 188: the MiG-31 (M31-1). 201 from 192: the Mirage 2000 (M2K-1).
@@ -124,7 +133,9 @@ const TANK_PLACEMENTS: usize = 233;
 /// more (TOR-6b, John 2026-11-11).
 /// 240 from 222: the bomber batch A records (BMB-A1, 2026-11-15), 18 more
 /// Cheat-only pairs on the B-52, B-2 and F-117 bay rows.
-const NOVELTY_PLACEMENTS: usize = 240;
+/// 242 from 240: the B-52's new underwing pylon row (row 7) takes the two novelty
+/// bombs under Cheat loading (B52-5, 2026-11-15), as the other bomb rows do.
+const NOVELTY_PLACEMENTS: usize = 242;
 /// Station and designator-pod pairs the normal rules accept (A2G decision 7).
 /// 67 from 65: the F-16A's two 0x07e5 wing rows carry the decoded designator
 /// bit 0x400, one pod each (slice F16A-4). 68: the MiG-31 (M31-1). 71: the Mirage 2000 (M2K-1).

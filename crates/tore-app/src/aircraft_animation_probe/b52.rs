@@ -1,6 +1,7 @@
 //! Independent B-52 whole-panel witnesses: the two stabilizer quads, the two
 //! inboard flap wedges, the full-height rudder, the four trucks and two
-//! outriggers, and the interim bay plates. Measures the shared Airframe output
+//! outriggers, and the fitted weapon bay (a door pair cut from the belly, lined
+//! recess). Measures the shared Airframe output
 //! and never repeats the rig's algorithm. Witness points are named in shape
 //! units and scaled with the aircraft's own per-axis scale (the identity: the
 //! 2/3 ft a unit is the probe's `scale`).
@@ -30,7 +31,13 @@ const GEAR: [usize; 32] = [
     0x4a73, 0x4ab9, 0x4b7b, 0x4b9a, 0x4c73, 0x4c92, 0x4a96, 0x4adc, 0x4bb9, 0x4bd8, 0x4cb1, 0x4cd0,
     0x4779, 0x4798, 0x47b7, 0x47d6, 0x482c, 0x484b, 0x486a, 0x4889,
 ];
-const BAY: [usize; 4] = [0x4dfb, 0x4e12, 0x4d5e, 0x4d75];
+/// The flat belly skin the fitted bay is cut from, and where the lining's
+/// addresses start. The lining is a ceiling and four walls (5 faces), a rail
+/// to each of the four lanes and a post at each lane's two row boundaries (5
+/// faces each).
+const BELLY: usize = 0x46ae;
+const LINING_BASE: usize = 0x7000;
+const LINING: usize = 5 + 4 * 5 + 8 * 5;
 /// The fuselage cross-section (x, z) at the gear stations, from the belly (-9)
 /// to the roof (11): a stowed truck must lie inside it.
 const SECTION: [[f32; 2]; 12] = [
@@ -342,25 +349,38 @@ fn gear(value: f64, reference: &[Face], pose: &[Face], scale: f32, m: &mut Metri
     }
 }
 
-/// Interim bay plates: drawn only while the bay is open, their top edge stays on
-/// the belly line (z -8), and the lowest point is z -8 - 5 * value.
-fn bay(value: f64, reference: &[Face], pose: &[Face], scale: f32, m: &mut Metrics) {
+/// The fitted bay: shut (0) the belly skin is whole, nothing hangs below the
+/// belly plane and no lining draws; open (above 0) the lining draws and the two
+/// doors hang on their hinge lines (the outer edges, x +/-3 ft, at the belly
+/// plane) with their free edges `3 ft * sin(90 degrees * value)` below it.
+fn bay(value: f64, _reference: &[Face], pose: &[Face], scale: f32, m: &mut Metrics) {
+    let o = tore_sim::combat::bays::opening(ID).expect("B-52 bay");
+    let belly = sp([0., 0., -9.])[2];
+    let lining = pose.iter().filter(|f| f.address >= LINING_BASE).count();
+    let skins: Vec<&Face> = pose.iter().filter(|f| f.address == BELLY).collect();
+    let lowest = skins
+        .iter()
+        .flat_map(|f| f.positions.iter())
+        .map(|p| p[2])
+        .fold(f32::MAX, f32::min);
     if value == 0. {
-        m.reviewed_direction_failures += usize::from(present(pose, &BAY) != 0);
+        m.reviewed_direction_failures +=
+            usize::from(lining != 0 || skins.len() != 1 || lowest < belly - 1e-4);
         return;
     }
-    m.reviewed_direction_failures += usize::from(present(pose, &BAY) != 4);
-    let (old, new) = (group(reference, &BAY), keyed(pose));
-    for point in [
-        sp([-7., -13., -8.]),
-        sp([-7., 26., -8.]),
-        sp([7., -13., -8.]),
-        sp([7., 26., -8.]),
-    ] {
-        pin(m, point_gap(&old, &new, point, scale));
+    m.reviewed_direction_failures += usize::from(lining != LINING);
+    // A vertex stays on each hinge line at the belly plane.
+    for feet in [o.outer, -o.outer] {
+        let hinge = feet as f32 / scale;
+        let held = skins
+            .iter()
+            .flat_map(|f| f.positions.iter())
+            .any(|p| (p[0] - hinge).abs() < 1e-3 && (p[2] - belly).abs() < 1e-3);
+        m.reviewed_anchor_missing |= !held;
     }
-    let want = sp([0., 0., -8. - 5. * value as f32])[2];
-    m.reviewed_direction_failures += usize::from((lowest(pose, &BAY) - want).abs() > 1e-3);
+    let leaf = o.outer as f32 / scale;
+    let hang = leaf * (value as f32 * std::f32::consts::FRAC_PI_2).sin();
+    m.reviewed_direction_failures += usize::from((belly - lowest - hang).abs() > 2e-3);
 }
 
 pub(super) fn check(

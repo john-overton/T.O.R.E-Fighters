@@ -1,11 +1,14 @@
 //! B-52H (`B52.SH`) own-source rig (B52-3 and B52-4): the two floating
 //! stabilizer quads, the two inboard flap wedges, the full-height rudder, the
-//! four tandem main trucks and two wingtip outriggers (one gear word) and the
-//! interim open-bay plates.
-//! See docs/formats/aircraft-variety.md "B-52 rig (B52-3, 2026-11-15)".
+//! four tandem main trucks and two wingtip outriggers (one gear word) and, since
+//! B52-5, the fitted weapon bay (one belly skin cut into two doors, a lined
+//! recess with rails and posts, drawn through [`crate::bay_doors`]).
+//! See docs/formats/aircraft-variety.md "B-52 rig (B52-3, 2026-11-15)" and "B-52
+//! bay, pylons and tail gun (B52-5, 2026-11-15)".
 //!
 //! B52.SH ships five state words: 0x7a20 the bay (two plates, both windings,
-//! hanging from the belly), 0x7a26 the gear (32 faces: four trucks of six and
+//! hanging from the belly; since B52-5 only reviewed, its plate is the material
+//! of the lining, and the plates themselves are no longer drawn), 0x7a26 the gear (32 faces: four trucks of six and
 //! two outriggers of four), 0x7a2c and 0x7a32 the left and right flap words
 //! (each deletes the inboard trailing wedge and adds nothing) and 0x7a38 the
 //! rudder (swaps the full-height rudder quad for a copy skewed to one side,
@@ -25,6 +28,9 @@ use tore_formats::{
     aircraft::{AircraftId, scale::scale_point},
     shape::{Face, Shape},
 };
+use tore_sim::combat::bays::{B52_ROW_FORWARD, B52_SLAB, Opening};
+use tore_sim::combat::hardpoints::grid_cells;
+use tore_sim::combat::store_sizes::StoreSize;
 
 const ID: AircraftId = AircraftId::B52;
 const WORDS: [usize; 5] = [0x7a20, 0x7a26, 0x7a2c, 0x7a32, 0x7a38];
@@ -130,9 +136,46 @@ const OUTRIGGER_HINGE_Z: f32 = 4.1;
 const OUTRIGGER_X: f32 = 111.;
 
 /// Bay word 0x7a20: two plates (x -7 and +7, y -13 to 26), both windings, hanging
-/// from the belly line z -8 to z -13. Interim until B52-5's fitted bay and doors.
+/// from the belly line z -8 to z -13. Only reviewed since B52-5, which cuts the
+/// bay from the belly skin below; one plate is the lining's material.
 pub(crate) const BAY: [usize; 4] = [0x4dfb, 0x4e12, 0x4d5e, 0x4d75];
-const BAY_TOP_Z: f32 = -8.;
+/// The flat belly skin the fitted bay is cut from: one six-vertex face at z -9,
+/// x -5 to 5, y -46 to 88, facing down (measured, B52-5). The 6 ft wide, 26 ft
+/// long opening (x +/-4.5 units, y -13 to 26) lies wholly inside it.
+pub(crate) const BELLY: usize = 0x46ae;
+/// The first address of the lining's faces (above every face of the shape).
+pub(crate) const LINING_BASE: usize = 0x7000;
+
+fn lining(address: usize) -> bool {
+    address >= LINING_BASE
+}
+
+/// The shape's feet a unit (it draws at 2/3 ft a unit).
+pub(crate) const UNIT: f64 = 2. / 3.;
+
+/// The bay's furniture, feet: a rail under the ceiling on each lane's centre
+/// line, running the whole bay, and a post from the floor to the ceiling at
+/// the two inner boundaries of the three row slabs, in each lane. Lanes are
+/// the columns of the shared grid for a 500 lb class store (four abreast at
+/// 1.3 ft; fitted: stores of other sizes space their own grid, so the
+/// furniture is not a measure of the load).
+fn furniture(o: &Opening) -> (Vec<[f64; 3]>, Vec<[f64; 2]>) {
+    let mk82 = StoreSize::of_shape(Some("MK82.SH"));
+    let ([abreast, _], pitch) = grid_cells(mk82, [2. * o.outer, B52_SLAB]);
+    let lanes: Vec<f64> = (0..abreast)
+        .map(|k| (k as f64 - (abreast as f64 - 1.) / 2.) * pitch)
+        .collect();
+    let rails = lanes.iter().map(|&x| [x, o.aft, o.fore]).collect();
+    let boundaries = [
+        B52_ROW_FORWARD[1] - B52_SLAB / 2.,
+        B52_ROW_FORWARD[1] + B52_SLAB / 2.,
+    ];
+    let posts = lanes
+        .iter()
+        .flat_map(|&x| boundaries.map(|y| [x, y]))
+        .collect();
+    (rails, posts)
+}
 
 fn right_flap(address: usize) -> bool {
     FLAP_R.contains(&address)
@@ -243,7 +286,9 @@ fn turn_angle(bottom: [f32; 3], top: [f32; 3], from: [f32; 3], to: [f32; 3]) -> 
     dot(u, cross).atan2(dot(v, w))
 }
 
-pub struct Rig;
+pub struct Rig {
+    bay: Opening,
+}
 impl Rig {
     pub fn load(bytes: &[u8], mut shape: Shape) -> AppResult<(Self, Shape)> {
         if tore_formats::module::code(bytes)?.0.len() != 27204
@@ -334,6 +379,20 @@ impl Rig {
         // Gear and bay words add exactly the reviewed plates and remove nothing.
         let gear = branch(bytes, &original, 0x7a26, &GEAR, &[])?.scaled(axis);
         let bay = branch(bytes, &original, 0x7a20, &BAY, &[])?.scaled(axis);
+        // The belly skin the fitted bay is cut from: whole, flat, facing down,
+        // wider and longer than the opening.
+        let opening = tore_sim::combat::bays::opening(ID).ok_or("B52 bay opening missing")?;
+        let belly = one(&shape, BELLY)?;
+        let feet = |p: &[f32; 3]| [p[0], p[1], p[2]].map(|v| f64::from(v) * UNIT);
+        if !belly.normal.is_some_and(|n| n[1] < -32000.)
+            || !belly.positions.iter().all(|p| {
+                (feet(p)[2] - opening.belly).abs() < 1e-3 && feet(p)[0].abs() >= opening.outer
+            })
+            || !belly.positions.iter().any(|p| feet(p)[1] <= opening.aft)
+            || !belly.positions.iter().any(|p| feet(p)[1] >= opening.fore)
+        {
+            return Err("unreviewed B52.SH belly skin".into());
+        }
         for truck in &TRUCKS {
             for &address in truck {
                 if one(&gear, address)?.positions.is_empty() {
@@ -341,14 +400,40 @@ impl Rig {
                 }
             }
         }
+        // The recess, drawn only while the doors are open, takes the material
+        // of the shape's own bay plate (one of the interim plates, no longer
+        // drawn itself).
+        let template = one(&bay, BAY[0])?.clone();
+        let (rails, posts) = furniture(&opening);
+        let lining_faces = crate::bay_doors::centre_lining(&template, &opening, UNIT, &rails, &posts)
+            .into_iter()
+            .enumerate()
+            .map(|(k, mut f)| {
+                f.address = LINING_BASE + k;
+                f
+            });
         let mut extra: Vec<Face> = gear
             .faces
             .into_iter()
             .filter(|f| GEAR.contains(&f.address))
             .collect();
-        extra.extend(bay.faces.into_iter().filter(|f| BAY.contains(&f.address)));
+        extra.extend(lining_faces);
         shape.faces.extend(extra);
-        Ok((Self, shape))
+        Ok((Self { bay: opening }, shape))
+    }
+    /// The faces a source face becomes: with the bay doors off their seat
+    /// the belly skin is cut into the two door leaves, turned down about
+    /// their hinges by `state.bay` (the doors' 1 second travel is the
+    /// flight's); the lining draws only then.
+    pub fn faces(&self, source: &Face, state: &State) -> Vec<Face> {
+        let a = source.address;
+        if a == BELLY && state.bay > 0. {
+            return crate::bay_doors::centre_doors(source, state.bay, &self.bay, UNIT);
+        }
+        if lining(a) && state.bay <= 0. {
+            return Vec::new();
+        }
+        vec![source.clone()]
     }
 
     pub fn animate(&self, source: &Face, state: &State) -> Option<Face> {
@@ -413,18 +498,8 @@ impl Rig {
             gear_positions(&mut result, state.gear);
             return Some(result);
         }
-        if BAY.contains(&a) {
-            let bay = state.bay.clamp(0., 1.) as f32;
-            if bay <= 0. {
-                return None;
-            }
-            // The plates drop out of the belly as the bay opens (interim,
-            // fitted): their top edge stays on the belly line.
-            let top = scale_point(ID, [0., 0., BAY_TOP_Z])[2];
-            for p in &mut result.positions {
-                p[2] = top + (p[2] - top) * bay;
-            }
-            return Some(result);
+        if lining(a) && state.bay <= 0. {
+            return None;
         }
         Some(result)
     }
@@ -472,7 +547,9 @@ mod tests {
     /// every truck stows inside the fuselage section and the bay plates drop.
     #[test]
     fn the_b52_rig_turns_whole_panels_about_their_hinges() {
-        let rig = Rig;
+        let rig = Rig {
+            bay: tore_sim::combat::bays::opening(ID).unwrap(),
+        };
         let moved = |s: &State, f: &Face| rig.animate(f, s).unwrap();
         let s0 = state();
 
@@ -686,22 +763,56 @@ mod tests {
                 .all(|p| (p[2] - 4.1).abs() < 1e-2 && p[0] < 111.01)
         );
 
-        // The bay plates drop from the belly line as the bay opens.
-        let door = face(
-            0x4dfb,
+        // The bay cuts the belly skin into two door leaves while it is off its
+        // seat and draws its lining then; shut, the belly is whole and the
+        // lining is gone.
+        let belly = face(
+            BELLY,
             &[
-                [-7., -13., -8.],
-                [-7., -13., -13.],
-                [-7., 26., -13.],
-                [-7., 26., -8.],
+                [-5., -46., -9.],
+                [5., -46., -9.],
+                [5., 88., -9.],
+                [-5., 88., -9.],
             ],
+        );
+        let ceiling = face(
+            LINING_BASE,
+            &[[-4.5, -13., 0.], [4.5, -13., 0.], [4.5, 26., 0.]],
         );
         let mut s = s0;
         s.bay = 0.;
-        assert!(rig.animate(&door, &s).is_none());
+        assert_eq!(rig.faces(&belly, &s).len(), 1);
+        assert!(rig.faces(&ceiling, &s).is_empty() && rig.animate(&ceiling, &s).is_none());
+        s.bay = 1.;
+        let open = rig.faces(&belly, &s);
+        let leaves: Vec<_> = open
+            .iter()
+            .filter(|f| f.positions.iter().any(|p| p[2] < -9. - 3.))
+            .collect();
+        assert_eq!(leaves.len(), 2, "two doors hang from the belly");
+        // Each leaf is 3 ft (4.5 units) wide, so it hangs 4.5 units below the
+        // belly plane, on x +/-4.5 units.
+        for leaf in leaves {
+            let low = leaf.positions.iter().map(|p| p[2]).fold(f32::MAX, f32::min);
+            assert!((low - (-9. - 4.5)).abs() < 1e-3, "{low}");
+            assert!(
+                leaf.positions
+                    .iter()
+                    .all(|p| (p[0].abs() - 4.5).abs() < 1e-3)
+            );
+        }
+        assert_eq!(rig.faces(&ceiling, &s).len(), 1);
+        // Half open the leaves hang on a quarter turn's sine.
         s.bay = 0.5;
-        let half = moved(&s, &door);
-        assert!((half.positions[1][2] - scale_point(ID, [0., 0., -10.5])[2]).abs() < 1e-3);
-        assert_eq!(half.positions[0][2], door.positions[0][2]);
+        let half = rig.faces(&belly, &s);
+        let low = half
+            .iter()
+            .flat_map(|f| f.positions.iter())
+            .map(|p| p[2])
+            .fold(f32::MAX, f32::min);
+        assert!(
+            (low - (-9. - 4.5 * (FRAC_PI_2 as f32 * 0.5).sin())).abs() < 1e-3,
+            "{low}"
+        );
     }
 }
