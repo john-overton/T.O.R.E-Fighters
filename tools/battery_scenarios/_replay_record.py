@@ -584,6 +584,20 @@ def scenarios() -> list[Scenario]:
         )
     )
 
+    # The F-117A as the player and in both wings (slice F117-9): a 2 v 2 recorded three times, so the
+    # F117.PT identity (checkpoint code 49, wire index 49) round-trips through the recording, plays
+    # back with nothing missing and records the same twice. Nobody fires (no gun, no air-to-air
+    # missile); its bay-release recording is `replay-a2g-f117`.
+    out.append(
+        record_scenario(
+            "replay-rec-f117-2v2",
+            ["--ai-probe-ticks", "2400", "--aircraft", "f117", "--probe-friendly-aircraft", "f117",
+             "--probe-enemy-aircraft", "f117", "--probe-fight", "2:2", "--separation", "5",
+             "--probe-attack", "300:10"],
+            timeout=500,
+        )
+    )
+
     # Every imported aircraft as the enemy and as the player.
     for ac in AIRCRAFT:
         out.append(

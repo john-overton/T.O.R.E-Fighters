@@ -603,6 +603,21 @@ const F117_TRIM_ALTITUDE_FT: f64 = 36_000.;
 /// brake lever agree with them: it moves the lever's state but adds no drag.
 pub const F117_AIRBRAKE_DRAG: i32 = 0;
 const F117_RETAIL_AIRBRAKE_DRAG: i32 = 256;
+/// F-117A fuel flow (F117-9, **fitted**, the coordinator's first pass,
+/// 2026-11-15): the record's `fuelConsumption` is 2 lb/s for both engines at
+/// full military power (0.333 lb/(lbf h) on the 21,600 lbf, a high-bypass
+/// figure), which flies the model's Mach 0.82 cruise at 36,000 ft for 1,516
+/// nautical miles from the 18,500 lb tank against the published 930 (F117-8,
+/// Wikipedia and flugzeuginfo; 1,140 with a full bomb load, Aerocorner). A
+/// flow of 3.3 lb/s reproduces 930 exactly, but the record keeps whole pounds
+/// a second (a word), so the nearest whole value is 3: 1,011 nautical miles,
+/// 9 percent over the published figure (4 would give 758, 18 percent under).
+/// The F404's own cited 0.81 lb/(lbf h) would be 4.86 lb/s and about 630
+/// nautical miles; that is not used (a fit to the one published range, not a
+/// thrust-specific figure for this engine). Dry only: the record has no
+/// afterburner row.
+pub const F117_FUEL_LB_PER_S: i32 = 3;
+const F117_RETAIL_FUEL_LB_PER_S: i32 = 2;
 /// The retail 0 G and 1 G rows (speed ft/s, altitude ft). The top edges are the
 /// record's ceiling (42,000 ft for 1 G; the 0 G row reaches 2,000 ft higher).
 const F117_RETAIL_ZERO_G: [[f64; 2]; 9] = [
@@ -1384,6 +1399,15 @@ pub const CORRECTIONS: &[Correction] = &[
         key: "airBrakesDrag",
         retail: F117_RETAIL_AIRBRAKE_DRAG,
         corrected: F117_AIRBRAKE_DRAG,
+    },
+    // F117-9: the fuel flow fitted to the published range (whole pounds a
+    // second; 3.3 fits exactly, 3 is the nearest the record can hold).
+    Correction {
+        id: AircraftId::F117,
+        block: Block::Plane,
+        key: "fuelConsumption",
+        retail: F117_RETAIL_FUEL_LB_PER_S,
+        corrected: F117_FUEL_LB_PER_S,
     },
 ];
 
@@ -2531,6 +2555,28 @@ mod tests {
         let low = [[100., 0.], [200., 9_000.], [900., 9_000.], [800., 0.]];
         assert_eq!(clip_below(&low, 9_000.), low.to_vec());
         assert_eq!(clip_below(&low, 20_000.), low.to_vec());
+    }
+
+    /// F117-9 (fitted): the whole-pound flow keeps the model's cruise range
+    /// near the published 930 nautical miles. The range at Mach 0.82 and
+    /// 36,000 ft is inversely proportional to the flow, 1,516 nautical miles at
+    /// the retail 2 lb/s (measured, F117-8), so 3 lb/s is 1,011. Pinned loosely
+    /// (within 15 percent above and 5 percent below the published figure): the
+    /// flow is a fit to one published range, not a thrust-specific figure.
+    #[test]
+    fn the_f117_fuel_flow_keeps_the_cruise_range_near_the_published_930() {
+        let range = |flow: i32| 1_516. * f64::from(F117_RETAIL_FUEL_LB_PER_S) / f64::from(flow);
+        assert!((range(F117_RETAIL_FUEL_LB_PER_S) - 1_516.).abs() < 1e-9);
+        let corrected = range(F117_FUEL_LB_PER_S);
+        assert!(
+            (0.95 * 930. ..=1.15 * 930.).contains(&corrected),
+            "{corrected} nmi"
+        );
+        // The record's whole pounds: the next whole flow is further from 930.
+        assert!(
+            (range(F117_FUEL_LB_PER_S + 1) - 930.).abs() > (corrected - 930.).abs(),
+            "3.3 lb/s rounds to {F117_FUEL_LB_PER_S}"
+        );
     }
 
     #[test]

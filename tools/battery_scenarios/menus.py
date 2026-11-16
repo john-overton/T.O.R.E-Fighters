@@ -822,6 +822,9 @@ def scenarios() -> list[Scenario]:
         ("f5e", "lobby-ordnance-laser", True, True, True),
         ("mf1", "lobby-ordnance-laser", True, True, True),
         ("tornado", "lobby-ordnance-laser", False, True, True),
+        # Slice F117-9: the F-117A has the PAVESPK.SEE row (its IRADS turret), so no warning, and its
+        # sensor helper line reads "Built-in IRADS" (measured, not assumed).
+        ("f117", "lobby-ordnance-laser", False, True, True),
     ):
         out.append(
             Scenario(

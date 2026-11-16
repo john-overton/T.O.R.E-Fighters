@@ -287,5 +287,40 @@ class DataLinkPictureTests(unittest.TestCase):
         self.assertTrue(any("over a lock" in p for p in problems), problems)
 
 
+F117_CLEAN = """AI probe: aircraft=F-117 actors=3 ticks=7200 enemy_skill=None mission=free
+t=0 (0.0s) Enemy 1-1 F117: alive=true agl=5000 kt=379 x=1 z=2 hdg=197 terrain_agl=5000
+actor=1 Friendly 1-2 F117 activity=In formation alive=true rounds=2 x=1.0 y=2.0 z=3.0 hdg=4.0
+actor=2 Enemy 1-1 F117 activity=In formation alive=true rounds=2 x=1.0 y=2.0 z=3.0 hdg=4.0
+actor=3 Enemy 1-2 F117 activity=In formation alive=true rounds=2 x=1.0 y=2.0 z=3.0 hdg=4.0
+AI probe attack: clicks=0 steps=0 presses=0 missiles=0 gun_bursts=0 gun_rounds=0 player_hits=0 player_kills=0 hits=0 destroyed=0 lost_friendly=0/1 lost_enemy=0/2 player_alive=true player_damaged=0 ejections=0 perceived=0
+AI probe totals: wings=3 ticks=7200 shots=0 dropped=0 warnings=0 live_projectiles=0 player_hp=262 target_hp=[131] checksum=0
+AI probe invariants: actors=3 samples=7200 anomalies=0 peak_heading_rate=1.0 peak_bank_rate=1.0 peak_kt=450 peak_alt_ft=5000 kinds=[]
+"""
+
+
+class F117UnarmedTests(unittest.TestCase):
+    """The F-117A engages nobody (F117-9): both GBU-27 stay in the bays."""
+
+    def test_a_fight_where_nobody_fired_passes(self):
+        self.assertEqual(ai.f117_unarmed_problems(F117_CLEAN, shots=0), [])
+        # Against shooters the shot count is theirs; the F-117s still hold both bombs.
+        self.assertEqual(ai.f117_unarmed_problems(F117_CLEAN.replace("shots=0", "shots=4")), [])
+
+    def test_a_spent_store_fails(self):
+        text = F117_CLEAN.replace("actor=1 Friendly 1-2 F117 activity=In formation alive=true rounds=2", "actor=1 Friendly 1-2 F117 activity=In formation alive=true rounds=1")
+        self.assertTrue(any("it fired" in p for p in ai.f117_unarmed_problems(text)))
+
+    def test_a_shot_in_an_all_f117_fight_fails(self):
+        self.assertTrue(any("1 shots" in p for p in ai.f117_unarmed_problems(F117_CLEAN.replace("shots=0", "shots=1"), shots=0)))
+
+    def test_no_f117_in_the_list_fails(self):
+        self.assertTrue(any("no F-117" in p for p in ai.f117_unarmed_problems(CLEAN)))
+
+    def test_the_scenarios_exist(self):
+        names = {s.name for s in ai.scenarios()}
+        for name in ("ai-f117-quick-mission-2v2", "ai-f117-vs-f16c-2v2", "ai-merged-airfield-f117-wing2"):
+            self.assertIn(name, names)
+
+
 if __name__ == "__main__":
     unittest.main()

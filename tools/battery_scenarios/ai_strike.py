@@ -920,6 +920,59 @@ def laser_self_problems(output: str) -> list[str]:
             + laser_self_run_problems(runs[1], "Su-25 built-in designator", cone=True))
 
 
+# F117-9 (2026-11-15): the AI F-117A flies the retail strike pass (decision 28: the level pass
+# at 5,000 ft, no `strike_class` override; its class is Attack), lases with its own IRADS turret,
+# releases a GBU-27 from its bay and goes home. The release altitude window around the 5,000 ft
+# pass (the pass settles within a few hundred feet).
+F117_PASS_FT = (4500.0, 5500.0)
+
+
+def f117_strike_problems(output: str) -> list[str]:
+    """`ai-strike-f117`: two runs. (1) An AI F-117 on a GBU-27 from its left bay station, against
+    the Ukraine armored column: the level pass (no pop-up, no dive), lased from its own IRADS (the
+    spot is its own), released from the bay, the tank destroyed, egress, not lost. (2) A Quick
+    Mission with the factory as the ground target: the wingman F-117 takes the Strike role, and
+    lases and releases on its own spot, then egresses."""
+    runs = parse_runs(output)
+    if len(runs) != 2:
+        return [f"{len(runs)} runs finished, want 2"]
+    problems: list[str] = []
+    for index, (run, label) in enumerate(zip(runs, ("own pass", "quick wing"))):
+        problems += consistency_problems(run, label)
+        if run.setup.get("aircraft") != "F117" or run.setup.get("load") != "PAVEWA3.JT":
+            problems.append(f"{label}: flew {run.setup.get('aircraft')} with {run.setup.get('load')}, want an F117 with PAVEWA3.JT")
+        plane = (run.first("start") or {}).get("plane", "0")
+        named = [f.get("name") for k, f in run.lines if k == "PROFILE"]
+        if "level" not in named or any(n in ("dive", "popup") for n in named):
+            problems.append(f"{label}: profiles {named}, want the level pass only")
+        release, impact = run.first("RELEASE"), run.first("IMPACT")
+        if release is None or impact is None:
+            problems.append(f"{label}: no release or no impact")
+            continue
+        if release.get("weapon") != "PAVEWA3.JT":
+            problems.append(f"{label}: released {release.get('weapon')}, want a GBU-27 (PAVEWA3.JT)")
+        if release.get("guided") != "Guiding" or release.get("spot_owner") != plane:
+            problems.append(f"{label}: the bomb was {release.get('guided')} on aircraft "
+                            f"{release.get('spot_owner')}'s spot, want guiding on its own IRADS spot ({plane})")
+        altitude = number(release.get("alt_ft"))
+        if not F117_PASS_FT[0] <= altitude <= F117_PASS_FT[1]:
+            problems.append(f"{label}: released at {release.get('alt_ft')} ft, want the 5,000 ft level pass")
+        if not run.of("EGRESS"):
+            problems.append(f"{label}: no EGRESS")
+        if run.of("LOST"):
+            problems.append(f"{label}: the striker was lost")
+        if index == 0:
+            if not number(impact.get("miss_ft")) <= GUIDED_MISS_FT:
+                problems.append(f"{label}: landed {impact.get('miss_ft')} ft from the target, want at most {GUIDED_MISS_FT:.0f}")
+            if not _target_hurt(run):
+                problems.append(f"{label}: the target is unhurt ({run.summary.get('target_hp')})")
+        else:
+            role = (run.first("ROLE") or {}).get("role")
+            if role != "strike":
+                problems.append(f"{label}: the wing was given role {role}, want strike")
+    return problems
+
+
 def laser_buddy_problems(output: str) -> list[str]:
     """`ai-strike-laser-buddy`: three runs. (1) An AI F-16C lases for a player's F/A-18D (the driver
     gives the order the wing order "Lase my target" gives), which drops a GBU-10 on its spot; the
@@ -1674,5 +1727,18 @@ def scenarios() -> list[Scenario]:
                   "column: a pop-up): releases inside its circle and defends against the defences. The "
                   "column's own guns may still bring it down at the pop-up's low altitude, so a loss is "
                   "allowed; the run checks the release and the defence.",
+        ),
+        Scenario(
+            name="ai-strike-f117", lane="flight",
+            args=pilot_run("UKR", "QUCOL", "--aircraft", "f117", "--load", "PAVEWA3", "--station", "0",
+                           "--seconds", "240"),
+            timeout=600,
+            then=[Step(pilot_run("UKR", "QUFACT", "--aircraft", "f117", "--load", "PAVEWA3", "--quick-wing",
+                                 "--seconds", "300"), timeout=600)],
+            check=f117_strike_problems,
+            notes="The AI F-117A flies the retail strike pass (F117-9, decision 28: the level pass at 5,000 ft, "
+                  "no class override) at the Ukraine armored column on its own IRADS spot: it lases, releases a "
+                  "GBU-27 from the left bay station, destroys the tank and egresses; then a Quick Mission "
+                  "wingman F-117 takes the Strike role at the factory and does the same.",
         ),
     ]

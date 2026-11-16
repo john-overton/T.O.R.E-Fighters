@@ -10411,3 +10411,231 @@ stores.
 2. The tail gun fires forward from the tail cone (slew not read). Build the rear-facing mount?
 3. The pylon weight class is 170, not 200 (the saved-load rule). Accept, or widen that rule?
 4. Two door leaves are drawn; the real bay has six sections.
+
+## F-117A in missions, multiplayer and replay (F117-9, 2026-11-15)
+
+Implementation and verification, slice F117-9 of the F-117A port (bomber batch A), with
+the coordinator's first-pass fuel flow fit. `AircraftId::F117` was appended to every
+identity list in BMB-A1 (checkpoint code 49, `SELECTABLE` index 49, carried in the 9-bit
+wire field), the strike class is Attack with no override (John, decision 28: the retail
+level pass at 5,000 ft), and the AI wing build reads the record as it is: two engines, no
+radar, no gun, two GBU-27 in the bays (the roster probe's `models=2 radar=false ir=true
+stores=2 gun=false`). The AI itself was not changed (AI behaviour work waits for John, and
+nothing needed it); the slice adds tests and scenarios and one fit. Provenance: the fuel
+flow is **fitted** (the coordinator's first pass, 2026-11-15, to a published range); every
+test and scenario is an agent decision; no retail bytes are committed.
+
+### Fuel flow, fitted to the published range
+
+The record's `fuelConsumption` is whole pounds a second for both engines at full military
+power. `aircraft_corrections.rs` now reads it as **3 lb/s** (retail 2) while the record
+still holds its retail value (`F117_FUEL_LB_PER_S`, a `CORRECTIONS` row, labelled fitted).
+The coordinator's figure was 3.3 lb/s, which reproduces the published 930 nautical miles
+exactly; the field is a word, so 3 is the nearest value it can hold (4 would be 758
+nautical miles, 18 percent under; the F404's own cited 0.81 lb/(lbf h) is 4.86 lb/s and
+about 630). Re-measured with `performance_probe` (`PROBE_ONLY=fuel PROBE_CRUISE=36000:470`,
+18,500 lb tank, extrapolated from 600 s as F117-8 did; logs in
+`.local/m3-aircraft/checks/F117-9/fuel-after.txt`):
+
+| Measure | Retail 2 lb/s (F117-8) | 3 lb/s | Published |
+| --- | ---: | ---: | --- |
+| Implied specific fuel consumption, military | 0.333 lb/(lbf h) | 0.500 | F404 0.81 (not used) |
+| Cruise Mach 0.82 (470 kt) at 36,000 ft: burn | 1.59 lb/s | 2.39 lb/s | none |
+| Same cruise: range from the full tank | 1,516 nautical miles | **1,011** | 930 (Wikipedia, flugzeuginfo), 1,140 with payload (Aerocorner) |
+| Cruise at 65 percent of the edge, 20,000 ft (362 kt): burn, range | 0.85 lb/s, 2,186 nm | 1.28 lb/s, 1,457 nm | none |
+| Military power, full tank: endurance, range at 538 kt | 154.2 min, 1,382 nm | 102.8 min, 921 nm | none |
+
+The model is 9 percent over the published range at 3 lb/s (it was 63 percent over). The pin
+is loose on purpose: `the_f117_fuel_flow_keeps_the_cruise_range_near_the_published_930`
+keeps the range (inversely proportional to the flow) between 95 and 115 percent of 930 and
+checks that the next whole flow is further from it; `the_b52_b2_and_f117_read_their_real_figures_only_while_retail`
+reads 3 from a retail record and `the_f117_has_no_speed_brake_and_climbs_like_a_subsonic_strike_jet`
+now carries 3. Nothing else moves: thrust, weights, ceiling, the speed edges, climb, turns
+and the stealth signature do not read the flow, and the default load's take-off weight is
+unchanged (the tank starts full at 18,500 lb either way).
+
+### AI
+
+**What an AI F-117 does** (all through the retail strike machinery; measured with
+`--a2g-run UKR QUCOL --pilot ai --aircraft f117 --load PAVEWA3 --station 0`, logs in
+`.local/m3-aircraft/checks/F117-9/`):
+
+- *Strike pass.* The level pass at 5,000 ft (`PROFILE name=level`; no dive, no pop-up),
+  from 450 kt; it lases at once with its own IRADS (`LASER state=Lasing`, the bomb's
+  `spot_owner` is itself), releases the GBU-27 at 3.9 s from 21,390 ft out at 5,000 ft and
+  432 kt (`guided=Guiding`), holds the spot through a turn banked to 74 degrees (speed
+  falls to 301 kt by 30 s: the hold the shared lasing code flies for any jet), lands the bomb 3.4 ft from the tank
+  at 31.5 s (27.6 s fall), kills it, and egresses at 43.9 s without loss. As a Quick Mission
+  wingman (`--quick-wing`, factory target) it takes the Strike role (`ROLE role=strike`),
+  releases at 42 s at 5,011 ft and 323 kt, lands 36 ft from its aim point (it killed a
+  neighbouring object, the factory still stood at 100 of 100 hit points) and egresses. As a
+  wingman given "Engage my target" by a human F-117 lead, it released on the lead's laser
+  spot (`spot_owner=0`, the buddy path) at 5,005 ft and 414 kt and killed the tank.
+- *Release origin.* A bomb leaves a bay station the way a human's does, from the bay's own
+  fitted mount: the AI and the human share `Configuration::from_source` (so one `placed_on`
+  table), the shared `release_round` and the one `release_point`, and the F-117 has no state
+  that only a human's host sets (the Tornado's swivel did, TOR-9 item 3; its sweep is not
+  here). `ai_wings::f117_tests::an_ai_f117_bomb_leaves_from_each_bay_station_with_the_doors_shut`
+  loads the real record, lets both bay stations go through the AI's release, and checks each
+  bomb's starting offset against the station's release point (3.0 ft either side of the
+  centreline, 3.26 ft below the reference point, inside the bay opening and the walls, one
+  bomb a side) with the doors at 0 and neither dropped. The recording of the AI pass (below)
+  holds the same station at x -3.0 ft, location 131 (the fitted magazine), shape `GB27.SH`.
+- *Doors.* Unchanged (coordinator first pass, 2026-11-15): the AI's release waits for no
+  door, so its bay doors stay shut, recorded and drawn, while its bomb leaves. The store is
+  not drawn at all while the doors are shut (`pylons::visible`), so an AI F-117's weapons
+  never show; the bomb appears under the belly at the release.
+- *No air-to-air.* No store has the air flag (the two GBU-27 are surface stores, capability
+  `air: false`), there is no gun and no radar, so the AI never engages an aircraft.
+  `an_ai_f117_is_an_attack_class_striker_with_no_store_for_an_aircraft` pins the class
+  (Attack), the two one-round bay stations and the missing capability. In a 2 v 2 fight of
+  F-117s against F-117s nobody fires (`shots=0`, every aircraft still `rounds=2`); against
+  F-16Cs the F-117 flies its formation, defends against the missile (`activity="Defending"`)
+  and fires nothing (`rounds=2` to the end, shot down or not: in the recorded run the F-117
+  was shot down at 57 s with both bombs aboard). It has no chaff or
+  flare to use either (F117-6).
+- *Return to base.* From a ground start at Southampton (FRA airport 14, 12,000 ft) the AI
+  F-117 taxis, lines up, starts its take-off roll at 41.5 s, is in its climb-out at 67.4 s
+  (185 kt), takes the land order at 100 s, flies the gates and the final (293.6 s),
+  touches down at 314.6 s, rolls out, leaves the runway at 338.9 s and parks at 740.9 s with
+  no tick off the pavement (78,050 ground samples, 0 off) and no anomaly.
+  **It lands fast: 224 kt at the threshold** against 142 kt for an F/A-18D at the same
+  airport (the same scenario with `f18`, final-entry 217 kt, threshold 142 kt). The AI holds
+  224 kt from the second gate to touchdown; the cap on a final is 174 kt. The likely cause
+  (read from the code, not measured): the AI never plans below the aircraft's loaded minimum
+  level speed, which the flaps lower by 25 percent, and the F-117 has no flaps (F117-8), so
+  the minimum stays at 224 kt; and the retail F-117 has no speed brake (F117-8) to shed
+  energy. It stays on the runway (rollout from 223 kt stops in about 21 s and 4,300 ft of the
+  12,000) and passes, but a real F-117 touches down about 155 kt. Not changed (shared AI
+  code): see the open items.
+- *The night rule.* An F-117 in a friendly wing at night makes the surface defenses the
+  retail night set (AAA becomes ZSU-23 novice): the rule keys on the file name in any
+  friendly wing (F117-6). `the_f117_is_a_quick_mission_player_and_a_wing_choice` now also
+  checks that the draft's spec wakes it at night for an AI wing's F-117 (not the player's),
+  that three wings of F/A-18Ds do not, and that an enemy-wing F-117 does not.
+
+**Tests and scenarios added.**
+
+| Name | What it pins |
+| --- | --- |
+| `ai_wings::f117_tests::an_ai_f117_is_an_attack_class_striker_with_no_store_for_an_aircraft` (real record, skips without the install) | Attack class, no gun pods, two bay stations of one `PAVEWA3.JT` each, every store a surface store, no radar |
+| `ai_wings::f117_tests::an_ai_f117_bomb_leaves_from_each_bay_station_with_the_doors_shut` | release origin per bay station, doors shut |
+| `ai-strike-f117` (flight lane) | own pass: level, own IRADS spot, bay release, kill, egress, not lost; Quick Mission wingman takes Strike |
+| `ai-f117-quick-mission-2v2` | all F-117: no shot, both bombs aboard |
+| `ai-f117-vs-f16c-2v2` | F-117 against F-16C: the F-117 fires nothing |
+| `ai-merged-airfield-f117-wing2` | takeoff, land order, landing and parking, all on the pavement |
+| `f117_strike_problems`, `f117_unarmed_problems` and tests | the checks above (`tools/test_battery_ai_strike.py`, `tools/test_battery_ai.py`) |
+
+The roster probe (`--ai-roster-probe-ticks 3600`) flew all 49 types at four skills: 196
+PASS, no FAIL, including four `F117.PT` lines (`models=2 radar=false ir=true stores=2
+gun=false projectiles=0 dropped=0`).
+
+### Quick Mission
+
+The F-117A is in the Quick Mission aircraft list as `F117.PT` / "F-117A Nighthawk" (the
+SELECTABLE list builds both lists) and in every AI wing field; a draft carries it as the
+player's aircraft and in every wing, and it never stands in for another aircraft
+(`quick_mission::the_f117_is_a_quick_mission_player_and_a_wing_choice`). The default load
+is the record's two bay `PAVEWA3.JT` (one GBU-27 each, 4,000 lb, 52,000 of 52,500 lb, no
+tank, F117-6); a Quick Mission strike works (`ai-strike-f117`'s second run: factory
+target, the wingman F-117 takes Strike, lases and releases from the bay). The class word
+`0x4000` is the retail bomber class, the same rule that gives the A-4E the Strike role. The
+Load Ordnance page shows no laser warning and the sensor helper line `Built-in IRADS: no
+pod needed for laser ordnance.` (`menus-snap-quick-lobby-ordnance-laser-notes-f117`,
+measured, not assumed: the record has the `PAVESPK.SEE` row). No template or table carries
+a list of aircraft by name apart from the night rule's `F117.PT`/`B2.PT` pair.
+
+### Multiplayer
+
+The identity crosses the wire as index 49 of 9 bits, the checkpoint as code 49 (BMB-A1's
+round-trip tests cover every `SELECTABLE` identity; nothing moved, protocol 83). The doors
+cross as the `bay` device (the 5th of the six device levels, 1/255) every aircraft already
+carries, and the stores as the same events the client turns into poses
+(`tore_session::client::convert::stores`): `replay-stores-unfired` (below) runs that
+conversion for the F-117 and finds the drawn origins, the live vertices and the release
+origins in agreement. `net-content-missing` (46 s) and `net-window-lobby` (185.5 s) passed
+after rebuilding `tore-server` and `tore-bot` (the lesson from M2K-9: an identity change
+needs a fresh server build).
+**Not run:** an F-117 over the wire. The net scenarios take no aircraft, and `tore-bot`'s
+`bomb` role selects the Mk 82 by name; an F-117 bot needs the role to take the bomb it
+carries, a change to shared bot code that is not made here. See the open items.
+
+### Replay
+
+`replay-a2g-f117` records the F-117's laser pass through `--a2g-run --record --verify-render`
+and reads it back. Measured (`.local/m3-aircraft/checks/F117-9/replay/`): the recording
+replays tick for tick as the run drew it (`verify-render: PASS ticks=5354 missing=0
+differing=0`), the aircraft is `F117.PT` and the weapon `PAVEWA3.JT`, the one
+`weapon.release` is guided from station 0 at 16.2 s on the shooter's own spot (`own`,
+`spot_owner` 0), the left bay station is recorded at x -3.0 ft, location 131, `GB27.SH`,
+and the recorded `bay` device is 0 until about 15 s, 0.8 at 16 s, 1.0 at 17 s and 0.158 at
+18 s, shut from 19 s to the end: the doors open for the release and close after it. The
+second run of the scenario flies the AI-wingman release (the lead's spot) and checks that
+its recording replays the same way (`PASS ticks=5747`), holds one guided release from the
+AI's station 0, the bay station at the same mount, and the bay device at 0 for the whole
+flight. The HUD camera and the four Sensor Views (white hot, black hot, TV, night vision)
+are drawn twice at one tick and match byte for byte and differ from each other. The
+scenario passes as a whole (82 s). It failed twice in between with `vkCreateDevice` errors
+while another program held the card's memory (11.9 of 12.3 GB used), which is the GPU, not
+the replay.
+
+`replay-stores-unfired` now includes `F117.PT` in `--replay-stores-check`: the two bay
+stations read `hardpoint=4` and `5`, `GB27.SH`, location 131, points (-3.0, -0.478, 0.0) and
+(3.0, -0.478, 0.0), and the unfired shapes, live vertices and release origins agree at 3
+count states. `replay-rec-f117-2v2` records the identity as the player and in both wings,
+three times.
+
+The **IRADS and FLIR labels** are text in the live cockpit and in the replay's Sensor View
+(F117-7): the replay names its sight from the record the same way
+(`sight_record`: the laser row is `IRADS`, the other row `FLIR`), pinned by
+`replay::viewer::views::sight_label_tests::the_sensor_view_names_the_f117s_turret_irads_and_another_aircrafts_sight_by_its_record`
+(reads the install, skips without it; the F-16C keeps its record's own name). No text is
+read back from a drawn frame by the battery.
+
+**`replay-stores-release-f117` was not added.** `--combat-smoke` fires every station at an
+aircraft and needs a gun or an air-to-air missile on the load (`no wreck-contact weapon
+fixtures`, then `fired=1 hits=0` for the GBU-27): it is meant for the F-15, F-16C and F-22
+families and does not apply to a bomb-only jet. The bay release is covered by the two
+scenarios above.
+
+### Bugs found and fixed
+
+None in game code. The slice found no fault in the AI release, the wire or the recording
+for the F-117 (unlike TOR-9's swivel and `same_stores`). The fuel flow was the one change.
+
+### Not run
+
+The F-117 flying over the wire (see Multiplayer); an AI landing at another field; the
+`ai-fuzz`, full AI and night AI lanes (the night rule is covered by the unit tests above and
+F117-6's surface scenarios, not by an AI F-117 flying a night mission); `--smoke-test`;
+`check_assets`; the other batteries' lanes.
+
+### Checks
+
+All through `.local/m3-imports/light3.sh`, one heavy command at a time, `tore-app` rebuilt
+and the profile `.local/m3-aircraft/profile-f117` refreshed first (logs in
+`.local/m3-aircraft/checks/F117-9/`): `cargo fmt --all -- --check` clean; `cargo clippy
+--locked --workspace --all-targets -- -D warnings` clean; `cargo test --locked --workspace
+--no-fail-fast` 7,772 passed, 0 failed, 108 ignored (the first run failed one of the new
+tests, an assertion on a Quick Mission draft with a zero-aircraft wing; fixed, and
+`tore-app` rerun in full: 2,557 passed); `--validate-ordnance`: 48 aircraft, 20 recovered
+stations, 4,784 weapon, 233 tank and 80 pod placements, 240 Cheat-only, `F117.PT` 46
+placements, passed; `--replay-stores-check`: `F117.PT` agrees; the roster probe 196 PASS; the
+battery `--scenario '*f117*'` 20 of 20 (the flight, animation, bay, laser, render, AI, menus
+and replay scenarios), plus `net-content-missing`, `net-window-lobby`,
+`replay-stores-unfired`, `menus-ordnance-availability` and `a2g-catalog`; the tools unit tests
+OK (5 skipped); `tools/check_docs.py` passed (382 files).
+
+### Open for John
+
+1. **AI landing speed.** An AI F-117 lands at about 224 kt (an F/A-18D lands at 142). Cap
+   its approach and final to the real 150 to 160 kt for no-flap aircraft (a shared AI change),
+   or leave it? A fix would need the AI to read a different minimum level speed for an
+   aircraft with no flaps, or a speed brake.
+2. **Fuel flow.** 3 lb/s (1,011 nautical miles, 9 percent over the published 930) as the
+   record can hold it, or 4 (758, 18 percent under), or widen the unit of the field?
+3. **AI doors.** Still shut while an AI F-117 releases (first pass). Open them for the
+   release, as a human's do, so a replay shows the bay working? It changes every bay
+   aircraft's AI.
+4. **Net bots.** Let `tore-bot --a2g bomb` take the first bomb of its `--load` so an F-117
+   (and the B-52 and B-2) can be flown over the wire in `net-a2g-stores`?

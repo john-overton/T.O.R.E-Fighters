@@ -636,3 +636,24 @@ the 2 lb/s flow, ceiling, envelopes, the 180 degree a second roll block, the ste
 signature (infrared 20, radar 1) and `bayDrag` (which the hybrid adapter does not read)
 are unchanged. Evidence, the before, after and real table, and the open questions:
 [F-117 flight review](../formats/aircraft-variety.md#f-117-flight-review-f117-8-2026-11-15).
+
+## F-117A fuel flow fit (F117-9, 2026-11-15)
+
+Dated note, additions only. One more `F117.PT` field is read differently, applied only
+while the record still holds its retail value and every other F-117 correction (BMB-A2,
+F117-8) still holds, in `tore-formats` `aircraft_corrections.rs`:
+
+| Field | Retail | Read as | Label |
+| --- | ---: | ---: | --- |
+| `fuelConsumption` | 2 lb/s | 3 lb/s | fitted (the coordinator's first pass, 2026-11-15): the published range of 930 nautical miles (Wikipedia, flugzeuginfo) needs about 3.3 lb/s for both engines at military power; the record keeps whole pounds a second, so 3 is the nearest value it can hold (4 would give 758 nautical miles, 18 percent under) |
+
+The retail 2 lb/s is 0.333 lb/(lbf h) on the 21,600 lbf, a high-bypass figure, and flew the
+Mach 0.82 cruise at 36,000 ft for 1,516 nautical miles from the 18,500 lb tank. At 3 lb/s
+(0.500 lb/(lbf h)) the same cruise burns 2.39 lb/s and reaches 1,011 nautical miles (9
+percent over the published 930), the 65 percent cruise at 20,000 ft 1,457 nautical miles
+(was 2,186), and military power at full tank lasts 102.8 minutes (was 154.2). The F404's own
+cited 0.81 lb/(lbf h) (4.86 lb/s, about 630 nautical miles) is not used: a flow fitted to
+the one published range is the cheaper claim. Thrust, weights, the airbrake word, ceiling,
+envelopes and the stealth signature are unchanged. The pin is loose (a unit test keeps the
+range within 95 to 115 percent of 930); the figures and the re-measurement are in
+[F-117A in missions, multiplayer and replay](../formats/aircraft-variety.md#f-117a-in-missions-multiplayer-and-replay-f117-9-2026-11-15).

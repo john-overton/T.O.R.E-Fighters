@@ -41,6 +41,7 @@ from pathlib import Path
 from battery import Scenario, Step
 from battery_scenarios import _replay_checks as rc
 from battery_scenarios._replay_record import sections
+from battery_scenarios.replay_views import PLAN as VIEWS_PLAN, VIEWS, digests
 
 ROOT = Path(__file__).resolve().parents[2]
 FORMAT_2 = ROOT / "crates" / "tore-replay" / "tests" / "golden" / "format2.tore-replay"
@@ -385,6 +386,117 @@ def harm_problems(work: Path, out: str, name: str, mode: str) -> list[str]:
     return problems
 
 
+# F117-9 (2026-11-15): the F-117A's bay release through a recording. The same laser pass as the
+# F-16C's, on the F-117's own IRADS spot, from the left bay station.
+F117_PASS = [*RUN, *COLUMN, "--aircraft", "f117", "--load", "PAVEWA3", "--station", "0", "--count", "1",
+             "--attack", "laser", *LASER_PASS]
+
+
+# The same pass flown by an AI wingman on the human lead's spot (a buddy laser), recorded: the AI's
+# bomb leaves the left bay with its doors shut (AI doors stay shut, coordinator first pass).
+F117_AI_PASS = [*RUN, *COLUMN, "--pilot", "ai", "--aircraft", "f117", "--load", "PAVEWA3", "--station", "0",
+                "--order", "engage-my-target", "--order-at", "3", "--seconds", "150"]
+
+
+def f117_ai_problems(work: Path, output: str) -> list[str]:
+    """The AI-flown F-117's recording replays as the run drew it, and holds one guided release from
+    the AI's station 0 at the fitted left bay mount with the doors shut from start to end."""
+    problems = []
+    if len(VERIFY.findall(output)) < 2:
+        problems.append("f117 (AI wingman): its recording does not replay as the run drew it (no second verify-render PASS)")
+    path = work / "log-f117-ai" / "log.jsonl"
+    rows = [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+    ai = [r["id"] for r in rows if r.get("type") == "aircraft" and not r.get("human") and r.get("pt") == "F117.PT"]
+    if len(ai) != 1:
+        return problems + [f"f117 (AI wingman): {len(ai)} AI F-117s recorded, want 1"]
+    events_ = [r for r in rows if r.get("type") == "event"]
+    releases = [r for r in kind(events_, "weapon.release") if r.get("subject") == ai[0]]
+    if len(releases) != 1 or releases[0]["fields"].get("station") != 0 or releases[0]["fields"].get("delivery") != "guided":
+        problems.append(f"f117 (AI wingman): releases {[r['fields'] for r in releases]}, want one guided release from station 0")
+    left = [r["fields"] for r in kind(events_, "stores.station") if r.get("subject") == ai[0] and r["fields"].get("slot") == 0]
+    if not left or abs(left[0].get("x_ft", 0) + 3.0) > 1e-6 or left[0].get("location") != 0x83:
+        problems.append(f"f117 (AI wingman): its left bay station was recorded as {left[:1]}, want x -3.0, location 131")
+    bay = [r["devices"]["bay"] for r in rows if r.get("id") == ai[0] and isinstance(r.get("devices"), dict)]
+    if not bay or max(bay) != 0:
+        problems.append(f"f117 (AI wingman): its doors were recorded open: max {max(bay) if bay else None}")
+    return problems
+
+
+def f117_problems(work: Path, output: str) -> list[str]:
+    """The recording replays as the run drew it; the bomb left the left bay on the IRADS spot; the
+    recorded doors were shut before and after and fully open at the release; the sensor views draw
+    the same twice and differ from each other."""
+    problems = verify_problems(output, "f117", 5_000) + f117_ai_problems(work, output)
+    path = work / "log-f117" / "log.jsonl"
+    rows = [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+    aircraft = [r for r in rows if r.get("type") == "aircraft"]
+    if not aircraft or aircraft[0].get("pt") != "F117.PT":
+        problems.append(f"f117: the recorded aircraft is {aircraft[0].get('pt') if aircraft else None}, want F117.PT")
+    names = {r.get("source") for r in rows if r.get("type") == "weapon"}
+    if "PAVEWA3.JT" not in names:
+        problems.append(f"f117: the recorded weapons are {sorted(n for n in names if n)}, want PAVEWA3.JT")
+    events_ = [r for r in rows if r.get("type") == "event"]
+    releases = kind(events_, "weapon.release")
+    if len(releases) != 1 or releases[0]["fields"].get("delivery") != "guided" or releases[0]["fields"].get("station") != 0:
+        problems.append(f"f117: releases {[r['fields'] for r in releases]}, want one guided release from station 0")
+    guided = kind(events_, "weapon.guided", released=True)
+    if not guided or not guided[0]["fields"].get("own") or guided[0]["fields"].get("spot_owner") != 0:
+        problems.append(f"f117: the bomb did not follow the shooter's own spot: {[g['fields'] for g in guided]}")
+    # The bay station's place is in the recording: the left bay's mount 3.0 ft out (F117-5), the
+    # fitted magazine location, the GBU-27 shape.
+    stations = kind(events_, "stores.station")
+    left = [r["fields"] for r in stations if r["fields"].get("slot") == 0]
+    if not left or abs(left[0].get("x_ft", 0) + 3.0) > 1e-6 or left[0].get("location") != 0x83 \
+            or left[0].get("shape") != "GB27.SH":
+        problems.append(f"f117: the left bay station was recorded as {left[:1]}, want x -3.0, location 131, GB27.SH")
+    # The doors (the recorded device `bay`), five samples a second.
+    bay = [(r["t"], r["devices"]["bay"]) for r in rows if r.get("type") == "aircraft_state" or
+           (isinstance(r.get("devices"), dict) and "bay" in r["devices"])]
+    if releases and bay:
+        t = releases[0]["t"]
+        if bay[0][1] != 0 or bay[-1][1] != 0:
+            problems.append(f"f117: the doors were not shut at the start and end: {bay[0]}, {bay[-1]}")
+        near = [b for tt, b in bay if abs(tt - t) <= 0.4]
+        if not near or max(near) < 0.95:
+            problems.append(f"f117: the doors were not open at the release ({t} s): {near}")
+        far = [(tt, b) for tt, b in bay if b > 0 and not t - 3.0 <= tt <= t + 3.0]
+        if far:
+            problems.append(f"f117: the doors were open away from the release: {far[:3]}")
+    else:
+        problems.append("f117: no recorded bay device samples")
+    first, second = digests(work / "a"), digests(work / "b")
+    if len(first) != len(VIEWS) or len(second) != len(VIEWS):
+        return problems + [f"f117: stills written: {len(first)} and {len(second)}, want {len(VIEWS)} each"]
+    if first != second:
+        problems.append("f117: a sensor view differs between two draws of the same tick")
+    if len(set(first)) != len(first):
+        problems.append("f117: two views drew the same picture")
+    return problems
+
+
+def f117_scenario() -> Scenario:
+    return Scenario(
+        name="replay-a2g-f117",
+        lane="replay",
+        args=[*F117_PASS, "--record", "{work}/f117.tore-replay", "--verify-render"],
+        timeout=600,
+        expect=[r"a2g-run: done"],
+        then=[
+            Step(["--recording-log", "{work}/f117.tore-replay", "--out", "{work}/log-f117", "--rate", "5"], timeout=180),
+            Step(["python3", "-c", VIEWS_PLAN, "{work}/plan.txt"], app=False, timeout=30),
+            Step(["--replay-stills", "{work}/f117.tore-replay", "{work}/plan.txt", "{work}/a"], timeout=600),
+            Step(["--replay-stills", "{work}/f117.tore-replay", "{work}/plan.txt", "{work}/b"], timeout=600),
+            Step([*F117_AI_PASS, "--record", "{work}/f117-ai.tore-replay", "--verify-render"], timeout=600),
+            Step(["--recording-log", "{work}/f117-ai.tore-replay", "--out", "{work}/log-f117-ai", "--rate", "5"], timeout=180),
+        ],
+        check_work=f117_problems,
+        notes="F117-9: an F-117A's IRADS laser pass recorded, replayed tick for tick and read back: the GBU-27 leaves the "
+              "left bay (the fitted bay mount in the recording), the recorded doors open for the release and shut after "
+              "it, and the HUD camera and the four Sensor Views draw the same at a tick every time; then an AI F-117 wingman's "
+              "release on the lead's spot, recorded with its doors shut and replayed tick for tick.",
+    )
+
+
 def scenarios() -> list[Scenario]:
     steps: list[Step] = []
     index: dict[str, int] = {}
@@ -441,5 +553,6 @@ def scenarios() -> list[Scenario]:
             then=steps,
             check_work=check,
             notes="bombs, rockets, lasers, JDAMs and HARMs recorded, replayed tick for tick and read back as events",
-        )
+        ),
+        f117_scenario(),
     ]
