@@ -16376,3 +16376,157 @@ the other AI, net and replay lanes, `--smoke-test`, `tools/check_assets.py`, win
 release (none carried). The shared drag, lapse, rolling, brake and stall terms were not touched, so no B52-8 style comparison of the
 other aircraft was needed: `the_b52_flies_its_fitted_terms_and_no_other_aircraft_does` pins that exactly the B-52 and the B-1B
 have a drag shape.
+
+## B-1B Lancer AI, missions, multiplayer and replay (B1B-9, 2026-11-16)
+
+Implementation and verification mode, slice B1B-9 (the B-1B's counterpart of B52-9, B2-9 and F117-9). The AI work
+was asked for by John through the bomber program (AGENTS.md: no AI work unless John asks). Everything here is
+`fitted`, agent decisions of 2026-11-16, except where a number is a record's. The branch carries `m3-aircraft`
+at B52-9 (merge 08bc6cb7), so the shared heavy-bomber rules of
+[BMB-AI](#ai-fixes-for-the-bombers-bmb-ai-2026-11-16) and the B-52's two airfield laws are all present. **No game
+code changed in this slice**: it adds scenarios and checks, one unit test, and settles with evidence that the
+B-1B needs no airfield law of its own.
+
+### The strike class (B1B-0 decision 8)
+
+`B1.PT` keeps the retail script `f.BI` and its strike class comes from the rule, not a table:
+maximum takeoff 477,000 lb is over the 150,000 lb Heavy bar, so the class is Heavy with no override
+(`strike_class::tests` already pin `B1.PT` as Heavy against the retail media, and the F-111F stays the only
+override). The runs show it: every B-1B strike log reads `PROFILE name=level`, and the Heavy rules apply
+(level release from altitude only, the 1.3 x minimum-speed stick, the 5,000 ft heavy floor, the bay doors of
+BMB-AI). Nothing about `f.BI` reaches the strike.
+
+### The AI strike from the bays
+
+The B-2's and B-52's stick rules read the station rows, and the B-1B's rows are the three shared-grid bays of
+B1B-5, so no code was needed. B1B-6 added `ai-strike-b1b-stick` (forward bay) and `-pack` (the default
+seven-packs); this slice adds the other two bays and a Quick Mission wing (`--a2g-run UKR QUCOL --pilot ai
+--aircraft b1b --load MK82 --station N --count 20`):
+
+| Run | What the log shows |
+| --- | --- |
+| `ai-strike-b1b-mid`: 20 Mk 82 in the intermediate bay (station 1), 20,000 ft, 12 nm | `BAY` open at 66.8 s (0.96), eight releases 67.34 to 69.09 s, 0.25 s apart, each `bay=1.00`, from right -1.95, 1.95, -0.65, 0.65 ft then the second tier (up -0.62, then 0.68), forward 19.97; doors read shut 1.95 s after the last; eight impacts (325 to 1,185 ft from the aim), egress at 110 s, not lost |
+| `ai-strike-b1b-aft`: the same in the aft bay (station 2) | the same cells at forward -13.03 ft (inside the 15 ft bay, -19.83 to -4.83), `BAY` open at 66.9 s, shut 71.1 s, eight impacts (379 to 1,391 ft from the aim), egress |
+| `ai-strike-b1b-quick-wing`: a Quick Mission with the Ukraine factory as target (`--quick-wing`) | `ROLE strike`, the forward bay's stick of eight at 5,079 ft (the 5,000 ft heavy floor) at 336 kt, doors open 56.4 s and shut 60.7 s, impacts 177 to 935 ft from the aim, egress at 88 s, not lost |
+
+The check (`b1b_bay_stick_problems`, shared by all four stick scenarios) now reads: stick of eight 0.25 s apart,
+every cell the grid's own place and inside that bay's opening, every release from the bay's station, the doors
+open at every release and shut after (`bay_door_problems`), impacts, egress, not lost, the Heavy level
+profile. Unit tests: `tools/test_battery_ai_strike.py` (`B1BTests`: a full stick from each bay passes; a short
+stick, a repeated cell, a shifted cell, a shut door, the wrong bay, the wrong aircraft and a dive profile each fail).
+
+**Anti-ship: no scenario, a limit.** The B-1B carries no anti-ship store: its Load Ordnance page admits four
+unguided bombs (`MK82AIR`, `MK82`, `MK82P3`, `FAB1000`, B1B-5) and no Harpoon, JSOW or guided store fits the
+bays' 1.3 ft pitch (B1B-6). `--a2g-run` fits any record on a station, so an AGM-84E on the forward row does leave
+and sink the Krivak in a driver run, but that is not a loadout the game can make, so it is not pinned. The real
+B-1B's heavy-store options (JASSM, Mk 84, GBU-31 on the combined bay) are the B1B-5 follow-up.
+
+**Air-to-air: nothing to fly.** The record has no gun and no air-to-air store, so a B-1B engages nobody;
+`ai-b1b-quick-mission-2v2` and `ai-b1b-vs-su27-2v2` (below) pin that. There is no tail gun to aim.
+
+### The airfield laws: decided with evidence, not needed
+
+B52-9's two laws (a 3,000 ft lateral lookahead on the final, and coasting over the taxi speed) apply only where
+`Situation::taxi_throttle_floor` is above zero, and B52-9 left open whether the B-1B needs them. It does not:
+
+- **The gate does not fire.** The floor is 1.1 x the throttle that balances the wheels' rolling deceleration
+  (0.8 ft/s squared shared value) against military thrust at the aircraft's weight, only when that throttle is over
+  0.2. At the full 477,000 lb it is 0.8 x 477,000 / (69,560 x 32.174) = 0.17 (a B-2 about 0.13, the B-52 0.53), so
+  the B-1B's floor is zero at every weight and the shared taxi law runs unchanged.
+- **The final is on the line.** The AI B-1B sent home to Simferopol (UKR 2, 5,532 ft, centre line x 1,107,331) at 40,000, 80,000 and
+  100,000 lb of fuel (the probe's own limit; the aircraft is then 274,000 to 334,000 lb) touches down at
+  x 1,107,331 every time, 0 ft off the centre line, at 158, 168 and 169 kt. The final overshoots the line once
+  (112 ft right at 224 s) and is back on it by 236 s, 5 s before the 190 ft the 80,000 lb B-52 swung either side.
+  Rolling out, it stays at x 1,107,327 to 1,107,344.
+- **The taxi-in is on the pavement.** All three rolls reach `TaxiClear` and `Parked` with `AI probe pavement:
+  off_pavement=0` (14,964 to 15,669 ground samples). The throttle runs at its 0.40 ceiling and falls away as it nears the
+  target speed (0.40, 0.34, 0.29 ... 0.00); it never holds a floor, so it never overshoots an anchor.
+- **The takeoff cycle** (`ai-merged-airfield-b1b-wing2`, Southampton, and `ai-heavy-takeoff-b1b-gre-a1`, Athens)
+  was already pinned on the pavement at B1B-8 and passes on this branch.
+
+So no airfield code changed and no baseline comparison of the other aircraft was needed (nothing in the sim
+differs from B52-9's merge). **The full-load landing.** B1B-8's scripted landing at 477,000 lb crashes at the touchdown. The AI is not
+affected: `ai-merged-airfield-b1b-wing2` takes the AI B-1B off Southampton at the default load (477,000 lb gross, 243,000 lb
+of fuel, the three rows of seven-packs), climbs out (airborne at 210.7 s), holds, and lands it 5.5 minutes later with almost all of that fuel
+still aboard (about 11 lb/s of burn plus the takeoff's afterburner): the threshold at 176 kt (the 175 kt bound), a
+touchdown, rollout, taxi and park with `off_pavement=0` over 97,986 ground samples, no crash. So the AI lands at a near-full load without
+the scripted landing's crash; the cause of that one (a flight-model touchdown, not the AI) stays B1B-8's open item.
+
+### Quick Mission
+
+`quick_mission::tests::the_b1b_is_a_quick_mission_player_and_a_wing_choice`: `B1.PT` is offered as the player's
+aircraft by its own selection key under its retail name "B- 1B Lancer" (with the space, kept by decision) and in every AI wing field; a draft
+carries it as the player and in every wing, never the B-2 or the B-52; the night stealth rule (the B-2 and the
+F-117) does not take it. The strike is `ai-strike-b1b-quick-wing`. Two 2 v 2 probes: `ai-b1b-quick-mission-2v2` (all
+B-1B: every actor holds its 12 store rounds as three rows of `MK-82AIR7 x4`, and the probe's whole shot total is
+zero: no gun, no air-to-air store) and `ai-b1b-vs-su27-2v2` (the probe's usual checks hold, the B-1B player
+fires nothing; the Su-27s fire eight times in the recorded run).
+
+### Multiplayer
+
+`net-a2g-stores-b1b`: both players in B-1Bs (`B1B_STORES_MISSION`, one wing of two), `tore-bot --a2g bomb --load
+MK82.JT`. The Mk 82 goes on the first station that takes it, the forward bay row (station 0), and the other two
+rows keep the default seven-packs. The watching client draws the bomber's stores (a Stores event of 16 bytes at most, 21
+events and 252 bytes in all, three aircraft's stores drawn), sees a Mk 82 leave plane 0 and the bomber's
+emptied stations (0 2 3), and reads plane 0's bay doors at 1.00 on its screen. The bomber's doors follow the
+human's `Switch::Bay`, so no wire byte was added. There is no gun to cover.
+
+### Replay
+
+`replay-rec-b1b-2v2`: the B-1B as the player and in both wings, a 2 v 2 recorded three times; `--verify-render`
+passes (2,401 ticks, none missing or differing) and two runs record the same (969 flight and aircraft events each),
+so the `B1.PT` identity, the three bay rows and the swing wing (whose sweep is a function of speed, rebuilt on
+playback) round-trip. `replay-a2g-b1b-ripple`: a human ripple of eight 0.1 s presses from the forward bay row (`--attack
+release --station 0 --count 20 --hold 0.1`), recorded and replayed with `--verify-render` (6,329 ticks, none
+missing or differing), read back as seven releases and outcomes (the first press is spent opening the doors),
+the recorded bay device shut at the start and the end and at 0.95 or more at every release.
+
+**A one-tick tap loses presses on the B-1B.** With the default one-tick press (`--hold` unset, 0.5 s apart)
+a run of eight gives 5 releases and one of twelve gives 9; the lost taps fall after the second and the fifth
+bomb. The B-52's identical run loses only the first. At a 1 s gap (recorded) the B-1B loses the taps that land
+just after the doors' one-second hold ends: 13.95 s, then nothing until 16.9 s, while the door device closes
+fully (15.0 to 16.0 s) and opens again; a 0.1 s press gives seven of eight at 0.5 s. This is the human release path, not the AI's (the AI's sticks are exact), and it was
+not traced; B1B-5's `flight-bay-ripple-b1b` (a 20-press ripple through its own driver) is unaffected. Listed for John.
+
+### Scenarios and files
+
+| Scenario or test | What it covers |
+| --- | --- |
+| `ai-strike-b1b-mid`, `ai-strike-b1b-aft`, `ai-strike-b1b-quick-wing` | the heavy stick from the other two bays, the Quick Mission wing |
+| `ai-b1b-quick-mission-2v2`, `ai-b1b-vs-su27-2v2` | the B-1B in both wings, nothing fired by it |
+| `net-a2g-stores-b1b` | bay stores, the Mk 82 leaving, the doors, on a watching client |
+| `replay-rec-b1b-2v2`, `replay-a2g-b1b-ripple` | the identity in a recording, the bay ripple and its door device, verify-render clean |
+| `quick_mission::tests::the_b1b_is_a_quick_mission_player_and_a_wing_choice` | the player and wing choice |
+| `tools/test_battery_ai_strike.py` (`B1BTests`), `tools/test_battery_ai.py` | the new checks, on synthetic logs, including the failing cases |
+
+Files: `crates/tore-app/src/quick_mission.rs` (one test); `tools/battery_scenarios/ai_strike.py` (the shared
+`b1b_bay_stick_problems`, three scenarios; the earlier `b1b_stick_problems` now calls it), `ai.py` (the two 2 v 2
+probes and `b1b_no_air_to_air_checker`), `net_a2g.py`, `_replay_record.py`, `_replay_a2g.py`,
+`tools/battery_selection.py` (`ai-b1b-*`, `replay-a2g-b1b-ripple`), `tools/test_battery_ai_strike.py`,
+`tools/test_battery_ai.py`; docs `spec/ai-strike.md`, `spec/ai-airfield.md`, `testing/lane-ai.md`, `lane-flight.md`,
+`lane-net.md`, `lane-replay.md`. `docs/features.md` reviewed (no row names the B-1B's AI), not edited.
+
+### Open for John
+
+1. **No anti-ship or guided strike for the B-1B** (nothing admitted on the bays beyond four unguided bombs): the
+   heavy-store bay and a wider grid pitch are the B1B-5 follow-up.
+2. **Tap presses lose bombs on the B-1B** (5 of 8, not traced; 0.1 s presses are clean).
+3. **The stick walks on beyond the aim** (impacts 177 to 1,391 ft), as the B-2's and B-52's; centring it needs a
+   checkpointed field.
+4. **The full 477,000 lb touchdown** still crashes in a scripted landing (B1B-8); the AI lands from a near-full load without it (`ai-merged-airfield-b1b-wing2`), so the cause is not the AI.
+5. **The post-kill loss** B52-9 saw after a ship kill was not exercised (no anti-ship store).
+
+### Checks (B1B-9)
+
+All through `.local/m3-imports/light3.sh` (away mode), profile `.local/m3-aircraft/profile-b1b` refreshed first,
+logs in `.local/m3-aircraft/checks/B1B-9/`. `cargo fmt --all -- --check` clean; `cargo clippy --workspace --all-targets --locked -- -D warnings` clean;
+`cargo test --locked --workspace --no-fail-fast` 7,880 passed, 0 failed, 108 ignored (with the new quick-mission test); `--validate-ordnance` passed (no pin moved: nothing in the ordnance changed);
+`python3 -B -m unittest discover -s tools` 597 OK (5 skipped); `tools/check_docs.py` passed (382 files). Battery
+(`--jobs 2 --windows 1`, profile-b1b): **93 of 93 pass** after one check fix: every `*b1b*` scenario, every `ai-heavy-*`,
+`ai-strike-*`, `ai-merged-airfield-*`, `net-a2g-*`, `net-ai-strike-*` and `replay-a2g*` scenario, with `replay-rec-b1b-2v2`
+(the first run's `ai-b1b-vs-su27-2v2` failed on the checker's own rule that every actor holds its store rounds, which a
+B-1B the Su-27s shoot down does not; the rule now applies to the all-B-1B fight only, and the two `ai-b1b-*` scenarios
+were rerun, 2 of 2). The first run of the new scenarios also found two check bugs, both mine: the actor regex missed
+"In formation", and the ripple's one-tick presses (above). **Not run:** the rest of the AI lane, `--smoke-test`,
+`tools/check_assets.py`, a before and after comparison of the other aircraft's airfield logs (no sim code changed
+since B52-9's merge, whose own comparison, 128 of 129 identical, stands).

@@ -3589,6 +3589,46 @@ mod tests {
         assert!(!tore_world::surface::resolve::night_stealth(&night));
     }
 
+    /// B1B-9 (2026-11-16): the B-1B Lancer is offered as the player's aircraft
+    /// and in every AI wing field, by its own selection key (`B1.PT`), and a
+    /// draft carries it as the player and in every wing. It never stands in
+    /// for the B-2 or the B-52, the other bombers the AI flies, and the
+    /// stealth night rule is not its own. The name is the retail one, with its
+    /// space ("B- 1B Lancer").
+    #[test]
+    fn the_b1b_is_a_quick_mission_player_and_a_wing_choice() {
+        let mut q = full_catalog();
+        assert_eq!(AircraftId::B1b.selection_key(), "B1.PT");
+        let player = q
+            .aircraft_files
+            .iter()
+            .position(|f| f == AircraftId::B1b.selection_key())
+            .unwrap();
+        assert_eq!(q.aircraft_names[player], "B- 1B Lancer");
+        q.apply(6, player);
+        assert_eq!(q.player(), Some(AircraftId::B1b));
+        for field in AI_AIRCRAFT_FIELDS {
+            let index = q.ai_choice(AircraftId::B1b).unwrap();
+            assert_eq!(q.values(field)[index], "B- 1B Lancer");
+            q.apply(field, index);
+            assert_eq!(q.wing_aircraft(field), Some(AircraftId::B1b));
+        }
+        let spec = q.mission_spec().unwrap();
+        assert_eq!(spec.wings[0].aircraft, AircraftId::B1b);
+        for wing in spec.wings.iter().skip(1) {
+            assert_eq!(wing.aircraft, AircraftId::B1b);
+            assert_ne!(wing.aircraft, AircraftId::B2);
+            assert_ne!(wing.aircraft, AircraftId::B52);
+        }
+        assert!(
+            !tore_formats::quick_template::tables::NIGHT_STEALTH_AIRCRAFT
+                .contains(&AircraftId::B1b.pt())
+        );
+        let mut night = spec;
+        night.condition = tore_world::mission::Condition::Night;
+        assert!(!tore_world::surface::resolve::night_stealth(&night));
+    }
+
     /// Slice GRI-9: the Saab Gripen is offered as the player's aircraft and,
     /// because the AI can fly it, in every AI wing field. The identity the
     /// mission flies is named exactly (`GRIPEN.PT`), never aliased to another

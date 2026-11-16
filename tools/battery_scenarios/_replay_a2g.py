@@ -602,6 +602,42 @@ def scenarios() -> list[Scenario]:
         problems += rc.file_problems(work, "log-b52-ripple/log.jsonl", rc.check_jsonl)
         return problems
 
+    # B1B-9: a B-1B's bay ripple (eight Mk 82 from the forward row, 0.5 s apart, 0.1 s presses: a one-tick tap loses
+    # every third press to the release interval, 5 of 8 and 9 of 12, while 0.1 s gives 7 of 8 as the B-52's does;
+    # the doors opened by the run) recorded,
+    # replayed tick for tick with `--verify-render` and read back as eight releases and outcomes, the row's count
+    # falling 20 to 12; the recorded bay device opens for the release and shuts after it.
+    b1b_args = [*RUN, "UKR", "QUCOL", "--attack", "release", "--from", "1", "--altitude", "20000", "--speed", "300", "--repeat", "8",
+                "--hold", "0.1", "--gap", "0.5", "--aircraft", "b1b", "--station", "0", "--load", "MK82", "--count", "20",
+                "--record", "{work}/b1b-ripple.tore-replay", "--verify-render"]
+
+    def b1b_check(work: Path, output: str) -> list[str]:
+        problems = verify_problems(output, "the B-1B ripple", 3_000)
+        rows = events(work, "b1b-ripple")
+        for name in ("weapon.release", "weapon.outcome"):
+            got = len(kind(rows, name))
+            if not 7 <= got <= 8:
+                problems.append(f"{got} {name} events for a ripple of 8 presses")
+        if len(kind(rows, "stores.items")) < 7:
+            problems.append("fewer stores.items entries than releases")
+        path = work / "log-b1b-ripple" / "log.jsonl"
+        rows_all = [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+        bay = [(r["t"], r["devices"]["bay"]) for r in rows_all
+               if r.get("id") == 0 and isinstance(r.get("devices"), dict) and "bay" in r["devices"]]
+        releases = [r["t"] for r in kind(rows, "weapon.release")]
+        if not bay or not releases:
+            problems.append("the B-1B ripple: no recorded bay device samples or no release")
+        else:
+            if bay[0][1] != 0 or bay[-1][1] != 0:
+                problems.append(f"the B-1B ripple: the doors were not shut at the start and end: {bay[0]}, {bay[-1]}")
+            for t in releases:
+                near = [b for tt, b in bay if abs(tt - t) <= 0.4]
+                if not near or max(near) < 0.95:
+                    problems.append(f"the B-1B ripple: the doors were not open at the release at {t} s: {near}")
+                    break
+        problems += rc.file_problems(work, "log-b1b-ripple/log.jsonl", rc.check_jsonl)
+        return problems
+
     return [
         Scenario(
             name="replay-a2g",
@@ -640,5 +676,18 @@ def scenarios() -> list[Scenario]:
             check_work=b52_check,
             notes="A B-52 bay ripple (eight Mk 82 from the forward bay row) recorded, replayed tick for tick and read back "
                   "as eight releases and outcomes (B52-9).",
+        ),
+        Scenario(
+            name="replay-a2g-b1b-ripple",
+            lane="replay",
+            args=b1b_args,
+            timeout=300,
+            expect=[r"a2g-run: done"],
+            outputs=["b1b-ripple.tore-replay"],
+            then=[Step(["--recording-log", "{work}/b1b-ripple.tore-replay", "--out", "{work}/log-b1b-ripple", "--rate", "5"],
+                       timeout=300)],
+            check_work=b1b_check,
+            notes="A B-1B bay ripple (eight Mk 82 from the forward bay row) recorded, replayed tick for tick and read back "
+                  "as eight releases and outcomes (B1B-9).",
         ),
     ]
