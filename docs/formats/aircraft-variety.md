@@ -9694,3 +9694,650 @@ press, 0.958 in the actual one-press probe), the doors stay 1 s after the releas
 reads `State::bay` on the RCS page only (no change to a row a radar reads), so it now applies
 to the F-117 at 1.5 times with the doors fully open, and the F-22's values are unchanged.
 Update to [F117-3 bay (interim)](#bay-interim-f117-4-f117-5-replaces-it): replaced.
+
+## Tu-160 source review (2026-11-15)
+
+Research mode, slice T160-0 (bomber batch B). This reviews `TU160.PT` (Tu-160
+Blackjack) and its dependency closure before `AircraftId::Tu160` exists.
+`TU160.PT` is not a parked target and has no `parked_aircraft.rs` entry. No
+original module was executed. PT, SEE, ECM and JT are read as bounded BRF data
+with the shared field order in `aircraft_schema.rs`; SH and HUD are inspected
+as data (`shape_inspect`, state words swept by value). Slice done by Claude
+Sonnet (sonnet-medium). Nothing here changes code or behaviour. Real-aircraft
+figures are cited and never establish game behaviour. Retail files were
+extracted only under `.local/m3-imports/scratch/tu160`; no retail bytes are
+committed.
+
+Questions open for John, **not decided here**: the record values, the real-size
+scale, the swing wing (schedule, pivot, fence), the surfaces, the bay layout and
+counts, the Kh-55 mask, the sensor row, the HUD and eye. They are listed under
+"Questions for John" in `.local/m3-aircraft/PLAN-T160.md`.
+
+### Tu-160 build and extraction
+
+`FA_1.LIB` and `FA_2.LIB` are the same pair as the MiG-31 review (see the
+[MiG-31 build section](#build-and-extraction)). The closure was extracted with
+`tore-extract --include 'TU160*' --include '*TU16*' --include '~TU16*' ...`
+plus `'*.PT'`, `'*.JT'`, `'*.SEE'` and `'*.ECM'` for the comparisons below. The
+`SETUP.ESA` installer copy of `FA_2.LIB` holds byte-identical `TU160.PT`,
+`TU160*.SH` and `B.BI`; only `B2.HUD` differs from the base copy (same size, a
+build difference, as the Tornado's `E2000.HUD`). The usual five unrelated
+archive errors appear.
+
+`swpatch.lib` (the toolkit patch archive, excluded from base-FA research as in
+the Tornado review) holds a different `TU160.SH`: same size (33,280 bytes),
+header exponent 8 (scale 1, the base shape is exponent 11), the same design at
+8 times the integer resolution (x -273 to 274, y -231 to 304, z -24 to 116), 317
+faces against 316, and the same six state words at other addresses (`83e0`,
+`83ec`, `83f2`, `83fe`, `8404`, `840a`) with the same values and face counts
+plus one. This review reads the base `FA_2.LIB` shape only; the patch copy is
+the finer coordinates of the same planform (a cross-check below).
+
+**No Tu-160 cockpit art exists**: the name sweeps `~TU16*`, `*TU160*`, `*TU-160*`
+and `*BLACKJ*` found only the encyclopedia pictures, the radio callout, the
+shapes, skins and records below. There is no `TU160.PTS`, no `TU160.AI`, no
+Tu-160 mission file and no `~TU160*` panel.
+
+### Tu-160 identity and record
+
+| Field | Decoded value |
+| --- | --- |
+| PT | `TU160.PT`, 10,215 bytes, SHA-256 `66090b93577ce00c2aae5357e1407896673e432942bc5249a37f69df68288656` |
+| Displayed names | `Tu-160`, `Tu-160 Blackjack-A`, `TU160.PT` |
+| Schema | OBJECT + NPC + PLANE, 219 statements; `structType` 5; `typeSize` 588; `instanceSize` 575 |
+| Object class / year / hit points | `0x4000` / 2010 / 343; `expType` 30; `flags` `0x2bf3` |
+| PLANE flags | `0x5` (base `0x01` and `0x04`; no hook, carrier or `0x10` seat bit) |
+| Shape | `tu160.SH` (33,280 bytes, **header exponent 11, so object scale 8**, CODE 28,716), shadow `tu160_s.SH` (15 faces) |
+| Damage looks | `TU160_A.SH` 313 faces, `TU160_B.SH` 54, `TU160_C.SH` 315, `TU160_D.SH` 38 (all exponent 11) |
+| Skins | `_TU160.PIC` 120,184 bytes (the shape's only texture), `_TU160_A/B/C/D.PIC` 124,084 / 44,004 / 102,504 / 44,264 |
+| Sounds | `&jet04.11k` loop and second sound, `&powerup.5k`, `&powerdn.5k` (all present in `FA_2.LIB`) |
+| HUD | `b2.HUD` (the B-2's HUD file) |
+| AI script | `b.BI` (4,608 bytes, shared with the B-2 and B-52 records) |
+| Sensors / jammer | `VIS300.SEE`, `TU160R.SEE`, `TU160.ECM`, `SU37L.SEE` |
+| Stores | `AS16.JT` on two bay rows (6 each) |
+| PTS | none |
+| Encyclopedia | `TU160.INF` (Jane's, quoted below as reference media), `AS16.INF`, `TU160.PIC`, `TU160_0/1/2.PIC`, `TU160_C.PIC`, `TU160_E.PIC`, `AS16_0.PIC` in `disc2/FA_3.LIB`; `^ACTU160.5K` radio callout in `FA_2.LIB` |
+| Cockpit art | none (sweeps above) |
+| Engines / thrust | 4 engines, thrust 158,092 lbf dry and 232,398 lbf afterburner (totals), fuel flow 26 and 174 |
+| Weights | empty 202,260 lb, internal fuel 368,000 lb, max takeoff 606,260 lb |
+| Ceiling / G | 50,000 ft; `envMin` -2, `envMax` 5, `negGLimit` 0 |
+| Speeds (1 G row) | 145 kt minimum, 1,203 kt at sea level, 1,270 kt top at 36,000 ft |
+| Signatures | `sigs` 266, 266, 100 (IR), 100 (radar), 0 |
+| Checkpoint code / CLI key | none yet, reserved for BMB-B1 |
+
+The decoded record equals the catalog row in [`fa-aircraft.csv`](fa-aircraft.csv)
+field for field. Hashes of the files later slices depend on:
+
+| Resource | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `TU160.SH` | 33,280 | `f493d99fe32b2720299fca80d9cbb72afbfd0878f8e025d93ed50a58cdadd66a` |
+| `TU160.SH` (`swpatch.lib`, not read as base) | 33,280 | `1cd7c0ef4e2367aa1a5c05590bd1e51e2343d5fefe5937602bac3013a659a4fd` |
+| `TU160_S.SH` | 4,608 | `2996389aceac54d7932f9251c2d2fdf3fcbd52edac7c87b2d3365ae9c562d050` |
+| `TU160_A.SH` | 25,088 | `e2005dd43d7f3b600664d7409748e9987163d542bd4763d7f1e09c62e12d65df` |
+| `TU160_B.SH` | 4,608 | `5fe809c57ca1adcc1ed7bd0586ae5932f35d67f7cca51ee2c4719dae368672b5` |
+| `TU160_C.SH` | 25,088 | `81d115b96ee72d00acf24f2d0e596896f4255c66225e14c0031cc57855e3c6d6` |
+| `TU160_D.SH` | 4,608 | `34947b218ccf610a603ae2b53f1d1e3fbed917ca4608483330127c0ad46648a6` |
+| `_TU160.PIC` | 120,184 | `d39d2293e4569d0c6bfdb42d03b91c5c3633e3204fbee3c3177eecaa1d5102c6` |
+| `TU160R.SEE` | 471 | `bbe1718f2ebc7b42aa0fc21dd3e21fc4d7d922f72fc2a68818e1f080af6615d4` |
+| `TU160.ECM` | 354 | `2f39f33781e8f49fc4ef9d05013ea61db0ec2d9a72526367ebb4566f34710e9b` |
+| `SU37L.SEE` | 468 | `f5d6d7fac00841a2e8caa0ecb9b0603cad52947cb2bcc1220519e3f5b6179940` |
+| `VIS300.SEE` | 471 | `2369a8be84e01882666a6d275f82edd02e631fdf0871f7ea66bc8c81f3b71cfb` |
+| `AS16.JT` | 2,768 | `6920952d86e7fcd8de90fe710d94b215afad0e855dcfa25984a6f727e38b6e06` |
+| `B2.HUD` (base) | 4,608 | `b2bf418785cff228b92b6aaee244333abf209f11e9cd1c5acd1287d03de35dee` |
+| `B.BI` | 4,608 | `781f27cddf73075f36659fe0910dda009a457cdd3f2386de6c9b8bb78946e7ae` |
+
+The game's own Jane's text (`TU160.INF`, reference media) is the source for the
+sweep angles, spans and weights quoted below; it also says: "no head-up display
+or CRTs", "No guns", and "a rotary launcher can be installed in each of two
+12.80 m (42 ft) long weapon bays, carrying 12 Kh-15P (AS-16 'Kickback') SRAMs
+or six Kh-55 (AS-15 'Kent') ALCMs".
+
+### Tu-160: the template copy list (for John)
+
+**`TU160.PT` is the `TU26.PT` (Tu-26 Backfire) record with 35 numeric statements
+changed**: 171 of 206 non-pointer statements are identical to the Tu-26's. The
+next closest records share 164 (`TU95.PT`) and 162 (`KC135.PT`); the B-1B
+shares fewer (the B-1B differs in 71 statements, the B-2 in 69). The sensor
+rows follow the Tu-26's pattern too (visual `VIS300.SEE`, own radar, own
+jammer, `SU37L.SEE`). Copied from the Tu-26, not authored for the Tu-160: the
+climb and dive limits, the whole linear and angular velocity blocks (`_bv`,
+`_brv` x and z, `puffRot`), stall (256, 1,280, 256, 30), spin entry and
+exit and the spin yaw, AOA and bank words, crash speeds, `coefDrag` 256,
+`airBrakesDrag` 192, `wheelBrakesDrag` 102, `flapsDrag` 76, `gearDrag` 23,
+`bayDrag` 25, `flapsLift` 25, `structureWarnLimit` and `structureLimit`
+(2,560 and 5,120), `throttleAcc` and `throttleDacc` (20 and 60), `envMin` -2,
+the sound words, the camera and doppler words and all 45 `systemDamage` bytes.
+The 35 statements the Tu-160 re-authors, against the Tu-26:
+
+| Field | `TU160.PT` | `TU26.PT` |
+| --- | ---: | ---: |
+| `typeSize` / `instanceSize` | 588 / 575 | 660 / 626 |
+| `dmgDebrisPos.x` / `dstDebrisPos.z` | -180 / -160 | 80 / -90 |
+| `year` | 2010 | 1987 |
+| `maxVisDist` | 1,337 | 775 |
+| `sigs[0]` / `sigs[1]` | 266 / 266 | 202 / 202 |
+| `hitPoints` | 343 | 253 |
+| Empty weight (`weight`), lb | 202,260 | 110,230 |
+| `maxAlt`, ft | 50,000 | 60,000 |
+| `viewOffset.y` | 35 | 20 |
+| `numHards` | 6 | 9 |
+| `envMax` | 5 | 4 |
+| `structure[0]` / `[1]` | 2,043 / 2,158 | 1,003 / 1,934 |
+| `_brv.y.acc` / `dacc`, `turbulencePercent` | 5 / 5, 146 | 4 / 4, 140 |
+| `rudderYaw` min/max/acc/dacc | -2 / 2 / 2 / 6 | -1 / 1 / 1 / 3 |
+| `engines` | 4 | 2 |
+| `thrust` / `aftThrust`, lbf | 158,092 / 232,398 | 59,986 / 88,180 |
+| `fuelConsumption` / `aftFuelConsumption` | 26 / 174 | 10 / 66 |
+| `internalFuel`, lb | 368,000 | 110,230 |
+| `_gpullDrag`, `loadedDrag`, `loadedGpullDrag` | 20, 40, 8 | 23, 30, 6 |
+| `loadedElevator` / `loadedAileron` / `loadedRudder` | 50 / 50 / 50 | 45 / 45 / 45 |
+| `maxTakeoffWeight`, lb | 606,260 | 273,370 |
+
+The G envelope is the Tu-160's own (below); the hardpoint rows are the Tu-160's
+(four sensors and two bay rows; the Tu-26's has a tail gun row and a sensor
+row at another place).
+
+Real figures against the record, from the game's own Jane's text (`TU160.INF`),
+Wikipedia (Tupolev Tu-160, read 2026-11-15) and aerospaceweb.org's Tu-160 page
+(read 2026-11-15); the sources disagree where noted:
+
+| Field | Record | Real | Difference | Verdict |
+| --- | ---: | ---: | ---: | --- |
+| Empty weight, lb | 202,260 | 242,500 (`TU160.INF`; Wikipedia 242,508); aerospaceweb 257,940 | -16.6% vs 242,500 | Authored (the Tu-26's 110,230 is not it); low |
+| Internal fuel, lb | 368,000 | `TU160.INF` max fuel 352,735; aerospaceweb 326,285; Wikipedia 286,600 | +4.3% vs 352,735; +12.8% vs 326,285 | Authored; at the high end of the sources |
+| Max takeoff, lb | 606,260 | 606,271 (275,000 kg: `TU160.INF`, Wikipedia); aerospaceweb 606,260 | exact | Real |
+| Thrust dry, lbf (total) | 158,092 | 4 x 30,900 = 123,600 (Wikipedia); aerospaceweb 123,370 | +28% | Not real; `TU160.INF` gives no dry figure |
+| Thrust afterburning, lbf | 232,398 | 4 x 55,000 = 220,000 (Wikipedia), aerospaceweb 220,460; `TU160.INF` 4 x 50,580 = 202,320 | +5.4% vs 220,460 | Close, the game's own text is lower |
+| Engines | 4 | 4 | | Correct |
+| Top speed | 1,270 kt at 36,000 ft | Mach 2.05, 1,200 kt at 40,000 ft (`TU160.INF`) | +5.8% | Close; the 1 G row is 2,133 ft/s (1,264 kt) at 40,000 ft |
+| Sea-level 1 G edge | 1,203 kt | the real low-level maximum was not found in the sources read | | The record's sea-level edge equals the real altitude top speed: authored |
+| Minimum speed (1 G, sea level) | 145 kt | `TU160.INF` approach speed not given | | Not examined |
+| Ceiling, ft | 50,000 | 49,200 (15,000 m, `TU160.INF`) | +1.6% | Close |
+| G limit | rows -1 to +3 real, +4 and +5 rows are stubs | `TU160.INF` "g limit: 2" | | See "G envelope" below |
+| Year | 2010 | first flight 1981, deliveries from 1987 (`TU160.INF`) | | Retail value; the year gates availability |
+| Hit points | 343 | none | | Own |
+
+**Which are template copies:** the flight tuning block and housekeeping (above).
+**Weights, fuel, thrust and the speed edges are the record's own numbers**,
+three of them (empty weight, dry thrust, fuel against Wikipedia) off the real
+figures; the maximum takeoff weight is the real figure.
+
+Options for John (none chosen; the Mirage 2000, Tornado and batch A precedent is
+that these corrections are his call):
+
+1. Keep every value as retail (document only, audit pins).
+2. Correct thrust to the real figures (dry 123,600, afterburning 220,460 lbf
+   total) and leave weights and fuel.
+3. Also correct empty weight to 242,500 lb and fuel to a cited figure (352,735
+   lb by `TU160.INF`; 326,285 lb by aerospaceweb), and trim the top speed to
+   1,200 kt. This is the batch A B-52 and B-2 route (all real).
+
+Agent note: with 158,092 lbf dry and 202,260 lb empty the record gives a dry
+thrust to empty weight of 0.78; the real 123,600 over 242,500 is 0.51. Full
+internal fuel plus an empty airframe is 570,260 lb, 36,000 lb under the maximum,
+which is also the bay payload (below): the record's weights were authored to add
+up to the real maximum takeoff weight.
+
+### Tu-160 G envelope rows
+
+Points are speed in ft/s at altitude in ft (the first word of each point is the
+speed, the second the altitude; the polygon runs up the slow edge and down the
+fast one). Eight rows, G -2 to +5; the rows for -2, 4 and 5 are degenerate
+stubs (795 to 815 ft/s at 0 to 1,000 ft), so the usable range is -1 to +3, as
+with the Tu-26.
+
+| G | Points |
+| ---: | --- |
+| -2, 4, 5 | 795@0, 805@1,000, 815@0, 815@0 (stub) |
+| -1 | 310@0, 394@18,562, 526@28,843, 880@36,125, 1,290@36,062, 1,650@31,000, 1,820@24,000, 1,770@0 |
+| 0 | 150@0, 205@18,000, 313@37,000, 511@47,000, 870@53,000, 1,312@53,000, 1,838@50,000, 2,234@41,000, 2,244@36,000, 2,130@0 |
+| 1 | 245@0, 299@17,500, 413@36,000, 601@45,000, 870@50,000, 1,302@50,000, 1,787@47,000, 2,133@40,000, 2,143@36,000, 2,030@0 |
+| 2 | same as -1 |
+| 3 | 395@0, 472@15,000, 621@20,500, 860@23,000, 1,125@23,000, 1,328@18,500, 1,422@13,000, 1,380@0 |
+
+The 1 G row tops out at 2,143 ft/s (1,270 kt) at 36,000 ft and 2,030 ft/s (1,203
+kt) at sea level, the catalog's top and sea-level speeds. The +3 G row ends at
+23,000 ft, the -1 and +2 rows at 36,000 ft. The Tu-26 row set is a different
+polygon with the same shape of stubs, so the envelope is authored for the
+Tu-160. `TU160.INF` gives "g limit: 2"; the record's rows give +3 and its
+`envMax` says 5 (the +4 and +5 rows cannot be reached).
+
+### Tu-160 dependency closure: shape, HUD, AI, sensors, ECM, stores
+
+| Resource | Role | Note |
+| --- | --- | --- |
+| `TU160.SH` | Shape | 316 runtime faces, 0 lines, 0 billboards, one texture `_TU160.PIC`, six state words (`7ff0`, `7ffc`, `8002`, `800e`, `8014`, `801a`), **no sweep word**; the streamer record is (pivot 20, 0, 10; points 50, -2, -22 in the record's units) and its relation to the mesh is unknown (as the Tornado's) |
+| `TU160_S.SH` | Shadow | 15 faces |
+| `TU160_A.SH` / `TU160_C.SH` | Damage bodies | 313 / 315 faces |
+| `TU160_B.SH` / `TU160_D.SH` | Damage pieces | 54 / 38 faces |
+| `b2.HUD` | HUD | the B-2's HUD; see "HUD" below |
+| `b.BI` | AI script | present, shared with the B-2 and B-52 |
+| `VIS300.SEE` | Visual sensor | type 0, 27,300 by 21,840 angle units, 60,760 ft; also on the Tu-26 and Tu-95 records |
+| `TU160R.SEE` | Radar | type 3, 60 degrees by 45 degrees zone (10,920 by 8,190), **range 911,400 ft (150 nmi)**; the Tu-26's `TU26R.SEE` is the same record with 607,600 ft (100 nmi) |
+| `TU160.ECM` | Jammer | type 9, own record, 354 bytes; differs from `TU26.ECM` in one word (`$1f0` against 0); not in any roster (`m3-asset-inventory.md`: "generation unreviewed") |
+| `SU37L.SEE` | Built-in laser designator | type 10, signature 1, zone 60 degrees (10,920) to 60,760 ft, fixed row at (0, 0, 0); see "Sensors" |
+| `AS16.JT` | Bay store | in the TORE roster (live, `missiles.rs`); `kikbk.SH`, real size 15.7 ft long, 1.49 ft body, 3.0 ft span (`store_sizes.rs`) |
+
+### Tu-160 shape state words (rule 11 fold table)
+
+`TU160.SH` has six state words, each a different kind. Counts from
+`Shape::with_state` (neutral 316 faces; coordinates raw shape units, x right,
+y forward, z up). **The object scale is 8, so one unit is 8/3 ft (2.667 ft)**
+(see "real size"). A value sweep of -1, 1, 2 to 5, 10 to 100 and 1,000 was run
+on every word.
+
+| Word | Values | Faces | Geometry | Reading | Status |
+| --- | --- | --- | --- | --- | --- |
+| `7ff0` | 1 | +16 | Four prisms behind the nozzles (plates at x -6 to -3 and 3 to 6, y -22 to -11, z -3 to -1, two windings each, and four z -2 plates) | Afterburner flames, one per engine | Confirmed by position (nozzles at y -11) |
+| `7ffc` | 1 | +4 | Two vertical plates at x -1 and x 1, y 6 to 16 (26.7 ft long), z 0 to -2, two windings each | Airbrake slot by order (the slot order below); the geometry is two ventral keel plates, **not a real Tu-160 feature** | By slot order only |
+| `8002` | 1 | +12 | Nose: plates x 0, y 20 to 22, z 0 to -5 and a cap at y 22, x -1 to 1; mains: x -1 / x 1 plates (y -4 to 2) and y -1 cross plates (x 0 to 2 and -2 to 0), z 0 to -5 | Gear down (nose and two mains) | Confirmed (slot order; low point -5) |
+| `800e` | -1 / 1 and up | +4 -2 / -2 | Left outer-wing trailing strip `50b4` `50db` (x -32 to -11, y -7 to -2, z -1 to 0) deleted by any value of 1 or more; value -1 deletes it and adds four faces `516f` `5196` `51bd` `51d2` (x -32 to -11, y -6 to -2, z -3 to 0) | Left flap, signed: **-1 drooped (down), 1 and up retracts/deleted** | Slot order and geometry |
+| `8014` | -1 / 1 and up | +4 -2 / -2 | The same for the right strip (`4b93` `4bba`, replacements `4c5a` `4c81` `4ca8` `4cbd`) | Right flap | As above |
+| `801a` | -1 / 1 / 2 and up | +2 -2 / +2 -2 / -2 | The rudder strip `52e0` `5307` (x 0, y -26 to -24, z 7 to 14) swapped for `5206` `522d` (value 1, trailing edge out to x +2 at z 7 and +1 at z 14) or `5273` `529a` (value -1, to x -2 and -1); a value of 2 or more deletes it | Rudder, **signed** (the second signed word in the bombers, after the B-2's drag rudders) | Confirmed by geometry |
+
+The slot order (flame, brake, gear, flap, flap, rudder) is the shared order of
+the MiG-25/31, Mirage 2000, Su-24 and Tornado families; the flap and rudder
+words are signed (a two-sided pose), as the B-2's drag-rudder word is. There is **no
+sweep word, no slat word, no spoiler word, no fence word, no tailplane word, no
+hook word, no canopy word, no bay-door word, no probe word and no reverser
+word.**
+
+**The sweep word: none.** The wing is one fixed spread pose, so any sweep is a
+**fitted rig** (the Tornado's, MiG-23's and F-14's method, not a source state).
+The spread pose measures: span x -34 to 34 (68 units, 181.3 ft against the real
+182.75 ft at 20 degrees, -0.8%); the movable panel's leading edge from (9, 4) to
+(32, -3) is 16.9 degrees from the lateral axis and its trailing edge (the flap
+strip) from (11, -2) to (32, -6) is 10.7 degrees against the real 20 degrees
+(one unit is 2.7 ft, so a unit of rounding over 23 is 2.5 degrees: the mesh is
+quantised, not wrong). The `swpatch.lib` copy at 8 times the resolution gives the
+leading edge from (65, 17) to (259, -21): 11.1 degrees.
+
+**The fixed gloves.** The mesh has a very large fixed root panel on each side of
+the fuselage, as `TU160.INF` describes ("very long and sharply swept fixed root
+panel"): its leading edge runs from x 2 at y 23 to x 9 at y 5 (68.7 degrees from
+the lateral axis), its outer edge x 9 to 10 from y 5 to y 1, then the trailing
+edge to the engine ducts at y -9 (the nacelles are x 2 to 6, z -3 to 0, y -9 to
+8). These faces are all fixed. The movable outer panel is **16 faces a side**
+(right: `4952 4975 498e 49af 49d6 49f9 4a22 4a49 4a6c 4a8f 4ab0 4ad3 4b1c 4b45`
+plus the flap strip `4b93 4bba`; left: `4e8e 4eaf 4ed8 4f01 4f24 4f47 4f60 4f87
+4faa 4fcd 4fee 5011 5040 5067` plus `50b4 50db`), 15 distinct vertices, spanning
+x 8 to 34 (right). **It shares not one vertex with any fixed face**: the root
+hangs 1 unit (2.7 ft) off the glove edge at (8, 2), (8, 1) and (9, 4), (9, 5) in
+the spread pose, and 4 to 6 units from the nacelles at the rear. A whole-panel
+turn therefore folds nothing (rule 11 passes trivially); the cost is the root
+seam (below).
+
+**The fence at full sweep: not in the shape.** `TU160.INF`: "when wings fully
+swept, inboard portion of each trailing-edge flap hinges upward and extends above
+wing as large fence". The mesh has **no geometry above the wing** (the wing
+panel is z -1 to 0; the highest outer-wing vertex is z 0); the flap strip is the
+whole outer-panel trailing strip (x 11 to 32, 21 units, 56 ft), not an inboard
+portion; the only flap pose in the source is the signed word's drooped copy
+(z -3, hinged about the strip's leading edge, a 3-unit (8 ft) drop at the root).
+So a fence is a **fitted rig** with a source mismatch: the strip is two whole
+faces (two layers) and cannot be split (whole-surface gate), so turning the
+strip up as a fence would stand a 56 ft by 5 to 8 ft plate on the wing, against
+the real inboard portion. Options below.
+
+**Rule 11 face table** (every face of every moving or word-added surface; the
+shared-vertex test is exact coordinates against all other faces):
+
+| Surface | Faces | Vertices each | Moved | On hinge/spindle | Fixed off axis |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Movable outer wing panel (swing), per side | 16 (incl. strip) | 3 or 4 (one 5) | all 15 distinct vertices | 0 (no vertex shared with a fixed face) | 0 |
+| Flap strip, right | `4b93` (top), `4bba` (bottom) | 4 | 2 each (the trailing edge `(11,-5,-1)` `(32,-7,-1)`) | 2 each, the leading edge `(11,-2,0)` `(32,-6,0)` / `(11,-2,-1)` `(32,-6,-1)` | 0 |
+| Flap strip, left | `50b4`, `50db` | 4 | 2 each | 2 each (mirror) | 0 |
+| Flap drooped copy (`8014` -1), right | `4c5a` `4c81` (4 vertices), `4ca8` `4cbd` (end triangles, 3) | 4, 4, 3, 3 | the strip edge z -3 / -2 | the leading edge z 0 / -1 | 0 |
+| Upper fin (real all-moving piece), both windings | `3ea8` `3f6f` (4), `3ecf` `3f96` (4, degenerate), `52e0` `5307` (4) | 4 | all | the base `(0,-17,7)` `(0,-24,7)` `(0,-26,7)` shared with the fixed lower fin and the tailplane roots | 0 |
+| Rudder strip, both poses | `5206` `522d` / `5273` `529a` | 4 | 2 (the trailing edge) | 2 `(0,-24,7)` `(0,-25,14)` (the hinge, shared with the fin) | 0 |
+| Tailplane, right | `1daf`, `3e5d` (two windings) | 4 | all 4 (whole quad) | 0 | 0 |
+| Tailplane, left | `1dce`, `3e7c` | 4 | all 4 | 0 | 0 |
+| Gear plates (`8002`) | 12 (nose 4, mains 4 and 4) | 4 | all plates rigid | the top edge z 0 sits on the belly (z -1 to 0), none shared | 0 |
+| Flames (`7ff0`) | 16 (four prisms) | 4 | placed only | none shared | 0 |
+| Keel plates (`7ffc`) | 4 | 4 | placed only | none shared | 0 |
+
+Verdict: no face folds. The whole-surface gate (no diagonal or partial surface;
+whole faces only) is met by every candidate: every face is a complete one-piece
+polygon and lies wholly on one side of its hinge or spindle.
+
+### Tu-160 surfaces (for John)
+
+- **Swing wing: 16 whole faces a side, one rigid panel.** The turn is a vertical
+  axis; the seam and the pivot are in the swing-wing survey below.
+- **All-moving tailplane: one quad per side at z 7 (right `1daf`/`3e5d`, left
+  `1dce`/`3e7c`).** The quad is [8,-28], [8,-25], [0,-18], [0,-26] (tip chord 3
+  units, root chord 8 units on the centre line, span 8 units each side: 16 units,
+  42.7 ft against `TU160.INF`'s tailplane span 13.25 m (43.5 ft), -1.9%). No state
+  word. Each side's root edge lies on the fin base at x 0; its two root vertices
+  are 4 units fore and aft of the root-chord midpoint `(0,-22,7)`, the lateral
+  spindle (rule 11: an all-moving surface turns about a lateral spindle through
+  its root chord midpoint, never a swept span axis). A pitch turn moves both
+  roots by up to 4 units times the sine (10.7 ft times the sine; at 0.25 rad
+  2.6 ft) in z, together; a **roll** turn moves them apart, so the left and
+  right roots split by the same 2.6 ft at the centre line, behind the fin. Real:
+  the horizontal tail is differential (stabilators for pitch and roll) and mounted
+  high on the fin (`TU160.INF`: "horizontal tail surfaces mounted high on fin"), so
+  rule 12 (pitch plus differential roll) applies; the whole-surface gate is met.
+- **Upper fin and rudder.** Real: the upper portion of the fin "is pivoted
+  one-piece all-moving surface" (`TU160.INF`). The mesh has the upper fin as six
+  faces (three per winding) at x 0, y -26 to -17, z 7 to 14, and a **rudder strip
+  of the aft 2 units only** (`52e0`/`5307`, 5.3 ft chord by 18.7 ft, 18% of the fin
+  chord at its base). The retail word swaps that strip for a skewed copy that
+  goes out 2 units at the base and 1 at the top (a chord that stretches from 2 to
+  2.8 at the base; not an exact rotation, as the Mirage 2000's and Tornado's
+  rudders). Options: (a) rig the strip only, hinged about `(0,-24,7)` to
+  `(0,-25,14)`, with the word's 45 degree pose as the limit (a large fitted
+  angle, the B-52 precedent was 31 degrees); (b) rig the whole upper fin (six
+  faces) about a vertical axis through the base chord midpoint `(0,-21.5,7)`,
+  matching the real one-piece surface (a fitted rotation; the base seam at the
+  tailplane roots opens by 4 units times the sine). Recommended (b) at a small
+  limit, if John wants the real surface; (a) is the source.
+- **Flaps: one whole strip a side** (x 11 to 32, two layers each), real
+  double-slotted flaps (Wikipedia). The word's drooped pose (-1) is the source
+  pose; the retail rest pose is the strip itself, and a retracted pose with the
+  strip deleted (value 1) is the retail "flaps in". Rig: hold the strips drawn
+  and droop them about the leading edge, like the Tornado's (TOR-3: 0.40 rad),
+  at a fitted limit within the source's 3-unit drop. **No slats** (real: full-span
+  leading-edge slats; the mesh has no slat face) and **no spoilers** (real:
+  there are wing spoilers; none in the mesh), none invented.
+- **The fence (real, not in the source).** Options (none chosen): (a) no fence
+  (what the shape holds; the flap strip simply swings with the swept panel);
+  (b) fitted: turn the whole flap strip up about its leading edge by about 90
+  degrees at full sweep (the strip is whole faces; a 56 ft fence is longer than
+  the real inboard portion and cannot be shortened without a partial surface);
+  (c) authored fence geometry for the inboard portion (new faces, fitted).
+- **Airbrake (the `7ffc` word).** The real Tu-160 has no airbrake, `TU160.INF`
+  does not list one, and the word's two plates are ventral keels 26.7 ft long.
+  The `BRAKE` indicator in `b2.HUD` exists. Options: draw the retail plates for
+  the brake word; or leave the word unrigged (as the F-111F's and B-1B's are
+  decided later).
+- **No elevons, no spoiler panels, no slats, no reversers, no refuelling probe.**
+  The in-flight refuelling probe (`TU160.INF`: "retracts into top of nose") has no
+  word and no geometry; none invented.
+
+### Tu-160 gear
+
+Plate gear, no wheels or doors, the state word `8002`: the nose plates at y 20 to
+22 (x 0 plane two windings and a y 22 cap x -1 to 1; z 0 to -5) and the two mains
+at x -1 and x 1 (long plates y -4 to 2) with cross plates at y -1 (x 0 to 2 and
+-2 to 0). Low point **-5 units**, 5 units (13.3 ft) below the belly skin (z -1
+to 0). At 8/3 ft per unit: wheelbase from the nose plates (y 21) to the mains'
+centre (y -1) 22 units, **58.7 ft**; the mains stand at x +-1 so the track is
+**5.3 ft** (the cross plates reach x +-2). The belly at the main-gear column is
+the flat fuselage skin (no gear-well overlay, no door), and the nacelles sit at
+x 2 to 6 outboard of it, so the mains of the mesh are inside the fuselage lines,
+**not** between the fuselage and the inboard engine as `TU160.INF` has it
+("gear retracts into thickest part of wing, between fuselage and inboard engine
+on each side; so track relatively small"). Real details (`TU160.INF`): twin
+nosewheels retract rearward; each main is a bogie of three pairs of wheels,
+retracting rearward with the bogie turning 90 degrees about the centre pair's
+axis; nose tyres 1,080 by 400 mm and main tyres 1,260 by 425 mm. The real track
+and wheelbase were not found. Height: gear down z -5 to 14 is 19 units, 50.7 ft
+against the real 43 ft (+18%); gear up (nacelles, z -3) it is 17 units, 45.3 ft
+(+5%): the gear plates are about 7 ft longer than the real clearance allows, if
+the reference z 0 is the belly. Gear rig options: each plate set rigid about the
+top edge (z 0) like the Tornado, the nose folding aft and the mains aft about a
+lateral axis through the belly; no bogie rotation and no doors in the source.
+The fold check passes trivially (whole plates, nothing shared).
+
+### Tu-160 real size (for John)
+
+Measured on the neutral state (gear up) and the gear word. Header exponent 11, so
+the **object scale is 8** (2^(11 - 8); the Tornado and B-52 are exponent 9, scale
+2, drawn at 2/3 ft; the B-2 and F-117 are exponent 8, scale 1, drawn at 1/3 ft).
+One unit is **8/3 ft**. `combat::debris::scale` (the sim's per-aircraft scale
+table) would need a `Tu160 => 8/3` arm beside the 2/3 group; the default 1/3 ft a
+unit would draw it **8 times too small**.
+
+| Axis | Units | At 8/3 ft | Real | Verdict |
+| --- | ---: | ---: | ---: | --- |
+| Span, spread (x -34 to 34) | 68 | 181.3 ft | 182.75 ft (55.70 m, 20 degrees; `TU160.INF`, Wikipedia) | -0.8% |
+| Length (y -29 to 38) | 67 | 178.7 ft | 177.5 ft (54.10 m) | +0.7% |
+| Height, gear up (z -3 to 14) | 17 | 45.3 ft | 43 ft (13.10 m) | +5.4% |
+| Height, gear down (z -5 to 14) | 19 | 50.7 ft | 43 ft | +17.8% |
+| Tailplane span (x -8 to 8) | 16 | 42.7 ft | 43.5 ft (13.25 m) | -1.9% |
+
+The four flame prisms reach y -22 (inside the length). The spread leading
+edge sweeps 16.9 degrees against the real 20 (above). The patch shape's
+coordinates (8 times finer, scale 1) give 547 units at 1/3 ft, 182.3 ft: the
+same aircraft. **Verdict.** The shape is modelled with the wing fully spread and
+is **true size at 8/3 ft per unit** (within 1% on span and length, -2% on
+tailplane span); only the gear-down height is high (the gear). No per-axis fit
+is needed except possibly the gear and the +5% body height. Options (none
+chosen): (1) draw at 8/3 ft per unit (the header scale; Tornado and B-52 precedent); (2) the same plus a
+per-axis z fit of about 0.95 (opinionated; it would shorten the gear by 5% too,
+not the 18%); (3) keep (1) and shorten the gear plates alone (fitted rig).
+
+### Tu-160 bay survey
+
+**The shape has no bays.** The belly under the fuselage centre (x -2.5 to 2.5,
+y -14 to 26) is flat skin at z 0 to -1: no opening, no door panel, no overlay
+panel and no door word, unlike the B-2's two overlay panels. The bay doors and the
+bay interiors are authored geometry (as the B-52's, B-2's and F-117's were).
+
+**The record's six hardpoints** (original order; location byte 0 Centerline, 1
+Fuselage, 2 Internal Gun, 3 Internal Bay, 4 Wing, 5 Wingtip; positions are record
+units right / up / forward, feet are units divided by 3):
+
+| Row | Location | Flags | x / y / z | Feet right / up / fwd | Max items | Weight class | Default | Role |
+| ---: | --- | ---: | --- | --- | ---: | ---: | --- | --- |
+| 0 | Fuselage | `0x1008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `VIS300.SEE` | Fixed visual sensor |
+| 1 | Fuselage | `0x1008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `TU160R.SEE` | Fixed radar (150 nmi) |
+| 2 | Fuselage | `0x1008` | 0 / 0 / -50 | 0 / 0 / -16.7 | 1 | 0 | `TU160.ECM` | Fixed jammer |
+| 3 | Fuselage | `0x1008` | 0 / 0 / 0 | 0 / 0 / 0 | 1 | 0 | `SU37L.SEE` | Fixed laser row |
+| 4 | Internal Bay | `0x1184` | 0 / -50 / 91 | 0 / -16.7 / 30.3 | 6 | 180 | `AS16.JT` | Bay row 1 |
+| 5 | Internal Bay | `0x1184` | 0 / -50 / 91 | 0 / -16.7 / 30.3 | 6 | 180 | `AS16.JT` | Bay row 2 |
+
+Findings: **the six hardpoints are four fixed sensor rows and two bay rows; there
+is no external station, no wing row, no gun row** (real: no external pylons in
+the standard fit, and no guns, `TU160.INF`). Both bay rows carry **the same
+position** (0, -16.7, 30.3 ft): the record does not place one bay ahead of the
+other. 30.3 ft forward is y 11.4 in the shape (nose y 38, tail y -29), the
+middle of the fuselage forward of the wing box; the up value (-16.7 ft) is 14 ft
+below the belly (-2.7 ft) and 3.4 ft below the gear low point (-13.3 ft): as on
+the B-2 and the F-22 it is **not a measured position**, so the placement code,
+not the raw number, must put the stores. The flags `0x1184` are `0x1000` (the
+reviewed-row bit; it refuses air-to-air missiles, below), the bomb bit `0x100`,
+the infrared/laser mask `0x80` and the **pair flag `0x4`**; there is no base
+`0x01`, no `0x40` (semi-active radar), no `0x20` (active radar) and no pod bit.
+Weight class 180 means 18,000 lb a row: two rows are **36,000 lb, exactly
+`TU160.INF`'s "up to 16,330 kg (36,000 lb)"** and six `AS16.JT` (2,640 lb each in
+the retail data: 15,840 lb) is a row's capacity from `maxItems`. The pair flag at
+x 0 puts a mirrored store on the same point (the B-2 slice cleared the flag on its
+bay rows for the same reason, `0x1504` to `0x1104`).
+
+**What the bay rows accept** (the loading rule `Station::allowed_count` replayed
+over the 135 retail `JT` records with the source flags; the TORE weapon roster
+admits a subset): the default `AS16.JT` (6), and by the masks 33 other records:
+signature 0 bombs (the bomb bit `0x100`: `MK82`, `MK82HD`, `MK82P`, `MK82P3`,
+`MK82AIR` (5), `MK84`, `FAB250`/`500`/`1000`, `AT2`, `GBU29`, `GBU29P`, `GBU30`,
+`~BLDR`, `~MOOSE`, the `CBU87`/`89`, `MK20`, `RBK250`/`500` cluster records, all
+6 a row but `MK82AIR` 5), signature 1 and 2 (`0x80`: `GBU10`, `GBU10A`, `PAVEWAY`,
+`PAVEWA3` (6), `GBU28` (4), `AS14`, `AS30`, `AT12`, `AGM65A`, `AGM65G`, `AGM84E`
+(6)), and the passive-emitter `AGM45` and `AGM88` (signature 4, which the rule sends
+to the bomb bit `0x100`, 6 a row). It refuses **air-to-air missiles**
+(`0x1000` with the air-target flag), **`AS15.JT`** (signature 3 with the support
+bit `0x200` needs `0x40`, which the row lacks) and every radar-guided store other
+than the default. So the retail row can carry bombs, guided bombs and
+air-to-ground missiles, **not the Kh-55 (`AS15.JT`)**.
+
+**Real bay loads (cited).** Two internal weapons bays in tandem in the centre
+fuselage (aerospaceweb, Wikipedia), each fitted with a rotary launcher (the game's
+own Jane's: "a rotary launcher can be installed in each of two 12.80 m (42 ft)
+long weapon bays"). Per launcher six Kh-55SM, Kh-101, Kh-102 or Kh-555 cruise
+missiles (12 in all, the primary load), or **12 Kh-15 (AS-16 'Kickback')**, 24 in
+all (Wikipedia, aerospaceweb: "up to 24"); free-fall bombs are theoretically
+compatible (aerospaceweb: "none have been integrated"). Maximum payload 36,000
+lb (16,330 kg, aerospaceweb and `TU160.INF`); Wikipedia gives 22,500 kg for each
+bay and 45,000 kg in all for free-fall weapons. Bay length: one source gives 11.3
+m (37.1 ft) for the originally planned Kh-45 (a web search summary, read
+2026-11-15, not fetched in full), `TU160.INF` 12.80 m (42 ft); no source gave a
+bay width or depth. The Kh-15 is 4.78 m (15.7 ft) long, 0.46 m diameter, 0.92 m
+tailspan, launch weight 1,200 kg (`AS16.INF`); the Kh-55 is about 6 m long (a
+search result, not confirmed). **Real 24 Kh-15 weigh 63,500 lb: more than the
+36,000 lb payload both sources agree on**, and the record's 12 (31,680 lb) is
+within it; the record is consistent with the Jane's 36,000 lb total.
+
+**The `AS16.JT` fit.** `AS16.JT` is signature 3, flags `0x2206f`, 2,640 lb (`AS16.INF`
+1,200 kg is 2,646 lb), range 0.08 to 6.58 nmi against the real 81 nmi from high
+altitude (150 km, `AS16.INF`); it is live in TORE (the Su-25 and Su-35 carry it:
+`docs/baselines/air-to-ground.md`). It is the default on both bay rows, so it
+loads under the default rule (the row's own default), 6 a row, 12 in all: the
+record, not the real 24. **The retail `AS15.JT` (the real Kh-55) is 220 lb in the
+retail data (real about 2,700 lb) and cannot be loaded on these rows**: this is the
+real aircraft's primary load, refused by the mask.
+
+**Mechanism.** `Location::InternalBay` rows are never drawn; the F-22's, F-117's
+and B-2's bay rows are re-placed as `Location::Magazine` rows in
+`combat::bays::STATIONS`, with a door state in `State::bay`, and the B-2 slice
+(`f764b3d7` on `m3-b2`, not yet merged here) adds `BayGrid` rows
+(`GRIDS`: width, length, ceiling a row), `ALTERNATIVES` (two rows that share a bay)
+and an `Opening` with doors. The B-52 slice has its own `GRIDS` to fold onto
+the B-2's at merge. The Tu-160 needs two stations on one centre line, in
+tandem, with a grid per row.
+
+**Proposed authored bay stations (opinionated, for John; geometry fitted to the
+shape and to the record, counts from the source rows).**
+
+| Item | Proposal | Label |
+| --- | --- | --- |
+| Carriers | Rows 4 and 5 become `Location::Magazine` for the Tu-160 in `combat::bays::STATIONS`, no new rows; the pair flag `0x4` is cleared in the loaded definition (as the B-2's) | opinionated, a record edit like the B-2's |
+| Mount points | Row 4 (forward bay) on the record's point, y 11.4 units = **30.3 ft forward**; row 5 (aft bay) **51.3 ft further aft** (bay length 42 ft plus a 9.3 ft divider, one wing box) at **-20.9 ft** (y -7.8 units), both on the centre line, floor 1 to 2 ft below the belly | fitted (length from `TU160.INF`; the divider stands for the wing carry-through box, not measured) |
+| Bay extent | Forward bay y 3.5 to 19.3 units (9.4 to 51.4 ft forward), aft bay y -15.7 to 0.0 units (-41.9 to 0.1 ft): 42 ft each, on the flat belly (y -14 to 26) except the aft 4.6 ft, which falls in the tail-cone taper | fitted; shift both 2 units forward if John wants the aft bay on flat skin |
+| Grid per bay | Kh-15 (15.7 ft, 3.0 ft span): 2 long (31.9 ft of 42), 3 abreast (4.5 ft, bay width 5 ft fitted), 1 tier = 6 a row (the record), or 2 tiers = 12 (the real count, 3.0 ft deep) | fitted; the shared grid already counts abreast, long and tiers |
+| Heavy stores | Mk 84 (2,000 lb, about 10 ft): 6 a row at the weight class; 3 long by 2 abreast in 42 ft; GBU-28 4 a row | the retail weight arithmetic, no change |
+| Exclusivity | Rows 4 and 5 are separate bays, not alternatives; each row holds one store type | as the F-22 wing row |
+| Doors | Two leaves a bay hinged at the outboard edge, one belly polygon cut a bay; rotary launcher drawn only as the stores' own positions (no launcher body in the source) | fitted, rig in T160-3 or T160-5 |
+| Signature | Bay stores add nothing; the open-bay term applies once the rows are in `STATIONS` (`bay_available()`) | existing rule |
+| Counts | Option A: the record's 6 a row (12 in all, 31,680 lb of Kh-15, within the 36,000 lb weight class); Option B: raise `maxItems` to the real 12 a bay (24 Kh-15, 63,500 lb) and cap the row at the 18,000 lb class (6 Kh-15 by weight): the class would have to change too | A source, B opinionated and heavier than the cited payload |
+| Kh-55 | Keep refused (the record mask, a 220 lb retail weight and a 9.87 nmi range); or set `0x40` on both rows (opinionated, record edit) to admit `AS15.JT` | John |
+| Load Ordnance rows | The mask already admits 33 records; add no rows, only audit them | B7 |
+
+### Tu-160 swing-wing survey
+
+**Real schedule (cited).** The outer wing is **manually selected to three
+positions: 20, 35 and 65 degrees** (`TU160.INF`, the game's own Jane's);
+aerospaceweb.org: 20 degrees for takeoff and landing, 35 transonic cruise, 65
+high-speed flight; Wikipedia gives 20 and 65 degrees (55.7 m spread, 35.6 m
+swept). Spans (`TU160.INF`): 55.70 m (182 ft 9 in) at 20 degrees, **50.70 m (166
+ft 4 in) at 35 degrees**, 35.60 m (116 ft 9.75 in) at 65 degrees. The real
+selection is **by the crew, not a speed law**; no published speed bands were
+found (the Mach 2.05 top speed is a 65 degree figure). Wing area 400 m2 spread
+and 360 m2 swept (Wikipedia). The Tornado's range is 25 to 67 degrees and is
+speed-scheduled in TORE; the Tu-160's 20 to 65 degrees is a turn of **45 degrees**
+(the Tornado's is 42).
+
+**Pivot (measured).** The shape has no pivot (no sweep word, no streamer record
+tied to the panel) and **no vertex shared between the panel and the glove**, so
+there is no glove-corner circle as the Tornado's. Two fits are given, with the
+mesh's 68 units spread span: (1) **the fit to the three real spans** (right
+panel's 15 vertices turned about a vertical axis through (px, py); the span is the
+largest x after the turn, doubled): **pivot (4.8, 0.0) units, that is 12.8 ft out
+and level with the reference point**, gives 55.3 / 50.7 / 35.6 m at 0 / 15 / 45
+degrees of turn (the real 55.7 / 50.7 / 35.6); the fit is a ridge (4.5 to 5.3 in x
+fit within 0.01 of the squared error with py near 0). (2) A root-hugging pivot at
+the panel's root (9, 0) gives 55.3 / 50.9 / **37.6** m (+5.6% at full sweep); (8, 2)
+gives 55.3 / 50.0 / 34.8. The Tornado's analogue (9.5, -1.5) gives 39.6 m at full
+sweep. The first is a fit to cited figures (the panel pivot of the real aircraft
+is not in any source read); it puts the pivot inside the nacelle and glove
+region, so the turning root corners go into the fixed airframe: at a 45 degree
+turn the rear root corners (11, -5) and (11, -2) reach (5.6, -7.9) and (7.8, -5.8),
+inside the nacelle (x 2 to 6, y -9 to 8, z -3 to 0), hidden from outside but
+overlapping its volume; the front root corners reach x 8.5 to 10.6. The probe in
+T160-3 measures the visible seam.
+
+**How `swing.rs` applies.** `tore_sim::combat::swing` is **Tornado-only by
+construction today**: `SWEEP_MIN` 25 and `SWEEP_MAX` 67, the speed schedule
+(`SWEEP_FROM_KNOTS` 304, `SWEEP_TO_KNOTS` 600), `FEET_PER_UNIT` 2/3, the pivots
+`PIVOT_R`/`PIVOT_L` and the wing placement constants are module constants;
+`wing_turn(speed, flaps)` and `speed_for_sweep(degrees)` take no aircraft;
+`swivels(id, row)` and `has_swivel(id)` name the Tornado alone; and the replay
+converter (`replay/convert.rs` lines 629 to 655) hard-codes the Tornado's
+schedule in its sweep test. The drawn rig is `tornado_animation.rs`. The Tu-160
+**needs no swivelling stations** (internal bays only, no wing pylons), so the sim
+side reduces to the sweep as a drawn pure function of speed and flaps
+(`State::speed`, `State::flaps`), not stored in checkpoints (the Tornado's rule:
+not recorded, recomputed each tick), and the changes are: (1) per-aircraft
+parameters (min and max sweep, schedule, pivots, unit scale) behind
+`wing_turn(id, ...)` and `speed_for_sweep(id, ...)` (the callers in
+`aircraft.rs`, `pylons.rs`, `stores_preview.rs`, `replay/convert.rs` and
+`tornado_animation.rs` pass the id); (2) a `tu160_animation.rs` rig (the panel,
+flap and fence faces, not shared with the Tornado's face lists); (3) the
+streamer record is the shape's own and gives an unknown pivot (20, 0, 10) in the
+record's units, not to be used until related to the mesh.
+
+**Proposed schedule (opinionated; the real selection is the crew's).** TORE has no
+manual sweep input; a speed schedule is the Tornado precedent. A speed law that
+visits the three detents: **20 degrees up to 250 kt (and with flaps out), 35
+degrees from 320 to 520 kt, 65 degrees from 600 kt up**, with the turn linear
+between (the real 20 degree takeoff and landing range, 35 degrees for the cruise
+band, 65 degrees for the high-speed one). This is fitted to the three real
+positions only; the bands are opinionated. Option: a player-selectable three-step
+control (new input and state), which would need a checkpoint word. The flight
+model reads no sweep (the Tornado finding, TOR-8: no flight law reads the sweep;
+the envelope rows carry the speed-dependent result), so none of this changes
+flight.
+
+### Tu-160 sensors (B7, `SU37L.SEE`)
+
+**`SU37L.SEE` is a built-in laser designator** (the Su-37's), not a pod: type 10,
+signature 1, zone 0 at 60 degrees (10,920 units) to 60,760 ft; the lock rule
+(`docs/formats/missiles.md`, "Laser and designator") requires a working laser
+designator on the launching aircraft for the laser-guided bombs and Maverick
+class (flag `0x400`). It sits on **hardpoint row 3 as a fixed fuselage row**
+(flags `0x1008`, position 0, 0, 0), exactly like `PAVESPK.SEE` on the B-1B/B-2 and
+`SU24L.SEE` on the Su-24: **not a station and not a pod**. The same record is on
+`SU34.PT`, `TU26.PT` (copied) and `TU95.PT`. The real Tu-160 carries no laser
+designator and no laser-guided weapons, and `TU160.INF` lists none. Because the
+bay rows admit `GBU10`, `GBU10A`, `PAVEWAY`, `PAVEWA3`, `GBU28` and the AGM class
+(above), the designator is what makes those loads usable. Options (none chosen):
+(1) keep as retail (a built-in sensor, no pod drawn, the Tornado and B-2
+precedent); (2) drop the row and refuse the laser stores by mask (B7: no designator
+the real aircraft does not have; opinionated, a record edit). The radar
+(`TU160R.SEE`, 150 nmi, the Tu-26's 100) and the jammer (`TU160.ECM`) are the
+record's own; the real aircraft has a nose radar and an active jamming system
+(`TU160.INF`). `VIS300.SEE` is the visual row. The real **video camera under the
+forward fuselage** for weapon aiming (`TU160.INF`) has no row and no geometry.
+
+### Tu-160 HUD and cockpit
+
+The record names **`b2.HUD`**: the B-2's HUD file (panel names `~b2`, `~b2h`,
+`~b2s`, `~b2_p`, `~b2_w`; indicators `GEAR`, `FLAP`, `BRAKE`, `BAY`; the base copy
+4,608 bytes, SHA-256 above), and `AURORA.PT` names the same file. The B-2 record
+itself has no HUD field (null); TORE gives it `B2.HUD` and the stem `B2`
+(`AircraftId::hud()`, BMB-A1 and B2-7). **No Tu-160 cockpit art exists** (sweeps
+above), so the retail Tu-160 shows the **B-2's panels** `~B2.PIC`, `~B2H.PIC`,
+`~B2S.PIC`, `~B2_P.PIC` (the B-2's own art, in `FA_1.LIB`). The record's `hudName`
+names a file, not an alias of the B-2 record, so it is the record's HUD (not a B6
+aliasing of identity). `TU160.INF` says the real aircraft has "no head-up display
+or CRTs". The other bombers: `bmbroh.HUD` (B-52, Tu-26, Tu-95), `bmbrcc.HUD`
+(B-1B). Options (none chosen): (1) `b2.HUD` and the B-2's cockpit stem `B2`
+(follow the record, the Mirage 2000 decision 1 precedent; the B-2 glass aperture
+work (B2-7) would be shared: the same pictures, the same HUD); (2) `bmbroh.HUD`
+(opinionated); (3) no HUD (opinionated). **The eye**: `viewOffset` is (0, 35, 60),
+11.7 ft up and 20 ft forward of the reference point, that is **y 7.5 units, z 4.4
+units**, over the wing root, **about 80 ft behind the real flight deck** (the nose
+tip is y 38); the Tu-26's is the same forward value with y 20: a copied value that
+needs a fitted eye in T160-7 if John chooses the cockpit view (the B-2's
+per-aircraft eye table is the precedent). The crew is four on K-36 seats
+(`TU160.INF`); the batch plan is pilot only.
+
+### Tu-160 roster note
+
+`TU160.PT` is the 2nd aircraft of bomber batch B; `AircraftId` stays append-only in
+batch order and is assigned by BMB-B1. `fa-aircraft.csv` already carries the
+decoded row.
+
+### Tu-160 unknowns and next steps
+
+- The pivot of the real swing wing, the sweep speed bands, the real track and
+  wheelbase, the bay width and depth and the real low-level top speed were not
+  found in the sources read.
+- The `swpatch.lib` shape (finer coordinates) is not read as base and could
+  refine the seam measurements in T160-3 if John wants it used.
+- The streamer record's relation to the mesh is unknown (as for the Tornado).
+- The Kh-55 (`AS15.JT`) retail weight (220 lb) and range (9.87 nmi), and the
+  `AS16.JT` range (6.58 nmi against 81 nmi), are weapon-data questions outside
+  this aircraft.
+- T160-2 sets the 8/3 ft scale; T160-3 builds the swing rig and the surfaces;
+  T160-5 the two bays; T160-7 the HUD and eye.
