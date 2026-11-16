@@ -14225,6 +14225,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     // sets the payload and the fuel systems from it.
                     load.reset(&mut state)?;
                 } else {
+                    // The load's own tank, as a reset gives it: the model's
+                    // full tank can put the default load over the maximum
+                    // takeoff weight (the B-1B and F-111F).
+                    load.apply_start_fuel(&mut state);
                     state.set_payload(load.state.own().payload_lbs())?;
                     state.systems = tore_sim::aircraft_systems::Systems::new(
                         load.state.own().configuration().engines,

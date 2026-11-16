@@ -1070,6 +1070,24 @@ impl State {
             crate::research::Surface::terrain(ground(x, z))
         });
     }
+    /// Lowers the tank to what the maximum takeoff weight leaves room for with
+    /// `pounds` of stores aboard (a whole pound, never below empty), for an
+    /// aircraft started with a load its full tank would put over the maximum
+    /// (the B-1B, the F-111F and the B-52H with their default loads). It never
+    /// raises the tank, and it does not touch the payload check:
+    /// [`Self::set_payload`] still refuses a load over the maximum.
+    pub fn fit_fuel_to_payload(&mut self, pounds: f64) {
+        if !pounds.is_finite() || pounds < 0. {
+            return;
+        }
+        let mass = self.model.configuration().mass;
+        let room = (mass.max_takeoff_lbs - mass.empty_lbs - pounds)
+            .floor()
+            .max(0.);
+        if self.fuel > room {
+            self.fuel = room;
+        }
+    }
     /// Mass-only payload API until loadout/weapon release is integrated.
     pub fn set_payload(&mut self, pounds: f64) -> tore_formats::Result<()> {
         // A record may carry more fuel than its maximum takeoff weight allows
@@ -4367,6 +4385,31 @@ pub(crate) mod integration_tests {
         )
         .unwrap();
         assert_eq!(assessment.limits(), loaded_assessment.limits());
+    }
+    #[test]
+    fn fitting_the_tank_to_a_payload_lowers_it_to_the_maximum_and_never_raises_it() {
+        use crate::models::FlightModel;
+        let mut s = State::new(&profile(), [0., 5000., 0.]).unwrap();
+        let mass = s.model().configuration().mass;
+        let full = s.fuel;
+        let payload = mass.max_takeoff_lbs - mass.empty_lbs - full + 250.5;
+        // Over the maximum with the full tank: refused, tank untouched.
+        assert!(s.set_payload(payload).is_err());
+        assert_eq!(s.fuel, full);
+        s.fit_fuel_to_payload(payload);
+        assert_eq!(s.fuel, (full - 250.5).floor());
+        s.set_payload(payload).unwrap();
+        assert!(mass.empty_lbs + s.fuel + payload <= mass.max_takeoff_lbs);
+        // A lighter load never raises it back; a bad payload is ignored.
+        let lowered = s.fuel;
+        s.fit_fuel_to_payload(0.);
+        s.fit_fuel_to_payload(f64::NAN);
+        s.fit_fuel_to_payload(-1.);
+        assert_eq!(s.fuel, lowered);
+        // A load the maximum cannot carry even empty leaves no fuel.
+        s.fit_fuel_to_payload(mass.max_takeoff_lbs);
+        assert_eq!(s.fuel, 0.);
+        assert!(s.set_payload(mass.max_takeoff_lbs).is_err());
     }
     #[test]
     fn runway_start_does_not_switch_legacy_adapter() {
