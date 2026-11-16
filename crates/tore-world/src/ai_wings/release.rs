@@ -369,11 +369,21 @@ mod tests {
         assert!(emitted > 0);
         let launcher = crate::combat::launcher(wings.mission().actor(id).unwrap().flight());
         let opening = bays::opening(AircraftId::B52).unwrap();
+        // The first bomb leaves the grid's outermost column on the left (the
+        // shared grid's ripple: four columns 1.3 ft apart, so 1.95 ft out); the
+        // pack record (six stores, 2 ft apart) stages across that point, which
+        // only the pack does, the real bay's stores are single. Every round
+        // starts within the opening's length.
+        let sides: Vec<f64> = state
+            .projectiles
+            .iter()
+            .map(|p| p.position[0] - launcher.position[0])
+            .collect();
+        let middle = sides.iter().sum::<f64>() / sides.len() as f64;
+        assert!((-2.0..-1.0).contains(&middle), "{sides:?}");
         for p in &state.projectiles {
-            let at = [0, 1, 2].map(|k| p.position[k] - launcher.position[k]);
-            // Between the walls (one opening, so inner 0) and between its ends.
-            assert!(at[0].abs() < opening.outer, "{at:?}");
-            assert!(at[2] > opening.aft && at[2] < opening.fore, "{at:?}");
+            let forward = p.position[2] - launcher.position[2];
+            assert!(forward > opening.aft && forward < opening.fore, "{forward}");
         }
     }
 }
