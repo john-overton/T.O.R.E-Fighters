@@ -551,6 +551,21 @@ def scenarios() -> list[Scenario]:
             notes="F-117A skin from above and below with the gear down, at its real size (per-axis shape scale 0.7647, 1.0463, 0.8869, docs/formats/objects-and-shapes.md, Aircraft shape scale): no underside shape shows through the top and the 19 double-sided panels do not z-fight. The shape's five E0 decal slots (two wing markings, two ruddervator markings, one fuselage side marking) stay omitted rather than filled with skin.",
         ),
         Scenario(
+            name="render-b1b-skin",
+            lane="flight",
+            args=["--free-flight", "--aircraft", "b1b", "--flight-view", "2", "--flight-look", "0,60", "--flight-zoom", "0.5", "--flight-devices", "1,0,0,0,0", "--loadout", "none", "--capture-flight", "{work}/b1b-top.ppm", "--no-audio"],
+            env={"TORE_WEATHER_TIME": "12:00"},
+            window=True,
+            outputs=["b1b-top.ppm", "b1b-under.ppm"],
+            expect=["Scene capture:"],
+            check=skin_capture_problems,
+            then=[
+                Step(["--free-flight", "--aircraft", "b1b", "--flight-view", "2", "--flight-look", "0,-60", "--flight-zoom", "0.5", "--flight-devices", "1,0,0,0,0", "--loadout", "none", "--capture-flight", "{work}/b1b-under.ppm", "--no-audio"], window=True, timeout=180),
+            ],
+            timeout=180,
+            notes="B-1B skin from above and below with the gear down, at its header scale (4/3 ft a unit, true size, no per-axis factor): no underside shape shows through the top and the double-sided panels do not z-fight, spread (the free-flight start is below the 280 knot sweep threshold). The shape's two E0 glove decal slots stay omitted rather than filled with skin (docs/formats/aircraft-variety.md, B-1B shape and rig). The zoom is 0.5 so the 137 ft span fits. The scenario starts stripped (`--loadout none`) because the B-1B default loadout is refused at start (payload over the mass limit, B1B-6/B1B-8 own it).",
+        ),
+        Scenario(
             name="render-runway-paint-calm",
             lane="flight",
             args=["--free-flight", "--aircraft", "f18", "--theater", "UKR", "--ground-start", "2", "--maneuver", "takeoff", "--flight-probe-ticks", "1300", "--flight-view", "1", "--capture-flight", "{work}/runway.ppm", "--no-audio"],

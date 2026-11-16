@@ -10,6 +10,7 @@ mod a4e;
 mod ac130;
 mod av8;
 mod awacs;
+mod b1b;
 mod b2;
 mod b52;
 mod b747;
@@ -199,6 +200,9 @@ impl Control {
             // that it stays that way. The elevator and aileron are the
             // elevons and the rudder is the drag rudders, all `Required`.
             Self::Flaps if id == Id::B2 => Expectation::Unsupported,
+            // B1B-3: the B-1B's flap strips droop (words 7b2e and 7b34's drooped
+            // poses), its tailerons are the elevator and (with the spoilers)
+            // the aileron, its rudder quad the rudder: all `Required` below.
             // F117-3 (decision 27, John 2026-11-15): the F-117's source has no
             // elevon, flap or aileron faces (the trailing edge is the aft edge
             // of whole wing facets), so those levers draw nothing and the probe
@@ -220,6 +224,9 @@ impl Control {
             // flame word, so brake and exhaust move nothing and must stay so.
             Self::Brake | Self::Exhaust if id == Id::B52 => Expectation::Unsupported,
             Self::Brake | Self::Exhaust if id == Id::F117 => Expectation::Unsupported,
+            // B1B-3: the spoilers (word 7b1c) are the speed brake and the roll
+            // spoilers; the four plumes (word 7b10) are the afterburner.
+            Self::Brake | Self::Exhaust if id == Id::B1b => Expectation::Required,
             Self::Brake | Self::Exhaust
                 if matches!(
                     id,
@@ -278,7 +285,7 @@ impl Control {
             Self::Bay
                 if matches!(
                     id,
-                    Id::F22 | Id::F22n | Id::Faxx | Id::F117 | Id::B2 | Id::B52
+                    Id::F22 | Id::F22n | Id::Faxx | Id::F117 | Id::B2 | Id::B52 | Id::B1b
                 ) =>
             {
                 Expectation::Required
@@ -302,7 +309,12 @@ impl Control {
                 Expectation::Required
             }
             Self::Rotor => Expectation::Unknown,
-            Self::Sweep if matches!(id, Id::F14 | Id::Mig23 | Id::Tornado | Id::TornadoClean) => {
+            Self::Sweep
+                if matches!(
+                    id,
+                    Id::F14 | Id::Mig23 | Id::Tornado | Id::TornadoClean | Id::B1b
+                ) =>
+            {
                 Expectation::Required
             }
             Self::Sweep => Expectation::Unknown,
@@ -496,6 +508,11 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     if id.source() == AircraftId::Tornado {
         neutral.speed = 200. * 1.68781;
     }
+    // The B-1B's wing sweeps with speed from 280 knots (B1B-3), so its controls
+    // are isolated below that; the sweep grids cover the interaction.
+    if id == AircraftId::B1b {
+        neutral.speed = 200. * 1.68781;
+    }
     neutral.engine = false;
     neutral.exhaust = 0.;
     neutral.gear = 0.;
@@ -685,6 +702,7 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
             | AircraftId::TornadoClean
             | AircraftId::B52
             | AircraftId::B2
+            | AircraftId::B1b
             | AircraftId::F117
     ) {
         "reviewed-controls-and-attachments"
@@ -1211,6 +1229,17 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
                 );
             }
         }
+        if id == AircraftId::B1b {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                b1b::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
         if id == AircraftId::B2 {
             for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
                 b2::check(
@@ -1407,6 +1436,9 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     }
     if id == AircraftId::B2 {
         failures.extend(b2::combinations(&airframe, &neutral, out)?);
+    }
+    if id == AircraftId::B1b {
+        failures.extend(b1b::combinations(&airframe, &neutral, out)?);
     }
     failures.extend(rotorcraft::combinations(&airframe, &neutral, out)?);
     moving_parts(&airframe, &neutral, out)?;
