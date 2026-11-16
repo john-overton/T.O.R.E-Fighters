@@ -482,6 +482,13 @@ pub const WINGS_LEVEL_HEIGHT_FT: f64 = 50.0;
 /// distance) and the largest intercept angle.
 pub const FINAL_LOOKAHEAD_MIN_FT: f64 = 1500.0;
 pub const FINAL_LOOKAHEAD_MAX_FT: f64 = 8000.0;
+/// Fitted (B52-9, 2026-11-16): the shortest lookahead for an aircraft whose
+/// wheels need over 0.2 throttle to taxi ([`Situation::taxi_throttle_floor`]
+/// above zero, the B-52 at every weight). The 80,000 lb B-52 snaked 190 ft
+/// right and 150 ft left of the line down the final with the shared 1,500 ft
+/// and touched down 140 ft off the centre line, on the grass; at 3,000 ft it
+/// touches down within 5 ft of it.
+pub const HEAVY_FINAL_LOOKAHEAD_MIN_FT: f64 = 3000.0;
 pub const FINAL_INTERCEPT_LIMIT_DEG: f64 = 60.0;
 /// Fitted: aim point a quarter of the way down the runway when the airport
 /// has no landing anchor (manual p.65-68).
@@ -1865,8 +1872,16 @@ impl Sequence {
                 {
                     pitch = pitch.max(0.0);
                 }
-                let lookahead =
-                    (to_aim * 0.25).clamp(FINAL_LOOKAHEAD_MIN_FT, FINAL_LOOKAHEAD_MAX_FT);
+                // Fitted (B52-9): an aircraft whose wheels need power to taxi
+                // (the B-52) is slow to roll and yaw, and the shared lookahead
+                // let it snake across the line (190 ft right, then 150 ft
+                // left of it at the touchdown, off the runway's edge).
+                let lookahead_min = if s.taxi_throttle_floor > 0.0 {
+                    HEAVY_FINAL_LOOKAHEAD_MIN_FT
+                } else {
+                    FINAL_LOOKAHEAD_MIN_FT
+                };
+                let lookahead = (to_aim * 0.25).clamp(lookahead_min, FINAL_LOOKAHEAD_MAX_FT);
                 let h = self.course();
                 let crosswind = s.wind[0] * h.cos() - s.wind[2] * h.sin();
                 let correction = -(crosswind / s.speed_fps.max(1.0)).clamp(-0.5, 0.5).asin();
@@ -2151,10 +2166,16 @@ fn taxi_speed(heading_error_deg: f64) -> f64 {
 }
 
 /// Fitted taxi speed control: gentle power below the target, brakes well
-/// above it.
+/// above it. An aircraft whose wheels need power to taxi
+/// ([`Situation::taxi_throttle_floor`], the B-52) coasts when it is over the
+/// target (B52-9): its rolling deceleration, 4.8 ft/s squared, does the
+/// slowing, where the floor held the throttle on and it ran past the anchor
+/// it stops at, turned back for it and swung 30 ft off the taxiway.
 fn taxi_throttle(speed: f64, target: f64, s: &Situation) -> (f64, bool) {
     if speed > target + 8.0 {
         (0.0, true)
+    } else if s.taxi_throttle_floor > 0.0 && speed > target {
+        (0.0, false)
     } else {
         (
             (s.taxi_throttle_floor + 0.05 + (target - speed) * 0.02)
@@ -2995,6 +3016,54 @@ mod tests {
         let (throttle, _) = taxi_throttle(48., 50., &s);
         assert!((throttle - (0.58 + 0.05 + 0.04)).abs() < 1e-12);
         assert_eq!(taxi_throttle(60., 50., &s), (0., true));
+    }
+
+    /// B52-9: a taxiing aircraft whose wheels need power (the B-52) stops
+    /// feeding the throttle once it is over the speed it wants, so it can
+    /// stop at a taxiway anchor; a fighter's law is the old one exactly.
+    #[test]
+    fn a_heavy_coasts_over_its_taxi_speed_and_a_fighter_keeps_its_law() {
+        let mut s = on_ground([0.; 3], 0., 0.);
+        // A fighter 4 ft/s over: the old law, 0.05 less 0.08, clamped to 0.
+        assert_eq!(taxi_throttle(54., 50., &s), (0.0, false));
+        assert_eq!(taxi_throttle(50., 50., &s), (0.05, false));
+        s.taxi_throttle_floor = 0.58;
+        s.taxi_throttle_max = 1.0;
+        // The B-52 at the same speeds: over the target it coasts (its wheels
+        // slow it), 8 ft/s over it brakes, under it the floor applies.
+        assert_eq!(taxi_throttle(50.5, 50., &s), (0.0, false));
+        assert_eq!(taxi_throttle(58.5, 50., &s), (0.0, true));
+        let (throttle, brakes) = taxi_throttle(50., 50., &s);
+        assert!(!brakes && (throttle - 0.63).abs() < 1e-12);
+    }
+
+    /// B52-9: the final's lateral lookahead is 3,000 ft at the least for an
+    /// aircraft whose wheels need power to taxi, 1,500 ft for every other:
+    /// 150 ft off the line and 6,000 ft out it asks for a gentler intercept.
+    #[test]
+    fn a_heavy_final_closes_on_the_line_more_gently_than_a_fighter() {
+        let heading = |floor: f64| {
+            let mut seq = landing();
+            seq.phase = Phase::Final;
+            let mut s = on_final(&seq, 6000., 330., 240.);
+            s.position[0] += 150.;
+            s.taxi_throttle_floor = floor;
+            match seq.step(&s).command.control {
+                Control::Air(g) => wrap_deg(g.heading_deg - seq.course().to_degrees()),
+                other => panic!("{other:?}"),
+            }
+        };
+        let fighter = heading(0.);
+        let heavy = heading(0.58);
+        assert!(
+            (fighter + (150f64).atan2(FINAL_LOOKAHEAD_MIN_FT).to_degrees()).abs() < 0.01,
+            "{fighter}"
+        );
+        assert!(
+            (heavy + (150f64).atan2(HEAVY_FINAL_LOOKAHEAD_MIN_FT).to_degrees()).abs() < 0.01,
+            "{heavy}"
+        );
+        assert!(heavy.abs() < fighter.abs());
     }
 
     fn vertical_landing(lift: Lift) -> Sequence {
