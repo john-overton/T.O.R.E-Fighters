@@ -2071,11 +2071,12 @@ impl Strike {
         // A retarded pack's laydown height is over the ground it flies, not
         // over the target (BMB-AI2): raised, never lowered, where the run-in
         // rises above the target's elevation.
-        if pass == Pass::Laydown && self.hold_ft.is_some() {
-            if let Some(terrain) = cx.terrain {
-                let ground = laydown_ground_ft(terrain, own.position, aim);
-                hold = hold.max(ground + (hold - target[1]));
-            }
+        if pass == Pass::Laydown
+            && self.hold_ft.is_some()
+            && let Some(terrain) = cx.terrain
+        {
+            let ground = laydown_ground_ft(terrain, own.position, aim);
+            hold = hold.max(ground + (hold - target[1]));
         }
         let speed = if pass == Pass::FastHigh {
             SpeedRequest::Maximum
