@@ -139,7 +139,15 @@ pub(crate) fn centre_lining(
     rails: &[[f64; 3]],
     posts: &[[f64; 2]],
 ) -> Vec<Face> {
-    centre_lining_with(template, o, unit, rails, posts, o.belly, [WALL, CEILING, RAIL])
+    centre_lining_with(
+        template,
+        o,
+        unit,
+        rails,
+        posts,
+        o.belly,
+        [WALL, CEILING, RAIL],
+    )
 }
 
 /// [`centre_lining`] with the palette indices of the walls, the ceiling and the
@@ -168,7 +176,15 @@ pub(crate) fn centre_lining_from(
     posts: &[[f64; 2]],
     floor: f64,
 ) -> Vec<Face> {
-    centre_lining_with(template, o, unit, rails, posts, floor, [WALL, CEILING, RAIL])
+    centre_lining_with(
+        template,
+        o,
+        unit,
+        rails,
+        posts,
+        floor,
+        [WALL, CEILING, RAIL],
+    )
 }
 
 /// The lining with both the floor height and the palette chosen (unified at the

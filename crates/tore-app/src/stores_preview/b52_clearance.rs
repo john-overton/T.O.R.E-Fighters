@@ -165,8 +165,9 @@ fn bay(
     // The leaves, and the rails and posts.
     let leaves = faces(airframe, &state, |f, p| {
         belly.contains(&f.address)
-            && p.iter()
-                .any(|v| v[1] < bays[0].belly - 0.05 && (id.source() != AircraftId::Tu26 || v[0].abs() > 2.))
+            && p.iter().any(|v| {
+                v[1] < bays[0].belly - 0.05 && (id.source() != AircraftId::Tu26 || v[0].abs() > 2.)
+            })
     });
     let furniture = faces(airframe, &state, |f, _| f.address >= furniture_from);
     // Each placed store with the bay it hangs in.

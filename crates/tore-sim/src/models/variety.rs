@@ -974,7 +974,12 @@ pub(crate) mod tests {
             let listed = |ids: &[AircraftId]| ids.contains(&id.source());
             assert_eq!(
                 c.aerodynamics.drag_shape.is_some(),
-                listed(&[AircraftId::B52, AircraftId::B1b, AircraftId::Tu160, AircraftId::Tu95]),
+                listed(&[
+                    AircraftId::B52,
+                    AircraftId::B1b,
+                    AircraftId::Tu160,
+                    AircraftId::Tu95
+                ]),
                 "{id:?}"
             );
             assert_eq!(

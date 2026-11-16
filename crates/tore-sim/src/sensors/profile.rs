@@ -871,7 +871,9 @@ mod tests {
 
     /// T160-6/7: the Tu-160's radar (the record the B-52's renames) and its
     /// jammer (the B-52's and AC-130's record with 16 bytes changed) are
-    /// reviewed in the same classes. The Tu-26's and Tu-95's stay unreviewed.
+    /// reviewed in the same classes. (The Tu-26's and Tu-95's were unreviewed
+    /// then; T26-7 and T95-7 review them, checked in their own tests below, and
+    /// the batch B and C integration, 2026-11-16, dropped the `None` pins.)
     #[test]
     fn the_tu160_radar_and_jammer_are_reviewed_transitional() {
         assert_eq!(Preset::for_record("TU160R.SEE"), Some(Preset::Transitional));
@@ -880,8 +882,6 @@ mod tests {
             Generation::for_record("TU160.ECM"),
             Some(Generation::Transitional)
         );
-        assert_eq!(Preset::for_record("TU26R.SEE"), None);
-        assert_eq!(Generation::for_record("TU26.ECM"), None);
     }
 
     /// B1B-7: the B-1B's five rows keep the retail records; its radar row is
@@ -939,22 +939,29 @@ mod tests {
         assert_eq!(Preset::for_record("TU26R.SEE"), Some(Preset::Transitional));
         assert_eq!(Preset::for_record("tu26r.see"), Some(Preset::Transitional));
         assert_eq!(Generation::for_record("TU26.ECM"), Some(Generation::Early));
-        // The records of the other bombers that fly the same family stay
-        // unreviewed until their own slices.
-        assert_eq!(Preset::for_record("TU160R.SEE"), None);
-        assert_eq!(Generation::for_record("TU160.ECM"), None);
+        // The records of the other bombers that fly the same family are
+        // reviewed by their own slices (T160-6/7, T95-7).
+        assert_eq!(Preset::for_record("TU160R.SEE"), Some(Preset::Transitional));
+        assert_eq!(
+            Generation::for_record("TU160.ECM"),
+            Some(Generation::Transitional)
+        );
     }
 
     /// T95-7: the Tu-95's radar and jammer records have their reviewed
     /// assignments, so the Bear flies with a radar (the B-52's class) and an
-    /// inert Early jammer; the Tu-160's records they rename stay unreviewed.
+    /// inert Early jammer; the Tu-160's records they rename are reviewed by
+    /// T160-6/7 (Transitional both), the Tu-95's own jammer is the Early one.
     #[test]
     fn the_tu95_radar_is_transitional_and_its_jammer_is_early() {
         assert_eq!(Preset::for_record("TU95R.SEE"), Some(Preset::Transitional));
         assert_eq!(Preset::for_record("tu95r.see"), Some(Preset::Transitional));
         assert_eq!(Generation::for_record("TU95.ECM"), Some(Generation::Early));
-        assert_eq!(Preset::for_record("TU160R.SEE"), None);
-        assert_eq!(Generation::for_record("TU160.ECM"), None);
+        assert_eq!(Preset::for_record("TU160R.SEE"), Some(Preset::Transitional));
+        assert_eq!(
+            Generation::for_record("TU160.ECM"),
+            Some(Generation::Transitional)
+        );
     }
 
     /// SU34-7: the Su-34's radar and jammer rows are the Su-27's own records,

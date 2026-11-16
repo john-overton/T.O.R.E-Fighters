@@ -2878,8 +2878,11 @@ mod tests {
                 !weapon_allowed(AircraftId::Tu26, TU26_BAY, source),
                 "{source}"
             );
+            // The Tu-95 stands in for an aircraft with no refusals on row 5
+            // (the Tu-160's aft bay is row 5 too and refuses the GBU-27 class,
+            // T160-5; the stand-in moved at the batch B and C integration).
             assert!(
-                weapon_allowed(AircraftId::Tu160, TU26_BAY, source),
+                weapon_allowed(AircraftId::Tu95, TU26_BAY, source),
                 "{source}"
             );
         }
@@ -2937,7 +2940,8 @@ mod tests {
                 "{source}"
             );
             assert!(!weapon_allowed(AircraftId::Tu95, TU95_WING_PYLONS, source));
-            assert!(weapon_allowed(AircraftId::Tu26, 5, source));
+            // The F-16C has no refusals (the Tu-26's own row 5 refuses some, T26-5).
+            assert!(weapon_allowed(AircraftId::F16C, 5, source));
         }
         for source in ["AS16.JT", "FAB250.JT", "MK82.JT", "MK82AIR.JT", "MK82P3.JT"] {
             assert!(
