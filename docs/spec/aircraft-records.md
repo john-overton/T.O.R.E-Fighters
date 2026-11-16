@@ -618,3 +618,48 @@ bomber by about a third as much (0.14 G rather than 0.44 G of extra deceleration
 kt at 1,000 ft), the landing rollout with the brake out is 19 percent longer, and the
 record ceiling is 50,000 ft. Evidence, tables and open questions:
 [B-2 flight review](../formats/aircraft-variety.md#b-2-flight-review-b2-8-2026-11-15).
+
+## Bomber batch B record corrections: B-1B, Tu-160, F-111F (BMB-B2, 2026-11-15)
+
+**Opinionated (coordinator first pass, `BOMBERS-DECISIONS-B.md`, for John to review),
+implemented by slice BMB-B2.** Like the batch A corrections above, each is a TORE override
+over the record, applied where `Aircraft::parse` reads it (`aircraft_corrections.rs`,
+`aircraft_stations.rs`), only to its own identity and only while every value it replaces
+still holds the retail number. The sources are those of the three batch B reviews in
+[the variety document](../formats/aircraft-variety.md#bomber-batch-b-record-and-station-corrections-bmb-b2-2026-11-15).
+
+| Aircraft | Field | Retail | Game | Source |
+| --- | --- | ---: | ---: | --- |
+| B-1B | Maximum take-off, lb | 447,000 | 477,000 | the game's own `B1.INF`, Air & Space Forces Magazine "B-1B Lancer", Wikipedia "Rockwell B-1 Lancer" (the record is a digit transposition; 395,000 was the B-1A) |
+| B-1B | Internal fuel, lb | 105,000 | 265,274 | Air Force Global Strike Command B-1B fact sheet (the game's `B1.INF` says 195,000) |
+| B-1B | Thrust, lbf (4 x F101-GE-102) | 58,400 | 69,560 | 17,390 each (Wikipedia "General Electric F101", read 2026-11-15) |
+| B-1B | Afterburner thrust, lbf | 140,000 | 123,120 | 30,780 each (Wikipedia F101; `B1.INF`) |
+| B-1B | 1 G and 0 G fast edge above 36,000 ft, ft/s | 1,400 and 1,410; 1,465 and 1,475 | 1,210; 1,275 | Mach 1.25 (`B1.INF`, Wikipedia) at 968.08 ft/s: **fitted** (the 0 G step over 1 G of 65 ft/s kept) |
+| B-1B | Bay rows 5 to 7 flags | `0x1500` | `0x1100` | designator bit `0x400` cleared (**fitted**, B7) |
+| Tu-160 | Empty weight, lb | 202,260 | 242,500 | `TU160.INF`; Wikipedia "Tupolev Tu-160" 242,508 |
+| Tu-160 | Thrust, lbf (4 x NK-32) | 158,092 | 123,600 | about 30,900 each (Wikipedia "Kuznetsov NK-32" / "Tupolev Tu-160", read 2026-11-15) |
+| Tu-160 | Afterburner thrust, lbf | 232,398 | 220,400 | about 55,100 each (the same pages) |
+| Tu-160 | Internal fuel, lb | 368,000 | 326,285 | 148,000 kg (aerospaceweb.org "Tu-160" as the T160-0 review read it); sources run 286,600 to 352,735 |
+| F-111F | Internal fuel, lb | 5,025 (gallons) | 32,663 | 5,025 US gal x 6.5 lb/gal (JP-4 planning figure); American Airpower Museum F-111 page 5,040 gal |
+| F-111F | Thrust, lbf (2 x TF30-P-100) | 50,200 (the afterburner total) | 29,120 | 14,560 each (Wikipedia "Pratt & Whitney TF30", `F111.INF`) |
+| F-111F | Afterburner thrust, lbf | 80,000 | 50,200 | 25,100 each (the same) |
+| F-111F | Fuel flow, lb/s (dry / afterburner) | 3 / 6 | 5 / 35 | **fitted** from the RB.199's cited TSFC 0.598 / 2.5 (no TF30 figure found), see the variety document |
+| F-111F | Wing rows 5 to 8 flags, weight class | `0x07e5`, 70 / 70 / 70 / 60 | `0x03e5`, 50 each | designator bit cleared (**fitted**: Pave Tack rides in the bay); 5,000 lb a pylon (Wikipedia "General Dynamics F-111 Aardvark") |
+
+Unchanged on purpose: the B-1B's empty weight (192,000 lb, real), ceiling (55,000 ft) and
+G rows (-2 / +5, no source) and its retail name `B- 1B Lancer`; the Tu-160's maximum
+take-off weight (606,260 lb), four engines, 50,000 ft ceiling, top speed and the Kh-55
+(`AS15.JT`, refused by the bay mask: the retail record is a 220 lb stand-in); the F-111F's
+empty weight, maximum, top speed, ceiling and G rows (retail-authored). The B-1B and
+Tu-160 fuel flows are not changed (the decisions list thrust, weights and fuel only);
+the variety document lists what the cited TSFC would give.
+
+**Fuel over the maximum.** None of the three has empty plus full fuel over its maximum
+take-off weight (457,274 / 477,000; 568,785 / 606,260; 80,144 / 100,000), so the
+record-level check is not involved. Their default loads add stores, and the loadout's
+starting-tank cap (78086f7e) then lowers the fuel: the B-1B to 243,000 lb (of 265,274) and the
+F-111F to 28,838 lb (of 32,663); the Tu-160 starts full (600,532 lb). Free flight and
+`--headless-flight` use the model's full tank.
+
+Logs are local: `.local/m3-aircraft/checks/BMB-B2/`.
+

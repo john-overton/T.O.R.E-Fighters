@@ -65,6 +65,9 @@ impl VarietyFlightModel {
             B52 => ("B-52", "B52.SH"),
             B2 => ("B-2", "B2.SH"),
             F117 => ("F-117", "F117.SH"),
+            B1b => ("B-1B", "B1.SH"),
+            Tu160 => ("Tu-160", "TU160.SH"),
+            F111 => ("F-111F", "F111.SH"),
             _ => return None,
         })
     }
@@ -145,6 +148,14 @@ impl VarietyFlightModel {
             // scaled by the shape's height factor (21 units become 18.62,
             // 6.21 ft); the note above gave the unscaled 21 units (7 ft).
             F117 => 21. / 3. * tore_formats::aircraft::scale::shape_axis_scale(a.id)[2],
+            // Bomber batch B (BMB-B1, 2026-11-15): deployed gear low points
+            // from the source reviews, in shape units at each shape's own
+            // header scale. B1.SH -8 at 4/3 ft a unit, TU160.SH -5 at 8/3 ft
+            // and F111.SH -11 at 2/3 ft, the last times the F-111F's height
+            // factor (BMB-B1: 0.827, so 11 units become 9.10 and 6.07 ft).
+            B1b => 8. * 4. / 3.,
+            Tu160 => 5. * 8. / 3.,
+            F111 => 11. * 2. / 3. * tore_formats::aircraft::scale::shape_axis_scale(a.id)[2],
             _ => unreachable!("registered variety identity"),
         };
         let mut tuning = Tuning {
@@ -472,6 +483,23 @@ pub(crate) mod tests {
             (
                 AircraftId::F117,
                 7. * tore_formats::aircraft::scale::F117_SHAPE_SCALE[2],
+            ),
+        ] {
+            let model = AircraftModel::for_aircraft(&synthetic(id)).unwrap();
+            let clearance = model.configuration().equipment.ground_clearance_ft;
+            assert!((clearance - feet).abs() < 1e-12, "{id:?}");
+        }
+    }
+    /// BMB-B1: batch B's deployed gear low points (B1.SH -8 at 4/3 ft a unit,
+    /// TU160.SH -5 at 8/3 ft, F111.SH -11 at 2/3 ft times the height factor).
+    #[test]
+    fn the_bomber_batch_b_gear_low_points_follow_their_source_reviews() {
+        for (id, feet) in [
+            (AircraftId::B1b, 32. / 3.),
+            (AircraftId::Tu160, 40. / 3.),
+            (
+                AircraftId::F111,
+                22. / 3. * tore_formats::aircraft::scale::F111_SHAPE_SCALE[2],
             ),
         ] {
             let model = AircraftModel::for_aircraft(&synthetic(id)).unwrap();
