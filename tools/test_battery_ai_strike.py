@@ -1725,37 +1725,55 @@ class Tu95Tests(unittest.TestCase):
         self.assertTrue(any("bay row (1)" in p for p in s.tu95_stick_problems(other_row)))
         self.assertTrue(any("Tu95" in p for p in s.tu95_stick_problems(b2_run(cells, station=1))))
 
-    def test_the_antiship_limit_run_wants_a_radar_missile_pick_and_no_release(self):
-        def limit(station="1", release=False, bay=False, lost=False, kind="RadarAgm"):
+    def test_the_antiship_runs_want_a_radar_missile_pick_a_stand_off_release_and_a_hit(self):
+        def run(station="1", aircraft="Tu95", release=True, bay=None, lost=False, kind="RadarAgm", hp="150/500",
+                range_ft=27488, cell=None, impacts=1):
+            bay = station == "1" if bay is None and aircraft == "Tu95" else bool(bay)
+            cell = cell or {"1": (-1.59, -2.12, 8.64), "2": (-12.00, -0.58, 9.00)}.get(station, (-6.33, -4.91, 9.67))
             lines = [
-                f"ai-strike: setup aircraft=Tu95 load=AS16.JT station={station} count=2 rounds=2 target=0x50000003 "
-                "name=Krivak target_at=1,2,3 hp=500 skill=1 profile=none handback=none order=none mode=none",
+                f"ai-strike: setup aircraft={aircraft} load=AS16.JT station={station} count=2 rounds=2 "
+                "target=0x50000003 name=Krivak target_at=1,2,3 hp=500 skill=1 profile=none handback=none "
+                "order=none mode=none",
                 "ai-strike: PROFILE t=0.000 name=none requested=none note=chosen",
                 "ai-strike: start t=0.000 plane=0 range_ft=91140 alt_ft=20000 speed_kt=450",
                 f"ai-strike: SELECTION t=0.008 target=0x50000003 station={station} kind={kind} side=2 class=0x2000 name=Krivak",
             ]
             if bay:
-                lines.append("ai-strike: BAY t=70.000 state=open bay=0.96")
+                lines.append("ai-strike: BAY t=107.492 state=open bay=0.96")
             if release:
-                lines.append(f"ai-strike: RELEASE t=80.000 n=1 weapon=AS16.JT station={station} alt_ft=20000 speed_kt=400 "
-                             "range_ft=1 pass=1 aim_ft=0 inside=yes lead_ft=0 dive_deg=0 bay=0.00")
+                lines.append(f"ai-strike: ORIGIN t=108.375 n=1 station={station} right={cell[0]} up={cell[1]} forward={cell[2]}")
+                lines.append(f"ai-strike: RELEASE t=108.375 n=1 weapon=AS16.JT station={station} alt_ft=20000 speed_kt=279 "
+                             f"range_ft={range_ft} pass=1 aim_ft=0 inside=yes lead_ft=0 dive_deg=-0 bay={'1.00' if bay else '0.00'}")
+            if bay:
+                lines.append("ai-strike: BAY t=110.325 state=shut bay=0.04")
+            for n in range(impacts):
+                lines.append(f"ai-strike: IMPACT t=124.867 n={n + 1} miss_ft=47.7 at=1,2,3")
             if lost:
-                lines.append("ai-strike: LOST t=50.000 reason=destroyed crashed=yes")
-            lines.append("ai-strike: summary t=90.000 ran_s=90.0 profile=level releases=0 impacts=0 kills=0 egress=no "
-                         "lost=no activity=Attacking target_hp=500/500 closest_ft=52000 store_rounds_left=2")
-            if not release:
-                lines.append("ai-strike: no release")
+                lines.append("ai-strike: LOST t=130.000 reason=destroyed crashed=yes")
+            lines.append(f"ai-strike: summary t=135.000 ran_s=135.0 profile=level releases={int(release)} impacts={impacts} "
+                         f"kills=0 egress=no lost={'yes' if lost else 'no'} activity=Defending target_hp={hp} closest_ft=13507 "
+                         "store_rounds_left=1")
             lines.append("ai-strike: done")
             return "\n".join(lines)
 
-        check1, check2 = s.tu95_antiship_limit_problems("1"), s.tu95_antiship_limit_problems("2")
-        self.assertEqual(check1(limit()), [])
-        self.assertEqual(check2(limit("2")), [])
-        self.assertTrue(any("known limit may be fixed" in p for p in check1(limit(release=True))))
-        self.assertTrue(any("doors moved" in p for p in check1(limit(bay=True))))
-        self.assertTrue(any("was lost" in p for p in check1(limit(lost=True))))
-        self.assertTrue(any("RadarAgm" in p for p in check1(limit(kind="Bomb"))))
-        self.assertTrue(any("station 2" in p for p in check2(limit("1"))))
+        check1, check2 = s.tu95_antiship_problems("1"), s.tu95_antiship_problems("2")
+        self.assertEqual(check1(run()), [])
+        self.assertEqual(check2(run("2")), [])
+        self.assertTrue(any("releases []" in p for p in check1(run(release=False, impacts=0))))
+        self.assertTrue(any("never opened" in p for p in check1(run(bay=False)) ))
+        self.assertTrue(any("bay door moved" in p for p in check2(run("2", bay=True))))
+        self.assertTrue(any("was lost" in p for p in check1(run(lost=True))))
+        self.assertTrue(any("RadarAgm" in p for p in check1(run(kind="Bomb"))))
+        self.assertTrue(any("station 2" in p for p in check2(run("1"))))
+        self.assertTrue(any("stand-off" in p for p in check1(run(range_ft=9000))))
+        self.assertTrue(any("unhurt" in p for p in check1(run(hp="500/500"))))
+        self.assertTrue(any("cell is" in p for p in check1(run(cell=(0.0, 0.0, 0.0)))))
+        # The Tu-26's own AS-16 (intake row, no doors).
+        self.assertEqual(s.tu26_as16_problems(run("1", aircraft="Tu26", cell=(-6.33, -4.91, 9.67))), [])
+        self.assertTrue(any("Tu26" in p for p in s.tu26_as16_problems(run("1", aircraft="Tu95", cell=(-6.33, -4.91, 9.67)))))
+        names = {sc.name for sc in s.scenarios()}
+        for name in ("ai-strike-tu95-antiship", "ai-strike-tu95-antiship-beams", "ai-strike-tu26-as16"):
+            self.assertIn(name, names)
 
 
 def su34_run(weapon="MK82.JT", station=1, cell=(-4.50, -3.46, 6.15), alt=5004, miss=420.5, guided=False,

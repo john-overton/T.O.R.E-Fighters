@@ -602,11 +602,13 @@ def scenarios() -> list[Scenario]:
         problems += rc.file_problems(work, "log-b52-ripple/log.jsonl", rc.check_jsonl)
         return problems
 
-    # B1B-9: a B-1B's bay ripple (eight Mk 82 from the forward row, 0.5 s apart, 0.1 s presses: a one-tick tap loses
-    # every third press to the release interval, 5 of 8 and 9 of 12, while 0.1 s gives 7 of 8 as the B-52's does;
-    # the doors opened by the run) recorded,
-    # replayed tick for tick with `--verify-render` and read back as eight releases and outcomes, the row's count
-    # falling 20 to 12; the recorded bay device opens for the release and shuts after it.
+    # B1B-9: a B-1B's bay ripple (eight Mk 82 from the forward row, 0.5 s apart, 0.1 s presses, the doors opened by
+    # the run) recorded, replayed tick for tick with `--verify-render` and read back as eight releases and outcomes,
+    # the row's count falling 20 to 12; the recorded bay device opens for the release and shuts after it. The 0.1 s
+    # hold stays: a one-tick tap 0.5 s apart still loses a press to the release interval (6 of 8 now, 5 of 8
+    # before BMB-AI2), which is not the doors' loss. B1B-9 accepted 7 or 8 because the first press was spent
+    # opening the doors; BMB-AI2 holds a press made while the doors open, so the run gives all eight and the
+    # scenario pins exactly eight (round 7, 2026-11-16).
     b1b_args = [*RUN, "UKR", "QUCOL", "--attack", "release", "--from", "1", "--altitude", "20000", "--speed", "300", "--repeat", "8",
                 "--hold", "0.1", "--gap", "0.5", "--aircraft", "b1b", "--station", "0", "--load", "MK82", "--count", "20",
                 "--record", "{work}/b1b-ripple.tore-replay", "--verify-render"]
@@ -616,9 +618,9 @@ def scenarios() -> list[Scenario]:
         rows = events(work, "b1b-ripple")
         for name in ("weapon.release", "weapon.outcome"):
             got = len(kind(rows, name))
-            if not 7 <= got <= 8:
-                problems.append(f"{got} {name} events for a ripple of 8 presses")
-        if len(kind(rows, "stores.items")) < 7:
+            if got != 8:
+                problems.append(f"{got} {name} events for a ripple of 8 presses, want 8 (BMB-AI2: no press is lost while the doors open)")
+        if len(kind(rows, "stores.items")) < 8:
             problems.append("fewer stores.items entries than releases")
         path = work / "log-b1b-ripple" / "log.jsonl"
         rows_all = [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
@@ -696,7 +698,10 @@ def scenarios() -> list[Scenario]:
 
     # T26-9: a Tu-26's bay ripple (eight Mk 82 in the belly bay row, 0.5 s apart, the doors opened by the run)
     # recorded, replayed tick for tick with `--verify-render` and read back as eight releases and outcomes; the
-    # recorded bay device opens for the release and shuts after it.
+    # recorded bay device opens for the release and shuts after it. T26-9 pressed ten times for the eight (the
+    # doors' held-press loss and the release interval's cost two) and accepted 7 or 8; BMB-AI2 holds a press made
+    # while the doors open, so ten presses give all eight and the scenario pins exactly eight (round 7,
+    # 2026-11-16). Eight one-tick presses 0.5 s apart still give seven (the release interval, not the doors).
     tu26_args = [*RUN, "UKR", "QUCOL", "--attack", "release", "--from", "1", "--altitude", "20000", "--speed", "300", "--repeat", "10",
                  "--gap", "0.5", "--aircraft", "tu26", "--station", "4", "--load", "MK82", "--count", "8",
                  "--record", "{work}/tu26-ripple.tore-replay", "--verify-render"]
@@ -704,11 +709,12 @@ def scenarios() -> list[Scenario]:
     def tu26_check(work: Path, output: str) -> list[str]:
         problems = verify_problems(output, "the Tu-26 ripple", 3_000)
         rows = events(work, "tu26-ripple")
+        # The bombs' own weapon (0): a surface weapon's miss (weapon 1) is in the log too.
         for name in ("weapon.release", "weapon.outcome"):
-            got = len(kind(rows, name))
-            if not 7 <= got <= 8:
-                problems.append(f"{got} {name} events for a ripple of 10 presses on 8 bombs")
-        if len(kind(rows, "stores.items")) < 7:
+            got = len(kind(rows, name, weapon=0))
+            if got != 8:
+                problems.append(f"{got} {name} events for a ripple of 10 presses on 8 bombs, want 8 (BMB-AI2: no press is lost while the doors open)")
+        if len(kind(rows, "stores.items")) < 8:
             problems.append("fewer stores.items entries than releases")
         path = work / "log-tu26-ripple" / "log.jsonl"
         rows_all = [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
