@@ -457,10 +457,22 @@ pub struct Rig {
     scale: f32,
     specific: Option<SpecificRig>,
 }
+/// The identity whose rig an aircraft drives: the Tornado IDS (Clean) drives the
+/// Tornado's. Only that variant maps to its source: `Id::source` also maps the
+/// Faxx to the F-22N, whose plain rig would lose the Faxx's split-leaf rudder
+/// and flaps (TOR-13 regression).
+fn rig_identity(id: Id) -> Id {
+    if id == Id::TornadoClean {
+        Id::Tornado
+    } else {
+        id
+    }
+}
+
 impl Rig {
     pub fn load(id: Id, bytes: &[u8]) -> AppResult<(Self, Shape)> {
         // A variant (the Tornado IDS (Clean)) drives its source's rig.
-        let id = id.source();
+        let id = rig_identity(id);
         // The aircraft's per-axis shape scale (M2K-2) is applied here, to the
         // parsed vertices, before any device turns them: a panel turned about
         // a hinge in scaled space stays rigid. Every aircraft but the Mirage
@@ -1124,6 +1136,21 @@ fn animate_gun(face: &mut Face, state: &State) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// The Faxx keeps its own identity in `Rig::load`, so the F-22 rig's
+    /// `Id::Faxx` branches (split-leaf rudder and flaps) run; only the Tornado
+    /// IDS (Clean) drives its source's rig.
+    #[test]
+    fn faxx_keeps_its_own_rig_identity_and_only_the_clean_tornado_maps_to_its_source() {
+        assert_eq!(rig_identity(Id::Faxx), Id::Faxx);
+        assert_ne!(Id::Faxx.source(), Id::Faxx, "source() maps the Faxx away");
+        assert_eq!(rig_identity(Id::F22n), Id::F22n);
+        assert_eq!(rig_identity(Id::TornadoClean), Id::Tornado);
+        for id in Id::ALL {
+            if id != Id::TornadoClean {
+                assert_eq!(rig_identity(id), id, "{id:?}");
+            }
+        }
+    }
     /// TOR-2: a generic rig draws at the scale the simulation measures the
     /// same aircraft at (stores, breakup pieces, gear), and the Tornado's
     /// is its header scale, 2/3 ft a unit.
