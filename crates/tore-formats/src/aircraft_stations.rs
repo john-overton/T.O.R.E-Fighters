@@ -543,6 +543,67 @@ pub const SU34_FUSELAGE: usize = 6;
 /// units, 8.3 ft) and 0.7 ft below the nacelle belly (-16 units, 5.3 ft). The
 /// retail -30 is 10 ft down, 1.7 ft below the wheels.
 pub const SU34_FUSELAGE_UP: i32 = -18;
+/// The Su-34's wing row (`SU34.PT` row 7, four `AT12.JT`, flags `0x7e5`) and
+/// wingtip row (row 8, two `AA11.JT`, flags `0x85`).
+pub const SU34_WING: usize = 7;
+pub const SU34_TIP: usize = 8;
+/// The Su-34's two pylon rows whose retail flags carry the designator bit
+/// `0x400` ([`DESIGNATOR_BIT`]): [`adjust_defaults`] clears it (SU34-5,
+/// coordinator first pass BMB-C1/C2, B7: the real aircraft has no pod station
+/// there, and the retail bit would offer a sensor pod on an intake and a wing
+/// pylon).
+pub const SU34_POD_ROWS: std::ops::Range<usize> = SU34_FUSELAGE..SU34_TIP;
+/// Stores the Su-34's fuselage row (row 6, two tandem pairs under the intake
+/// ducts) refuses though its mask and weight class admit them: the 22 whose
+/// full row clips the drawn airframe by more than 0.75 ft (the Su-27 stations
+/// the Su-34 reuses carry default clips up to 0.72 ft; the AS-14 default
+/// itself clips 0.57 ft), overlaps its neighbour, or comes within 1 ft of the
+/// gear. Measured with the stores preview, every catalog store at its full
+/// count (SU34-5, 2026-11-16). See `docs/formats/aircraft-variety.md`.
+pub const SU34_FUSELAGE_REFUSED: [&str; 22] = [
+    "AA6.JT",
+    "AA9.JT",
+    "AGM45.JT",
+    "AGM84E.JT",
+    "AGM88.JT",
+    "AIM7.JT",
+    "AIM7E.JT",
+    "AM39.JT",
+    "AS30.JT",
+    "AT12.JT",
+    "GBU10.JT",
+    "GBU10A.JT",
+    "GBU12.JT",
+    "GBU16.JT",
+    "GBU29.JT",
+    "GBU29P.JT",
+    "GBU30.JT",
+    "MK84.JT",
+    "PAVEWA3.JT",
+    "PAVEWAY.JT",
+    "PL10.JT",
+    "PL7.JT",
+];
+/// The Su-34's wing row (row 7, one store a pylon on the middle and outer
+/// underwing pylons) refuses the four long bombs of the GBU-27 class: their
+/// 14 ft bodies on pylons 4 ft apart overlap (1.4 ft) and the front pair enters
+/// the wing by 1.1 ft (SU34-5, 2026-11-16).
+pub const SU34_WING_REFUSED: [&str; 4] = ["GBU29.JT", "GBU29P.JT", "GBU30.JT", "PAVEWA3.JT"];
+/// The Su-34's wingtip rails (row 8) refuse the stores whose bodies enter the
+/// tip's edge by more than 0.75 ft: the two Mavericks and the Chinese and
+/// French short-range missiles (the AA-11 default clips 0.59 ft, the same as
+/// the Su-27's) (SU34-5, 2026-11-16).
+pub const SU34_TIP_REFUSED: [&str; 4] = ["AGM65A.JT", "AGM65G.JT", "PL7.JT", "R550.JT"];
+/// The rocket pods the Su-34's wing row (row 7) takes beyond its mask: `B8.JT`
+/// (B-8), `B13.JT` (B-13), `LAU10.JT` and `LAU61.JT`. They are multi-rocket
+/// stores (`pod_count > 1`), which the loader admits only through the designator
+/// bit `0x400`, and [`adjust_defaults`] clears that bit on rows 6 and 7 (SU34-5,
+/// B7). The real Su-34 carries rocket pods on its wing pylons, so [`extra_weapon`]
+/// puts the four back on row 7 (the F-117's Paveway II precedent; SU34-6,
+/// coordinator first pass 2026-11-16). Row 6 stays without them: the pods sit
+/// under the intake ducts of a fuselage row that stands for four real stations
+/// and no rocket pod hangs there.
+pub const SU34_EXTRA_PODS: [&str; 4] = ["B8.JT", "B13.JT", "LAU10.JT", "LAU61.JT"];
 /// The F-117's two internal bay rows (`F117.PT` rows 4 and 5, flags `0x1100`,
 /// one store each): [`weapon_allowed`] refuses the stores that cannot clear
 /// the fitted bays and [`extra_weapon`] admits the Paveway II laser bombs.
@@ -761,6 +822,15 @@ pub fn weapon_allowed(id: AircraftId, row: usize, source: &str) -> bool {
                 &F111_ROW6_REFUSED[..]
             } else {
                 &[]
+            };
+            !refused.contains(&source)
+        }
+        AircraftId::Su34 => {
+            let refused = match row {
+                SU34_FUSELAGE => &SU34_FUSELAGE_REFUSED[..],
+                SU34_WING => &SU34_WING_REFUSED[..],
+                SU34_TIP => &SU34_TIP_REFUSED[..],
+                _ => &[],
             };
             !refused.contains(&source)
         }
@@ -1374,7 +1444,11 @@ fn default_signature(id: AircraftId) -> &'static [Signature] {
 ///   row 5 holds 180 rounds in place of 150 ([`SU34_GUN_ROUNDS`], the real
 ///   GSh-30-1 magazine), and the fuselage row 6 moves up from -10 ft to -6 ft
 ///   ([`SU34_FUSELAGE_UP`]: the retail point is 1.7 ft under the main wheels'
-///   bottoms). **Fitted** (agent decision).
+///   bottoms). **Fitted** (agent decision). Update (SU34-5, 2026-11-16): rows 6
+///   and 7 lose the designator bit `0x400` (`0x07e5` to `0x03e5`, B7: no
+///   sensor pod on a station the real aircraft does not have;
+///   [`SU34_POD_ROWS`]), and [`weapon_allowed`] refuses the stores that clip
+///   the drawn airframe on the three weapon rows.
 pub fn adjust_defaults(id: AircraftId, rows: &mut Vec<Hardpoint>) {
     if !is_retail(id, rows) {
         return;
@@ -1479,6 +1553,9 @@ pub fn adjust_defaults(id: AircraftId, rows: &mut Vec<Hardpoint>) {
         AircraftId::Su34 => {
             rows[SU34_GUN].count = SU34_GUN_ROUNDS;
             rows[SU34_FUSELAGE].position[1] = SU34_FUSELAGE_UP;
+            for row in &mut rows[SU34_POD_ROWS] {
+                row.flags &= !DESIGNATOR_BIT;
+            }
         }
         _ => {}
     }
@@ -1601,11 +1678,15 @@ pub fn default_counts(id: AircraftId, rows: &mut [Hardpoint]) {
 /// The F-117's two bay rows (`F117.PT` rows 4 and 5) also take the Paveway II
 /// laser bombs, [`F117_EXTRA_BOMBS`]: the retail bomb-only mask `0x1100`
 /// leaves them out, and a laser bomb is what the real jet carries.
+///
+/// The Su-34's wing row (`SU34.PT` row 7) takes the four rocket pods
+/// [`SU34_EXTRA_PODS`], which clearing its designator bit would otherwise refuse.
 pub fn extra_weapon(id: AircraftId, rows: usize, row: usize, source: &str) -> bool {
     (id == AircraftId::F16C && rows > F16_WET && row == F16_TIP && source == "AIM120.JT")
         || (id == AircraftId::F117
             && F117_BAY_ROWS.contains(&row)
             && F117_EXTRA_BOMBS.contains(&source))
+        || (id == AircraftId::Su34 && row == SU34_WING && SU34_EXTRA_PODS.contains(&source))
 }
 
 type Signature = (u8, i32, [i32; 3], &'static str, i32, i32);
@@ -2864,6 +2945,27 @@ mod tests {
                 "{source}"
             );
         }
+        // Su-34 (SU34-5): the defaults stay admitted, the named stores are
+        // refused on their own row only.
+        for (row, default) in [
+            (SU34_FUSELAGE, "AS14.JT"),
+            (SU34_WING, "AT12.JT"),
+            (SU34_TIP, "AA11.JT"),
+        ] {
+            assert!(weapon_allowed(AircraftId::Su34, row, default), "{default}");
+        }
+        for (row, list) in [
+            (SU34_FUSELAGE, &SU34_FUSELAGE_REFUSED[..]),
+            (SU34_WING, &SU34_WING_REFUSED[..]),
+            (SU34_TIP, &SU34_TIP_REFUSED[..]),
+        ] {
+            for source in list {
+                assert!(!weapon_allowed(AircraftId::Su34, row, source), "{source}");
+                assert!(weapon_allowed(AircraftId::Su27, row, source), "{source}");
+            }
+        }
+        assert!(weapon_allowed(AircraftId::Su34, SU34_WING, "GBU12.JT"));
+        assert!(weapon_allowed(AircraftId::Su34, SU34_GUN, "GSH301.JT"));
         // Su-34.
         let retail = default_rows(AircraftId::Su34);
         assert_eq!(retail.len(), 9);
@@ -2872,6 +2974,12 @@ mod tests {
         let mut expected = key(&retail);
         expected[SU34_GUN].4 = 180;
         expected[SU34_FUSELAGE].2 = [24, -18, -13];
+        // SU34-5: no designator pod on the fuselage and wing rows (B7).
+        for row in [SU34_FUSELAGE, SU34_WING] {
+            assert_eq!(retail[row].flags, 0x7e5);
+            expected[row].1 = 0x3e5;
+        }
+        assert_eq!(rows[SU34_TIP].flags, 0x85);
         assert_eq!(key(&rows), expected);
         // The wheels' bottoms are 25 units down: the row is above them.
         assert!(rows[SU34_FUSELAGE].position[1] > -25);
@@ -2911,5 +3019,24 @@ mod tests {
         assert!(weapon_allowed(AircraftId::F117, 4, "MK84.JT"));
         assert!(!weapon_allowed(AircraftId::F117, 5, "GBU16.JT"));
         assert!(weapon_allowed(AircraftId::F117, 3, "GBU16.JT"));
+    }
+    /// SU34-6 (2026-11-16): clearing the designator bit on the Su-34's rows 6
+    /// and 7 removed the rocket pods, and the guarded extra weapon puts the four
+    /// back on the wing row only. Nothing else, and no other aircraft, changes.
+    #[test]
+    fn the_su34_wing_row_takes_the_four_rocket_pods_and_nothing_else_moves() {
+        for name in SU34_EXTRA_PODS {
+            assert!(extra_weapon(AircraftId::Su34, 9, SU34_WING, name), "{name}");
+            assert!(!extra_weapon(AircraftId::Su34, 9, SU34_FUSELAGE, name));
+            assert!(!extra_weapon(AircraftId::Su34, 9, SU34_TIP, name));
+            assert!(!extra_weapon(AircraftId::Su27, 9, SU34_WING, name));
+            assert!(!extra_weapon(AircraftId::Tu95, 9, SU34_WING, name));
+            // The pods are not the row's mask: the extra permission is the
+            // only way they reach the row, and they are not refused by name.
+            assert!(weapon_allowed(AircraftId::Su34, SU34_WING, name));
+        }
+        assert!(!extra_weapon(AircraftId::Su34, 9, SU34_WING, "MK82.JT"));
+        assert!(!extra_weapon(AircraftId::Su34, 9, SU34_WING, "AGM88.JT"));
+        assert!(extra_weapon(AircraftId::F16C, 10, F16_TIP, "AIM120.JT"));
     }
 }

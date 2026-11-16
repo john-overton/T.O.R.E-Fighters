@@ -266,6 +266,27 @@ def tu95_clearance_problems(output: str) -> list[str]:
     return problems
 
 
+def su34_clearance_problems(output: str) -> list[str]:
+    """The Su-34's loaded rows clear the airframe, each other and the gear (SU34-5)."""
+    problems = []
+    clips = {int(m.group(1)): float(m.group(2)) for m in re.finditer(r"su34 clip hardpoint (\d) \S+ \w+: ([\d.]+) ft", output)}
+    for row in (6, 7, 8):
+        if row not in clips:
+            problems.append(f"no clip line for row {row}")
+        elif clips[row] > 0.75:
+            problems.append(f"row {row} enters the airframe by {clips[row]:.2f} ft")
+    m = re.search(r"su34 closest pair .*?: gap (-?[\d.]+) ft", output)
+    if not m or float(m.group(1)) < 0.05:
+        problems.append("two stores touch")
+    gears = re.findall(r"su34 gear row\d \S+ \S+: gap (-?[\d.]+) ft", output)
+    if len(gears) < 10:
+        problems.append(f"{len(gears)} gear lines, expected the ten stores")
+    for gap in gears:
+        if float(gap) < 1.0:
+            problems.append(f"a store is only {gap} ft from the gear")
+    return problems
+
+
 def skin_capture_problems(output: str) -> list[str]:
     """Every aircraft skin capture drew a non-blank frame."""
     captures = [line for line in output.splitlines() if line.startswith("Scene capture:")]
@@ -372,6 +393,23 @@ def scenarios() -> list[Scenario]:
                  "TORE_STORES_PREVIEW_RECORDS": "8=AS16.JT:10"},
             expect=["Bay clearance: tu95 opening", "Pylon clearance: tu95 row 8"], check=tu95_clearance_problems,
             notes="Headless Tu-95 clearances in feet (T95-5): the 6 default AS-16 in the open bay against the doors, walls, roof, floor, rails and ends (their fins touch each other, the one accepted exception); 10 AS-16 on the pylon beams against each other, the inboard propeller disc, the nacelle, the fuselage, the gear and the wing.",
+        ),
+        Scenario(
+            name="render-su34-clearance", lane="flight",
+            args=["--stores-preview", "{work}/stores"],
+            env={"TORE_STORES_PREVIEW_CPU": "1", "TORE_STORES_PREVIEW_CLEARANCE": "1",
+                 "TORE_STORES_PREVIEW_AIRCRAFT": "su34"},
+            expect=["su34 clip hardpoint 6", "su34 gear row6"], check=su34_clearance_problems,
+            notes="Headless Su-34 clearances in feet (SU34-5): the default 4 AS-14, 4 AT-12 and 2 AA-11 against the drawn airframe, each other and the gear-down plates.",
+        ),
+        Scenario(
+            name="render-su34-clearance-mk82", lane="flight",
+            args=["--stores-preview", "{work}/stores"],
+            env={"TORE_STORES_PREVIEW_CPU": "1", "TORE_STORES_PREVIEW_CLEARANCE": "1",
+                 "TORE_STORES_PREVIEW_AIRCRAFT": "su34",
+                 "TORE_STORES_PREVIEW_RECORDS": "6=MK82.JT:4,7=MK82.JT:4,8=GBU12.JT:2"},
+            expect=["su34 clip hardpoint 6", "su34 gear row6"], check=su34_clearance_problems,
+            notes="The same clearances with Mk 82 on the fuselage and wing rows and GBU-12 on the tips (SU34-5).",
         ),
         Scenario(
             name="render-ah64-stub-wing-pylons", lane="flight",

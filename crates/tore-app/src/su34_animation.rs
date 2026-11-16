@@ -51,7 +51,7 @@ const FLAME: [usize; 16] = [
 const GEAR_R: [usize; 2] = [0x4a7b, 0x4a9a];
 const GEAR_L: [usize; 2] = [0x4ae6, 0x4b05];
 const GEAR_NOSE: [usize; 4] = [0x4b69, 0x4b88, 0x4ba7, 0x4bce];
-const GEAR: [usize; 8] = [
+pub(crate) const GEAR: [usize; 8] = [
     0x4a7b, 0x4a9a, 0x4ae6, 0x4b05, 0x4b69, 0x4b88, 0x4ba7, 0x4bce,
 ];
 /// The neutral flap quads (both windings a side) and the faces the word's

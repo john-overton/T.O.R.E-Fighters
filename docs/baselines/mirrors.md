@@ -338,3 +338,11 @@ The Tu-26 flies the AC-130 family by its record (`bmbroh.HUD`, stem `AC130`, `~A
 rear feed camera (`mirrors::camera`) stays on the shared seat for every aircraft; only the Back view and the replay cameras take the per-aircraft eye
 (`mirrors::eye_offset`), which gives the Tu-26 7 feet up and 56 feet ahead (the shared seat is 7 and 10). See [the Tu-26
 section](../formats/aircraft-variety.md#tu-26-backfire-c-ordnance-sensors-hud-and-cockpit-t26-67-2026-11-16). Frames are under `.local/m3-aircraft/frames/T26-6/`.
+
+## 2026-11-16 Su-34 cockpit: the Su-33 family's mirrors, its own Back eye (SU34-7)
+
+The Su-34 flies the Su-33 family cockpit (`su33cc.HUD`, stem `SU33`, `~SU33H.PIC`, 1280 x 490), so its
+mirrors are the reviewed `SU33` seeds, fed by the rear camera on the shared seat. Only the Back view
+and the replay cameras take the per-aircraft eye (`mirrors::eye_offset`), which gives the Su-34 7 feet
+up and 17 feet ahead, over the drawn canopy. See [the Su-34 section](../formats/aircraft-variety.md#su-34-ordnance-sensors-hud-and-cockpit-su34-67-2026-11-16).
+Frames are under `.local/m3-aircraft/frames/SU34-6/`.

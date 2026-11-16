@@ -2126,6 +2126,12 @@ HUD field is null and `B2.HUD` is bound by name; John, 2026-11-15, opinionated).
 aperture is measured on that art and its pilot's eye is a per-aircraft table entry; see
 [the B-2 sensors, HUD and cockpit section](aircraft-variety.md#b-2-sensors-hud-and-cockpit-b2-7-2026-11-15). No retail art is committed.
 
+**Cockpit family (SU34-7, 2026-11-16).** The Su-34 draws the Su-33 family's `~SU33H.PIC` (1280 x 490, the
+combiner frame closes one 68,414 pixel glass) by its record's `su33cc.HUD`; no Su-34 picture exists. Its HUD
+glass aperture is the MiG-29 family's, measured on that art (66,681 pixels, none opaque, 97.5 percent of the
+glass) and its pilot's eye is a per-aircraft table entry; see
+[the Su-34 section](aircraft-variety.md#su-34-ordnance-sensors-hud-and-cockpit-su34-67-2026-11-16).
+
 ## F-117A skin review (F117-2, 2026-11-15)
 
 `F117.SH` draws at its header scale (1/3 ft a unit) times the per-axis scale

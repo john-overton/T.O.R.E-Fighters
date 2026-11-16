@@ -437,6 +437,10 @@ adds order kinds.
 | `ai-strike-tu95-stick` (T95-9, 2026-11-16) | An AI Tu-95 (Heavy) on `~QUCOL` at 20,000 ft, 12 nm out, six Mk 82 in the belly bay (`--station 1 --count 6`) | The doors open before the first bomb (a `BAY` line), six releases 0.25 s apart each with `bay=1.00`, from the row's six places (right -1.95, 1.95, -0.65, 0.65 ft at 16.19 ft forward, then -1.95 and 1.95 ft at 8.64 ft; up -2.98), station 1, the doors read shut 1.5 to 6 s after the last, an impact, egress, not lost |
 | `ai-strike-tu95-quick-wing` (T95-9) | A Quick Mission with the Ukraine factory as the ground target and a Tu-95 wing (`--quick-wing --station 1 --count 6`) | `ROLE strike`, the same bay stick of six with the doors open for it at the 5,000 ft heavy floor, the factory killed, egress, not lost |
 | `ai-strike-tu95-antiship`, `ai-strike-tu95-antiship-beams` (T95-9) | An AI Tu-95 with two AS-16 on the bay row (`--station 1`) or the wing beams (`--station 2`), 15 nm from the Ukraine surface fleet's Krivak at 20,000 ft, 90 s | **Pins a known limit**: the radar missile is selected (`SELECTION kind=RadarAgm`, the station asked for) and aimed at the Krivak, and **nothing is released**, no `BAY` line, not lost. The run fails by design the day the AI can fire the AS-16 (see aircraft variety, T95-9) |
+| `ai-strike-su34-bombs` (SU34-9, 2026-11-16) | An AI Su-34 (Fighter, one bomb a pass) on `~QUCOL` with a Mk 82 from row 6 (`--station 1`) then row 7 (`--station 2`), two runs | The level pass at 4,500 to 5,500 ft, one release from the named station leaving the cell a human's first press leaves from ((-4.50, -3.46, 6.15) and (-18.00, -1.78, -3.40) ft), no bay door moved, an impact inside the skill 1 limit, egress, not lost |
+| `ai-strike-su34-default` (SU34-9) | An AI Su-34 on its default load picks its own store (`--station 1 --choose-store`) | A laser store (the AS-14, `guided=Guiding` on its own spot), landed within 150 ft of the tank, the tank hurt, egress, not lost |
+| `ai-strike-su34-quick-wing` (SU34-9) | A Quick Mission with the Ukraine factory as the ground target and a Su-34 wing (`--station 1 --quick-wing`) | `ROLE strike` from the record's bomber class word, an AS-14 from station 1 guiding on the wing's own spot, landed within 150 ft, something destroyed, egress, not lost |
+| `ai-strike-su34-antiship` (SU34-9) | An AI Su-34 with two AGM-84E on its wing row (`--station 2 --count 2`), 15 nm from the Ukraine surface fleet's Krivak, 40 s | One Harpoon leaves each wing ((-18.00, -1.89, -3.40) and the mirror), both hit and the Krivak is destroyed, no bay door moves, not lost inside the window. The jet is shot down at about 52 s if the run goes on (the lone driver-flown wing flies on in formation: open) |
 | `a2g-release-origin-b2` (B2-6) | The human trigger on the B-2's four bay rows (`--a2g-run --attack release`, 12 presses a Mk 82 row, 4 a Paveway row) | Each release leaves where it hangs: outermost first, alternating sides, front row before back, bottom tier first |
 | `ai-strike-tu160-stick` (T160-6, 2026-11-16) | An AI Tu-160 (Heavy) on `~QUCOL` at 20,000 ft, 12 nm out, the forward bay's six Mk 82 (`--aircraft tu160 --load MK82`) | Six releases from the grid's own places (four abreast at 45.73 then 38.18 ft ahead, -1.95 ft up), doors open for the release, an impact, egress, not lost; the cells equal the human's in `a2g-release-origin-tu160` |
 | `a2g-release-origin-tu160` (T160-6, 2026-11-16) | The human trigger on the Tu-160's bays (`--a2g-run --attack release`, 6 AS-16 a bay, 6 Mk 82 of the forward bay) | Each release leaves where it hangs: AS-16 three abreast (-1.59, +1.59, 0), forward row then back (38.61 and 22.66 ft forward, aft bay -12.73 and -28.68); Mk 82 four abreast |
@@ -1213,3 +1217,27 @@ the bay grid's cells and the beams' rows, each within 0.05 ft of where it hangs;
 `flight-tu95-tail-gun` (the B-52's scenario with an AI Tu-95: 5 of 180 rounds hit the F-22, the same 35 percent
 ceiling) and `flight-countermeasures-tu95` (99 chaff and 99 flares, five and three released). The `menus` and
 `a2g-catalog` expected lines read 22 recovered weapon stations (from 23).
+
+Update (SU34-5, 2026-11-16): `su34` joins `STATIONS` (`[180, 4, 4, 2]`), so the slot and
+jettison scenarios cover its gun, fuselage, wing and wingtip rows. New scenarios:
+`flight-bay-fire-su34-pylon-row6`, `-row7` and `-row8` (windowed stores-preview fire: a Mk 82 or
+GBU-12 leaves the intake, wing or tip station; nothing opens, the Su-34 has no bay), and
+`render-su34-clearance` and `render-su34-clearance-mk82` (headless: the default and a Mk 82 load
+clip the airframe by at most 0.75 ft, no two stores touch, and every store stays at least 1 ft
+from the gear-down plates).
+
+Update (SU34-6, 2026-11-16): new scenarios `a2g-laser-su34` (the Su-34's built-in laser: an AS-14 from
+row 6 guides to the tank and destroys it, an AT-12 from row 7 guides and hurts it),
+`a2g-release-origin-su34` (AS-14 front pair then rear pair, AT-12 outer then middle pylon, AA-11 tip
+rails, LAU-61 rocket pods on the outer pylon, each from the cell it hangs at, left then right),
+`ai-strike-su34-origin` (an AI Su-34's AS-14, AT-12 and LAU-61 leave from the human's cells, guide and
+egress) and `flight-countermeasures-su34` (the retail `SU27.ECM` row, five chaff and three flare
+releases). `menus-ordnance-availability` expects 5,361 weapon placements (the four rocket pods back on
+row 7).
+
+Update (SU34-8, 2026-11-16): `su34` joins `flight-variety`, `flight-liftoff`, `flight-liftoff-retail` and
+`flight-approach` (liftoff window 110 to 140 kt, recorded 121.5 kt; approach window 115 to 145 kt, recorded
+126.8 kt at 17,339 lb of fuel, 65 percent; the ordinary takeoff tick allowance; Simferopol), and
+`ai-heavy-takeoff-su34-gre-a1` and `ai-heavy-land-su34-ukr-a2` join the AI lane (the heavy-class airfield
+laws do not apply to the Su-34, whose flaps-up minimum is 119.8 kt; the scenarios pin that it takes off,
+lands at 125 kt and parks cleanly). The windows are fitted agent decisions on no published speed.

@@ -19180,3 +19180,555 @@ whoever wins).
 
 Provenance: the airfield law, the scenarios and their windows are fitted agent decisions of 2026-11-16; the
 stations, ordnance and AS-16 record are T95-5 to T95-7's; no retail bytes are committed.
+
+## Su-34 stations, bays and pylons (SU34-5, 2026-11-16)
+
+Opinionated and **fitted**, agent-authored (SU34-5), applying the coordinator's first-pass
+decisions for the Su-34 (`BOMBERS-DECISIONS-C.md`, "Su-34" item 5 and "BMB-C1/C2", for John
+to review). Earlier sections stay as written; the SU34-0 review's station table and BMB-C2's
+gun count and row 6 height are what this builds on. The numbers and the clearance tables are
+in the [stores specification](../spec/stores-on-pylons.md#the-su-34-stations-su34-5-2026-11-16).
+
+**No bay.** The Su-34 has no internal bay, so there is no door leaf, belly cut or bay cell
+in this slice. The slice is wing, fuselage and intake stations only.
+
+**Stations after SU34-5.** The record keeps its nine rows (no row is added, none moved to
+another location byte); rows 6 and 7 lose a flag bit and take the Flankers' station table.
+
+| Row | What it is | Where it hangs now | Capacity, class | Default |
+| ---: | --- | --- | --- | --- |
+| 5 | GSh-30-1 gun | the record's point (BMB-C2: 180 rounds) | 180 | `GSH301.JT` x 180 |
+| 6 | fuselage row, flags `0x07e5` to `0x03e5` | two tandem pairs under the intake ducts: 4.5 ft out, 2.0 ft forward of the reference point, the stores' middles 6.9 ft either side (the shared fuselage-pair rule), hung under the lowest part of the duct over the store's length (`Hang::Lowest { half: 6 }`); the record's own point (BMB-C2) is 6 ft below the reference | 4, class 80 | `AS14.JT` x 4 |
+| 7 | wing row, flags `0x07e5` to `0x03e5` | the middle and outer underwing pylons, one store each: 14 and 18 ft out, 0.4 and 3.4 ft back (the Su-27's numbers, new `Location::Separate` use for this aircraft); the outer pair leaves first | 4, class 80 | `AT12.JT` x 4 |
+| 8 | wingtip rails, flags `0x85` | the tip's edge, as the record and the shared wingtip rule have them; unchanged | 2, class 10 | `AA11.JT` x 2 |
+
+The wing table is the Su-27's, not the Su-35's: the Su-34's half span (25.9 ft) is the
+Su-27's (26.3 ft), not the Su-35's 24.3 ft, and the drawn leading edge is swept the same
+way. The intake and wing numbers are the Flankers' constants (`FLANKER_INTAKE`,
+`SU27_WING`) reached through two named Su-34 aliases (`SU34_INTAKE`, `SU34_WING`) so a
+future Su-34 source can move them without touching the Flankers. The Su-34's gun row 5 is
+not the Flankers' tunnel row (the Su-27's row 5), which the Su-34 record does not have.
+
+**The 12 real hardpoints and the unplaced two.** The real jet has 12 weapon stations (two
+wingtip, six underwing, two under the intake ducts, two in the tunnel). The record has
+10 stores on them: 2 tip, 4 wing, 4 fuselage. The four fuselage stores stand for the two
+intake pylons and the two tunnel stations (one record row cannot span two kinds of station,
+so they are drawn as the shared tandem pairs under the ducts). The two **unplaced real
+stations are the inner underwing pair (about 10 ft out)**, the same two the Su-27 and Su-35
+leave unplaced; the record has no row for them and nothing is drawn there. No per-station
+source for the Su-34 was found (SU34-0), so the table is the Flankers' (opinionated).
+
+**Designator bit.** Rows 6 and 7 lose `0x400` (BMB-C1/C2 decision, B7: never hang a
+sensor pod on a station the real aircraft does not have). The retail bit would have offered
+the Pave Spike on an intake pylon and a wing pylon. A consequence the decision did not
+state: `0x400` is also the bit that admits the multi-pod rocket stores, so **`B8.JT`,
+`B13.JT`, `LAU10.JT` and `LAU61.JT` leave both rows** (8 placements). The real Su-34 does carry
+rocket pods on its wing pylons (open for John below). The pod placement pin falls by two.
+
+**What the rows admit and refuse.** Every catalog store was loaded at its full count on each
+row and measured with the stores preview (`TORE_STORES_PREVIEW_CLEARANCE=1`): its worst point
+against the drawn airframe's underside (`clip`), the closest pair of stores and the gap to
+the gear-down plates. A store is refused when it enters the airframe by more than 0.75 ft
+(the Flanker stations the Su-34 reuses carry default clips up to 0.72 ft, and the AS-14 default
+here clips 0.57 ft), when two stores overlap, or when it comes within 1 ft of the gear
+(none did). The lists are in `aircraft_stations.rs` and enforced by `weapon_allowed`:
+
+| List | Row | Stores | Measured |
+| --- | ---: | ---: | --- |
+| `SU34_FUSELAGE_REFUSED` | 6 | 22: `AA6`, `AA9`, `AGM45`, `AGM84E`, `AGM88`, `AIM7`, `AIM7E`, `AM39`, `AS30`, `AT12`, `GBU10`, `GBU10A`, `GBU12`, `GBU16`, `GBU29`, `GBU29P`, `GBU30`, `MK84`, `PAVEWA3`, `PAVEWAY`, `PL10`, `PL7` | clips 0.81 to 3.69 ft (the PL10 pair overlaps by 0.07 ft) |
+| `SU34_WING_REFUSED` | 7 | 4: `GBU29`, `GBU29P`, `GBU30`, `PAVEWA3` | the front pair enters the wing by 1.10 ft and the stores on the two pylons overlap by 1.40 ft |
+| `SU34_TIP_REFUSED` | 8 | 4: `AGM65A`, `AGM65G`, `PL7`, `R550` | clips 0.83 to 1.09 ft on the tip's edge |
+
+Tanks (F150, F250, F350, F500) report a clip of 0.00 on both rows and stay. The wing row
+admits everything else, including the Mk 84, GBU-12 and GBU-16 (the GBU-10 class clips 0.12 ft
+and its pair gap is 0.21 ft). The Su-34 placements fall from 137 to 99 (rocket pods 8, refusals 30).
+
+**Default load.** Unchanged: 4 `AS14.JT`, 4 `AT12.JT`, 2 `AA11.JT` and the gun at 180. The
+loadout counts the same weight as before, so the start tank is unchanged.
+
+**Clearance of the default load (feet, stores preview).**
+
+| Row | Store | Clip into the airframe | Closest neighbour | Gear plate gap |
+| ---: | --- | ---: | ---: | ---: |
+| 6 | `KEDGE.SH` (AS-14) | 0.57 (fins into the belly under the rear pair's tail) | 1.44 | 2.23 (rear pair, left), 3.74 (front) |
+| 7 | `SWNGR.SH` (AT-12) | 0.00 | 1.44 | 4.72 |
+| 8 | `ARCHR.SH` (AA-11) | 0.59 (the same as the Su-27's tip) | 1.44 | 16.4 |
+
+**Gear down.** The Su-34's gear plates stand 26 units (8.67 ft) below the reference point
+(the mains 8.33 ft). The rear under-intake store's lowest point is 7.31 ft below the
+reference point: **1.36 ft above the ground contact line**, and the nearest of its points
+to a gear plate is 2.23 ft (to the left main, 2.56 ft to the right). The front pair hangs
+higher (5.35 ft above the ground). So the under-intake stores clear the gear. There is no
+centreline station: the record has no centreline row, so there is no centreline tandem to
+check (the tunnel pair is drawn under the ducts as above). Measured with the clearance
+report's new Su-34 gear arm (`tore-app` `stores_preview.rs`, the Tornado's gear check
+generalised to a face list), neutral pose (gear down).
+
+**Reading the preview.** The front AS-14 of each intake pair hangs about 4 ft higher than the
+rear one: the forebody underside rises toward the nose, and the pair's two pylons read the
+underside separately (the F-14 tunnel precedent). That is how the shared rule draws a
+fuselage pair; no extra mechanism was added.
+
+**AI release.** An AI bomb leaves the wing row from one of its two pylons through the shared
+release (`ai_wings::release`, a new test pins 14 or 18 ft out). The fuselage and tip rows
+use the same racks as the Su-27's. The slot scenarios fire all four stations (below).
+
+**Pins** (`ordnance_audit.rs`, dated): weapon placements 5,357 from 5,395 (Su-34 137 to 99),
+designator pod placements 80 from 82; aircraft 54, tank placements 257, recovered stations 23
+and Cheat-only 278 unchanged. At integration the coordinator recomputes (B4).
+
+**Open for John.**
+
+1. The designator bit decision also removes the rocket pods (B-8, B-13, LAU-10, LAU-61) from
+   both rows. The real Su-34 carries rocket pods on its wing pylons. The fix, if wanted, is
+   a guarded `extra_weapon` for those four stores on rows 6 and 7 (the F-117's Paveway II
+   precedent), with the audit's expected count following it.
+2. The row 6 refusal list is long (22) because the shape's intake underside is low and
+   curved. The laser bombs (GBU-10, 12, 16) and the Mk 84 and AS-30 are on it though the real
+   jet carries heavy bombs. A different threshold (0.9 ft keeps the GBU-12 and GBU-16) is a
+   one-line change.
+3. The AS-14 default clips the belly by 0.57 ft (fin tips), inside the Flankers' accepted
+   band (0.54 to 0.72).
+4. The four fuselage stores stand for four real stations (two intake, two tunnel). A tunnel
+   row of their own would need a new record row.
+
+## Su-34 ordnance, sensors, HUD and cockpit (SU34-6/7, 2026-11-16)
+
+Implementation mode, agent-authored (SU34-6 and SU34-7, run together), applying the coordinator's
+first-pass decisions for the Su-34 (`BOMBERS-DECISIONS-C.md`, "Su-34" items 5 and 7 and "Su-34
+stations (SU34-5)") for John to review. Earlier sections stay as written. **Retail evidence:**
+`SU34.PT`, `SU33CC.HUD`, `~SU33H.PIC` and `SU34.SH` read from the install by the new tests
+`crates/tore-import/tests/su34_cockpit.rs` and `hud_aperture::the_su34_draws_the_su33_art_glass_measured_on_the_imported_picture`.
+
+### Rocket pods restored on the wing row (SU34-6)
+
+SU34-5 cleared the designator bit `0x400` on rows 6 and 7 (B7: no pod body on a station the real
+aircraft lacks). That bit is also the one the loader needs for any store with more than one body
+(`pod_count > 1`), so B-8, B-13, LAU-10 and LAU-61 left both rows. The real Su-34 carries rocket pods
+on its wing pylons, so the coordinator decided to restore them with a guarded extra weapon, the
+F-117's Paveway II precedent:
+
+| Item | Value |
+| --- | --- |
+| Guard | `aircraft_stations::extra_weapon(Su34, _, SU34_WING, name)` for the four names in `SU34_EXTRA_PODS` |
+| Row | row 7 only (the wing row, 14 and 18 ft out). Row 6 (two tandem pairs under the intake ducts, standing for four real stations) stays without them |
+| Count | the row's own, 4 pods (no weight cap, as the F-117's bays); each `LAU61.JT` pod carries 19 rockets, 76 rounds for the row |
+| Clearance | measured in SU34-5's scan: all four clip 0.00 ft and clear the gear by 4.8 to 5.2 ft on row 7 |
+| Other rows and aircraft | unchanged (unit test `the_su34_wing_row_takes_the_four_rocket_pods_and_nothing_else_moves`) |
+
+The audit's expectation takes the row's own count for the Su-34 as it does for the F-117
+(`ordnance_audit.rs`). **Pins:** weapon placements **5,361 from 5,357** (Su-34 99 to 103, catalog 58
+normal of 83 Cheat; the four pods are exactly the four placements added); aircraft 54, tank
+placements 257, recovered stations 23, designator pod placements 80 and Cheat-only 278 unchanged
+(`--validate-ordnance`, log `.local/m3-aircraft/checks/SU34-6/validate-ordnance.txt`; before:
+`validate-before.txt`). At integration the coordinator recomputes (B4).
+
+**Default load.** Unchanged: gun 180, 4 `AS14.JT`, 4 `AT12.JT`, 2 `AA11.JT` (6,811 lb of stores
+at the start). No default row takes a pod.
+
+### Live fire, jettison, guided stores and release origin (SU34-6)
+
+| Check | Scenario | Result |
+| --- | --- | --- |
+| Every slot fires | `flight-livefire-su34-slot1` to `slot4` (gun 180, AS-14, AT-12, AA-11) | gun 80 shots, 51 hits, 1 kill in the 1,200 tick probe; one missile a trigger, the other stations untouched. The default load holds no multi-body pack, so no `SHOTS_PER_ROUND` entry is needed; a pod loaded by hand fires one rocket a press (below) |
+| Jettison | `flight-jettison-su34-slot2` to `slot4` | each row empties and the payload falls |
+| Guided stores | `a2g-laser-su34` (new) | the built-in laser (fixed `SU37L.SEE` row, no pod body) holds a tank; an AS-14 from row 6 released at 0.77 s guides to 9 ft and destroys it (0 of 200 left); an AT-12 from row 7 guides to 4 ft and hurts it (120 of 200 left, as the Su-25's and A-10's runs) |
+| Release origin, human | `a2g-release-origin-su34` (new) | AS-14s leave the front pair (4.50 ft out, 2.05 ft down, 8.90 ft forward) then the rear pair (6.03 ft down, 4.90 ft aft), left then right, on 2 inch rails; AT-12s leave the outer pylons (18 ft, 3.40 ft aft) then the middle (14 ft, 0.40 ft aft), 1.78 ft down on 1 ft pylons; AA-11s leave the tip rails (25.33 ft out, 0.33 ft down, 11.33 ft aft, no pylon); LAU-61 rockets leave the outer pylon, 2.02 ft down, left then right |
+| Release origin, AI | `ai-strike-su34-origin` (new) | an AI Su-34 with an AS-14 (station 1), an AT-12 and a LAU-61 (station 2): each first release leaves from exactly the human's cell (`ORIGIN` lines), the missiles guide on the AI's own laser spot (AS-14 kills; AT-12 within 150 ft), the pod's rocket lands, and it egresses. The AI is the shared strike driver; no AI code changed. |
+
+Jettisoning a pod leaves the same way as any row. Pods that fire are counted per rocket (76 rounds
+for four LAU-61 on the row): a station release of a pod is one rocket, so the run's `rounds-after`
+falls by one a press.
+
+### Countermeasures and jammer
+
+The record gives `SU27.ECM` (the Su-27's, byte-equal to `MIG31.ECM`): 60 chaff, 60 flares and the
+jammer, late-Cold-War generation. Nothing changes. New scenario `flight-countermeasures-su34`: five
+chaff and three flare releases leave the standard outlet (carried 55 and 57 of 60, five chaff
+cartridges in the air). Frame `countermeasures-chaff-flare` shows two flares and a chaff puff behind
+the tail in the back view, the weapons window reading `58 CHAFF` and `58 FLARE`. The real jet's own
+figures were not sought; the record's 60 are kept.
+
+### Sensors (SU34-7)
+
+Every row of the record against the real aircraft (coordinator decision: keep all five, draw no body,
+B7; the rows are fixed and sit at the origin, so no pod body can appear on any station):
+
+| Row | Record | Real Su-34 | Verdict |
+| --- | --- | --- | --- |
+| 1 | `VIS300.SEE` | the pilot's eyes | kept |
+| 2 | `SU27R.SEE` | a forward radar (the real set is a different, terrain-following one) | kept. The record is the Su-27's; its preset is **Advanced**, assigned already for the Su-27 and Su-35 (`Preset::for_record`, `docs/radar.md`), so the Su-34 flies with a radar and needs no new entry (test `the_su34_radar_and_jammer_rows_are_the_su27s_reviewed_records`). It is the air-to-air RWS/TWS set; no ground-mapping mode exists for a bomber (the B-2's note) |
+| 3 | `SU27I.SEE` (IRST) | no IRST is cited for the real Su-34 | kept as the record gives it (open for John) |
+| 4 | `SU27.ECM` | an electronic-warfare suite | kept (above) |
+| 5 | `SU37L.SEE` | a laser designator | kept; it is the built-in laser the guided runs above use |
+
+No pod body is drawn anywhere (frames `external` and `pods/`).
+
+### HUD and cockpit (SU34-7)
+
+- **Binding.** `su33cc.HUD` and the Su-33 family art `~SU33H.PIC`, stem `SU33`, instrument frame
+  `~SU33_P.PIC` (the record's, BMB-C1, spec-derived); the `AircraftId` arm in `hud_aperture.rs`
+  already existed. The Su-34 has no picture of its own (`~SU34*.PIC` absent) and the single-seat look
+  is accepted, as decided.
+- **Glass aperture, measured.** The shared trapezoid `(511,100) (770,100) (752,388) (528,388)` was
+  measured for the MiG-29 and is used by the Su-25 and MiG-23. On the imported 1280 x 490 art the
+  combiner frame closes one transparent region, 68,414 pixels (x 510 to 770, y 90 to 393); the
+  polygon covers **66,681 pixels, none opaque, 97.5 percent of the glass** (the rest is the chords
+  at the top corners and the console under y 388). Not failed closed: an unknown picture size
+  still fails closed. Fitted (agent decision 2026-11-16).
+- **Pilot eye.** The shared seat (7 ft up, 10 ft ahead) sat 8.7 ft behind the drawn canopy.
+  Measured on `SU34.SH` at 1/3 ft a unit: the canopy's crown on the centre line is 17 units (5.7
+  ft) up at y 43 (14.3 ft ahead), its glass falls to 15 units at the windscreen apex (y 58, 19.3 ft
+  ahead) and on to the nose cone (11 units at y 67, 6 at y 77); the spine behind the crown is 15
+  units at y 24 and 13 at y 16. The new entry in `mirrors::eye_offset` is **7 ft up, 17 ft ahead**:
+  the canopy's middle (y 51), 1.3 ft over the crown (the F-117's margin), the same height as before.
+  The retail test pins that no skin point within 12 units of the centre line reaches the eye's 21
+  units, and that the eye lies between the crown and the apex. Only the Back view and the replay's
+  Back, cockpit and HUD cameras take it; the mirror rear feed stays on the shared seat. The
+  record's `viewOffset` (2, 20, 80) is read by no host code. Fitted (agent decision 2026-11-16).
+  Frame `cockpit-view-back-f2`: the view clears the canopy and spine and looks down to both fins
+  and the stinger.
+- **Instruments.** The Su-33 family window frame draws under the bezel (frames `cockpit-front-view`,
+  `instrument-page-1`). The weapons window reads `180 GSH-301`, `4 AS-14`, `4 AT-12`, `2 AA-11`,
+  `60 CHAFF` and `60 FLARE`.
+- **RCS page.** Page 0 reads `SIG 144` (frame `rcs-page-closed`); there is no bay, so no open-bay
+  reading.
+- **Rear view.** The F2 view is the fitted eye above (frame `cockpit-view-back-f2`). There is no
+  rear-view HUD, so no rear cue (the B-52's finding). The cockpit art's mirrors keep the shared
+  rear feed.
+- **List screen.** There is no `ICO2SU34.PIC` and nothing reads an `ICO2*.PIC`: the Quick Mission
+  aircraft list shows the Su-34 as a name only, like every aircraft (frame `menu-aircraft`), so no
+  fallback to the Su-27's icon is needed or coded. The Load Ordnance page names the sensor line
+  `Built-in laser designator: no pod needed for laser ordnance.` (frame `menu-ordnance`).
+
+### Checks
+
+Through `light3.sh`, profile `profile-su34` refreshed first. `cargo fmt --all -- --check` clean;
+`cargo clippy --workspace --all-targets --locked -- -D warnings` clean; `cargo test --locked
+--workspace --no-fail-fast` 7,874 passed, 0 failed, 108 ignored (7,861 after SU34-5); `--validate-ordnance`
+passed (54 / 23 / **5,361** / 257 / 80 pods / 278 Cheat-only); `--aircraft su34 --headless-flight
+600` 0 non-finite, 0 overspeed, no loss. Logs and frames: `.local/m3-aircraft/checks/SU34-6/`,
+`.local/m3-aircraft/frames/SU34-6/` (local only).
+
+### Open for John
+
+1. Rocket pods return on row 7 only. Row 6 stays without them; adding it is a one-line change.
+2. `SU27I.SEE` (an IRST) stays though none is cited for the real Su-34.
+3. The radar is the Su-27's air-to-air set; the real terrain-following ground-attack radar has no
+   mode here (no ground-mapping mode for a bomber).
+4. The eye is fitted (7 ft up, 17 ft ahead); the single-seat look means it sits where the drawn
+   canopy is, not at the real side-by-side cabin.
+5. Chaff and flares are the record's 60 each; the real jet's figures were not sought.
+
+## Su-34 flight review (SU34-8, 2026-11-16)
+
+Validation mode, slice SU34-8 (bomber batch C), Claude Sonnet (sonnet-high). The Su-34
+flies the hybrid adapter's `variety` configuration built from `SU34.PT` with BMB-C2's
+corrections (empty 49,604 lb, tank 26,676 lb, dry thrust 33,800 lbf, the 1 G fast edge at
+or above 36,000 ft trimmed to Mach 1.8 / 1,742 ft/s, 180 gun rounds). Kept as the record
+has them (coordinator first pass): afterburner 59,510 lbf, maximum takeoff 97,000 lb, G -4
+to +9, the 55,000 ft ceiling, the 741 kt sea-level edge. **No fit was made in this slice**:
+every difference found is either inside the published scatter, rests on a source too
+weak to fit to, or is the shared fighter law the Su-27 shows to the same degree. The
+slice's product is the measurement, the scenarios and the open list below. Raw probe
+output is local: `.local/m3-aircraft/checks/SU34-8/` (`before/`, `after/`, `run_perf.sh`,
+`run_probes.sh`, `ai/`). "Before" and "after" are the same code (nothing was changed in
+the model), so the two directories agree line for line.
+
+### Real figures and their sources
+
+Read 2026-11-16. Weights, thrust, ceiling, speed and range are the Wikipedia "Sukhoi
+Su-34" specification block (through a fetch tool that paraphrases) and the migflug.com
+"Su-34 Fullback" page, which says its figures are mostly the maker's and nominal. The
+engines are the Saturn AL-31FM1; the AL-31F's dry and afterburning fuel consumption is
+from Wikipedia "Saturn AL-31".
+
+| Figure | Real (source) |
+| --- | --- |
+| Empty / normal takeoff / maximum takeoff | 49,604 / 85,980 / 99,428 lb (Wikipedia, migflug); the record's 97,000 maximum is kept |
+| Internal fuel | 26,676 lb (12,100 kg) |
+| Thrust | 2 x 29,700 lbf with afterburner (AL-31FM1, 132 kN); dry 2 x 16,750 lbf (migflug, AL-31F; no dry figure is published for the FM1); thrust to weight 0.68 at normal takeoff weight |
+| Top speed | Mach 1.8 at altitude, 1,900 km/h (1,030 kt); 1,400 to 1,435 km/h (Mach 1.14 to 1.2, 756 to 775 kt) at sea level (migflug, Wikipedia); aerospaceweb gives the altitude speed and "sea level unknown" |
+| Service ceiling | 15,000 m (49,200 ft, migflug), 17,000 m (56,000 ft, Wikipedia and a second figure on migflug), 14,000 m (45,900 ft, aerospaceweb) |
+| Rate of climb | none published (migflug: the maker has published neither a climb rate nor a takeoff run); two databases quote 180 m/s and 13,800 m/min, with no source |
+| Takeoff and landing runs | takeoff 1,260 m (4,134 ft), landing 1,100 m (3,600 ft), weights and surface not stated (an armsnet and a globalmilitary spec sheet through a search summary); migflug: "roughly 2,000 m of runway for takeoff and landing roll at heavy weights" |
+| Takeoff, approach and landing speeds | not found in any source |
+| Range | 4,000 km typical (2,160 nmi, aerospaceweb), ferry 4,500 km (migflug; 7,000 km at aerospaceweb), combat radius about 1,100 km with a war load |
+| G limit | +9 quoted (Wikipedia, migflug); aerospaceweb +7; migflug says the practical limit at working weights is far lower |
+| Roll rate | none found |
+| AL-31F fuel consumption | 0.78 lb/lbf/h dry, 1.96 lb/lbf/h afterburning (Wikipedia, the AL-31F) |
+
+### What the model gives, and the Su-27 beside it
+
+All probes use `performance_probe` and `tore-app --headless-flight` on the corrected record,
+clean at the 76,280 lb full tank unless a row says otherwise ("default" is the Load Ordnance
+default of 6,811 lb of stores, 83,091 lb gross; "normal" is 85,980 lb). The Su-27 (56,000 lb
+clean at its 20,000 lb tank, 57,932 lb at its default load) is the same airframe family and
+the same drag law, run the same way.
+
+| Figure | Su-34 (before = after) | Su-27 (model) | Real Su-34 (source above) |
+| --- | --- | --- | --- |
+| Thrust to weight, afterburner, at 76,280 / 85,980 / 97,000 lb | 0.78 / 0.69 / 0.61 | 1.06 at 56,000 lb | 0.68 at normal takeoff weight |
+| Level top speed, afterburner, sea level | 657 kt (Mach 0.99); edge 741 kt (Mach 1.12) | 655 kt (Mach 0.99) | 756 to 775 kt (Mach 1.14 to 1.2) |
+| Level top speed, afterburner, 15,000 / 30,000 / 36,000 ft | 868 / 914 / 916 kt (Mach 1.39 / 1.55 / 1.60) | 848 / 1,159 / 1,296 kt (Mach 1.35 / 1.97 / 2.26) | Mach 1.8 at altitude (1,030 kt) |
+| Same at the default load, sea level and 36,000 ft | 640 kt, 892 kt (Mach 1.55) | n/a | n/a |
+| Level top speed, military power, sea level / 36,000 ft | 495 kt (Mach 0.75) / 690 kt (Mach 1.20) | 542 kt / 1,072 kt (Mach 1.87) | none (no dry figure published) |
+| Share of the edge reached in level flight at full afterburner | 0.887 at sea level, 15,000 ft and 36,000 ft (868 of about 978 kt at 15,000 ft) | 0.885 | not applicable (the real Mach 1.8 is the limit) |
+| Climb, 350 KEAS then Mach 0.8, full thrust, 76,280 lb: 5,000 / 10,000 / 20,000 / 36,000 / 45,000 ft | 28 / 45 / 75 / 124 / 155 s; highest 49,800 ft on that schedule | 23 / 37 / 60 / 95 / 115 s | none |
+| Climb rate, first 5,000 ft average, and the best band rate | about 10,700 ft/min, 19,900 ft/min at 30,000 ft | about 13,000, 28,300 | none (180 m/s is 35,400 ft/min, unsourced) |
+| Afterburner zoom ceiling on the fighter schedule | 64,600 ft (Mach 0.8 schedule, full tank), 63,500 ft at 57,604 lb | 70,100 ft | 49,200 to 56,000 ft |
+| Sustained turn, speed held, full tank: 300 / 400 / 500 kt at 1,000 ft | 4.07 G (14.6 deg/s) / 4.77 G (12.9) / 3.63 G (7.6) | 4.65 / 5.72 / 4.13 G | none |
+| Sustained turn, 15,000 ft, 350 / 450 / 550 kt | 4.07 / 4.12 / 3.63 G | 4.05 / 4.79 / 4.82 G | none |
+| Instantaneous pull at 400 / 500 kt, 1,000 ft (full tank) | 6.96 / 6.97 G | 7.81 / 7.83 G | +9 G listed, +7 in one source |
+| Limit G at 76,280 lb, 425 to 625 kt at 5,000 ft | 6.89 G (the +9 row divided by 1 + 0.3 x loading 0.675 = 1.31) | not run (its instantaneous pull is 7.8 G) | +9 listed |
+| Roll rate, full stick | 225 deg/s (the Su-27's block) | 225 | none found |
+| Speed brake, extra deceleration at 378 / 530 / 681 kt at 1,000 ft | 0.32 / 0.50 / 0.64 G | 0.30 / 0.46 / 0.58 G | none |
+| Fuel flows, military / afterburner (record, whole lb/s) | 5 / 30 lb/s: 0.53 / 1.82 lb/lbf/h at the corrected thrust | 5 / 30: 0.44 / 1.82 | 0.78 / 1.96 (AL-31F) |
+| Tank at military / afterburner | 88.9 min / 14.8 min | 66.7 / 11.1 min | none |
+| Cruise Mach 0.8 at 36,000 ft (470 kt), throttle trimmed: burn, range from 26,676 lb | 2.33 lb/s (throttle 0.45), 1,498 nm | 0.97 lb/s, 2,695 nm | 2,160 nmi typical, 2,430 nmi ferry (about 600 nmi radius with a war load) |
+| Takeoff, default load, 83,091 lb, 12,000 ft runway (GRE 1): rotation, liftoff, run | 112.6 kt, 121.5 kt, 913 ft (985 ft on UKR 1) | 120.7 kt, 128.1 kt, 703 ft at 57,932 lb | run 1,260 m (4,134 ft), weight not stated; Su-27 about 650 m |
+| Takeoff, clean 76,280 / 66,415 lb (16,000 lb fuel) | 114.5 kt after 735 ft / 110.6 kt after 647 ft | n/a | n/a |
+| Takeoff, heavier weight: 96,415 lb (the full 40,000 lb of fuel proxy for the 97,000 lb maximum) | 135.8 kt after 1,357 ft | n/a | 1,260 m at an unstated weight |
+| Takeoff, `--retail-stall-speeds`, default load | 95.9 kt after 551 ft (stall scale 1.0) | n/a | n/a |
+| Approach (scripted, 1.3 x flapped stall), 83,091 lb / 66,415 lb / 58,415 lb / 96,415 lb | 134.6 / 125.6 / 118.5 / 145.0 kt; touchdown 127.7 / 119.3 / 112.0 / 137.4 kt | 142.2 kt, touchdown 135.4 kt at 57,932 lb | none |
+| Landing rollout from touchdown (brakes), same four weights | 1,617 / 1,432 / 1,281 / 1,849 ft | 1,750 ft | landing run 1,100 m (3,600 ft), weight unstated |
+| Approach, the battery's 65 percent fuel (17,339 lb) | 126.8 kt, touchdown 125.7 kt, rollout 1,573 ft (UKR 1, 5,532 ft) | n/a | n/a |
+
+Weights for the takeoff rows: `--flight-fuel 40000` sets the internal fuel (it is not clamped
+to the 26,676 lb tank), which is the way the ground start reaches a weight near the 97,000
+lb maximum without a Load Ordnance load that heavy; the printed `loadout:` line still
+shows the default 83,091 lb. All the air maneuvers (`level`, `climb`, `roll`, `pull`, `loop`, `stall`, `stall-recover`,
+`spin-recover`, `sprint`, `dive`, `overspeed`, `rudder`, `gcurve`) and the ground ones
+(`takeoff`, `land`, `land-hard`, `nosewheel`) ran with 0 non-finite samples, no crash, and
+the `overspeed` run ending in the overspeed loss by design.
+
+### Why nothing was fitted
+
+1. **Top speed (10 to 17 percent under).** The model reaches Mach 1.60 at 36,000 ft and
+   Mach 0.99 at sea level against Mach 1.8 and Mach 1.14 to 1.2. The cause is shared:
+   at full afterburner every fighter in the family levels off at 0.885 to 0.887 of its 1 G
+   top-speed edge, because the clean drag is the full thrust at the edge and the loading
+   and G terms add to it (the Su-27 shows the same 0.885, 655 kt at sea level and Mach 2.26
+   at 36,000 ft against a published 2.35). The Mach 1.8 trim set the *edge* at the real
+   Mach, so the level speed sits 11 percent below it where the Su-27's edge (Mach 2.55)
+   sits 8 percent above the real Mach 2.35 and its level speed 4 percent below. The F-15E
+   (8 percent under) and the Gripen (11 percent under at sea level) were left alone in
+   B5-4 as a fleet drag-law decision, and John's one trim was the F-5E's. The decision
+   record binds this slice to the edge trim, so a changed edge (or a per-aircraft
+   `level_speed_fraction`, which would put level flight exactly on the edge and into the
+   overspeed shake) was **not made**; it is the first open question below.
+2. **Takeoff and landing runs (4.5 and 2.2 times short).** The model takes off in 913 ft
+   and rolls 1,617 ft after touchdown against a published 4,134 ft and 3,600 ft. The
+   Su-27 is short the same way (703 ft against about 2,130 ft). The cause is the shared
+   takeoff and landing model (no flap, gear or induced drag, no thrust lost with speed,
+   18 ft/s squared of brakes): a physical estimate for 0.72 thrust to weight and a 205 ft/s
+   liftoff is 910 ft, which the probe reproduces. The B-52's fit (B52-8: rolling
+   deceleration 4.8, brakes 2.6) rested on a pilot's figure for a known weight; the Su-34
+   figures have unstated weights and come from spec-sheet summaries, so they were not
+   fitted. The runs end well inside every field the scenarios use.
+3. **Ceiling (55,000 ft in the record, 49,200 to 56,000 published, zoom 64,600).** Inside
+   the scatter of the published ceiling, and the coordinator kept the record's 55,000 ft.
+   The zoom above the record's polygon (a shared feature of every aircraft, the Su-27
+   reaches 70,100 ft) is not a service ceiling.
+4. **Range (1,498 nm against 2,160 nmi).** The cruise burn is right and the published
+   range is the optimistic one. At Mach 0.8 and 36,000 ft the model needs a throttle of
+   0.45 (9,100 lbf of the lapsed dry thrust against 76,280 lb, a lift to drag of 8.4) and
+   burns 2.33 lb/s, which is a specific fuel consumption of 0.92 lb/lbf/h against the lapsed
+   thrust, a normal cruise figure for the AL-31F. A range of 2,160 nmi from 26,676 lb needs
+   1.6 lb/s at the same speed. A drag shape (the B-52's and B-1B's hook) would have to
+   cut the clean drag by a third, which is not clearly supported by any figure, so none
+   was made. The record's dry flow of 5 lb/s is 31 percent under the AL-31F's sea-level
+   static figure (0.78 lb/lbf/h x 33,800 lbf = 7.3 lb/s); raising it would cut the range to
+   about 1,070 nm, so it was left (the flow is proportional to the throttle at every
+   altitude while the thrust lapses, which already flatters the altitude cruise).
+5. **Climb.** No published rate exists; the model's 0.69 thrust to weight at the normal
+   weight equals the published 0.68, and the first 5,000 ft in 28 s is a plausible figure
+   for that ratio.
+6. **G and roll.** The +9 row stays the record's (the loaded-elevator rule divides it to
+   6.9 G at the full tank); no roll figure exists.
+7. **Brake.** The Su-27's `airBrakesDrag` gives a weight-proportional drag, so the heavier
+   Su-34 slows by the same 0.3 to 0.6 G the Su-27 does; no real figure was found.
+
+### AI heavy-class laws
+
+The BMB-AI laws (flaps down below `max(200 kt, 1.05 x the clean minimum)`, the climb-out
+wait, the taxi throttle) engage only for an aircraft whose flaps-up minimum is above
+190.5 kt. The Su-34's flaps-up minimum level speed at sea level is 119.8 kt at the default
+load (the ground-start probe's `min_level_flaps_kt`; about 129 kt at 96,415 lb by the
+square-root weight scaling), so **none of them applies**: the aircraft flies the ordinary
+fighter laws. Two scenarios were added anyway because they
+pass cleanly and record that fact (`tools/battery_scenarios/ai.py`):
+
+- `ai-heavy-takeoff-su34-gre-a1`: a two-ship takes off from Athens (12,000 ft) at the
+  default load, taxi 18 s, line up, roll at 26.6 s, airborne through the climb-out at
+  73.4 s (205 kt), then flies on; 0 anomalies, 0 ground hazards.
+- `ai-heavy-land-su34-ukr-a2`: an airborne Su-34 with 26,000 lb of fuel sent home lands at
+  Simferopol (5,532 ft), touches down at 125 kt (bound 135 kt), clears the runway and
+  parks at 493 s with 0 off-pavement samples (10,000 lb of fuel: 103 kt).
+
+### Battery windows
+
+`su34` joins `flight-variety`, `flight-liftoff`, `flight-liftoff-retail` and
+`flight-approach` (`tools/battery_scenarios/flight.py`): liftoff 110 to 140 kt (measured
+121.5 kt after 985 ft on UKR 1), approach 115 to 145 kt (measured 126.8 kt at 17,339 lb of
+fuel), the ordinary takeoff tick allowance (1,818 ticks to 100 ft against 4,500) and
+Simferopol, whose 5,532 ft holds the run and the 1,573 ft rollout with 2,322 ft to spare.
+The windows are fitted agent decisions on no published speed (the Su-27's windows, 120 to
+135 kt and measured 128.1 and 142.2 kt, widened for the heavier jet); they pin
+regressions, not the real aircraft. New unit test
+`the_su34_flies_the_shared_fighter_law_at_its_published_thrust_to_weight` (`models/variety.rs`)
+pins the corrected record (weights, thrusts, the absence of any per-aircraft hook) and the
+0.68 thrust to weight.
+
+### Checks
+
+`cargo fmt --all -- --check` and `cargo clippy --workspace --all-targets --locked -- -D warnings`
+clean; `cargo test --locked --workspace --no-fail-fast` 7,875 passed, 0 failed, 108 ignored;
+`--headless-flight 1200 --aircraft su34` 515.9 kt level at 5,009 ft, 0 non-finite; the ground-start
+takeoff (121.5 kt after 985 ft on UKR 1); battery `--jobs 2 --windows 1` 105 of 105 (every `*su34*`
+scenario, every `flight-approach-*` and `flight-liftoff-*`); the tools unittests; `tools/check_docs.py`.
+Logs are in `.local/m3-aircraft/checks/SU34-8/`.
+
+Provenance: weights, thrust, fuel, ceiling edge and trim are BMB-C2's (coordinator first pass); the
+battery windows are fitted agent decisions; every real figure is a public page for comparison
+only; no model term changed. No retail bytes committed.
+
+### Open for John
+
+1. **Top speed.** Keep Mach 1.60 at 36,000 ft and Mach 0.99 at sea level (the Su-27 shows the
+   same 0.885 level fraction), or trim the Su-34's edge so level flight lands on the real
+   figure: at the measured 0.887 level fraction the 1 G fast edge would be Mach 2.03
+   (1,963 ft/s) at 36,000 ft for Mach 1.8, and 835 kt at sea level (a 1,410 ft/s edge,
+   Mach 1.26) for 741 kt (Mach 1.12; computed from the measured ratio, not probed). The
+   edge is also the overspeed limit, so the aircraft could then dive to Mach 2.0, above the
+   real limit. A fleet answer (the F-15E, Gripen and F-5E have the same shortfall) is the
+   alternative.
+2. **Takeoff and landing runs.** 913 ft and 1,617 ft against the published 4,134 ft and
+   3,600 ft (weights unstated), the same as the Su-27's shortfall. A per-aircraft fit with the
+   B-52's rolling and brake terms would need about 18 ft/s squared of added rolling
+   deceleration at the default load (the model's mean acceleration is 23 ft/s squared and the
+   4,134 ft run needs a mean of 5; arithmetic, not probed), against the B-52's 4.8, so the
+   published run is probably a derated or much heavier takeoff and a fit would not be
+   defensible. Leave the shared model alone, or give a firm weight and surface.
+3. **Ceiling.** 55,000 ft (record) between 49,200 and 56,000 ft (published); the zoom reaches
+   64,600 ft.
+4. **Range and fuel flow.** 1,498 nm against 2,160 nmi published; dry flow 5 lb/s against
+   7.3 lb/s from the AL-31F's consumption. The two trade against each other; see item 4
+   above. A drag shape could close the range if a firm figure appears.
+5. **Dry thrust and military top speed.** Mach 1.20 at 36,000 ft and 495 kt at sea level on
+   the corrected 33,800 lbf; no real dry figure was found to check.
+6. **Roll rate and the +9 G row.** The Su-27's 225 deg/s and a +9 row that the loaded-elevator
+   rule divides to 6.9 G at the full tank; no real figure, and one source says +7.
+7. **Windows.** The liftoff and approach windows rest on no published speed.
+
+## Su-34 AI, missions, multiplayer and replay (SU34-9, 2026-11-16)
+
+Implementation and verification mode. The AI work was asked for by John through the bomber program
+(AGENTS.md: no AI work unless John asks). **No game code changed in `tore-sim` or `tore-world`:** the
+Su-34 flies the shared AI under the ordinary laws, and every scenario below passed on the first run.
+The one Rust change is a Quick Mission unit test. The base is `m3-su34` merged with `m3-aircraft`
+1699a86f (B52-9's heavy final lookahead and taxi coast, the battery's RAM profile copies).
+
+### What the Su-34 is to the AI
+
+| Fact | Value | Source |
+| --- | --- | --- |
+| Strike class | Fighter by the rule (maximum takeoff 97,000 lb is under the Heavy weight, +9 G over the Heavy G limit, 1,465 kt over the Attack top speed) | accepted, BOMBERS-DECISIONS-C |
+| Bomber class word | `0x4000` (the catalog row), so a friendly wing 2 or 3 takes the Strike role when a ground target is set | retail rule, [AI strike](../spec/ai-strike.md) |
+| Passes and release | The four fighter passes plus the level run, **one weapon a pass** (an AI Su-34 on four Mk 82 drops one and leaves) | shared Fighter behaviour |
+| Stations the AI strikes from | Row 6 (station 1, four under the intake ducts: AS-14, Mk 82), row 7 (station 2, four on the wing pylons: AT-12, Mk 82, LAU-61 pods, AGM-84E, AM-39), row 8 (station 3, the tip rails: AA-11 only) | SU34-5, SU34-6 |
+| Bay | none, so no door ever moves and no `BAY` line is printed | SU34-5 |
+| Air-to-air | the GSh-301 (180 rounds) and two AA-11 on the tips; the AS-14 and AT-12 are "not air to air" on the probe's list | SU34-6 |
+| Airfield laws | none engage: the flaps-up minimum is 119.8 kt against the heavy class's 190.5 kt, and `taxi_throttle_floor` is 0 | SU34-8 |
+
+### Strike (`ai-strike-su34-*`, flight lane)
+
+All on the Ukraine column or factory at the driver's defaults (skill Average, 450 kt, 5,000 ft, level pass).
+
+| Scenario | What the AI does | Numbers |
+| --- | --- | --- |
+| `ai-strike-su34-origin` (SU34-6, kept) | AS-14, AT-12 and a LAU-61 pod | each leaves the cell a human's first press leaves from |
+| `ai-strike-su34-bombs` | one Mk 82 from row 6, one from row 7 | released at 16 s, 5,004 ft, 402 kt, 12,440 ft out; origin (-4.50, -3.46, 6.15) from row 6 and (-18.00, -1.78, -3.40) from row 7, the same as `--attack release` by hand; landed 420 ft and 248 ft from the tank (the skill-1 limit is 814 ft); egress at 40 s; no bay door moved |
+| `ai-strike-su34-default` | picks its own store from the default load (`--choose-store`) | selects a laser store, releases an AS-14 at once on its own spot (`guided=Guiding`, spot owner 0), lands it 0.5 ft from the tank and destroys it at 19.6 s, egress at 42 s |
+| `ai-strike-su34-quick-wing` | a Quick Mission with the factory as the ground target (`--quick-wing`) | `ROLE strike` from the bomber class word, an AS-14 from station 1 at 3,340 ft on its own spot, 49.7 ft from the aim, destroys another object near the factory (`target=no`), egress at 73 s |
+| `ai-strike-su34-antiship` | two AGM-84E on the outer wing pylons, 15 nm from the Ukraine surface fleet | both leave at 0.017 s (one a wing, (-18.00, -1.89, -3.40) and (18.00, -1.89, -3.40)), both hit the Krivak 166 ft from the aim at 30.05 s and it is destroyed |
+
+The harness limit: `--a2g-run --pilot ai` with neither `--load` nor `--station` stops ("the aircraft has no
+air-to-ground station"): the driver's own search finds no station on the Su-34's default load. `--station 1`
+names the default AS-14 row, and the scenarios that say "default load" name it that way.
+
+### Airfield (`ai-merged-airfield-su34-wing2`, AI lane)
+
+`ai-heavy-takeoff-su34-gre-a1` and `ai-heavy-land-su34-ukr-a2` were SU34-8's. SU34-9 adds the full cycle at
+Southampton (FRA 14, 12,000 ft) at the default load, 83,091 lb: it taxis out, lines up and takes off at 26.7 s,
+is airborne in the climb-out at 73.7 s, holds at the marshal, lands on the order at 132 kt (the check bound is
+140 kt), clears the runway at 353.7 s and parks at 812.4 s. **All of 114,254 ground samples are on the pavement**
+(0 off), 0 anomalies. No airfield code was touched, so the BMB-AI baseline comparison (ai-takeoff, ground, theater,
+records-land, merged-airfield, ils-terrain, taxi, lost-lead) has nothing to prove for this slice: the binary is the
+merge's, and the scenarios of the other aircraft run in the final battery below. Gated laws (B52-9's final lookahead
+and taxi coast) read `taxi_throttle_floor > 0`, which is 0 for the Su-34.
+
+### Air-to-air (`ai-su34-*`, AI lane)
+
+- `ai-su34-quick-mission-2v2`: every wing the Su-34 (the player's too), 2 v 2 with the fight script. The probe's
+  usual checks hold (0 anomalies), 182 shots, an AA-11 left a tip rail (an enemy Su-34 ended on `AA-11 x0`), and no
+  actor holds more than the default load's four AS-14 or four AT-12 (`su34_air_fight_problems`).
+- `ai-su34-vs-su27-2v2`: two Su-34s against two Su-27s; the probe's usual checks hold whoever wins.
+
+### Quick Mission
+
+`the_su34_is_a_quick_mission_player_and_a_wing_choice` (`quick_mission.rs`): the Su-34 is in the player's list by
+`SU34.PT`, named "Su-34 Platypus", is an AI choice in all four wing fields, a draft carries it as the player and in
+every wing and never as the Su-27 or the Su-35, and it is not in the stealth night rule. The strike case is
+`ai-strike-su34-quick-wing` above.
+
+### Multiplayer (`net-a2g-stores-su34`, net lane)
+
+The `net-a2g-stores` drive with both players in Su-34s and `tore-bot --a2g bomb --load MK82.JT`: the watching
+client draws the bomber's stores, sees the bomber's Mk 82 and the AI MiG-29s' stores empty as they release (a Stores
+event of 16 bytes at most, 20 told), and its `bay doors` line is empty, **no door open on any aircraft**
+(`no_doors=True`). A Su-34 has no bay, so the scenario reads the absence of doors where the B-2 and F-117 ones read
+their presence. The gun's rounds on a watching client are not covered (`tore-bot` has no gun role).
+
+### Replay
+
+- `replay-rec-su34-2v2`: a Su-34 2 v 2 recorded three times: `--verify-render` passes (2,401 ticks, none missing or
+  differing), two recordings agree, the checkpoint code 55 round-trips.
+- `replay-a2g-su34-ripple`: four Mk 82 from the wing row's pylons, 0.5 s apart (the outer pair, left then right,
+  then the middle pair at 14 ft), recorded and replayed tick for tick with `--verify-render` (3,388 ticks, none
+  missing or differing), read back as four releases and outcomes, and the recorded bay device never leaves 0.
+
+### Findings
+
+1. **No code change was needed.** A fighter-bomber needs no heavy law: the cycle, the strike and the missions all
+   pass under the shared ones. The Quick Mission default hands the Su-34 a Strike role through its record's
+   class word (a fighter by `StrikeClass`, a bomber by `0x4000`), as retail does the Su-24 and the A-4E.
+2. **Fighter class drops one weapon a pass.** Four Mk 82 on a row leave one a pass, not a stick; the heavy stick is
+   for the Heavy class only. A Su-34 sent at a column with four AS-14 uses one and goes home. Whether a
+   fighter-bomber should salvo is John's call.
+3. **Anti-ship after the shot.** The run is stopped at 40 s because the lone driver-flown wing stays "In formation"
+   after the release (the PHASE lines show Exit and TurnBack for four ticks, then nothing), flies on at 450 kt into
+   the fleet's other ships, goes "Defending" at 27 s and is shot down at 51.8 s, 54,000 ft from the kill. The
+   B-52's run does the same (BMB-AI notes it as the B-52's post-kill loss). It looks like a driver artefact (no
+   lead to follow, no route to leave on) rather than a mission AI fault; an AI Quick Mission wing would be on a
+   route. Not traced further.
+4. **Harpoon and Exocet on a Su-34.** AGM-84E and AM-39 are on the Su-34's row 7 through the shared weapon
+   tables (the record's AS-14 bit admits them), not through anything specific to the Su-34. The real aircraft's
+   anti-ship stores are the Kh-35 family, absent from the retail data, so the scenario stands for "the aircraft
+   carries anti-ship stores in this game". The default load carries none.
+
+### Not run
+
+The AI lane's other 800 or so scenarios beyond the `ai-heavy-*`, `ai-merged-airfield-*` and `ai-strike-*`
+selected; `--smoke-test`; `check_assets`; a Quick Mission flown to the end (landing and parking after the strike);
+a gun round over the wire; a windowed run.
+
+### Open for John
+
+1. **Fighter-bomber salvo.** Fighter class drops one store a pass. If a Su-34 should ripple its Mk 82, that is a
+   strike class decision (an Attack or a new class), not a Su-34 change.
+2. **The anti-ship scenario stops at 40 s** for the reason in finding 3.
+3. **A full Quick Mission cycle** (strike, return, land, park) for the Su-34 has not been flown to the end.
+
+Provenance: scenarios, checks and the unit test are fitted agent decisions (2026-11-16); the Mk 82 and Harpoon cells
+are the human's first-press cells from SU34-5 and SU34-6. No retail bytes committed.

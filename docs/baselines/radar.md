@@ -425,3 +425,12 @@ there is no ground-mapping mode, as for the B-52 and the B-2. A surface radar mi
 and three released leave 94 and 96 (`flight-countermeasures-tu26`). The RCS page reads `SIG 150` closed (the record's 100 plus the stores on
 the stations) and `SIG 225` with the bay open (the open-bay term of 1.5, which reaches only the RCS page). See [the Tu-26
 section](../formats/aircraft-variety.md#tu-26-backfire-c-ordnance-sensors-hud-and-cockpit-t26-67-2026-11-16).
+
+## Su-34 sensors: Su-27 radar, IRST, jammer and laser rows, 2026-11-16 (SU34-6, SU34-7)
+
+The Su-34 keeps the five sensor rows of its record, all fixed at the origin with no pod body:
+`SU27R.SEE` (Advanced, the Su-27's reviewed preset; the radar window runs the air-to-air RWS/TWS set),
+`SU27I.SEE` (the IRST), `SU27.ECM` (late-Cold-War jammer, 60 chaff, 60 flares) and `SU37L.SEE` (the
+built-in laser). The laser works from the fixed row (`a2g-laser-su34`: an AS-14 guides to 9 ft and
+destroys the tank, an AT-12 guides to 4 ft and hurts it). The RCS page reads `SIG 144`; there is no bay.
+See [the Su-34 section](../formats/aircraft-variety.md#su-34-ordnance-sensors-hud-and-cockpit-su34-67-2026-11-16).

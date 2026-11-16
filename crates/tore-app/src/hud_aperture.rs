@@ -91,7 +91,11 @@ pub fn mask(source: &Sprite, id: AircraftId) -> Vec<u8> {
         // The Su-34's su33cc.HUD is the Su-33 family's, the same module and the
         // same ~SU33H.PIC the MiG-29, Su-25 and MiG-23 fly, so it takes the
         // glass already measured for them (BMB-C1, 2026-11-15; coordinator
-        // first pass, Su-34 item 7). The pilot eye is SU34-7's.
+        // first pass, Su-34 item 7). Measured on the imported art in SU34-7
+        // (2026-11-16, the retail-reading test of the Su-34's glass in this
+        // file's tests): 66,681 pixels, no opaque pixel, 97.5 percent of the
+        // 68,414 pixel transparent region the combiner frame closes. The
+        // pilot eye is `mirrors::eye_offset`'s.
         AircraftId::Mig29 | AircraftId::Su25 | AircraftId::Mig23 | AircraftId::Su34 => (
             (1280, 490),
             &[(511, 100), (770, 100), (752, 388), (528, 388)],
@@ -451,6 +455,10 @@ mod tests {
 
     /// Transparent pixels inside the F-5E polygon on the retail `~F29H.PIC`.
     const F5E_GLASS_PIXELS: usize = 58_556;
+    /// Pixels inside the Su-33 family polygon on the retail `~SU33H.PIC`, and
+    /// the transparent region the combiner frame closes there (SU34-7).
+    const SU33_GLASS_PIXELS: usize = 66_681;
+    const SU33_GLASS_REGION: usize = 68_414;
 
     fn transparent(width: usize, height: usize) -> Sprite {
         Sprite {
@@ -693,6 +701,95 @@ mod tests {
             }
         }
         assert_eq!(reached, covered, "the glass is one connected region");
+    }
+
+    /// SU34-7: the Su-34 flies the Su-33 family's `~SU33H.PIC` (its `su33cc.HUD`
+    /// names the stem `SU33`), so it draws the glass measured for the MiG-29,
+    /// Su-25 and MiG-23. Retail-reading (skips without an install): the
+    /// polygon never covers an opaque pixel and covers 97.5 percent of the
+    /// one closed transparent region the combiner frame bounds (x 510 to 770,
+    /// y 90 to 393; the rest is the polygon's chords at the corners and the
+    /// console under y 388), with its area pinned.
+    #[test]
+    fn the_su34_draws_the_su33_art_glass_measured_on_the_imported_picture() {
+        let source = transparent(1280, 490);
+        assert_eq!(
+            mask(&source, AircraftId::Su34),
+            mask(&source, AircraftId::Mig29)
+        );
+        let root = std::env::var_os("TORE_GAME_DIR").map_or_else(
+            || {
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../gameassets/fighters-anthology")
+            },
+            std::path::PathBuf::from,
+        );
+        let Ok(media) = tore_import::MediaSource::detect(&root) else {
+            eprintln!("skipped: no retail install at {}", root.display());
+            return;
+        };
+        let name = AircraftId::Su34.cockpit();
+        assert_eq!(name, "~SU33H.PIC");
+        let Some(library) = ["FA_1.LIB", "FA_2.LIB"]
+            .iter()
+            .filter_map(|lib| media.archive(lib).ok())
+            .find(|library| library.entries.contains_key(name))
+        else {
+            eprintln!("skipped: no retail {name}");
+            return;
+        };
+        let pic = tore_formats::Pic::parse(&library.read(name).unwrap()).unwrap();
+        assert_eq!((pic.width, pic.height), (1280, 490));
+        let source = Sprite {
+            width: pic.width,
+            height: pic.height,
+            rgba: pic.rgba(&[[0; 3]; 256]),
+            glyphs: vec![],
+        };
+        let (width, height) = (source.width, source.height);
+        let mask = mask(&source, AircraftId::Su34);
+        let covered = mask.iter().filter(|v| **v == 1).count();
+        assert_eq!(covered, SU33_GLASS_PIXELS, "glass area moved");
+        for (at, covered_pixel) in mask.iter().enumerate() {
+            if *covered_pixel == 1 {
+                assert_eq!(source.rgba[at * 4 + 3], 0, "mask covers opaque art");
+            }
+        }
+        // Flood the transparent pixels from the glass centre: the combiner
+        // frame closes this region, so it is the whole glass.
+        let mut interior = vec![false; width * height];
+        let mut todo = vec![240 * width + 640];
+        let (mut left, mut right, mut top, mut bottom) = (width, 0, height, 0);
+        while let Some(at) = todo.pop() {
+            if interior[at] || source.rgba[at * 4 + 3] != 0 {
+                continue;
+            }
+            interior[at] = true;
+            let (x, y) = (at % width, at / width);
+            (left, right, top, bottom) = (left.min(x), right.max(x), top.min(y), bottom.max(y));
+            if x > 0 {
+                todo.push(at - 1);
+            }
+            if x + 1 < width {
+                todo.push(at + 1);
+            }
+            if at >= width {
+                todo.push(at - width);
+            }
+            if at + width < width * height {
+                todo.push(at + width);
+            }
+        }
+        let glass = interior.iter().filter(|v| **v).count();
+        assert_eq!(glass, SU33_GLASS_REGION, "the combiner frame moved");
+        assert_eq!((left, right, top, bottom), (510, 770, 90, 393));
+        let inside = (0..mask.len())
+            .filter(|&at| mask[at] == 1 && interior[at])
+            .count();
+        assert!(
+            inside * 1000 >= glass * 970,
+            "the polygon covers {inside} of the glass's {glass}"
+        );
     }
 
     /// MF1-7: the Mirage F1 flies the Rafale's `rafale.HUD` family, so its glass

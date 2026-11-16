@@ -334,6 +334,11 @@ TU26_STORES_MISSION = STORES_MISSION.replace("wing friendly 1 F16C.PT 2 average\
 # Mk 82 in the belly bay, and `--a2g bomb` takes it. The watching client must draw the bay stores and see a Mk 82
 # leave with the bay doors open.
 TU95_STORES_MISSION = STORES_MISSION.replace("wing friendly 1 F16C.PT 2 average\n", "wing friendly 1 TU95.PT 2 average\n")
+# SU34-9 (2026-11-16): the same mission with both players in Su-34s, a jet with no bay: its stores hang on the
+# fuselage and wing rows and the tip rails, so the watching client has no doors to see, only stores to draw and
+# see leave. `tore-bot --load MK82.JT` hangs the Mk 82 on the first station that takes it and `--a2g bomb` takes
+# the first bomb, so a Mk 82 must leave the bomber's pylon on the watcher's screen.
+SU34_STORES_MISSION = STORES_MISSION.replace("wing friendly 1 F16C.PT 2 average\n", "wing friendly 1 SU34.PT 2 average\n")
 # The strike handback with a B-2 (the F-117 has no radar to set up a pass with), airborne at 20,000 ft so the heavy needs no climb to its release floor: the human's pass is
 # continued by the AI, whose bay doors must open for the release and be seen to open from the other client.
 B2_STRIKE_MISSION = STRIKE_MISSION.replace(
@@ -410,10 +415,11 @@ def drive_strike_handback_b2(d: Drive) -> None:
 
 
 def drive_stores(d: Drive, mission: str = STORES_MISSION, load: str = "MK82.JT", doors: bool = False,
-                 bomb: str | None = None) -> None:
+                 bomb: str | None = None, no_doors: bool = False) -> None:
     """Another player's and an AI's stores empty on a client's screen as they release (protocol 27). With
     `doors` (a bay aircraft) the watching client also sees the bomber's bay doors open (BMB-AI). `bomb` is the
-    store the watcher must see leave when it is not the whole `load` (a comma list of stores)."""
+    store the watcher must see leave when it is not the whole `load` (a comma list of stores). `no_doors` (an
+    aircraft with no bay, SU34-9) has the watcher see no bay door open on any aircraft."""
     bomb = bomb or load
     port = d.port()
     server = start_server(d, port, mission, king="first-player", loadouts="any")
@@ -438,6 +444,10 @@ def drive_stores(d: Drive, mission: str = STORES_MISSION, load: str = "MK82.JT",
     if doors:
         for problem in doors_problems(watch.text(), "Watch", 0, "the Bomber"):
             d.problem(problem)
+    if no_doors:
+        opened = {k: v for k, v in last_doors(watch.text()).get("Watch", {}).items() if v > 0.05}
+        if opened:
+            d.problem(f"Watch saw bay doors open on a jet with no bay: {opened}")
     log_must(d, server_log(d), r"joined as Bomber", r"joined as Watch", forbid=r"protocol error|bad packets|\bfault\b")
 
 
@@ -490,6 +500,12 @@ def drive_stores_tu95(d: Drive) -> None:
     drive_stores(d, TU95_STORES_MISSION, "MK82.JT", doors=True)
 
 
+def drive_stores_su34(d: Drive) -> None:
+    """`net-a2g-stores` with both players in Su-34s (SU34-9): a Mk 82 leaves the bomber's pylon on the watcher's
+    screen, the AI's stores still empty, and no bay door is drawn open (the Su-34 has no bay)."""
+    drive_stores(d, SU34_STORES_MISSION, "MK82.JT", no_doors=True)
+
+
 def scenarios() -> list[Scenario]:
     return [
         Scenario(
@@ -529,6 +545,10 @@ def scenarios() -> list[Scenario]:
         ),
         Scenario(
             name="net-a2g-stores-tu95", lane="net", args=[], driver=drive_stores_tu95, uses=("server", "bot"),
+            timeout=420,
+        ),
+        Scenario(
+            name="net-a2g-stores-su34", lane="net", args=[], driver=drive_stores_su34, uses=("server", "bot"),
             timeout=420,
         ),
         Scenario(

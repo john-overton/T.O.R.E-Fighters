@@ -1369,6 +1369,14 @@ mod tests {
         );
         assert_ne!(bear, shared);
         assert_ne!(bear, deck);
+        // SU34-7: the Su-34's seat is the drawn canopy, 7 ft ahead of the shared one.
+        body.aircraft = Some(AircraftId::Su34);
+        let canopy = body_camera(body, 3).position;
+        assert_eq!(
+            canopy,
+            crate::mirrors::pilot_eye_of(Some(AircraftId::Su34), [0., 1000., 0.], level)
+        );
+        assert_ne!(canopy, shared);
     }
     #[test]
     fn back_from_another_aircraft_sits_at_its_pilot_eye_and_shows_it() {

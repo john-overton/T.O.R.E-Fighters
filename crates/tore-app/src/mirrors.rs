@@ -216,6 +216,21 @@ const DEFAULT_EYE: [f64; 2] = [7., 10.];
 /// the deck, 53 ft ahead, and 5 ft up: 1.7 ft over the roof (the B-52's
 /// margin), so the back view looks over the crown and down the length of the
 /// aircraft to the fin, past the four propeller discs.
+///
+/// Su-34 (SU34-7, 2026-11-16, fitted from the shape: `SU34.SH` at 1/3 ft a
+/// unit): the drawn canopy is the one hump of the Flanker nose. Its crown on
+/// the centre line is 5.7 ft up (17 units) at 14.3 ft ahead of the origin
+/// (y 43); its glass faces slope forward through 5.0 ft (15 units) at the
+/// windscreen apex, 19.3 ft ahead, to the nose cone (3.7 ft at 22.3 ft). Behind
+/// the crown the spine falls to 5.0 ft at 8 ft ahead and 4.3 ft at 5.3 ft
+/// ahead. The shared seat (10 ft ahead, 7 ft up) is 8.7 ft behind the canopy
+/// hump, 1.8 ft over the spine, so the back view started aft of the cockpit.
+/// The seat is the canopy's middle, 17 ft ahead (y 51: the crown at 14.3 ft and
+/// the apex at 19.3 ft), and 7 ft up, 1.3 ft over the crown (the F-117's
+/// margin), so the back view looks over the canopy and down the spine to the
+/// fins and the tail stinger, not out of the inside of the glass. The height is
+/// the shared seat's. The record's own `viewOffset` (2, 20, 80) is read by no
+/// host code.
 pub(crate) fn eye_offset(id: Option<AircraftId>) -> [f64; 2] {
     match id {
         Some(AircraftId::B2) => [10., 20.],
@@ -226,6 +241,7 @@ pub(crate) fn eye_offset(id: Option<AircraftId>) -> [f64; 2] {
         Some(AircraftId::F111) => [5., 25.],
         Some(AircraftId::Tu26) => [7., 56.],
         Some(AircraftId::Tu95) => [5., 53.],
+        Some(AircraftId::Su34) => [7., 17.],
         _ => DEFAULT_EYE,
     }
 }
@@ -552,12 +568,12 @@ mod tests {
         }
     }
 
-    /// B2-7, F117-7, B52-7, B1B-7, T160-7, F111-7, T26-7 and T95-7: only the B-2,
-    /// the F-117, the B-52, the B-1B, the Tu-160, the F-111F, the Tu-26 and the Tu-95
-    /// have a seat of their own; every other aircraft, and an unknown type, keeps
-    /// the shared one (7 ft up, 10 ft ahead).
+    /// B2-7, F117-7, B52-7, B1B-7, T160-7, F111-7, T26-7, T95-7 and SU34-7: only the
+    /// B-2, the F-117, the B-52, the B-1B, the Tu-160, the F-111F, the Tu-26, the Tu-95
+    /// and the Su-34 have a seat of their own; every other aircraft, and an unknown
+    /// type, keeps the shared one (7 ft up, 10 ft ahead).
     #[test]
-    fn only_the_bombers_with_a_drawn_flight_deck_have_their_own_pilot_eye() {
+    fn only_the_bombers_and_the_su34_with_a_drawn_seat_have_their_own_pilot_eye() {
         for id in AircraftId::ALL {
             let want = match id {
                 AircraftId::B2 => [10., 20.],
@@ -568,6 +584,7 @@ mod tests {
                 AircraftId::F111 => [5., 25.],
                 AircraftId::Tu26 => [7., 56.],
                 AircraftId::Tu95 => [5., 53.],
+                AircraftId::Su34 => [7., 17.],
                 _ => [7., 10.],
             };
             assert_eq!(eye_offset(Some(id)), want, "{id:?}");
@@ -632,6 +649,13 @@ mod tests {
         let tu95 = at(Some(AircraftId::Tu95));
         for i in 0..3 {
             let moved = (tu95[i] - shared[i]) - (-up[i] * 2. + forward[i] * 43.);
+            assert!(moved.abs() < 1e-9, "axis {i}");
+        }
+        // The Su-34: as high as the shared seat and 7 ft further forward (the
+        // drawn canopy's middle), 1.3 ft over the crown.
+        let su34 = at(Some(AircraftId::Su34));
+        for i in 0..3 {
+            let moved = (su34[i] - shared[i]) - forward[i] * 7.;
             assert!(moved.abs() < 1e-9, "axis {i}");
         }
     }

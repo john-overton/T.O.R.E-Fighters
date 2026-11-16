@@ -4275,3 +4275,45 @@ point at the drawn wing's underside, 1 ft pylon depth. Both AS-16 rows are Activ
 want the A-G page and a designated target (`a2g-sarh-as16-tu95`: both rows launch and kill the lead truck; the
 bay's leaves a second later, behind its doors). See the
 [aircraft variety section](../formats/aircraft-variety.md#tu-95-bear-h-ordnance-sensors-hud-and-cockpit-t95-67-2026-11-16).
+
+## The Su-34 stations (SU34-5, 2026-11-16)
+
+Opinionated and fitted (agent decisions applying the coordinator's first pass, for John to
+review). The Su-34 has no internal bay, so nothing opens. Its record rows 6 and 7 hang at the
+[Flankers' real stations](#the-su-27-and-su-35), reusing their constants, because no
+per-station source for the Su-34 was found; row 8 (wingtip rails) keeps the tip's edge.
+
+| Record (row) | Retail position, ft out / up / forward | T.O.R.E stations | How |
+| --- | --- | --- | --- |
+| 5, GSh-30-1 | 3.3 / 1.7 / 20 | unchanged (180 rounds, BMB-C2) | internal gun |
+| 6, fuselage (four AS-14) | 8.0 / -10.0 / -4.33 (raised to -6.0 by BMB-C2) | two tandem pairs under the intake ducts, 4.5 ft out, 2.0 ft forward | the shared fuselage-pair rule, 2 inch rails under the lowest part of the duct along the store (`Hang::Lowest { half: 6 }`); the four stores stand for the real two intake and two tunnel stations |
+| 7, wing (four AT-12) | 16.7 / -5.0 / -7.7 | the middle and outer underwing pylons, one store each: 14 and 18 ft out, 0.4 and 3.4 ft back | `Location::Separate`, the Su-27's pair (`SU27_WING`); the outer pair leaves first |
+| 8, wingtip (two AA-11) | 27.0 / -0.3 / -11.3 | the tip's edge | the shared wingtip rule, unchanged |
+
+The inner underwing pair (about 10 ft out) is the two real stations with no record row: it is
+not drawn. Rows 6 and 7 lose the designator bit `0x400` (B7), so no sensor pod loads there, and
+the rocket-pod stores (`B8`, `B13`, `LAU10`, `LAU61`, admitted by the same bit) leave with it.
+
+**Refusals** (`weapon_allowed`, the lists `SU34_FUSELAGE_REFUSED` 22, `SU34_WING_REFUSED` 4,
+`SU34_TIP_REFUSED` 4): a store whose full row enters the drawn airframe by more than 0.75 ft,
+overlaps its neighbour, or comes within 1 ft of the gear-down plates. Measured with
+`TORE_STORES_PREVIEW_CLEARANCE=1`, every catalog store at its full count, normal loading;
+Cheat loading ignores the lists.
+
+Default-load clearances (feet): row 6 AS-14 clips 0.57 (neighbour 1.44, gear 2.23); row 7
+AT-12 0.00 (1.44, 4.72); row 8 AA-11 0.59 (1.44, 16.4). The rear under-intake store's lowest
+point is 1.36 ft above the ground contact line with the gear down (the gear-down plates are
+at least 2.23 ft away). The `render-su34-clearance` scenarios pin these limits.
+See [the format notes](../formats/aircraft-variety.md#su-34-stations-bays-and-pylons-su34-5-2026-11-16).
+
+## The Su-34's rocket pods (SU34-6, 2026-11-16)
+
+Clearing the designator bit on the Su-34's fuselage and wing rows (SU34-5) also removed the four
+multi-rocket stores, because that bit is what admits a store with more than one body. The real jet
+carries rocket pods on its wing pylons, so the wing row (row 7, 14 and 18 ft out) takes `B8.JT`,
+`B13.JT`, `LAU10.JT` and `LAU61.JT` again through a guarded extra weapon (four pods, the row's own
+count; the fuselage row stays without them). They clip the airframe by 0.00 ft and clear the gear
+by about 5 ft (SU34-5's scan). A pod fires one rocket a press from the outer pylon pair (left then
+right, 2.02 ft down, 18 ft out, 3.40 ft aft); the human's and the AI's first release leave from the
+same cell (`a2g-release-origin-su34`, `ai-strike-su34-origin`). See
+[the format notes](../formats/aircraft-variety.md#su-34-ordnance-sensors-hud-and-cockpit-su34-67-2026-11-16).

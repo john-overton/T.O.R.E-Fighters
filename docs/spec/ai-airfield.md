@@ -609,3 +609,12 @@ other aircraft's law is as it was, bit for bit).
 
 Evidence and the baseline comparison are in the [aircraft variety](../formats/aircraft-variety.md#tu-95-bear-h-ai-missions-multiplayer-and-replay-t95-9-2026-11-16)
 T95-9 section.
+
+**Update (SU34-9, 2026-11-16): the Su-34 needs no airfield law.** **Fitted**, agent decision (no code changed).
+The Su-34's flaps-up minimum is 119.8 kt, far under the heavy class's 190.5 kt, and its wheels need no throttle
+to taxi (`Situation::taxi_throttle_floor` is 0), so none of the BMB-AI or B52-9 laws engage and its takeoff,
+approach and rollout are the ordinary ones. The full Southampton cycle at the default load (83,091 lb) runs from the
+taxi to the parking stand on the pavement (all 114,254 ground samples; takeoff roll at 27 s, airborne 74 s, touchdown
+132 kt, parked 812 s), `ai-merged-airfield-su34-wing2`; SU34-8's `ai-heavy-takeoff-su34-gre-a1` and
+`ai-heavy-land-su34-ukr-a2` are the Athens takeoff and the Simferopol landing
+([evidence](../formats/aircraft-variety.md#su-34-ai-missions-multiplayer-and-replay-su34-9-2026-11-16)).

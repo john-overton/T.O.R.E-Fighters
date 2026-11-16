@@ -1338,6 +1338,19 @@ pub fn station_move(id: AircraftId, hardpoint: usize) -> Option<StationMove> {
                 },
             )
         }
+        // The Su-34 (SU34-5, 2026-11-16): the Flankers' real-station table
+        // again, rows 6 to 8 (no per-station source was found, opinionated):
+        // the four fuselage stores two a side under the intake ducts, the wing
+        // row of four on the middle and outer underwing pylons, the wingtip
+        // rails unchanged. The two inner underwing pylons have no row and
+        // stay unplaced.
+        (AircraftId::Su34, 6) => at(
+            Location::Fuselage,
+            SU34_INTAKE[0],
+            SU34_INTAKE[1],
+            Hang::Lowest { half: 6. },
+        ),
+        (AircraftId::Su34, 7) => at(Location::Wing, SU34_WING[0], SU34_WING[1], Hang::Separate),
         (AircraftId::Su27, 7) => at(Location::Wing, SU27_WING[0], SU27_WING[1], Hang::Separate),
         (AircraftId::Su35, 7) => at(Location::Wing, SU35_WING[0], SU35_WING[1], Hang::Separate),
         _ => None,
@@ -1450,6 +1463,10 @@ const FLANKER_INTAKE: [f64; 2] = [4.5, 2.0];
 /// 1.5 ft, and an AA-11's nose further forward runs into it. The inner
 /// underwing pylon (about 10 ft out) has no retail row and is not drawn.
 const SU27_WING: [f64; 2] = [16.0, -1.9];
+/// The Su-34's intake pylons and wing row (SU34-5): the Flankers' own
+/// ([`FLANKER_INTAKE`], [`SU27_WING`]) until the stores preview says otherwise.
+const SU34_INTAKE: [f64; 2] = FLANKER_INTAKE;
+const SU34_WING: [f64; 2] = SU27_WING;
 /// The Su-35's (canard Su-27M) row: middle pylon 13 ft out, outer 17 ft
 /// out (its wing is shorter, 24.3 ft half span against 26.3).
 const SU35_WING: [f64; 2] = [15.0, -0.9];
@@ -4189,6 +4206,68 @@ mod tests {
                 pair.iter().all(|p| p[0] == 0.) && (pair[0][2] - pair[1][2]).abs() > aa11.length
             );
         }
+    }
+
+    /// SU34-5: the Su-34 reuses the Flankers' real-station table for its rows
+    /// 6 and 7 (intake pylons, middle and outer underwing pylons) and leaves
+    /// the wingtip rails and the gun to their records.
+    #[test]
+    fn the_su34_hangs_its_rows_at_the_flankers_real_stations() {
+        let flat = Shape {
+            lines: Vec::new(),
+            faces: vec![tore_formats::shape::Face {
+                positions: vec![
+                    [0., -90., -3.],
+                    [90., -90., -3.],
+                    [90., 90., -3.],
+                    [0., 90., -3.],
+                ],
+                colors: vec![1; 4],
+                fog: Default::default(),
+                uv: Vec::new(),
+                texture: String::new(),
+                subtype: 0x20,
+                normal: None,
+                address: 0,
+            }],
+            billboards: Vec::new(),
+            state_words: Default::default(),
+        };
+        let model = Underside::of(&flat, 1. / 3.);
+        let row = |location, position, count| Hardpoint {
+            location,
+            flags: 0x03e5,
+            position,
+            store: Some("AS14.JT".into()),
+            count,
+            weight_class: 80,
+            slew: [0; 4],
+        };
+        assert_eq!(SU34_INTAKE, FLANKER_INTAKE);
+        assert_eq!(SU34_WING, SU27_WING);
+        let (mount, _) = placed_on(
+            AircraftId::Su34,
+            6,
+            &row(1, [24, -18, -13], 4),
+            Some(&model),
+        );
+        assert_eq!([mount[0], mount[2]], SU34_INTAKE);
+        let (mount, wing) = placed_on(
+            AircraftId::Su34,
+            7,
+            &row(4, [50, -15, -23], 4),
+            Some(&model),
+        );
+        assert_eq!(wing.location(), Location::Separate);
+        assert_eq!([mount[0], mount[2]], SU34_WING);
+        // The wingtip rails keep the tip's edge, not a table station.
+        assert!(station_move(AircraftId::Su34, 8).is_none());
+        assert!(station_move(AircraftId::Su34, 5).is_none());
+        // The Su-27's own tunnel row is not the Su-34's row 5 (its gun).
+        assert!(
+            station_move(AircraftId::Su34, 5).is_none()
+                && station_move(AircraftId::Su27, 5).is_some()
+        );
     }
 
     #[test]

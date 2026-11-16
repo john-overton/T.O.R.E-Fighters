@@ -3978,6 +3978,44 @@ mod tests {
             "the enemy's F-117 does not"
         );
     }
+    /// SU34-9 (2026-11-16): the Su-34 Platypus is offered as the player's
+    /// aircraft and in every AI wing field, by its own selection key
+    /// (`SU34.PT`), and a draft carries it as the player and in every wing. It
+    /// never stands in for the Su-27 or the Su-35, the Flankers its record was
+    /// copied from, and it has no part in the stealth night rule.
+    #[test]
+    fn the_su34_is_a_quick_mission_player_and_a_wing_choice() {
+        let mut q = full_catalog();
+        assert_eq!(AircraftId::Su34.selection_key(), "SU34.PT");
+        let player = q
+            .aircraft_files
+            .iter()
+            .position(|f| f == AircraftId::Su34.selection_key())
+            .unwrap();
+        assert_eq!(q.aircraft_names[player], "Su-34 Platypus");
+        q.apply(6, player);
+        assert_eq!(q.player(), Some(AircraftId::Su34));
+        for field in AI_AIRCRAFT_FIELDS {
+            let index = q.ai_choice(AircraftId::Su34).unwrap();
+            assert_eq!(q.values(field)[index], "Su-34 Platypus");
+            q.apply(field, index);
+            assert_eq!(q.wing_aircraft(field), Some(AircraftId::Su34));
+        }
+        let spec = q.mission_spec().unwrap();
+        assert_eq!(spec.wings[0].aircraft, AircraftId::Su34);
+        for wing in spec.wings.iter().skip(1) {
+            assert_eq!(wing.aircraft, AircraftId::Su34);
+            assert_ne!(wing.aircraft, AircraftId::Su27);
+            assert_ne!(wing.aircraft, AircraftId::Su35);
+        }
+        assert!(
+            !tore_formats::quick_template::tables::NIGHT_STEALTH_AIRCRAFT
+                .contains(&AircraftId::Su34.pt())
+        );
+        let mut night = spec;
+        night.condition = tore_world::mission::Condition::Night;
+        assert!(!tore_world::surface::resolve::night_stealth(&night));
+    }
     #[test]
     fn the_vertical_lifters_lead_wingmen_in_the_air_and_off_the_ground() {
         // The CH-47, the V-22, the AV-8 and the Yak-141 are offered to the AI

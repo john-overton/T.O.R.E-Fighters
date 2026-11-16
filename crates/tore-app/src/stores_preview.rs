@@ -1767,9 +1767,13 @@ fn clearance_report(
     if let Some((gap, pair)) = closest {
         println!("Stores preview: {short} closest pair {pair}: gap {gap:.2} ft");
     }
-    if airframe.profile.id.source() != tore_formats::aircraft::AircraftId::Tornado {
-        return;
-    }
+    // The gear plates of the aircraft whose stores hang close to them (the
+    // Tornado's; the Su-34's, SU34-5, 2026-11-16).
+    let gear_faces: &[usize] = match airframe.profile.id.source() {
+        tore_formats::aircraft::AircraftId::Tornado => &crate::tornado_animation::GEAR,
+        tore_formats::aircraft::AircraftId::Su34 => &crate::su34_animation::GEAR,
+        _ => return,
+    };
     let Some(shape) = airframe.poses.first() else {
         return;
     };
@@ -1778,7 +1782,7 @@ fn clearance_report(
     for face in shape
         .faces
         .iter()
-        .filter(|f| crate::tornado_animation::GEAR.contains(&f.address))
+        .filter(|f| gear_faces.contains(&f.address))
     {
         let p: Vec<[f64; 3]> = face
             .positions

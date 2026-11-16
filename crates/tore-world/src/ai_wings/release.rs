@@ -752,4 +752,45 @@ mod tests {
             &[0, 2],
         );
     }
+
+    /// SU34-5: an AI bomb leaves the Su-34's wing row from one of its two
+    /// underwing pylons a side (the Flankers' middle and outer stations, 14 and
+    /// 18 ft out), one store a pylon, through the shared release.
+    #[test]
+    fn an_ai_bomb_leaves_the_su34_wing_row_from_an_underwing_pylon() {
+        use tore_formats::aircraft::{AircraftId, Hardpoint};
+        use tore_sim::combat::hardpoints;
+        let (mut wings, _) = build(None);
+        let mut state = combat_fixture(false);
+        state.projectiles.clear();
+        let id = wings.mission().actors()[1].id();
+        let mut config = state.own().configuration().clone();
+        let mut bomb = mk82_pack(config.stations[0].weapon.clone());
+        bomb.burst.game_rounds_in_burst = 1;
+        config.stations[0].weapon = bomb;
+        let row = Hardpoint {
+            location: 4,
+            flags: 0x03e5,
+            position: [50, -15, -23],
+            store: Some("AT12.JT".into()),
+            count: 4,
+            weight_class: 80,
+            slew: [0; 4],
+        };
+        let (mount, rack) = hardpoints::placed_on(AircraftId::Su34, 7, &row, None);
+        config.stations[0].mount = mount;
+        config.stations[0].rack = rack;
+        config.stations[0].count = 4;
+        wings.configs.insert(id, config.clone());
+        let weapon = config.stations[0].weapon.clone();
+        let ground = |_: f64, _: f64| 0.;
+        let emitted = wings.release(&launch(id, 0x5000_0001), &mut state, &weapon, &[], &ground);
+        assert_eq!(emitted, 1);
+        let launcher = crate::combat::launcher(wings.mission().actor(id).unwrap().flight());
+        let out = (state.projectiles[0].position[0] - launcher.position[0]).abs();
+        assert!(
+            [14., 18.].iter().any(|pylon| (out - pylon).abs() < 0.01),
+            "{out}"
+        );
+    }
 }

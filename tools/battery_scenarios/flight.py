@@ -24,6 +24,8 @@ VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22",
 VARIETY_AIRCRAFT += ["tu26"]
 # The Tu-95 Bear-H joins the variety flight (T95-8, 2026-11-16).
 VARIETY_AIRCRAFT += ["tu95"]
+# The Su-34 joins the variety flight (SU34-8, 2026-11-16).
+VARIETY_AIRCRAFT += ["su34"]
 # Aircraft whose PT disables spins (X-31 flag, F-22 family): they never enter one.
 SPIN_IMMUNE = {"x31", "f22", "f22n", "faxx"}
 
@@ -151,6 +153,10 @@ STATIONS["tu26"] = [2000, 2, 2, 2, 0]
 # Update (T95-6, 2026-11-16): the pylon row now starts loaded with its ten AS-16 (the default load
 # is 16, six in the bay and ten on the beams), so it is a third live slot.
 STATIONS["tu95"] = [2000, 6, 10]
+# The Su-34 (SU34-5, 2026-11-16): the GSh-30-1 (row 5, 180 rounds, the real magazine) and the
+# default AS-14 (row 6, four, two tandem pairs under the intake ducts), AT-12 (row 7, four, one a
+# pylon on the middle and outer underwing pylons) and AA-11 (row 8, two, the wingtip rails).
+STATIONS["su34"] = [180, 4, 4, 2]
 
 
 def _numbers(output: str, prefix: str) -> dict:
@@ -444,6 +450,14 @@ APPROACH_TARGET["b1b"] = (145, 170)
 # gives 166.2 kt, touchdown at 164.8 kt and a 2,612 ft rollout.
 LIFTOFF_TARGET["f111"] = (150, 190)
 APPROACH_TARGET["f111"] = (140, 175)
+# The Su-34 (SU34-8, 2026-11-16; agent decisions, fitted windows). No primary takeoff or approach
+# speed was found: the one published takeoff figure is a 1,260 m (4,134 ft) run and a 1,100 m
+# landing run, weights unstated (a spec sheet and a search summary, docs/formats/aircraft-variety.md,
+# "Su-34 flight review"). The windows are the Su-27 family's plausibility band widened for the
+# heavier jet: the scripted runs fly the default load (gross 83,091 lb) and measure a liftoff of
+# 121.5 kt after 985 ft and an approach of 126.8 kt at 65 percent fuel (the Su-27: 128.1 and 142.2 kt).
+LIFTOFF_TARGET["su34"] = (110, 140)
+APPROACH_TARGET["su34"] = (115, 145)
 # The figures the model gives with the fitted per-aircraft stall references
 # (`STALL_REFERENCE_FRACTIONS`, 2026-09-30), for the aircraft whose figure is not
 # exactly inside John's range, kept as a regression window of plus or minus 6
@@ -488,6 +502,9 @@ KNOWN_APPROACH["tu160"] = 143.6
 # The F-111F's measured liftoff and approach at its default load (F111-8, 2026-11-16).
 KNOWN_LIFTOFF["f111"] = 171.8
 KNOWN_APPROACH["f111"] = 166.2
+# The Su-34's measured liftoff and approach at its default load (SU34-8, 2026-11-16).
+KNOWN_LIFTOFF["su34"] = 121.5
+KNOWN_APPROACH["su34"] = 126.8
 # TOR-6 (2026-11-11): the Tornado's default load is lighter than TOR-8 measured (one centreline tank, 1,650
 # lb of external fuel, not two): liftoff 146.4 kt (was 150.6), approach 155.1 kt (was 160.1), both inside the
 # windows and the plus or minus 6 percent regression band, so no window was refitted and the known values above
@@ -576,6 +593,8 @@ INTERNAL_FUEL_LB["b1b"] = 265274
 INTERNAL_FUEL_LB["f111"] = 32663
 # TU95.PT internal fuel, 148,150 lb (BMB-C2, the Tu-95MS tank; the approach scenario flies 65 percent, 96,298 lb).
 INTERNAL_FUEL_LB["tu95"] = 148150
+# SU34.PT internal fuel, 26,676 lb (BMB-C2, the real figure; the approach scenario flies 65 percent, 17,339 lb).
+INTERNAL_FUEL_LB["su34"] = 26676
 APPROACH_FUEL_CAP_LB = 100000
 
 # The Tu-26 Backfire-C (T26-8, 2026-11-16; agent decisions, fitted windows). The
@@ -748,6 +767,8 @@ LIFTOFF_AIRCRAFT += ["f111"]
 LIFTOFF_AIRCRAFT += ["tu26"]
 # The Tu-95 joins them (T95-8, 2026-11-16).
 LIFTOFF_AIRCRAFT += ["tu95"]
+# The Su-34 joins them (SU34-8, 2026-11-16).
+LIFTOFF_AIRCRAFT += ["su34"]
 
 
 def liftoff_scenarios() -> list[Scenario]:
@@ -1696,6 +1717,20 @@ def slot_scenarios() -> list[Scenario]:
         timeout=300,
         notes="Tu-26 glove release: a Mk 82 leaves the fixed glove pylon with the bay doors shut (the glove rows do not swing; the default Kh-15 need a target the preview does not give them).",
     ))
+    # SU34-5 (2026-11-16): the Su-34 has no bay; its fuselage (two tandem pairs under the intake
+    # ducts), wing (middle and outer underwing pylons) and wingtip rows fire a bomb from the
+    # stations they hang at, with the stores preview's fixed-tick simulation.
+    for row, load in ((6, "MK82.JT:4"), (7, "MK82.JT:4"), (8, "GBU12.JT:2")):
+        out.append(Scenario(
+            name=f"flight-bay-fire-su34-pylon-row{row}", lane="flight",
+            args=["--stores-preview", "{work}/frames"], window=True,
+            env={"TORE_STORES_PREVIEW_AIRCRAFT": "su34", "TORE_STORES_PREVIEW_FIRE": str(row),
+                 "TORE_STORES_PREVIEW_RECORDS": f"{row}={load}", "TORE_STORES_PREVIEW_FUEL": "15000"},
+            expect=[f"Stores firing: su34 row={row} PASS"],
+            outputs=[f"frames/su34-fire-row{row}-t000.png", f"frames/su34-fire-row{row}-t400.png"],
+            timeout=300,
+            notes=f"Su-34 row {row} release: {load.split(':')[0]} leaves its station (no bay: nothing opens).",
+        ))
     return out
 
 
@@ -1896,6 +1931,14 @@ def countermeasure_scenarios() -> list[Scenario]:
     out.append(Scenario(name="flight-countermeasures-tu95", lane="flight", args=args, window=True,
                         check=check_tu95_countermeasures, timeout=180,
                         notes="The Tu-95's retail TU95.ECM: 99 chaff and 99 flares, five and three released, no jammer (T95-6)."))
+    # SU34-6: the Su-34 keeps the retail SU27.ECM row (the Su-27's, "as the record gives it"): 30 chaff
+    # and 30 flares and the jammer.
+    args = ["--live-fire", "--aircraft", "su34"] + ["--combat-command", "chaff"] * 5
+    args += ["--combat-command", "flare"] * 3
+    args += ["--countermeasure-preview", "240", "--capture-flight", "{work}/cm.ppm", "--no-audio"]
+    out.append(Scenario(name="flight-countermeasures-su34", lane="flight", args=args, window=True,
+                        check=check_countermeasures, timeout=180,
+                        notes="The Su-34's retail SU27.ECM row: its chaff and flares, five and three released (SU34-6)."))
     out.extend(tornado_countermeasure_scenarios())
     return out
 

@@ -202,7 +202,21 @@ const TANK_RECORDS: usize = 9;
 /// coordinator to recompute (B4).
 /// 5,262 with the Tu-95 (-30) on top of the B-1B, the Tu-160, the F-111F and the Tu-26 (2026-11-16,
 /// batch B and C integration; the merged total is measured by `--validate-ordnance` at the end of the round).
-const WEAPON_PLACEMENTS: usize = 5262;
+/// 5,357 from 5,395 (SU34-5, 2026-11-16, measured by `--validate-ordnance`): the
+/// Su-34's rows 6 and 7 lose the designator bit `0x400` (B7), and that bit is
+/// also the one that admits the multi-pod rocket stores, so B-8, B-13, LAU-10
+/// and LAU-61 go from both rows (8 placements); the named refusals take 22
+/// stores off row 6, four off row 7 and four off the wingtip row (30). The
+/// Su-34 holds 99 placements, from 137.
+/// 5,361 from 5,357 (SU34-6, 2026-11-16, measured by `--validate-ordnance`): the
+/// Su-34's wing row (row 7) takes B-8, B-13, LAU-10 and LAU-61 again through the
+/// guarded extra weapon (`extra_weapon`, the F-117's Paveway II precedent), four
+/// placements; row 6 stays without them. The Su-34 holds 103 placements, the
+/// normal catalog 58 of the 83 Cheat.
+/// 5,228 with the Su-34 (-34) on top of the B-1B, the Tu-160, the F-111F, the Tu-26 and the Tu-95
+/// (2026-11-16, batch B and C integration; the merged total is measured by `--validate-ordnance`
+/// at the end of the round).
+const WEAPON_PLACEMENTS: usize = 5228;
 /// 188 from 182: the F-16A's centreline tank row (F150.GAS or F250.GAS) plus
 /// the tank selection its two 0x07e5 wing rows accept, 6 tank placements.
 /// 192 from 188: the MiG-31 (M31-1). 201 from 192: the Mirage 2000 (M2K-1).
@@ -266,7 +280,12 @@ const NOVELTY_PLACEMENTS: usize = 284;
 /// 83 from 82 (F111-5, 2026-11-16): the F-111F's bay row (9) carries the
 /// designator bit `0x400` (the Pave Tack station, B7: the one row of the
 /// aircraft that does), one pod; its wing rows keep it cleared.
-const POD_PLACEMENTS: usize = 83;
+/// 80 from 82 (SU34-5, 2026-11-16): the Su-34's rows 6 and 7 lose the designator
+/// bit `0x400` (B7: no sensor pod on a station the real aircraft does not
+/// have), so the two pod placements they added in BMB-C1 are gone.
+/// 81 with both: the F-111F adds its Pave Tack pod (82 to 83) and the Su-34 loses its two
+/// (83 to 81), batch B and C integration, 2026-11-16.
+const POD_PLACEMENTS: usize = 81;
 
 pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
     if AircraftId::ALL.len() != AIRCRAFT {
@@ -544,8 +563,9 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                     && hardpoint == tore_formats::aircraft::stations::F16_TIP
                     && weapon.source == "AIM120.JT";
                 // The F-117's bay rows also take the Paveway II bombs (F117-5),
-                // the row's own one.
-                let bay_paveway = id == AircraftId::F117
+                // the row's own one, and the Su-34's wing row the four rocket
+                // pods (SU34-6), the row's own count.
+                let bay_paveway = matches!(id, AircraftId::F117 | AircraftId::Su34)
                     && tore_formats::aircraft::stations::extra_weapon(
                         id,
                         aircraft.hardpoints.len(),
