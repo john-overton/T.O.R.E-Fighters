@@ -2584,6 +2584,7 @@ mod profile_tests {
             ("thrust", 21_600),
             ("maxTakeoffWeight", 54_000),
             ("internalFuel", 18_500),
+            ("airBrakesDrag", 256),
         ];
         let text = batch_text(
             "F117.PT",
@@ -2601,6 +2602,8 @@ mod profile_tests {
             (52_500., 45_000.)
         );
         assert_eq!(a.number("thrust"), 21_600.);
+        // F117-8: the real jet has no speed brake, so the record's 256 reads 0.
+        assert_eq!(a.number("airBrakesDrag"), 0.);
         let env = |g: i32| a.envelopes.iter().find(|e| e.g == g).unwrap();
         assert_eq!(
             env(1).points,

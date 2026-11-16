@@ -612,6 +612,123 @@ pub(crate) mod tests {
         let extra = (braked - clean) / w;
         assert!((0.08..0.22).contains(&extra), "{extra} G");
     }
+    /// F117-8: the F-117A at its real thrust, weights and (corrected) record has
+    /// no speed brake, so the brake lever adds no drag, and the shared model
+    /// gives it a thrust to weight and a climb of a subsonic strike jet. Loose
+    /// pins (docs/formats/aircraft-variety.md, "F-117 flight review"): the
+    /// published thrust to weight is 0.40 at 52,500 lb (Wikipedia), and the
+    /// published climb figures (2,820 to 9,000 ft/min) span a factor of three,
+    /// so only a broad band is pinned.
+    #[test]
+    fn the_f117_has_no_speed_brake_and_climbs_like_a_subsonic_strike_jet() {
+        use crate::flight::{PilotInput, State};
+        let mut a = synthetic(AircraftId::F117);
+        for (key, value) in [
+            ("weight", 29_500),
+            ("internalFuel", 18_500),
+            ("thrust", 21_600),
+            ("maxTakeoffWeight", 52_500),
+            ("fuelConsumption", 2),
+            ("_gpullDrag", 38),
+            ("airBrakesDrag", 0),
+        ] {
+            a.fields.get_mut(key).unwrap().value = value.to_string();
+        }
+        a.envelopes = [
+            (
+                0,
+                vec![
+                    [250., 0.],
+                    [265., 16_000.],
+                    [327., 29_500.],
+                    [418., 38_750.],
+                    [570., 47_000.],
+                    [715., 47_000.],
+                    [897., 42_000.],
+                    [961., 36_000.],
+                    [1_060., 0.],
+                ],
+            ),
+            (
+                1,
+                vec![
+                    [285., 0.],
+                    [305., 17_000.],
+                    [367., 30_500.],
+                    [458., 37_750.],
+                    [570., 45_000.],
+                    [715., 45_000.],
+                    [847., 40_000.],
+                    [891., 36_000.],
+                    [1_000., 0.],
+                ],
+            ),
+            (
+                2,
+                vec![
+                    [315., 0.],
+                    [335., 17_000.],
+                    [392., 25_500.],
+                    [481., 30_750.],
+                    [570., 34_000.],
+                    [710., 35_000.],
+                    [891., 34_000.],
+                    [980., 0.],
+                ],
+            ),
+            (
+                3,
+                vec![
+                    [350., 0.],
+                    [385., 13_000.],
+                    [457., 21_500.],
+                    [570., 26_000.],
+                    [890., 26_000.],
+                    [940., 0.],
+                ],
+            ),
+        ]
+        .into_iter()
+        .map(|(g, points)| tore_formats::aircraft::Envelope { g, points })
+        .collect();
+        let model = AircraftModel::for_aircraft(&a).unwrap();
+        const KT: f64 = 1.68781;
+        let step = |speed_kt: f64, altitude: f64, brake: f64| {
+            let mut s = State::from_model(model.clone(), [0., altitude, 0.]);
+            s.enable_research(1).unwrap();
+            s.speed = speed_kt * KT;
+            s.velocity = crate::attitude::Basis::new(0., 0., 0.)
+                .forward
+                .map(|v| v * s.speed);
+            s.throttle = 1.;
+            s.brake_out = brake > 0.;
+            s.brake = brake;
+            s.cheats.unlimited_fuel = true;
+            s.step(&PilotInput::default(), |_, _| -60_000.);
+            let t = s.trace.0.adapter.expect("hybrid step trace");
+            (
+                t.power.thrust_lbf,
+                t.forces.drag.total_lbf,
+                t.forces.weight_lbs,
+            )
+        };
+        // The brake lever moves the state but adds no drag at any speed.
+        for (kt, ft) in [(295., 1_000.), (413., 1_000.), (475., 36_000.)] {
+            let (_, clean, _) = step(kt, ft, 0.);
+            let (_, braked, _) = step(kt, ft, 1.);
+            assert!((braked - clean).abs() < 1e-6, "{kt} kt at {ft} ft");
+        }
+        // Thrust to weight at the maximum takeoff weight is the published
+        // 0.40 (Wikipedia: 21,600 / 52,500 = 0.41).
+        assert!((21_600. / 52_500. - 0.40_f64).abs() < 0.02);
+        // Clean at 48,000 lb, 370 kt at sea level: the specific excess power
+        // as a climb rate, a loose band across the published 2,820 to 9,000
+        // ft/min (the model reads about 8,000 ft/min on this one step).
+        let (thrust, drag, weight) = step(370., 0., 0.);
+        assert_eq!(weight, 48_000.);
+        let rate = (thrust - drag) * 370. * KT / weight * 60.;
+        assert!((3_000. ..11_000.).contains(&rate), "{rate} ft/min");
+    }
     /// The B-52H's flight terms (B52-8, 2026-11-15): a B-52 built from
     /// synthetic values near the corrected record (real thrust, weights and
     /// fuel, a placard-like 1 G top edge of 385 kt at sea level and 515 kt at

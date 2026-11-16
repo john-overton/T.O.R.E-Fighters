@@ -9883,3 +9883,265 @@ Provenance: sensor rows, HUD module, panel names, cockpit art and the night rule
 bindings opinionated (John, 2026-11-15, decisions 26 and 28), the night rule switch on John's decision 3;
 the glass polygon, the eye entry and the label text fitted or agent decisions 2026-11-15. No retail bytes
 committed.
+
+
+## F-117 flight review (F117-8, 2026-11-15)
+
+Validation and fitting, slice F117-8 (bomber batch A), Claude Sonnet (sonnet-high). The
+F-117A flies the hybrid adapter's `variety` configuration built from `F117.PT` and
+`F117.SH` with BMB-A2's corrections (maximum take-off 52,500 lb, ceiling 45,000 ft, the
+1 G fast edge at 36,000 ft trimmed to Mach 0.92). The record's own thrust (21,600 lbf,
+two non-afterburning F404-F1D2), empty weight (29,500 lb), tank (18,500 lb), flow (2
+lb/s), G rows (-3 to +6), 180 degree a second roll block and the other envelope rows
+were read and validated, not changed. Raw probe output is local:
+`.local/m3-aircraft/checks/F117-8/` (`before/`, `after/`, `run_perf.sh`,
+`run_probes.sh`, `battery.txt`, `headless-f117-1200.txt`). "Before" is the repository at
+c10543c7, "after" is with the one fit below.
+
+### What is wrong
+
+**One thing was clearly wrong and citable: the speed brake.** The record carries
+`airBrakesDrag` 256, a fighter's airbrake, and the hybrid adapter turns it into a drag of
+weight x 256/256 x the brake x the speed share: 0.30 G of extra deceleration at 295 kt,
+0.49 G at 413 kt and 0.66 G at 530 kt at 1,000 ft on the 48,000 lb jet (more than the
+whole clean drag). The real jet has none: a pilot's account says "there are no drag
+devices on the jet: no speed brakes, no flaps, nothing" except the landing gear and, on
+landing, the drag chute (jetcareers.com forum, "F-117 Cloaking Device", read 2026-11-15,
+an unofficial source; the post also says aerodynamic braking was prohibited). The shape
+has no airbrake word to draw (F117-3, "Brake: none ... the real jet has none"), and the
+record's `flapsLift` and `flapsDrag` are already 0, so the record agreed about the flaps
+and disagreed about the brake. **Fitted:** `airBrakesDrag` 256 to 0
+(`F117_AIRBRAKE_DRAG`, a `CORRECTIONS` row applied only while the record still holds 256
+and the other F-117 corrections hold). The brake lever still moves the state but adds no drag. A visible effect: the
+scripted landing deploys the brake on its rollout, so the rollout from touchdown goes
+from 2,504 ft to 3,117 ft (default load) and from 2,569 ft to 3,218 ft (clean), nearer
+the published figure, and the `devices` probe's final speed is 435 kt against 372 kt.
+
+**Nothing else was clearly wrong.** Each remaining difference is either inside the
+published scatter, rests on a source too weak to fit to, or is a shared-model feature:
+
+- **Top speed.** The record's sea-level edge, 592.2 kt (Mach 0.90), equals the Wikipedia
+  infobox's 594 kn (684 mph); the high-altitude edge is Mach 0.92 after BMB-A2, the
+  published Mach. The other published figures disagree: 541 kn "at high altitude"
+  (Wikipedia body text), 562 kt (flugzeuginfo.net), 646 mph or 656 mph, Mach 0.98
+  (Aerocorner, MILAVIA), 594 kn. A lifting-line style check says a 21,600 lbf jet with a
+  zero-lift drag coefficient of 0.025 to 0.03 on 780 square feet would be thrust limited
+  at 520 to 570 kt at sea level, so 592 kt is at the top of the plausible band (it needs
+  a coefficient of 0.023), but no source gives sea-level speed alone, so it was **not
+  changed**; see the question at the end.
+- **Climb.** The published rates do not agree (2,820 ft/min in the Wikipedia body, 3,000
+  ft/min and 9,000 ft/min on two other listings; not one states a weight or altitude).
+  The model gives 6,800 ft/min over the first 5,000 ft and 9,300 ft/min at its best (clean,
+  full tank, 300 KEAS to Mach 0.75). At a thrust to weight of 0.45 and a drag of about
+  0.2 of the weight at 370 kt, 6,000 to 9,000 ft/min is what the arithmetic gives, and
+  2,820 ft/min cannot be a maximum. No fit.
+- **Drag shape.** A per-aircraft `DragShape` (the B-52H's way, B52-8) was **not
+  justified.** The B-52's edge is a placard; the F-117's is thrust limited with no
+  afterburner (the real jet cannot go supersonic), so the shared square law
+  (drag equals the thrust at the edge) is the right kind of curve. The one published
+  figure that checks cruise drag, the range, points the other way from the B-52's: the
+  model's range at Mach 0.82 and 36,000 ft is 1,516 nautical miles against the published
+  930 (Wikipedia, flugzeuginfo; 1,140 with a full bomb load, Aerocorner), so the model's
+  cruise is more efficient than the real jet, and a drag shape that lowers cruise drag
+  would widen the gap. The fuel flow, not the drag, is the likelier cause (below).
+- **Takeoff and landing speeds.** The model's weight-scaled stall puts the default load's
+  rotation at 169.7 kt and liftoff at 177.2 kt (3,647 ft run), clean 162.8 and 170.3 kt
+  (3,091 ft), against a published rotation speed of 160 kt and takeoff speed of 165 kt
+  (a FlightGear simulator guide and an unnamed listing: unofficial, no weight), so the
+  model is 6 to 8 percent high on weak figures. The `--retail-stall-speeds` figure,
+  146.5 kt, is 11 percent low against the same figures, so the real number sits between
+  the two switches. The approach is 166.2 kt (the cap, 0.85 times the record's 195.5 kt
+  landing limit) with touchdown at 170 kt at a 45,525 lb landing weight: Aerocorner says 150
+  kt approach and the FlightGear guide 150 to 160 kt touchdown at AoA 9 degrees, but the
+  pilot account says the jet is Approach Category E (166 kt or more), "oftentimes the
+  approach speed was in the 180s". With the 150 kt published at an unstated and probably
+  lighter weight (the speed scales with the square root of the weight: 166 kt at 45,525 lb is 150 kt at about
+  37,000 lb, a plausible landing weight, 29,500 empty plus 7,500 of fuel), the model agrees. No fit; the battery
+  windows are loose.
+- **Takeoff and landing distances.** The takeoff run is 3,647 ft against the published
+  6,200 ft take-off distance and the landing 3,117 ft against 7,400 ft (Aerocorner; neither
+  states a weight, a surface or whether it is a ground run or a distance over a 50 ft
+  obstacle). The shared takeoff has no flap, gear or induced drag and no thrust lost with
+  speed, a physical ground-run estimate (T/W 0.41, 278 ft/s liftoff, 0.33 g mean) is about 3,600 ft,
+  and the real jet lands with its **drag chute**, which the model does not have
+  (see below), so these are not fitted.
+- **Thrust lapse.** The shared lapse (`exp(-h/70,000)`) keeps 0.60 of the sea-level thrust
+  at 36,000 ft; the B-52 fit used 0.3 for a TF33. No F404 figure was found, so unlike the B-52
+  (TF33, B52-8) it was not fitted. Of the model's figures this is the one most likely to
+  make the F-117's 4,000 to 4,600 ft/min climb rate at 30,000 to 35,000 ft too good.
+
+### Before, after and real
+
+Probe: `performance_probe` and `--headless-flight`, full tank (18,500 lb), clean 48,000
+lb unless a row says otherwise, "default" is the Load Ordnance default, two GBU-27
+(4,000 lb), 52,000 lb gross, "approach" flies 65 percent fuel (12,025 lb) from 1,280 ft
+at `--theater UKR --ground-start 1` (5,532 ft runway). Logs in
+`.local/m3-aircraft/checks/F117-8/`.
+
+| Figure | Before | After | Real (source) |
+| --- | --- | --- | --- |
+| Thrust to weight at maximum take-off, 52,500 lb | 0.41 | 0.41 | 0.40 (Wikipedia; its own 2 x 9,040 lbf would give 0.34, so the figure agrees with the record's 21,600) |
+| Takeoff, default load: rotation, liftoff, run | 169.7 kt, 177.2 kt, 3,647 ft | 169.7 kt, 177.2 kt, 3,646 ft | rotation 160 kt, takeoff 165 kt (FlightGear guide, unnamed listing; unofficial); takeoff distance 6,200 ft (Aerocorner, unstated weight) |
+| Takeoff, clean 48,000 lb: liftoff, run | 170.3 kt, 3,091 ft | 170.3 kt, 3,091 ft | none |
+| Takeoff, retail stall speeds (default load) | 146.5 kt, 2,445 ft | the same | none |
+| Time to 5,000 / 10,000 / 20,000 / 30,000 / 36,000 / 40,000 ft, clean, 300 KEAS to Mach 0.75 | 44 / 76 / 161 / 303 / 382 / 445 s | the same | none found for times |
+| Same, default load | 47 / 81 / 176 / 329 / 414 / 484 s | the same | none |
+| BMB-A2 probe schedule (fighter climb, 450 kt to Mach 0.8), 36,000 ft | 381 s | 381 s | not a real figure |
+| Climb rate, first 5,000 ft average / best | 6,800 / 9,300 ft/min | the same | 2,820 (Wikipedia body), 3,000, 9,000 ft/min (listings), no weight stated |
+| Highest altitude on the schedule (clean / default) | 44,518 / 44,509 ft | the same | service ceiling 45,000 ft (Wikipedia infobox); 43,000 to 45,000 (body); 50,000 est. (MILAVIA) |
+| Level top speed, sea level / 15,000 / 30,000 / 36,000 ft | 592.2 / 565.3 / 538.3 / 527.5 kt (Mach 0.90, 0.90, 0.91, 0.92) | the same | 594 kn (infobox), 541 kn at altitude (body), 562 kt (flugzeuginfo), Mach 0.92 (Wikipedia, aerospaceweb), Mach 0.98 (MILAVIA) |
+| Level top speed, 40,000 ft | 502 kt (Mach 0.88), the edge | the same | none |
+| Acceleration 364 to 460 kt at sea level (clean / default) | 23 s / 25 s | the same | none |
+| Acceleration 316 to 460 kt at 36,000 ft (clean / default) | 68 s / 83 s | the same | none |
+| Sustained turn, speed held, sea level, 330 / 461 / 527 kt (Mach 0.5, 0.7, 0.8) | 2.91 G (70 deg bank) / 2.28 G / 1.70 G | the same | none found |
+| Sustained turn, held, 15,000 ft, Mach 0.7 / 0.9 | 2.00 G / 1.16 G | the same | none |
+| Sustained turn, held, 30,000 ft, Mach 0.7 / 0.8 / 0.9 | 1.55 G / 1.56 G / 1.21 G | the same | none (BMB-A2: 1.56 to 1.21 G at Mach 0.9 with the edge trim) |
+| Instantaneous pull, full stick, 3 s, 1,000 ft, Mach 0.5 / 0.7 | 4.84 G, 14.8 deg/s / 4.85 G, 10.0 deg/s | the same | +6 G limit (Aerocorner); the loaded-elevator rule divides it by 1.25 at this load |
+| Instantaneous pull, 15,000 ft / 30,000 ft, Mach 0.7 | 3.23 G / 1.62 G | the same | none (the envelope's 2 G and 3 G rows narrow with height) |
+| Roll rate, full stick | 180 deg/s | 180 deg/s | none found (the record's block, the A-4E's 180 / 214 / 427) |
+| Speed brake, extra deceleration at 295 / 413 / 532 kt at 1,000 ft | 0.30 / 0.49 / 0.66 G | 0 | none: no speed brake (pilot account, unofficial) |
+| Cruise Mach 0.82 (470 kt) at 36,000 ft: burn, range from 18,500 lb | 1.59 lb/s, 1,516 nm | the same | range 930 nmi (Wikipedia, flugzeuginfo), 1,140 nm with payload (Aerocorner) |
+| Cruise 65 percent of the edge at 20,000 ft (362 kt) | 0.85 lb/s, 2,186 nm | the same | none |
+| Military power, full tank | 2.00 lb/s, 154 min | the same | F404 dry fuel consumption 0.81 lb/lbf/h (-402) gives 4.86 lb/s |
+| Approach, default load, 65 percent fuel | 166.2 kt, touchdown 169.9 kt, rollout from touchdown 2,504 ft | 166.2 kt, 169.9 kt, 3,117 ft | approach 150 kt (Aerocorner), touchdown 150 to 160 kt (FlightGear guide), often in the 180s (pilot account); landing distance 7,400 ft (Aerocorner) |
+| Approach, clean | 166.2 kt, touchdown 171.6 kt, rollout 2,569 ft | 166.2 kt, 171.6 kt, 3,218 ft | the same |
+| Stealth signature, infrared / radar | 20 / 1 | 20 / 1 | n/a (below) |
+
+Sources read 2026-11-15: Wikipedia "Lockheed F-117 Nighthawk" (specifications block and
+body text; read through the first 100,000 characters), aerospaceweb.org "F-117 data",
+flugzeuginfo.net "Lockheed F-117 Nighthawk", MILAVIA "F-117 specifications", Aerocorner
+"Lockheed Martin F-117 Nighthawk" (read through a search result; the page itself failed to
+fetch, so the takeoff, landing, approach and 2,850 gallon fuel figures are a search
+summary's), Wikipedia "General Electric F404" (0.81 lb/lbf/h is the -402's), the Air and
+Space Forces Magazine "The Black Jet" (52,000 lb gross, JP-4, tailhook, drag chute released
+when the nosewheel touches down), the FlightGear F-117 guide (a simulator guide; the page
+refused a direct fetch, so its 160 kt rotation, 150 to 160 kt touchdown and AoA 9 degrees
+are a search result's summary) and the jetcareers.com forum post by an F-117 pilot. Every
+figure from a forum or simulator guide is used only as a plausibility target. No official
+take-off, landing or climb figure was found; the Dash One was not available.
+
+### Instantaneous and sustained turns, and the probe's limits
+
+The generic probe schedules can fly the F-117 off its envelope, as they did the bombers:
+the accelerations at 40,000 and 45,000 ft start at Mach 0.55 (315 kt), which is under the
+envelope's low edge there, so they drift 6,000 to 9,000 ft and settle at nonsense speeds
+(501 kt at 40,000 ft, 567 kt at 45,000 ft); the 1 G band at 45,000 ft is 338 to 424 kt
+(Mach 0.59 to 0.74), the ceiling polygon BMB-A2 shifted up by 3,000 ft. The fighter climb
+probe at Mach 0.9 never leaves sea level (it flies at 463 kt, an edge it cannot
+hold). Both are probe artifacts, not the aircraft. The sustained turns above hold the speed
+(`PROBE_HOLD_SPEED=1`); with the speed free, the sea-level Mach 0.5 turn is 2.91 G and
+the aircraft slows to 346 kt. At 36,000 ft the band is too narrow for any sustained or
+instantaneous pull (a G limit of 1.0 at Mach 0.5 to 0.9), and at Mach 0.9 and 1,000 ft
+the pull is 1.61 G, because the edge there is 592 kt.
+
+The sustained turn at Mach 0.9 and 30,000 ft that BMB-A2 reported as falling from 1.56 G
+to 1.21 G is the edge, not a defect: at 530 kt the drag equals the thrust by the law
+(0.89 of the edge speed); at 0.8 Mach, the more usual speed, the model sustains 1.56 G (50 deg bank, 2.8 deg/s).
+
+### Open-bay drag: `bayDrag` is not read on the hybrid adapter
+
+The record's `bayDrag` (25) is read into `DragProfile.bay` (`tore-formats`
+`flight_model/profile.rs`) and used only by `flight_model/forces.rs`, the native
+(retail-law) diagnostic. The hybrid adapter's one drag expression
+(`State::airframe_drag`, `flight/airframe.rs`) reads gear, flaps and airbrake from
+`c.native.drag` and nothing else: no `bay`, `rudder` or `wheel` term. An open F-117 bay
+(or an F-22's) therefore adds no drag, and the open bay has no effect on speed, climb or
+range, though it does raise the radar signature (below). The coefficient 25 is 10
+percent of the weight (25 / 256 = 0.098 W) with the bay fully open, 4,700 lbf on the
+48,000 lb jet, 22 percent of the sea-level thrust, before the device fraction the
+airbrake term uses; the real bay is open for seconds on a bombing run. **Not added**: reading it would change
+the flight of every bay aircraft (the F-22 family and the F-117, the aircraft with reviewed bays) and the result needs a sim version bump; it is John's call.
+Options: leave it, or add `bay x bayDrag/256 x the speed share` to the airframe drag
+beside the airbrake term.
+
+### Stealth signature
+
+The sensor code has a radar signature concept (`sensors/signature.rs`,
+`docs/radar.md`): `sigs[3]` radar and `sigs[2]` infrared, from the record. The F-117's are
+radar 1 and infrared 20 (B-2: 1 and 15; F-22: 10), unchanged and pinned by the record
+test. Detection range goes with the square root of the signature over 100: nose-on, clean,
+a radar of 90 nmi nominal range sees it at 9 nmi, 11 nmi with the bay fully open
+(1 + 0.5 x the open fraction), 13 nmi abeam (x2 aspect weight) and 18 nmi from straight
+above or below (x4); gear down adds 25 percent to the signature (a 12 percent longer
+range). Stores in the bay do not count (only external stores add 3 each and 2 per 1,000
+lb, which the F-117 cannot carry). The infrared signature gives 0.45 of the nominal IR
+range (sqrt(20/100)). Surface radars read the signature since SAM-1 (they use the
+air-to-air model) but not the gear, flap and bay deployment, so SAMs do not yet see an
+open F-117 bay (SAM-1's open item). The numbers are gameplay tuning, not measured cross
+sections; none was found for the real jet, so no fitted value was needed.
+
+### The drag chute (not modelled)
+
+The real jet lands with a drag chute (required except in crosswinds), which the game does
+not model for any aircraft. The scripted rollout uses wheel brakes alone, so the rollout
+is 3,117 ft where a real chute landing is shorter and the published landing distance is
+7,400 ft. Not added; option for John: map the airbrake key to a chute for the F-117, or
+fit the shared brake deceleration (18 ft/s squared) down per aircraft the way the B-52
+did (an unofficial source gives no figure for the F-117).
+
+### Other findings
+
+- Air maneuvers (`--headless-flight`, the B-2 set): level (445 kt at 5,000 ft after 7,200
+  ticks), pull (4.85 G), loop (completed), roll, sprint (583 kt), rudder, devices,
+  stall-recover (recovered at tick 1,843, 216.9 kt minimum), spin-recover and `dive` and
+  `overspeed` ended in the overspeed loss by design. `roll` and `rudder` end with
+  `crashed=true` in the shared harness because they hold a full stick or pedal with no
+  recovery (the run is not an acceptance of the stick; same before and after). All had
+  `non_finite=0`.
+- `--headless-flight 1200 --aircraft f117`: 399.1 kt level at 5,016 ft, fuel 18,486 lb, no
+  crash, 0 non-finite. The ground-start takeoff (`--theater UKR --ground-start 1`,
+  `takeoff`) completes at 3,582 ticks, 100 ft, 199 kt.
+- The flaps: `flapsLift` and `flapsDrag` are 0 in the record, so the flap lever does
+  nothing for lift or drag (`flaps_lift_f8=0` in the envelope line), as for the real
+  jet.
+- `_gpullDrag` 38 (induced drag per G above 1, 0.148 of the weight) checks against a
+  lifting-line estimate for the F-117's 2.4 aspect ratio (780 sq ft, 43.25 ft span, e
+  0.8): 0.25 W at 3 G at 330 kt at sea level, against the record's 0.30 W; kept.
+- `loadedElevator` 40: the +6 G row divides by 1 + 0.4 x loading, to 4.8 G at the probe's
+  air start (full tank, no stores) and 4.6 G with the 4,000 lb of GBU-27; the real limit is
+  +6 G (Aerocorner) at an unstated weight.
+- Fuel flow: see the question below; the record's 2 lb/s is a high-bypass figure (SFC
+  0.333 at the rated thrust), the F404's low-bypass dry figure is 0.81.
+- The battery (`tools/battery_scenarios/flight.py`): `f117` joins the liftoff,
+  liftoff-retail and approach scenarios (it was already in `VARIETY_AIRCRAFT`), with
+  fitted windows (liftoff 155 to 185 kt, approach 150 to 180 kt, agent decisions from the
+  weak figures above; recorded 177.2 and 166.2 kt), an internal fuel of 18,500 lb (65
+  percent, 12,025 lb, for the approach) and the ordinary take-off tick allowance (it lifts
+  off at 3,582 ticks, under the 4,500 limit); no theater override (the 5,532 ft runway
+  holds its 3,646 ft run and 3,117 ft rollout, 1,004 ft to spare).
+
+### Checks
+
+`cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D
+warnings`, `cargo test --locked --workspace --no-fail-fast` (counts in the plan's Session
+log; the new test is
+`the_f117_has_no_speed_brake_and_climbs_like_a_subsonic_strike_jet`, a loose pin, and
+`the_b52_b2_and_f117_read_their_real_figures_only_while_retail` now also checks the brake),
+`--headless-flight 1200 --aircraft f117`, a ground-start takeoff, `battery.py --lane
+flight --scenario '*f117*'` 13 of 13 (animation, liftoff, liftoff-retail, approach, variety,
+the three bay-fire and three bay scenarios, a2g-laser, bay-clearance, skin), the tools
+unittests, `check_docs`.
+
+Provenance: the airbrake fit is **fitted** (an agent decision, 2026-11-15) on an
+unofficial but unambiguous account that the jet has no speed brake, consistent with the
+record's zero flap terms and the rig; the thrust, weights, fuel, ceiling and top-speed
+edge are BMB-A2's; the battery windows are fitted agent decisions; every real figure is
+a public page, forum or guide, for comparison only; nothing else changed.
+
+### Open for John
+
+1. **Sea-level top speed.** Keep the record's 592 kt (Mach 0.90, equal to the 594 kn
+   infobox) or trim the sea-level edge (1,000 ft/s) toward the 541 to 562 kt of the
+   other sources (about 5 to 9 percent), the one-vertex way BMB-A2 trimmed 36,000 ft?
+2. **Fuel flow.** 2 lb/s (SFC 0.333, a high-bypass figure) or the F404's cited 0.81 lb/lbf/h
+   x 21,600 lbf = 4.86 lb/s, which would give a cruise range of about 630 nmi against the
+   published 930 (the record's 2 gives 1,516)? A flow of 3.3 lb/s reproduces 930 exactly. The
+   B-2's equivalent question is open too.
+3. **`bayDrag`**: read it on the hybrid adapter (a sim change for every bay aircraft) or
+   leave it?
+4. **Drag chute**: add a landing aid for the F-117 or leave the wheel brakes alone?
+5. **Thrust lapse**: the shared 70,000 ft lapse keeps 0.6 of the thrust at 36,000 ft; an
+   F404 figure would let the F-117 be fitted like the B-52. None was found.
+6. **Takeoff and landing speeds**: the weight-scaled model is 6 to 8 percent above the weak
+   published figures; a `stall_reference_fraction` of about 1.15 would fit them, but the
+   figures are a simulator guide and an unnamed listing.

@@ -176,6 +176,13 @@ bomber's climb on a constant equivalent airspeed, its pitch held by a speed inte
 `PROBE_TURN_MACH`. Evidence: the
 [variety flight review](../formats/aircraft-variety.md#b-2-flight-review-b2-8-2026-11-15).
 
+Update (F117-8, 2026-11-15): the F-117A (`f117`) joins the liftoff, retail-stall and approach
+scenarios of `flight.py` (it was already in `VARIETY_AIRCRAFT`): fitted windows 155 to 185 kt
+liftoff and 150 to 180 kt approach, recorded 177.2 and 166.2 kt at the 52,000 lb default
+load, an internal fuel of 18,500 lb (the approach flies 65 percent, 12,025 lb) and the
+ordinary takeoff allowance. Evidence: the
+[F-117 flight review](../formats/aircraft-variety.md#f-117-flight-review-f117-8-2026-11-15).
+
 `flight-variety-gcurve-*` sweeps the full-stick G limit of the seven transports
 and airliners from 100 to 750 kt at 5,000 ft (`--maneuver gcurve`). Once the
 limit has passed 1.4 G it must not fall below 1.3 G, through the top speed and
