@@ -19732,3 +19732,102 @@ a gun round over the wire; a windowed run.
 
 Provenance: scenarios, checks and the unit test are fitted agent decisions (2026-11-16); the Mk 82 and Harpoon cells
 are the human's first-press cells from SU34-5 and SU34-6. No retail bytes committed.
+
+## Bomber batch B and C integration (round 7, 2026-11-16)
+
+Integration agent, Sonnet. The six per-aircraft branches of the batch B and C bombers (`m3-b1b`, `m3-tu160`,
+`m3-f111`, `m3-tu26`, `m3-tu95`, `m3-su34`, each X-5 to X-9) are merged into `m3-aircraft` on top of BMB-AI2, in
+batch order, one `--no-ff` merge each. Nothing is pushed. Implementation mode; no spec changed, so no provenance
+label moves.
+
+**Merges.** `158248ae` m3-b1b, `8eeccab5` m3-tu160, `048ae612` m3-f111, `2485bb76` m3-tu26, `143a70d9` m3-tu95,
+`27a2710d` m3-su34, then the fix commits `a2ec98a6` (the T95-9 taxi hold on the heavy predicate and the test fixes),
+`6fc1be4f` (the merged ordnance pins) and `ff83cce0` (the AS-16 and held bay press pins). `cargo check --workspace
+--all-targets --locked` was clean after each merge.
+
+**Conflicts and how they were resolved.** Every shared list kept every entry of every side in batch order (batch A,
+BMB-AI and B52-9, then batch B, then batch C), docs sections stay dated, and tail-append conflicts took ours then
+theirs (`resolve-append.py` for the docs, a small by-hunk script for the code and the battery tables, because a tail
+append in Python or Rust shares its closing lines with both sides).
+
+- **One `bays::openings(id)`.** B1B-5 had made it an iterator, T160-5 a `Vec`. It is one `Vec<Opening>` now: one
+  entry for every single-bay aircraft (the B-52, F-117, B-2, Tu-26, Tu-95, F-111F), two for the Tu-160, three for the
+  B-1B; `opening(id)` is still the first. Both branches' bay tests are kept, and the F-111F, Tu-26 and Tu-95 add
+  theirs beside them. The shared door helper in `bay_doors.rs` was already one (`centre_doors`, `centre_doors_all`);
+  its lining gained one private implementation (`centre_lining_with`: floor height and palette) behind the three
+  public names the branches use (`centre_lining`, B1B-5's `centre_lining_in` palette, T26-5's `centre_lining_from`
+  floor).
+- **Per-aircraft tables.** The eye table and its test (`mirrors.rs`), the radar and jammer arms (`sensors/profile.rs`:
+  `TU160R`, `A6R`, `TU26R`, `TU95R` and their jammers; the B-1B and Su-34 flew existing records), the glass tests
+  (`hud_aperture.rs`), `fit_envelopes` and the `CORRECTIONS` rows, `aircraft_stations.rs` (`weapon_allowed` arms and
+  tests), the variety fit hooks and the alignment-rate arm are all kept, one arm each. The per-aircraft terms test in
+  `models/variety.rs` now names every aircraft that has each term (drag shape: B-52, B-1B, Tu-160, Tu-95; stall
+  reference: B-52, Tu-160; thrust lapse: B-52, Tu-95; ground deceleration: B-52, Tu-26, Tu-95; alignment 0.4: the
+  transports, B-52, Tu-160, Tu-95).
+- **`Store.look_deg` (T160-9)** needed no edit: no other branch builds a `Store` literal of its own.
+- **T160-9 strike code and BMB-AI2's laydown fix** merged without a textual conflict and both are present: the heavy
+  cue pointing (gain 0.4, 3 s damping), `seeker_fire_range` and `laydown_ground_ft`.
+- **T95-9 taxi hold.** It merged clean but still read `taxi_throttle_floor > 0`; it now asks `heavy_airfield(s)`, the
+  BMB-AI2 predicate, which names the B-52, the Tu-26 and the Tu-95 (the unit test sets the predicate). One Rust edit
+  beyond conflict markers, in `ai/airfield.rs`.
+- **F111-8 and F111-9.** `Configuration::wing_sweep` in the checkpoint and the replay `same_stores` that ignores
+  `Rack::swing` are both present.
+- **Battery tables.** `flight.py`, `ai.py`, `ai_strike.py`, `net_a2g.py`, `_replay_*.py`, `battery_selection.py`,
+  `menus.py`, `a2g_*.py`, `render.py` and their `test_battery_*.py` keep every aircraft's entries.
+
+**Rust edits beyond conflict markers.** `ai/airfield.rs` (the hold on the predicate, its test), `sensors/profile.rs`
+(three radar tests had pinned the Tu-160's, Tu-26's and Tu-95's records as unreviewed "until their own slices";
+those `None` pins are dropped, the records are checked as reviewed), `aircraft_stations.rs` (two station tests used
+another bomber's bay row 5 as an unrefused stand-in; the Tu-95's and the F-16C's rows stand in now: the Tu-160's aft
+bay is row 5 too), `bay_doors.rs` and `models/variety.rs` and `b52_clearance.rs` (the unified helpers above, one
+filter widened so the Tu-26's door leaves and the B-1B's share one clearance report), and the dated pin notes in
+`ordnance_audit.rs`.
+
+**Pins (rule B4), measured by `--validate-ordnance`** on the merged tree: 54 aircraft, 22 recovered stations,
+**5,228 weapon placements** (5,395 - 51 B-1B - 10 Tu-160 + 3 F-111F - 45 Tu-26 - 30 Tu-95 - 34 Su-34, as expected,
+no difference), 257 tank placements, **81 designator pods** (82 + 1 F-111F Pave Tack - 2 Su-34), **284
+Cheat-only**, 82 / 9 records. Detail in [ordnance availability](../baselines/ordnance-availability.md).
+
+**Held bay presses (BMB-AI2) against the branch pins.** Two checks pinned the old loss and are updated, not
+restored: `replay-a2g-b1b-ripple` (B1B-9, 8 presses 0.1 s long, accepted 7 or 8 because the first press was spent
+opening the doors) now pins exactly 8 releases and outcomes, and `replay-a2g-tu26-ripple` (T26-9, ten presses for
+eight bombs, accepted 7 or 8) pins exactly 8 of the bombs' own weapon. A plain one-tick tap 0.5 s apart still loses
+a press to the release interval, which is not the doors' loss: the B-1B gives 6 of 8 (5 before BMB-AI2) and the Tu-26
+7 of 8, so the B-1B scenario keeps its 0.1 s hold. The older notes ("8 presses gave 5", "10 for 8") are dated history
+and stay.
+
+**Heavy airfield laws on the Tu-26 and Tu-95** (BMB-AI2's predicate gives them the 3,000 ft final lookahead and the
+taxi coast by id), proved with every `ai-heavy-*` and `ai-merged-airfield-*` scenario: all pass, and neither aircraft
+is worse than on its own branch. Tu-26, Simferopol at 70,000 lb: final 233.8 s, touchdown 264.5 s at 166 kt, clear
+297.6 s, **parked 512.9 s** (514.0 s on the merged T26-9 tree), 0 of 40,256 ground samples off the pavement; its
+Southampton cycle is bit-identical to the branch (final 630.5 s, rollout 660.9 s). Tu-95, Simferopol at 60,000 lb:
+touchdown 274.3 s at 121 kt, **parked 599.9 s, 0 of 57,086 ground samples off the pavement**, the same as T95-9; the
+Southampton cycle parks at 1,151.4 s. Both stay in the predicate.
+
+**The AS-16 on every aircraft (T160-9's `seeker_fire_range`).** The T95-9 "never fires" pin is gone. Run for 150 s,
+an AI Tu-95 with two AS-16 against the Krivak (15 nm, 20,000 ft) fires one from 27,488 ft at 108.4 s from the bay
+(doors open 0.96 at 107.5 s, shut at 110.3 s) or the beams (no door), the missile hits at 124.9 s (47.7 ft miss, 150
+of 500 left), and the Tu-95 is still flying at 145 s. The 90 s window of `ai-strike-tu95-antiship` and `-beams`
+would have kept passing vacuously (the shot comes at 108 s), so both are positive scenarios of 135 s now. New
+**`ai-strike-tu26-as16`**: an AI Tu-26 with only the AS-16 (its intake pair, station 1) fires from 27,480 ft at
+102.3 s with no door moving, hits at 118.6 s (47.4 ft, 150 of 500 left) and is not lost at 135 s; the scenario runs
+125 s.
+
+**Checks** (logs in `.local/m3-aircraft/checks/bomber-merge7/`): `cargo fmt --all -- --check` clean; clippy
+`--workspace --all-targets --locked -- -D warnings` clean; `cargo test --locked --workspace --no-fail-fast` 7,950
+passed, 0 failed, 108 ignored (7,874 before the merges); `--validate-ordnance` passed; `--animation-probe` b52 271,
+b2 268, f117 207, b1b 314, tu160 320, f111 258, tu26 310, tu95 125, su34 321, tornado 279 neutral faces, 0 required
+failures each; `--headless-flight 1200` for the nine bombers: no crash, 0 non-finite; `--ground-start 1
+--headless-flight 600` with the default load for b1b (243,000 lb of fuel), tu160 (326,285), f111 (28,413), tu26,
+tu95, su34 and b52 (286,412): all start and fly; battery `--jobs 2 --windows 1` over 462 scenarios (every `*b52*`,
+`*b2*`, `*f117*`, `*b1b*`, `*tu160*`, `*f111*`, `*tu26*`, `*tu95*`, `*su34*` and `*tornado*`, `ai-heavy-*`,
+`ai-strike-*`, `ai-merged-airfield-*`, `net-a2g-*`, `net-ai-strike-*`, `replay-a2g*`, `flight-approach-*`,
+`flight-liftoff-*`, `flight-bay-*`, `menus-ordnance-availability`, `a2g-catalog`, `ai-roster-probe`) 461 passed;
+the one failure was `replay-a2g-tu26-ripple`'s old pin, now updated and passing, and the rewritten and new AS-16
+scenarios, `menus-ordnance-availability` and `a2g-catalog` were rerun after the edits and pass; tools unittests 636
+OK (5 skipped); `tools/check_docs.py` passed.
+
+**Open for John.** (1) The pre-merge failures stand and are untouched: `a2g-terrain-mask`, `a2g-harm-bore`,
+`ai-ils-terrain-fra-a9` (rerun on the merged tree, same failures). (2) An F-111F quick-wing pair at QUFACT still
+loses both aircraft to its own laydown pack's proximity fuzes (BMB-AI2, open). (3) A one-tick tap 0.5 s apart on the
+B-1B and Tu-26 still loses a press to the release interval.
