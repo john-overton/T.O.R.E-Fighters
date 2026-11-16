@@ -334,6 +334,21 @@ class TailGunTests(unittest.TestCase):
         self.assertTrue(any("a laser" in p for p in flight.b52_tail_gun_problems("enemy_gun=89/128")))
         self.assertTrue(any("never fired" in p for p in flight.b52_tail_gun_problems("enemy_gun=0/0")))
 
+    def test_the_tu95_turret_check_is_the_same_rule_and_names_the_bear(self):
+        """T95-6 (2026-11-16)."""
+        self.assertEqual(flight.tu95_tail_gun_problems("enemy_gun=5/189"), [])
+        self.assertTrue(any("Tu-95" in p and "never fired" in p for p in flight.tu95_tail_gun_problems("enemy_gun=0/0")))
+        self.assertTrue(any("a laser" in p for p in flight.tu95_tail_gun_problems("enemy_gun=89/128")))
+
+    def test_the_tu95_has_three_live_slots_and_its_two_missile_rows_are_refused_slots(self):
+        """T95-6 (2026-11-16): gun 2,000, six AS-16 in the bay, ten on the beams."""
+        self.assertEqual(flight.STATIONS["tu95"], [2000, 6, 10])
+        self.assertIn(("tu95", 2), flight.REFUSED_SLOTS)
+        self.assertIn(("tu95", 3), flight.REFUSED_SLOTS)
+        names = {s.name for s in flight.scenarios()}
+        for name in ("flight-tu95-tail-gun", "flight-countermeasures-tu95", "flight-livefire-tu95-slot3", "flight-jettison-tu95-slot3"):
+            self.assertIn(name, names)
+
 
 class ScenarioListTests(unittest.TestCase):
     def test_names_are_unique_and_prefixed(self):

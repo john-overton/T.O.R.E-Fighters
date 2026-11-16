@@ -45,7 +45,11 @@ const AIRCRAFT: usize = 54;
 /// Tu-95's empty pylon row (row 8) are two more optional weapon rows (BMB-C1
 /// and BMB-C2, 2026-11-15): the empty selection is the AS-16, a default store
 /// of another row that each now admits (batch C alone was 22 from 20).
-const RECOVERED_STATIONS: usize = 23;
+/// 22 from 23 (T95-6, 2026-11-16, measured): the Tu-95's pylon row (row 8) now
+/// starts loaded with its ten AS-16 (`aircraft_stations::TU95_WING_DEFAULT`), so it
+/// is a default store row, no longer an optional empty one; weapon, tank, Cheat-only
+/// and pod placements do not move (`TU95.PT` 3 source rows, 0 optional).
+const RECOVERED_STATIONS: usize = 22;
 const TANK_RECORDS: usize = 9;
 /// 3,817 from 3,684: the F-16A's four wing and wingtip rows join the roster
 /// (slice F16A-4, 133 compatible supported-weapon placements: two 0x07e5 rows

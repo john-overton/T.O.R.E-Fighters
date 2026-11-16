@@ -1052,3 +1052,16 @@ ten pylon AS-16 clear each other, the inboard propeller disc, the nacelle, the f
 `flight-livefire-tu95-slot1` to `-slot3` and `flight-jettison-tu95-slot2` run too. `flight-animation-tu95`
 now requires the bay control (the four belly triangles whole at 0 with no lining; open, the 20 lining
 faces and the leaves hanging on a quarter turn). The menus expected line reads 5,365 weapon placements.
+
+Update (T95-6/7, 2026-11-16): the Tu-95's ordnance, countermeasures and tail turret join the flight lane.
+`STATIONS["tu95"]` is now `[2000, 6, 10]` (the pylon row starts loaded with ten AS-16), so
+`flight-livefire-tu95-slot1` to `-slot3` and `flight-jettison-tu95-slot2` and `-slot3` run; slots 2 and 3 (the
+bay's and the beams' AS-16, surface missiles) are in `REFUSED_SLOTS` (the Weapons window reads `TARGET TYPE`,
+`NO LOCK`, nothing fires). New: `a2g-sarh-as16-tu95` (an AS-16 from the bay and one from the beam each designated
+on the A-G page through the Bear's radar, launched at the lead truck of `~QUCOL` and killing it; the bay's leaves
+at least half a second after the beam's, the door wait), `a2g-release-origin-tu95` (the human's presses leave from
+the bay grid's cells and the beams' rows, each within 0.05 ft of where it hangs; the unit test
+`an_ai_tu95_leaves_the_bay_and_the_beams_from_the_humans_places` pins the AI to the same cells),
+`flight-tu95-tail-gun` (the B-52's scenario with an AI Tu-95: 5 of 180 rounds hit the F-22, the same 35 percent
+ceiling) and `flight-countermeasures-tu95` (99 chaff and 99 flares, five and three released). The `menus` and
+`a2g-catalog` expected lines read 22 recovered weapon stations (from 23).

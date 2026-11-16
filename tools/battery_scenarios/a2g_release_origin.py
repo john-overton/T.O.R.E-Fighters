@@ -425,6 +425,52 @@ def b2_origin_problems(output: str) -> list[str]:
     return problems
 
 
+# The Tu-95's AS-16 (T95-6, 2026-11-16), one run each at 20,000 ft: the six in the belly bay
+# (row 7, the shared grid: three lanes 1.59 ft apart, the bottom tier at 2.12 ft under the reference
+# point first, outermost lane first alternating sides, then the middle lane; the bomb sight holds the
+# last press past the target, so five of six count) and the ten on the beams (row 8, five a wing,
+# 12.0 ft out, 0.58 ft under the reference point from 1 ft pylons: the front row at 17.24 ft ahead,
+# the lanes at 15.10, 12.00 and 8.90 ft out, left then right of each pair, then the rear row at
+# 0.76 ft ahead). The AI's release reads the same places (`Station::release_point`); the unit test
+# `an_ai_tu95_leaves_the_bay_and_the_beams_from_the_humans_places` pins its list to this one.
+TU95_BAY_CELLS = [(-1.59, -2.12, 8.64), (1.59, -2.12, 8.64), (0.0, -2.12, 8.64),
+                  (-1.59, -0.53, 8.64), (1.59, -0.53, 8.64)]
+TU95_BEAM_CELLS = [(-15.10, -0.58, 17.24), (15.10, -0.58, 17.24), (-12.00, -0.58, 17.24),
+                   (12.00, -0.58, 17.24), (-8.90, -0.58, 0.76), (8.90, -0.58, 0.76),
+                   (-15.10, -0.58, 0.76), (15.10, -0.58, 0.76), (-12.00, -0.58, 0.76),
+                   (12.00, -0.58, 0.76)]
+TU95_RUNS = [("belly bay", 1, 6, TU95_BAY_CELLS, None), ("pylon beams", 2, 10, TU95_BEAM_CELLS, WING)]
+
+
+def tu95_args(station: int, presses: int) -> list[str]:
+    return ["--a2g-run", "UKR", "QUCOL", "--attack", "release", "--from", "1", "--altitude", "20000",
+            "--speed", "300", "--repeat", str(presses), "--gap", "0.5", "--aircraft", "tu95", "--station",
+            str(station), "--load", "AS16"]
+
+
+def tu95_origin_problems(output: str) -> list[str]:
+    parts = runs(output)
+    if len(parts) != len(TU95_RUNS):
+        return [f"{len(parts)} runs finished, want {len(TU95_RUNS)}"]
+    problems: list[str] = []
+    for part, (label, _station, _presses, cells, depth_want) in zip(parts, TU95_RUNS):
+        found = ORIGIN.findall(part)
+        if len(found) < len(cells):
+            problems.append(f"Tu-95 {label}: {len(found)} releases, want at least {len(cells)}")
+        for n, ((_, r, u, f, _station_right, _after, hr, hu, hf, depth), (wr, wu, wf)) in enumerate(zip(found, cells)):
+            r, u, f, hr, hu, hf = (float(v) for v in (r, u, f, hr, hu, hf))
+            if abs(r - hr) > 0.05 or abs(u - hu) > 0.05 or abs(f - hf) > 0.5:
+                problems.append(f"Tu-95 {label}: release {n} left from {r:.2f} {u:.2f} {f:.2f}, hung at {hr:.2f} {hu:.2f} {hf:.2f}")
+            if abs(r - wr) > 0.05 or abs(u - wu) > 0.05 or abs(f - wf) > 0.5:
+                problems.append(f"Tu-95 {label}: release {n} at {r:.2f} {u:.2f} {f:.2f}, want {wr:.2f} {wu:.2f} {wf:.2f}")
+            if depth_want is None:
+                if depth != "none":
+                    problems.append(f"Tu-95 {label}: release {n} pylon depth {depth}, want none")
+            elif depth == "none" or abs(float(depth) - depth_want) > 0.01:
+                problems.append(f"Tu-95 {label}: release {n} pylon depth {depth}, want {depth_want:.2f}")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     base = ["--a2g-run", "UKR", "QUCOL", "--attack", "release", "--from", "1", "--altitude", "3000",
             "--speed", "420"]
@@ -536,6 +582,14 @@ def scenarios() -> list[Scenario]:
             notes="The B-2's bay grids (B2-5): the left and right bays' Mk 82 rows leave nine presses from the grid's own "
                   "places (front row of the bottom tier first, outermost first, alternating sides, then the back row, then "
                   "the next tier up) and the Paveway III rows three from their one row, each from where it hangs.",
+        ),
+        Scenario(
+            name="a2g-release-origin-tu95", lane="flight",
+            args=tu95_args(TU95_RUNS[0][1], TU95_RUNS[0][2]),
+            timeout=300,
+            then=[Step(tu95_args(r[1], r[2]), timeout=300) for r in TU95_RUNS[1:]],
+            check=tu95_origin_problems,
+            notes="The Tu-95's AS-16 (T95-6): the six belly-bay stores leave from the shared grid's places (bottom tier first, outermost lane first, alternating sides) and the ten beam stores from their beam's rows (front row first, outermost lane first, left then right), each from where it hangs; the AI reads the same places.",
         ),
         Scenario(
             name="a2g-release-origin-tornado-rail", lane="flight",

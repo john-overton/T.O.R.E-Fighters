@@ -76,7 +76,8 @@ fn the_three_records_parse_as_their_own_identities_with_their_station_tables() {
                 ("", 2_000),
                 ("", 2_000),
                 ("AS16.JT", 6),
-                ("", 10),
+                // The pylon row starts loaded with its ten AS-16 (T95-6).
+                ("AS16.JT", 10),
             ],
         ),
         (

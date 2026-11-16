@@ -504,7 +504,8 @@ def scenarios() -> list[Scenario]:
             # BMB-B1/B2 (2026-11-15): 51 aircraft and 249 tank placements after the B-1B, Tu-160 and F-111F joined (F-111F 16 tank); the integration of batches A and B is dated in ordnance_audit.rs.
             # Bomber batches A, B and C integration (2026-11-16): 54 aircraft, 23 recovered stations, 5,395 weapon, 257 tank, 278 Cheat-only and 82 designator pod placements, measured: 5,093 plus the Tu-26 (129), Tu-95 (36) and Su-34 (137 weapon, 8 tank) joined with their BMB-C2 station corrections (the batch's own 5,447 was from the pre-round-2 5,145; not added). Dated in ordnance_audit.rs.
             # T95-5 (2026-11-16): 5,365 weapon placements, measured: the Tu-95's bay row refuses 30 stores that do not clear the opened bay (TU95.PT 36 to 6); every other pin is unchanged.
-            expect=[r"ordnance audit: 54 aircraft, 23 recovered weapon stations, 5365 weapon placements, 257 tank placements, 82 weapon and 9 tank records; passed"],
+            # T95-6 (2026-11-16): 22 recovered stations (from 23), measured: the Tu-95's pylon row starts loaded with ten AS-16, so it is no longer an optional empty row; every other pin is unchanged.
+            expect=[r"ordnance audit: 54 aircraft, 22 recovered weapon stations, 5365 weapon placements, 257 tank placements, 82 weapon and 9 tank records; passed"],
             notes="All reviewed source stations, compatible supported weapons/tanks, empty defaults and accepted-load restoration. The audit fails when a supported weapon or tank record is missing or a pinned count moves (ordnance_audit.rs).",
         )
     )

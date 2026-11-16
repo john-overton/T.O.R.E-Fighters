@@ -501,6 +501,32 @@ mod tests {
         assert!(mask(&source, AircraftId::F22).iter().all(|v| *v == 0));
     }
 
+    /// T95-7: the Tu-95's glass is the whole `~AC130H.PIC` picture (the one
+    /// window the art has, as the B-52's), trimmed by the art's own opaque
+    /// pixels; a picture of any other size fails closed.
+    #[test]
+    fn the_tu95_glass_is_the_whole_ac130_picture_less_its_opaque_pixels() {
+        let mut source = transparent(1280, 490);
+        let frame = 480 * source.width + 20;
+        source.rgba[frame * 4 + 3] = 255;
+        let tu95 = mask(&source, AircraftId::Tu95);
+        assert_eq!(tu95.len(), 1280 * 490);
+        // The polygon is the picture's rectangle: every pixel inside it but
+        // the one-pixel border the polygon test leaves out, less the opaque one.
+        for (x, y) in [(1, 1), (640, 245), (1278, 488), (20, 479), (21, 480)] {
+            assert_eq!(tu95[y * 1280 + x], 1, "{x},{y}");
+        }
+        assert_eq!(tu95[frame], 0);
+        assert!(tu95.iter().filter(|v| **v == 1).count() > 1280 * 490 - 1800);
+        assert_eq!(tu95, mask(&source, AircraftId::B52));
+        assert_eq!(tu95, mask(&source, AircraftId::Tu26));
+        assert!(
+            mask(&transparent(1394, 508), AircraftId::Tu95)
+                .iter()
+                .all(|v| *v == 0)
+        );
+    }
+
     #[test]
     fn f22_and_faxx_share_the_reviewed_source_aperture() {
         let source = transparent(1000, 490);

@@ -155,3 +155,9 @@ aft mount, the Tu-95 dorsal tilt, the arcs, the muzzle point in the mount's fram
 `a_forward_gun_keeps_the_nose_line_and_its_sight_view`,
 `a_slewed_guns_sight_view_points_astern_from_the_same_muzzle`). `tore-world`: `ai_wings::tail_gun_tests`.
 
+
+## Update (T95-6, 2026-11-16): the Tu-95's tail turret
+
+The Tu-95's `T23_1.JT` tail turret (row 3, moved to the cone's point by T95-5) reads the same slew words and fires
+astern with the same `TAIL` cue and the same BMB-AI aim model as the B-52's: `flight-tu95-tail-gun` has an AI Tu-95
+hit 5 of 180 rounds on an F-22 closing from astern. No code changed; the mount follows its record.

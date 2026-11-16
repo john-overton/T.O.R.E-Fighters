@@ -127,7 +127,9 @@ STATIONS["b52"] = [1242, 12, 0, 0, 0]
 # tail cone), the six default AS-16 in the belly bay (row 7) and the pylon row (row 8, ten
 # AS-16, empty by default and keeping an empty AS-16 selection). Rows 5 and 6 (the Bear-A to F
 # turrets) hold nothing and are not stations.
-STATIONS["tu95"] = [2000, 6, 0]
+# Update (T95-6, 2026-11-16): the pylon row now starts loaded with its ten AS-16 (the default load
+# is 16, six in the bay and ten on the beams), so it is a third live slot.
+STATIONS["tu95"] = [2000, 6, 10]
 
 
 def _numbers(output: str, prefix: str) -> dict:
@@ -1241,6 +1243,11 @@ REFUSED_SLOTS = {
     # its radar (`B52R.SEE`, enabled), so the Harpoon wants a surface target as everyone's does.
     # `a2g-antiship-b52` fires it at the Krivak.
     ("b52", 2),
+    # The Tu-95's AS-16 rows, the bay (slot 2) and the pylon beams (slot 3), are surface missiles
+    # (T95-6, 2026-11-16): the Bear has its radar now, so they want a surface target. The
+    # `a2g-sarh-as16-tu95` scenario launches one from each against the lead truck.
+    ("tu95", 2),
+    ("tu95", 3),
 }
 
 
@@ -1555,8 +1562,26 @@ def countermeasure_scenarios() -> list[Scenario]:
     out.append(Scenario(name="flight-countermeasures-b2", lane="flight", args=args, window=True,
                         check=check_countermeasures, timeout=180,
                         notes="The B-2's retail F18.ECM row: 30 chaff and 30 flares, five and three released (B2-6)."))
+    # T95-6 (2026-11-16): the Tu-95's own `TU95.ECM` carries 99 chaff and 99 flares like the B-52's
+    # (the source review read the Tu-160 record's 30 and 40 as counts: they are the radar and
+    # infrared deception chances, and the Tu-95's are zero), with no radio-frequency or infrared jammer.
+    args = ["--live-fire", "--aircraft", "tu95"] + ["--combat-command", "chaff"] * 5
+    args += ["--combat-command", "flare"] * 3
+    args += ["--countermeasure-preview", "240", "--capture-flight", "{work}/cm.ppm", "--no-audio"]
+    out.append(Scenario(name="flight-countermeasures-tu95", lane="flight", args=args, window=True,
+                        check=check_tu95_countermeasures, timeout=180,
+                        notes="The Tu-95's retail TU95.ECM: 99 chaff and 99 flares, five and three released, no jammer (T95-6)."))
     out.extend(tornado_countermeasure_scenarios())
     return out
+
+
+def check_tu95_countermeasures(output: str) -> list[str]:
+    """The shared dispenser check, and the Tu-95's record: 99 of each."""
+    problems = check_countermeasures(output)
+    m = re.search(r"capacity_chaff=(\d+) capacity_flares=(\d+)", output)
+    if not m or (int(m.group(1)), int(m.group(2))) != (99, 99):
+        problems.append(f"capacities {m.groups() if m else None}, want 99 chaff and 99 flares")
+    return problems
 
 
 def _origins(output: str) -> tuple[list[float] | None, list[tuple[str, list[float]]]]:
@@ -2631,17 +2656,34 @@ def fight_scenarios() -> list[Scenario]:
                   "BMB-AI: with an aim error, a lag and a swing rate, so a minority of the rounds hit (2 of 176, was 89 of 128).",
         )
     )
+    # T95-6 (2026-11-16): the Tu-95's tail turret (the cone's point, slewed aft, 2,000 rounds of
+    # the twin 23 mm) through the same BMB-AI aim model: aim error, lag and swing rate.
+    out.append(
+        Scenario(
+            name="flight-tu95-tail-gun",
+            lane="flight",
+            args=[
+                "--aircraft", "f22", "--probe-enemy-aircraft", "tu95", "--probe-enemy-skill", "ace",
+                "--probe-geometry", "rear", "--separation", "1", "--probe-guns",
+                "--ai-probe-ticks", "3000", "--no-audio",
+            ],
+            check=tu95_tail_gun_problems,
+            timeout=600,
+            notes="T95-6: an AI Tu-95's slewed twin 23 mm tail turret fires astern at a fighter in its rear arc "
+                  "(enemy_gun hits on the player), with BMB-AI's aim error, lag and swing rate, so a minority of the rounds hit.",
+        )
+    )
     return out
 
 
-def b52_tail_gun_problems(output: str) -> list[str]:
+def b52_tail_gun_problems(output: str, name: str = "B-52") -> list[str]:
     m = re.search(r"enemy_gun=(\d+)/(\d+)", output)
     if not m:
         return ["no debrief line with enemy_gun"]
     hits, shots = int(m.group(1)), int(m.group(2))
     problems = []
     if shots == 0:
-        problems.append("the B-52's tail gun never fired at the fighter behind it")
+        problems.append(f"the {name}'s tail gun never fired at the fighter behind it")
     elif hits > TAIL_GUN_MAX_SHARE * shots:
         # BMB-AI (2026-11-16): the gunner has an aim error, a lag and a swing rate; the exact, instant
         # swing hit 89 of 128 rounds here. The fighter closes 1,800 ft off the tail from 5,800 ft, so
@@ -2649,6 +2691,11 @@ def b52_tail_gun_problems(output: str) -> list[str]:
         # the unit test's (`combat::slew`).
         problems.append(f"the tail gun hit {hits} of {shots} rounds, more than {TAIL_GUN_MAX_SHARE:.0%}: a laser")
     return problems
+
+
+def tu95_tail_gun_problems(output: str) -> list[str]:
+    """T95-6: the same check for the Tu-95's twin GSh-23 turret (`T23_1.JT`, slewed aft)."""
+    return b52_tail_gun_problems(output, "Tu-95")
 
 
 TAIL_GUN_MAX_SHARE = 0.35

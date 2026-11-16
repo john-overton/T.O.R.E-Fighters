@@ -160,7 +160,7 @@ flying channel, instead of borrowing a preset.
 | Preset | Radar records | Notch half-width, ft/s | Range factor at notch centre | Reference burn-through B, nmi | Angular coupling half-width / sidelobe floor |
 | --- | --- | ---: | ---: | ---: | --- |
 | Basic | F4BR, MIG21R, MIG27R | Disabled | 1.0 | 5 | 3 degrees / 0.05 |
-| Transitional | F14R, B52R (B52-7, 2026-11-15, fitted: the Tu-160's record renamed, a long-range bomber set; the AC-130's class) | 100 | 0.20 | 8 | 2 degrees / 0.02 |
+| Transitional | F14R, B52R (B52-7, 2026-11-15, fitted: the Tu-160's record renamed, a long-range bomber set; the AC-130's class), TU95R (T95-7, 2026-11-16, fitted: the same record renamed again, the B-52's reading) | 100 | 0.20 | 8 | 2 degrees / 0.02 |
 | Advanced | F18R, MIG29R, SU24R, SU27R, F22R, MIG31R | 60 | 0.45 | 10 | 1 degree / 0.005 |
 
 Basic sets are primarily vulnerable to ground clutter and carry no Doppler notch,
@@ -241,6 +241,14 @@ by John, O4), read as Early with no RF mode and strength 0.00 (MF1-7 sensor
 summary), so it too emits no RF noise; its radar is `F18R.SEE`. Unlike the
 Mirage 2000 it has no jammer worth a matchup row: the record gives chaff and
 flares only.
+
+Update (T95-7, 2026-11-16): the Tu-95 carries `TU95.ECM`, the Tu-160's `TU160.ECM` with
+its mode flags, radar deception chance (30), infrared deception chance (40) and their
+signature terms all zero; its chaff and flare counts (99 each) and dispenser angles are
+unchanged. It is read as Early with no RF mode and strength 0.00, like `F104.ECM`
+(`sensors::profile::Generation::for_record`, fitted, agent decision): the Bear emits no
+noise and carries 99 chaff and 99 flares. Its radar `TU95R.SEE` is Transitional (table
+above), so the Bear has a radar and the A-G designation its AS-16 needs.
 
 Only installed, powered, undamaged RF jammers contribute. Jammer strength S is
 `clamp(ECM.radar_deception_chance / 100, 0, 1)`, repurposed as an authored

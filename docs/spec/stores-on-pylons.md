@@ -3921,3 +3921,16 @@ nothing.
 Provenance: the belly skin, the cone, the wing height and the disc are measured from `TU95.SH`; the
 six-missile bay and the ten pylon missiles are cited public figures (Wikipedia "Kh-55"); the width,
 depth, doors, grid, beam, refusals and every offset are fitted (agent, 2026-11-16).
+
+## Tu-95 default load and release cells (T95-6, 2026-11-16)
+
+The default load is 16 AS-16: six in the belly bay and ten on the beam pylons (row 8 starts loaded; the
+coordinator's brief, opinionated). The human's presses (`a2g-release-origin-tu95`) and the AI's release
+(`Station::next_release_point`) read the same cells. Bay (feet right, up, forward of the reference point): the
+bottom tier first at 2.12 ft under it, outermost lane first alternating sides (-1.59, +1.59, 0.00 at 8.64 ft
+forward), then the second tier 1.59 ft up. Beams: the front row at 17.24 ft ahead (15.10 and 12.00 ft out, left
+then right), then the rear row at 0.76 ft ahead (8.90, 15.10 and 12.00 ft out), 0.58 ft under the reference
+point at the drawn wing's underside, 1 ft pylon depth. Both AS-16 rows are Active radar surface missiles: they
+want the A-G page and a designated target (`a2g-sarh-as16-tu95`: both rows launch and kill the lead truck; the
+bay's leaves a second later, behind its doors). See the
+[aircraft variety section](../formats/aircraft-variety.md#tu-95-bear-h-ordnance-sensors-hud-and-cockpit-t95-67-2026-11-16).

@@ -203,6 +203,12 @@ pub const TU95_WING_FLAGS: i32 = 0x1025;
 /// ten underwing Kh-55s, Wikipedia "Kh-55", read 2026-11-15; opinionated, the
 /// real pylon arrangement was not found).
 pub const TU95_WING_COUNT: i32 = 10;
+/// The store the Tu-95's pylon row starts loaded with (T95-6, 2026-11-16): the
+/// retail row names none (`""`, six), and the default load of the aircraft is
+/// ten AS-16 on the beams beside the six in the bay, so the row carries the
+/// AS-16 at its full ten. Opinionated (the coordinator's brief; the Tu-95MS16's
+/// ten underwing missiles are cited).
+pub const TU95_WING_DEFAULT: &str = "AS16.JT";
 /// The Tu-95's tail turret row (`TU95.PT` row 3, `T23_1.JT`, slewed aft): its
 /// mount moves to the drawn tail cone ([`TU95_GUN_MOUNT`], T95-5).
 pub const TU95_GUN: usize = 3;
@@ -1032,6 +1038,9 @@ fn default_signature(id: AircraftId) -> &'static [Signature] {
 ///   and [`weapon_allowed`] leaves the AS-16 alone on it. **Opinionated**
 ///   (the Tu-95MS16's ten pylon missiles are cited, the arrangement is not),
 ///   positions fitted.
+///   Update (T95-6, 2026-11-16): row 8 also starts loaded, with ten AS-16
+///   ([`TU95_WING_DEFAULT`]), so the default load is 16 AS-16, six in the bay
+///   and ten on the beams.
 /// - **Su-34** (`SU34.PT`; BMB-C2, coordinator first pass 2026-11-15): the gun
 ///   row 5 holds 180 rounds in place of 150 ([`SU34_GUN_ROUNDS`], the real
 ///   GSh-30-1 magazine), and the fuselage row 6 moves up from -10 ft to -6 ft
@@ -1103,6 +1112,9 @@ pub fn adjust_defaults(id: AircraftId, rows: &mut Vec<Hardpoint>) {
             pylons.flags = TU95_WING_FLAGS;
             pylons.count = TU95_WING_COUNT;
             pylons.weight_class = 0;
+            // T95-6 (2026-11-16, coordinator brief): the default load is the
+            // MS16's ten pylon missiles as well as the bay's six.
+            pylons.store = Some(TU95_WING_DEFAULT.into());
         }
         AircraftId::Su34 => {
             rows[SU34_GUN].count = SU34_GUN_ROUNDS;
@@ -2225,6 +2237,7 @@ mod tests {
         expected[TU95_WING_PYLONS].2 = [36, -6, 27];
         expected[TU95_WING_PYLONS].4 = 10;
         expected[TU95_WING_PYLONS].5 = 0;
+        expected[TU95_WING_PYLONS].3 = Some(TU95_WING_DEFAULT.to_string());
         // T95-5: the tail turret moves to the drawn tail cone.
         expected[TU95_GUN].2 = [0, 6, -242];
         assert_eq!(key(&rows), expected);

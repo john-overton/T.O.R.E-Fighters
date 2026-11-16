@@ -15849,3 +15849,172 @@ for the Tu-95 (a row in `bays::STATIONS`), so the open-bay RCS term applies.
 
 **Checks.** See the plan's T95-5 entry; clearance, sweep and frame files are in
 `.local/m3-aircraft/checks/T95-5/` and `.local/m3-aircraft/frames/T95-5/`.
+
+
+## Tu-95 Bear-H ordnance, sensors, HUD and cockpit (T95-6/7, 2026-11-16)
+
+Slices T95-6 (ordnance, default load, countermeasures) and T95-7 (sensors, HUD, cockpit, instruments)
+ran together (implementation mode, bomber batch C), by an agent (Claude Sonnet). They apply the
+coordinator's first pass (`BOMBERS-DECISIONS-C.md`, Tu-95 items 8, 9 and 10, "Tu-95 stations
+(T95-5)") and the B-52 pattern ([B52-6/7](#b-52-ordnance-tail-gun-sensors-and-cockpit-b52-67-2026-11-15)).
+No decision proved impossible. Earlier Tu-95 sections stay as written (B11); the corrections they
+need are named below as updates. Frames are in `.local/m3-aircraft/frames/T95-6/`, logs in
+`.local/m3-aircraft/checks/T95-6/`.
+
+### The default load (T95-6, opinionated: the coordinator's brief)
+
+**16 AS-16: six in the belly bay and ten on the beam pylons.** T95-5 left row 8 empty (the retail row
+names no store); `aircraft_stations::adjust_defaults` now gives it `AS16.JT` at its ten
+(`TU95_WING_DEFAULT`). Load Ordnance (frame `load-ordnance`) reads Fuselage `23mmx1 turret 2000 (max
+2000)`, Internal Bay `AS-16 Kickback 6 loaded (max 6)`, Wing `AS-16 Kickback 10 loaded (max 10)`; vehicle
+weight 388,894 of 414,470 lb, 25,576 available: empty 198,415, internal fuel 148,150 (100 percent) and
+42,329 lb of stores (16 AS-16 at 2,640 lb and the rounds). The Weapons window reads `2000 23MMX1`, `16
+AS-16`, `99 CHAFF 99 FLARE`. `--headless-flight 600 --aircraft tu95` flies the loaded Bear level at 243.2
+kt at 5,000 ft with 0 non-finite samples (as at T95-5); a ground start parks at 9.3 ft, 4.7 kt.
+
+`--validate-ordnance`: aircraft 54, **recovered weapon stations 22 (from 23)**, weapon placements 5,365,
+tank placements 257, Cheat-only 278, designator pods 82, all unchanged but the one. The recovered count
+falls because the Tu-95's pylon row is now a default store row and no longer an optional empty one
+(`TU95.PT`: 3 source rows, 0 optional weapon rows, 6 compatible placements, 0 tanks; catalog 5 normal, 83
+Cheat). `ordnance_audit.rs` carries the dated note; `a2g-catalog`, `menus-ordnance-availability` and
+`test_battery_a2g.py` read 22. Pins before and after: 54 / 23 / 5,365 / 257 / 82 / 278, then 54 / 22 /
+5,365 / 257 / 82 / 278.
+
+### Live fire, jettison, release (T95-6)
+
+| Scenario | What it shows |
+| --- | --- |
+| `flight-livefire-tu95-slot1` | the tail turret fires 301 rounds in 1,200 ticks astern (the aircraft in the fixture crashes at the end, as the B-52's does) |
+| `flight-livefire-tu95-slot2`, `-slot3` | the bay's and the beams' AS-16 are surface missiles: against the practice aircraft the Weapons window reads `TARGET TYPE`, `NO LOCK` and nothing is fired. Listed as refused slots (`REFUSED_SLOTS`, as the B-52's Harpoons) |
+| `flight-jettison-tu95-slot2`, `-slot3` | the bay's six lighten the load 42,329 to 26,455 lb, the beams' ten to 15,873 lb; the station reads 0 and the selection moves on |
+| `a2g-sarh-as16-tu95` (new) | an AS-16 from the bay and one from the beam (`--attack sarh`, `~QUCOL`, 350 kt, 3,000 ft, 4 nm): each is designated on the A-G page through the Bear's radar, locked CUED, launched at the lead truck and kills it (miss 24 and 28 ft). The bay's missile leaves at 2.98 s, the beam's at 2.03 s: the press waits for the doors (1 s) |
+| `a2g-release-origin-tu95` (new) | the human's presses: bay cells (feet right, up, forward) -1.59, -2.12, 8.64; 1.59, -2.12, 8.64; 0.00, -2.12, 8.64; then the second tier at -0.53 (outermost lane first, alternating sides, bottom tier first; the bomb sight holds the sixth past the target, so five are measured). Beams: front row at 17.24 ft ahead (-15.10, 15.10, -12.00, 12.00), rear row at 0.76 ft ahead (-8.90, 8.90, -15.10, 15.10, -12.00, 12.00), 0.58 ft under the reference point, 1 ft pylon depth. Every release leaves within 0.05 ft of where it hangs |
+| unit test `an_ai_tu95_leaves_the_bay_and_the_beams_from_the_humans_places` | the AI reads the same places: `Station::next_release_point`, which the strike's gate and the shared release read, walks the same six bay cells and ten beam cells (right and forward for the beams, whose height needs the drawn wing's underside) |
+
+The guided AS-16 (`kind sarh`, guidance Active, role Surface) needs the Bear's radar, which is why T95-7's
+radar preset (below) is part of this slice's proof: with the record's `TU95R.SEE` unreviewed the run read
+`NO TARGET` and no AS-16 could be launched. The AS-16 is not a pack (`SHOTS_PER_ROUND` unchanged).
+
+### Tail turret (T95-6)
+
+`flight-tu95-tail-gun` (new): `--aircraft f22 --probe-enemy-aircraft tu95 --probe-enemy-skill ace
+--probe-geometry rear --separation 1 --probe-guns --ai-probe-ticks 3000` (the B-52's scenario with the
+Bear). The AI Tu-95's slewed twin 23 mm turret (the cone's point, heading 180 degrees, 45 degree arcs) fires
+astern at the closing F-22 through BMB-AI's aim model (1 degree aim error, lag, 30 degrees a second swing):
+**5 of 180 rounds hit** (2.8 percent; the check fails above 35 percent or at no fire). It needed no code:
+the mount reads its record words (the integration note above). The human's tail turret draws `TAIL 2000
+23MMX1` on the HUD and the tracers show the astern line (frame `tail-gun-side`). Rows 5 and 6 stay cleared.
+
+### Countermeasures (T95-6) and a correction to the source review
+
+The Bear carries **99 chaff and 99 flares**, and `flight-countermeasures-tu95` (new) releases five and three
+(94 and 96 left, five cartridges in the air, six flares burning), frame `countermeasures-chaff-flare-jammer`
+(`97 CHAFF 97 FLARE` after two of each). **Update (T95-6, to the T95-0 review):** the review read `TU95.ECM`
+as "no chaff and no flare dispenser (the Tu-160's `TU160.ECM` adds 30 and 40)". Those two bytes are the radar
+and infrared deception chances, not counts. `TU95.ECM` differs from `TU160.ECM` in the mode flags (`$1f0` to
+`$0`), the radar deception chance (30 to 0), its signature term, the infrared deception chance (40 to 0) and
+its term; the two dispenser blocks (99 chaff and 99 flares, chances 35, angles 95/24 and 159/31) are
+identical. So the Bear has dispensers and **no jammer** (flags 0, chance 0): `Generation::for_record` reads it
+**Early with no RF mode and strength 0.00** (fitted, agent decision; the F-5E's `F104.ECM` precedent), which
+`--sensor-summary` prints as `jammer TU95.ECM EARLY strength 0.00 (no RF mode)`. Devices leave from the
+shared standard outlet, 15 ft aft of the reference point and 2 ft under it (inside the 80 ft tail, as the
+B-52's). `--jammer-on` still lights `JAM` on the RWR window (the window's switch, not the record: nothing
+radiates), frame `countermeasures-chaff-flare-jammer`.
+
+### Sensors (T95-7)
+
+`--sensor-summary`: `Tu95: radar TU95R.SEE search 150 nmi 60x60 deg track 150 nmi 45x45 deg look-down 0
+TRANSITIONAL; infrared none; visual VIS300.SEE search 10 nmi 150x120 deg track 5 nmi 150x120 deg; jammer
+TU95.ECM EARLY strength 0.00 (no RF mode); signature radar 400 infrared 75`.
+
+Every sensor row against the real aircraft, none with a body and none a station:
+
+| Row | Record | Real Bear-H | Decision |
+| --- | --- | --- | --- |
+| `VIS300.SEE` | the transports' visual sensor | eyes | kept |
+| `TU95R.SEE` | the Tu-160's radar record renamed (43 bytes of names) | nose search and bombing radar (Clam Pipe, Jane's, T95-0) | kept; **Transitional** (below) |
+| `TU95.ECM` | dispensers 99/99, no jammer | pylon ECM pods and chaff (Jane's, T95-0); no figure | kept as the record reads |
+| `SU37L.SEE` | laser designator, fixed row (flags `0x1008`, origin) | none (inertial and terrain-reference missiles) | kept, **no body** (decision 9; B7) |
+
+No pod hangs anywhere: the bay mask `0x1180` and the pylon mask `0x1025` carry no designator bit (T95-5), so
+nothing can be loaded that the real aircraft lacks.
+
+- **Radar profile (agent decision, fitted, John to confirm):** `TU95R.SEE` was `UNREVIEWED (not enabled)`,
+  so the Bear flew with no radar and the AS-16 refused to launch (`NO TARGET`). It is `Preset::Transitional`
+  as `B52R.SEE` (the same Tu-160 record renamed; the AC-130 class: 100 ft/s Doppler notch, burn-through 8
+  nmi; `sensors::profile`, [radar](../radar.md#presets)). One line to revert. Modes are the shared
+  air-to-air ones (RWS 150 nmi, TWS track 150 nmi, scope 5 to 150, no infrared, no ground map: the shared
+  radar has none; the strike aids are the A-G designation of a radar contact and the sights). Frame
+  `tail-gun-side` shows `TWS 10 ... TRACK` with the F-22 in the radar window.
+- **RCS page (frames `rcs-page-closed`, `rcs-page-bay-open`):** `SIG 483` with the bay closed and `SIG 724`
+  with it open (record 400 with 16 AS-16 hung, the open-bay term of 1.5 on top; the HUD adds a `BAY` cue
+  while the doors are off their seat). The open bay reaches the RCS page only, as the F-22's, F-117's,
+  B-2's and B-52's.
+
+### HUD and cockpit (T95-7)
+
+- **HUD:** the record's `bmbroh.HUD` (the AC-130 module, panels `~AC130*`; byte-identical to the B-52's), the
+  AC-130 stem and `~AC130H.PIC` (1280 x 490). No Tu-95 cockpit art exists (T95-0). The HUD draws as the
+  B-52's: flight data, `TAIL 2000 23MMX1` for the slewed gun, the weapon and count, `NO TARGET`, `BAY` with
+  the doors open (frame `cockpit-front-view`, 90 degree looks `cockpit-look-left-45`).
+- **Glass aperture (measured):** `hud_aperture::mask` already holds the Tu-95 on the AC-130 arm (BMB-C1): the
+  one window the art has is the picture, so the polygon is the whole 1280 x 490 rectangle, trimmed by the
+  art's own opaque pixels, **not failing closed** (the HUD draws, frame `cockpit-front-view`). It is now
+  pinned for the Tu-95 (`hud_aperture::tests::the_tu95_glass_is_the_whole_ac130_picture_less_its_opaque_pixels`:
+  the rectangle, an opaque pixel left out, the same mask as the B-52's and Tu-26's, a 1394 x 508 picture
+  fails closed) and the retail-reading `crates/tore-import/tests/tu95_cockpit.rs` pins the bindings, the
+  four fixed sensor rows (flags `0x1008`, at the origin), the HUD's panel frame, the art size, the absence of
+  any `~TU95*` picture and the record's `viewOffset` (0, 20, 60).
+- **Eye (fitted, measured):** `mirrors::eye_offset` gains the Tu-95: **5 ft up and 53 ft ahead** of the model
+  origin (the shared seat is 7 up, 10 ahead). Measured on `TU95.SH` (2/3 ft a unit, the centre line): the
+  fuselage top is flat at 3.1 ft (4.7 units) from 45 ft aft of the origin to 48 ft ahead; the flight deck is
+  the nose ahead of that: a roof 3.3 ft up (5 units) from 47.3 to 51.3 ft ahead, the windscreen falling to 1.3
+  ft at 58.7 ft, the cone ending at 64 ft (the glazed faces are flat colours, no texture). The shared seat is
+  37 ft aft of the deck, over the wing. The seat is the deck's middle, 53 ft ahead, 1.7 ft over the roof (the
+  B-52's margin), so F2 Back clears the crown and looks down the aircraft to the fin (frame
+  `cockpit-view-back-f2`: the wings with the pylon missiles, the fin, the tail cone). The forward cockpit,
+  padlock and target camera do not read the eye (the forward camera sits at the origin).
+  `mirrors::tests::only_the_b2_the_f117_and_the_b52_have_their_own_pilot_eye` and
+  `flight_views::tests::back_from_a_b2_sits_at_its_own_seat` carry the Tu-95. The record's `viewOffset` is not
+  used.
+- **Propeller discs:** they hide neither the HUD nor the cockpit view. The forward view (camera at the origin,
+  the inboard disc plane 31.7 ft ahead, its inner edge 16 ft out of line) shows no disc; the 45 degree looks show none; the
+  F2 Back view from the deck shows the two inboard discs as grey blur at the outer 80 pixels of each side of the
+  1280 pixel picture, as they would stand beside a cockpit looking aft (frame `cockpit-view-back-f2`), clear of
+  the centre, the HUD (none draws on the rear views) and the windows. Not changed.
+- **Rear view:** F2 Back is the only rear view; the rear views carry no HUD, so no rear cue for the tail turret
+  exists (the B-52's open item 3, unchanged).
+
+### Tests
+
+`tore-sim`: `sensors::profile::tests::the_tu95_radar_is_transitional_and_its_jammer_is_early`;
+`tore-formats`: the Tu-95 default row in `aircraft_stations::tests` (row 8 `AS16.JT`); `tore-world`:
+`ai_wings::release::tests::an_ai_tu95_leaves_the_bay_and_the_beams_from_the_humans_places`; `tore-app`: the
+glass test and the eye tests above; `tore-import`: `tu95_cockpit.rs` (retail-reading, skips without media) and
+`bomber_batch_c.rs` (row 8 `AS16.JT` x10). Battery additions: `flight-tu95-tail-gun`,
+`flight-countermeasures-tu95`, `a2g-sarh-as16-tu95`, `a2g-release-origin-tu95`; `STATIONS["tu95"]` is `[2000, 6,
+10]`, so `flight-livefire-tu95-slot1` to `-slot3` and `flight-jettison-tu95-slot2` and `-slot3` run (slots 2 and
+3 refused).
+
+### Open for John
+
+1. **Default load of 16 AS-16** (six bay, ten beams) is the brief's; the loaded Bear is 388,894 of 414,470 lb.
+2. **Radar enabled as Transitional** (`TU95R.SEE`), and **`TU95.ECM` read as Early with no jammer** (the record
+   gives none; the real Bear-H carries ECM pods and "Ground Bouncer" jamming, T95-0). A fitted jammer would be
+   an invention; the alternative is to author one.
+3. **The T95-0 "no dispensers" reading was wrong**: the Bear has 99 chaff and 99 flares, leaving from the shared
+   standard outlet (inside the fuselage; the shared law puts every aircraft's at 15 ft aft).
+4. **`--jammer-on` lights `JAM`** on the RWR window though the record radiates nothing (shared window).
+5. **Eye 5 ft up, 53 ft ahead.** No rear cue for the tail turret (no rear-view HUD exists).
+6. **The AS-16 in the bay and on the beams are two Active radar missiles needing the A-G page**: no unguided
+   release exists for them (the Harpoon's rule).
+
+### Checks
+
+All through `.local/m3-imports/light3.sh`, profile `.local/m3-aircraft/profile-tu95` refreshed first, logs in
+`.local/m3-aircraft/checks/T95-6/`: see the plan's T95-6 and T95-7 entry for the counts.
+
+Provenance: radar and jammer records, the HUD module, panel names and cockpit art are spec-derived (retail);
+the radar preset, the jammer generation, the default load, the eye and the aperture's measurement are fitted or
+opinionated, agent decisions 2026-11-16 (the load the coordinator's brief); the shape measurements are from
+`TU95.SH`. No retail bytes are committed.

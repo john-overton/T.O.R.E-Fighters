@@ -1176,3 +1176,15 @@ Measured with `--validate-ordnance` on `m3-tu95` at the batch C integration base
 first). The Tu-26's own bay refusals (T26-5, on its branch, not in this base) move other rows; the
 coordinator recomputes the merged totals (B4). The `menus-ordnance-availability` expected line reads
 5365; `a2g-catalog` and `test_battery_a2g.py` carry the unchanged 54, 23, 257 and 278.
+
+## Tu-95 default load (T95-6, 2026-11-16)
+
+The Tu-95's pylon row (`TU95.PT` row 8) now starts loaded with its ten AS-16 beside the bay's six (the
+coordinator's brief), so it is a default store row and no longer an optional empty one. Measured with
+`--validate-ordnance` on `m3-tu95` (profile refreshed first): aircraft 54, recovered weapon stations **22 (from
+23)**, weapon placements 5,365, tank placements 257, Cheat-only 278 and designator pods 82, all unchanged.
+`ordnance TU95.PT: 3 source rows, 0 optional weapon rows, 6 compatible weapon placements, 0 tank placements;
+defaults and restart passed; catalog 5 normal, 83 Cheat`. The `menus-ordnance-availability` and `a2g-catalog`
+expected lines and `test_battery_a2g.py` read 22. Load Ordnance reads 388,894 of 414,470 lb. The Tu-26's
+own branch moves its own rows; the coordinator recomputes the merged totals (B4). See the
+[Tu-95 section](../formats/aircraft-variety.md#tu-95-bear-h-ordnance-sensors-hud-and-cockpit-t95-67-2026-11-16).

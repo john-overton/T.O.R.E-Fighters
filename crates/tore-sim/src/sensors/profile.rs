@@ -148,6 +148,13 @@ impl Preset {
             // AC-130's class (Transitional). Without it the record decodes
             // as unreviewed and the B-52 flew with no radar at all.
             "B52R.SEE" => Some(Self::Transitional),
+            // The Tu-95's radar (T95-7, 2026-11-16, fitted, agent decision):
+            // the Tu-160's record renamed again (43 bytes of names differ
+            // from `TU160R.SEE`, range 911,400), so the B-52's reading: a
+            // long-range bomber set of the AC-130's class (Transitional).
+            // Without it the Bear flew with no radar, no A-G designation and
+            // so no way to launch its AS-16.
+            "TU95R.SEE" => Some(Self::Transitional),
             "F18R.SEE" | "MIG29R.SEE" | "SU24R.SEE" | "SU27R.SEE" | "F22R.SEE" | "F15R.SEE"
             | "E3R.SEE" | "E2R.SEE" | "MIG31R.SEE" => Some(Self::Advanced),
             _ => None,
@@ -253,7 +260,13 @@ impl Generation {
     pub fn for_record(record: &str) -> Option<Self> {
         match record.to_ascii_uppercase().as_str() {
             "F4.ECM" | "MIG21.ECM" | "AV8.ECM" | "YAK141.ECM" | "KA50.ECM" | "A7.ECM"
-            | "F104.ECM" => Some(Self::Early),
+            | "F104.ECM"
+            // The Tu-95's jammer record (T95-7, 2026-11-16, fitted, agent
+            // decision): the Tu-160's `TU160.ECM` with the mode flags, the
+            // deception chance, the chaff and the flare counts all zero. Like
+            // the F-5E's `F104.ECM` it reads as Early with no RF mode and
+            // strength 0.00: no noise, no dispensers.
+            | "TU95.ECM" => Some(Self::Early),
             "F14.ECM" | "MIG29.ECM" | "SU24.ECM" | "AC130.ECM" | "B52.ECM" | "A10.ECM" => {
                 Some(Self::Transitional)
             }
@@ -835,6 +848,18 @@ mod tests {
         assert_eq!(Preset::for_record("b52r.see"), Some(Preset::Transitional));
         // The Tu-160's record it renames stays unreviewed until its own slice.
         assert_eq!(Preset::for_record("TU160R.SEE"), None);
+    }
+
+    /// T95-7: the Tu-95's radar and jammer records have their reviewed
+    /// assignments, so the Bear flies with a radar (the B-52's class) and an
+    /// inert Early jammer; the Tu-160's records they rename stay unreviewed.
+    #[test]
+    fn the_tu95_radar_is_transitional_and_its_jammer_is_early() {
+        assert_eq!(Preset::for_record("TU95R.SEE"), Some(Preset::Transitional));
+        assert_eq!(Preset::for_record("tu95r.see"), Some(Preset::Transitional));
+        assert_eq!(Generation::for_record("TU95.ECM"), Some(Generation::Early));
+        assert_eq!(Preset::for_record("TU160R.SEE"), None);
+        assert_eq!(Generation::for_record("TU160.ECM"), None);
     }
 
     #[test]
