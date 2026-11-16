@@ -13,7 +13,7 @@ from battery import Scenario
 REVIEWED_AIRCRAFT = ("a7", "f4b", "f4j", "f4e", "f4g", "f15", "mig17", "f16c", "f104", "a310", "c130", "ac130", "e3", "a10", "av8", "ah64", "mi24", "ch47",
                      "yak141", "v22", "il76", "e2", "b747",
                      "f18", "rafale", "mig29", "su27", "su35", "mig21", "su25", "f22", "f22n", "faxx", "x31", "mig23", "f14", "a4e", "mig25",
-                     "f16a", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc", "b52", "b2", "f117", "b1b", "tu160", "f111")
+                     "f16a", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc", "b52", "b2", "f117", "b1b", "tu160", "f111", "tu26")
 
 
 def check_report(work: Path, _output: str) -> list[str]:
@@ -104,6 +104,9 @@ def check_report(work: Path, _output: str) -> list[str]:
                     "pitch-roll-combinations-72deg.csv": 26, "sweep-flap-combinations.csv": 41,
                     "sweep-seam-span-taileron.csv": 19, "taileron-corner-swing.csv": 25,
                     "brake-sweep.csv": 9, "exhaust-sweep.csv": 8},
+        # The Tu-26 (T26-3): the swing wing against the speed, flaps and gear (6 poses), the
+        # tailplane pitch against roll (25 poses) and the dense gear sweep (202 values).
+        "TU26.PT": {"dense-gear.csv": 203, "pitch-roll-combinations.csv": 26, "sweep-grid.csv": 7},
         # The Tornado IDS (Clean) (TOR-13) drives the Tornado's own rig: the same sweeps.
         "tornadoc": {"dense-gear.csv": 203, "pitch-roll-combinations-25deg.csv": 26,
                      "pitch-roll-combinations-67deg.csv": 26, "sweep-flap-combinations.csv": 36,

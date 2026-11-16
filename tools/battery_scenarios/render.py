@@ -596,6 +596,21 @@ def scenarios() -> list[Scenario]:
             notes="F-111F skin from above and below with the wing spread (200 knots) and the gear down, at its real size (per-axis shape scale 0.859, 1.0, 0.827 on the header scale, docs/formats/objects-and-shapes.md, Aircraft shape scale): no underside shape shows through the top and the 19 double-sided panels do not z-fight; the fixed glove plates lie inside the spread wing and show nothing. The shape has no E0 decal faces. The default load is not used: with the full 32,663 lb tank it is over the 100,000 lb maximum take-off weight and free flight refuses to start (F111-6 and F111-8).",
         ),
         Scenario(
+            name="render-tu26-skin",
+            lane="flight",
+            args=["--free-flight", "--aircraft", "tu26", "--flight-view", "2", "--flight-look", "0,60", "--flight-zoom", "1", "--flight-devices", "1,0,0,0,0", "--capture-flight", "{work}/tu26-top.ppm", "--no-audio"],
+            env={"TORE_WEATHER_TIME": "12:00"},
+            window=True,
+            outputs=["tu26-top.ppm", "tu26-under.ppm"],
+            expect=["Scene capture:"],
+            check=skin_capture_problems,
+            then=[
+                Step(["--free-flight", "--aircraft", "tu26", "--flight-view", "2", "--flight-look", "0,-60", "--flight-zoom", "1", "--flight-devices", "1,0,0,0,0", "--capture-flight", "{work}/tu26-under.ppm", "--no-audio"], window=True, timeout=180),
+            ],
+            timeout=180,
+            notes="Tu-26 skin from above and below with the gear down, at its header scale (4/3 ft a unit, 101 ft spread span, 4 to 10 percent under the real Tu-22M3, no per-axis factor): no underside shape shows through the top and the double-sided panels do not z-fight. The shape's E0 decal slots stay omitted rather than filled with skin (docs/formats/aircraft-variety.md, Tu-26 shape and rig).",
+        ),
+        Scenario(
             name="render-runway-paint-calm",
             lane="flight",
             args=["--free-flight", "--aircraft", "f18", "--theater", "UKR", "--ground-start", "2", "--maneuver", "takeoff", "--flight-probe-ticks", "1300", "--flight-view", "1", "--capture-flight", "{work}/runway.ppm", "--no-audio"],

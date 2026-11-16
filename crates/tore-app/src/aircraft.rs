@@ -423,6 +423,22 @@ impl Airframe {
             }
             return Some(points);
         }
+        if self.profile.id == tore_formats::aircraft::AircraftId::Tu26 {
+            // The swing wing carries its vapor point with the drawn tip (T26-3).
+            let turn = crate::tu26_animation::sweep_turn(s);
+            let basis = tore_sim::attitude::Basis::new(s.yaw, s.pitch, s.bank);
+            let mut points = [[0.; 3]; 2];
+            for (side, out) in points.iter_mut().enumerate() {
+                let p = crate::tu26_animation::streamer_point(def, side, turn)?;
+                *out = std::array::from_fn(|i| {
+                    s.position[i]
+                        + basis.right[i] * p[0]
+                        + basis.up[i] * p[1]
+                        + basis.forward[i] * p[2]
+                });
+            }
+            return Some(points);
+        }
         streamer_world_points(
             def,
             s.position,

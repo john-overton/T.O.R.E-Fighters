@@ -12488,6 +12488,606 @@ likely needed in F111-7. The bomb sight type of `ac130.HUD` was not read here.
   only with the wings spread below 26 degrees (conflicting accounts; Wikipedia mirror,
   forum posts); the primary technical order was not found.
 
+## Tu-26 source review (2026-11-15)
+
+Research mode, slice T26-0 (bomber batch C). This reviews `TU26.PT` (Tu-26
+Backfire-C, the retail name for the Tu-22M3) and its dependency closure before
+`AircraftId::Tu26` exists. `TU26.PT` is not a parked target and has no
+`parked_aircraft.rs` entry. No original module was executed. PT, SEE, ECM and JT
+are read as bounded BRF data with the shared field order in `aircraft_schema.rs`;
+SH and HUD are inspected as data (`shape_inspect`, state words swept by value).
+Slice done by Claude Sonnet (sonnet-medium). Nothing here changes code or
+behaviour. Real-aircraft figures are cited and never establish game behaviour.
+Retail files were extracted only under `.local/m3-imports/scratch/tu26`; no
+retail bytes are committed. The [Tu-160 review](#tu-160-source-review-2026-11-15)
+(`TU160.PT` is this record with 35 changes) and the B-52 review are the worked
+examples; this section repeats their method on the Tu-26.
+
+Questions open for John, **not decided here**: the record values, the draw scale,
+the sweep law and pivot, the surfaces, the bay and station counts, the missing
+Kh-22, the tail gun, the sensor row, the HUD and eye. They are listed under
+"Questions for John" in `.local/m3-aircraft/PLAN-T26.md`.
+
+### Tu-26 build and extraction
+
+`FA_1.LIB` and `FA_2.LIB` are the same pair as the MiG-31 review. The closure was
+extracted with `tore-extract --include 'TU26*' --include '~TU26*' --include
+'T23_1*' --include 'BMBROH*' --include 'B.BI'` plus `'*.PT'`, `'*.JT'`, `'*.SEE'`
+and `'*.ECM'` for the comparisons below. The `SETUP.ESA` installer copy of
+`FA_2.LIB` holds byte-identical `TU26.PT`, `TU26*.SH`, `T23_1.JT`, `B.BI`,
+`TU26.ECM` and `TU26R.SEE`; only `BMBROH.HUD` differs (the same one-byte build
+difference the B-52 review found). The usual five unrelated archive errors appear.
+
+`swpatch.lib` (excluded from base research, as in the Tornado and Tu-160
+reviews) holds a different `TU26.SH`: header exponent 8 (scale 1), 310 faces
+(the same count), the same six state words at other addresses (`7b00`, `7b0c`,
+`7b12`, `7b1e`, `7b24`, `7b2a`), coordinates about 4 times finer (x -157 to 157, y
+-143 to 247, z -16 to 87). It is the same planform at 1/3 ft a unit, so it gives
+span 104.7 ft and length 130 ft: **the same aircraft, not a truer size** (the
+Tu-160's patch copy was likewise only finer). This review reads the base shape.
+
+**No Tu-26 cockpit art exists**: sweeps `~TU26*`, `*TU26*` (apart from the shape,
+skins, damage looks and radio callout below) and `*BACKFI*` found only the
+encyclopedia pictures `TU26_0.PIC` and `TU26_1.PIC`. There is no `TU26.PTS`, no
+`TU26.AI` and no Tu-26 mission file.
+
+### Tu-26 identity and record
+
+| Field | Decoded value |
+| --- | --- |
+| PT | `TU26.PT`, 10,301 bytes, SHA-256 `9046433366523710f871420c0d4a3c321fc4fd1928ce70ff93573454f7e80000` |
+| Displayed names | `Tu-26`, `Tu- 26 Backfire-C`, `TU26.PT` |
+| Schema | OBJECT + NPC + PLANE; `structType` 5; `typeSize` 660; `instanceSize` 626 |
+| Object class / year / hit points | `0x4000` / 1987 / 253; `expType` 30; `flags` `0x2bf3` |
+| PLANE flags | `0x5` (base `0x01` and `0x04`; no hook, carrier or `0x10` seat bit) |
+| Shape | `tu26.SH` (33,280 bytes, **header exponent 10, so object scale 4**, CODE 26,812), shadow `tu26_s.SH` (14 faces) |
+| Damage looks | `TU26_A.SH` 322 faces, `TU26_B.SH` 41, `TU26_C.SH` 335, `TU26_D.SH` 44 (all exponent 10) |
+| Skins | `_TU26.PIC` 139,424 bytes (the shape's only texture), `_TU26_A/B/C/D.PIC` 143,844 / 41,924 / 140,724 / 51,804 |
+| Sounds | `&jet09.11k` loop and second sound, `&powerup.5k`, `&powerdn.5k`; `^ACTU26.5K` radio callout |
+| HUD | `bmbroh.HUD` (the B-52's and Tu-95's file) |
+| AI script | `b.BI` (shared with the B-2, B-52, Tu-95, Tu-160) |
+| Sensors / jammer | `VIS300.SEE`, `TU26R.SEE`, `TU26.ECM`, `SU37L.SEE` |
+| Gun | `T23_1.JT`, 2,000 rounds, flag `0x180a` (tail, slewed aft) |
+| Stores | `AS16.JT` as the default of three external rows (2, 4 and 6); the bay row has no default |
+| PTS | none |
+| Encyclopedia | `TU26.INF` (Jane's, quoted below as reference media), `TU26_0.PIC`, `TU26_1.PIC` in `disc2/FA_3.LIB` |
+| Engines / thrust | 2 engines, thrust 59,986 lbf dry and 88,180 lbf afterburner (totals), fuel flow 10 and 66 lb/s |
+| Weights | empty 110,230 lb, internal fuel 110,230 lb, max takeoff 273,370 lb |
+| Ceiling / G | 60,000 ft; `envMin` -2, `envMax` 4, `negGLimit` 0 |
+| Speeds (1 G row) | 145 kt minimum, 598 kt at sea level, 1,145 kt top at 36,000 ft |
+| Signatures | `sigs` 202, 202, 100 (IR), 100 (radar), 0 |
+| Checkpoint code / CLI key | none yet, reserved for BMB-C1 |
+
+The decoded record equals the catalog row in [`fa-aircraft.csv`](fa-aircraft.csv)
+field for field. Hashes of the files later slices depend on:
+
+| Resource | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `TU26.SH` | 33,280 | `56b5f36f63a2c3427fedcc5687330a8a8fb6763fe5402a8e42f88ff9ac15cca9` |
+| `TU26.SH` (`swpatch.lib`, not read as base) | 33,280 | `bfb51489a9f1a343adbc0a4c6cb7f2fb4cc0e61e7ef57feae73195570163eea5` |
+| `TU26_S.SH` | 4,608 | `3c72da3401873835816c44225324888674b24dda9b138b23ad1b72430e5cd286` |
+| `TU26_A.SH` | 25,088 | `201c66da646cc210aa489c4c8ca0903c2af2ebdf4fa648a4286b88b18247dda6` |
+| `TU26_B.SH` | 4,608 | `2b6523354c243622d090a01ab5664fbfc142a28bb9dc0767df575175032330de` |
+| `TU26_C.SH` | 25,088 | `1edc910fdddcf9e4d56ec919ba8c5fa3fd35f48831799dd86235c4b139820a36` |
+| `TU26_D.SH` | 4,608 | `bb6e3505328cd0389d68d75f031d5095d11fae2ce74e153ebc4be668d09c2180` |
+| `_TU26.PIC` | 139,424 | `1c37cb06a9340dad5c82f4e04f7f1d20a5818fd202847de0726f0b2a42c0c997` |
+| `TU26R.SEE` | 488 | `d4c3f5676cff03e024dd3cf34c133f6a91dacc418640eab91143cc6ee7a5e9ee` |
+| `TU26.ECM` | 345 | `9028130b3110139b94d0d56bf7a06f5c14d5c7b9bfd8d7ac4d2bce4901f4ff78` |
+| `T23_1.JT` | 2,704 | `031db9b6035eeaa2b24bc8d3e120cf65f41091b6c4173da5edf94ea9fb164963` |
+| `BMBROH.HUD` (base) | 4,608 | `3eb15857d970c2f3f48f3f9482cbfaa8c1463aef4275a2198d6065d55ef7bbf9` |
+
+`SU37L.SEE`, `VIS300.SEE`, `B.BI` and `AS16.JT` hash as in the Tu-160 review (same
+files).
+
+The game's own Jane's text (`TU26.INF`, reference media; the Tu-22M3 figures) is
+the source for the figures quoted below. It says: a "large missile targeting and
+navigation radar inside dielectric nosecone"; "radar ('Box Tail') for tail
+turret, above guns"; "One GSh-23 twin-barrel 23 mm gun, with barrels
+superimposed, in radar directed tail mounting"; "Max offensive weapon load three
+Kh-22 (NATO AS-4 'Kitchen') air-to-surface missiles, one semi-recessed under
+centre-fuselage, one under fixed centre-section panel of each wing; or 24,000 kg
+(52,910 lb) of conventional bombs or mines, half carried internally and half on
+racks under wings and engine air intake trunks. Internal bombs can be replaced
+by rotary launcher for six Kh-15P (AS-16 'Kickback') ... with four more underwing
+as alternative to Kh-22s". Wing: "large-span fixed centre-section and two outer
+steering sleeves variable from 20 degrees to 65 degrees sweepback ... leading-edge
+fence towards tip of centre-section each side".
+
+### Tu-26: the template copy list (for John)
+
+**`TU160.PT` is this record with 35 statements changed** (the Tu-160 review), and
+**this record is itself close to the Tu-95's: 170 of its 207 non-pointer
+statements equal `TU95.PT`'s** (37 differ), then `KC135.PT` 166, `E3.PT` 165,
+`IL76.PT`, `E2.PT` and `AN74.PT` 164, `B52.PT` 162. So the Tu-26's tuning is the
+shared large-aircraft block, not a Backfire measurement. Copied (equal to the
+Tu-95's, hence not authored for the Tu-26): the whole linear and angular velocity
+blocks (`_bv`, `_brv` x and z, `puffRot`), stall (256, 1,280, 256, 30), spin
+entry, exit and words, crash speeds, `coefDrag` 256, `airBrakesDrag` 192,
+`wheelBrakesDrag` 102, `flapsDrag` 76, `gearDrag` 23, `bayDrag` 25, `rudderYaw`,
+`structureWarnLimit` and `structureLimit` (2,560 and 5,120), `throttleDacc` 60,
+the sound words, the camera and doppler words and the 45 `systemDamage` bytes. The
+37 statements the Tu-26 does not share with the Tu-95 (so authored, or chosen for
+it):
+
+| Field | `TU26.PT` | `TU95.PT` |
+| --- | ---: | ---: |
+| OBJECT `flags` / PLANE `flags` | `0x2bf3` / `0x5` | `0x12bf3` / `0x4` |
+| `dmgDebrisPos.x` / `dstDebrisPos.z` | 80 / -90 | 180 / -280 |
+| `year` | 1987 | 1984 |
+| `maxVisDist` | 775 | 1,465 |
+| `sigs[0]`, `[1]`, `[2]`, `[3]` | 202, 202, 100, 100 | 278, 278, 75, 400 |
+| `hitPoints` | 253 | 393 |
+| Empty weight (`weight`), lb | 110,230 | 264,550 |
+| `maxBank` | 8,190 | 5,460 |
+| `maxAlt`, ft | 60,000 | 40,750 |
+| `envMin` / `envMax` | -2 / 4 | -1 / 3 |
+| `structure[0]` / `[1]` | 1,003 / 1,934 | 608 / 789 |
+| `_brv.y.acc` / `dacc`, `turbulencePercent`, `rudderBank` | 4 / 4, 140, 5 | 3 / 3, 141, 10 |
+| `engines` | 2 | 4 |
+| `thrust` / `aftThrust`, lbf | 59,986 / 88,180 | 355,080 / 0 |
+| `throttleAcc` | 20 | 10 |
+| `fuelConsumption` / `aftFuelConsumption` | 10 / 66 | 4 / 0 |
+| `internalFuel`, lb | 110,230 | 100,000 |
+| `_gpullDrag`, `flapsLift`, `loadedDrag`, `loadedGpullDrag` | 23, 25, 30, 6 | 20, 38, 60, 12 |
+| `loadedElevator` / `Aileron` / `Rudder` | 45 / 45 / 45 | 26 / 26 / 26 |
+| `maxTakeoffWeight`, lb | 273,370 | 407,850 |
+
+Real figures against the record, from the game's own Jane's text (`TU26.INF`),
+Wikipedia "Tupolev Tu-22M" (Tu-22M3 specification, read 2026-11-15) and
+Wikipedia "Kuznetsov NK-25" (read 2026-11-15); the sources disagree where noted:
+
+| Field | Record | Real | Difference | Verdict |
+| --- | ---: | ---: | ---: | --- |
+| Empty weight, lb | 110,230 | 127,868 (58,000 kg, Wikipedia); `TU26.INF` gives none; the plan's "about 118,000" was not re-found | -13.8% vs Wikipedia | **Authored**: it equals the Jane's fuel figure (below) and the weights add up (below) |
+| Internal fuel, lb | 110,230 | 110,230 (50,000 kg, `TU26.INF`); Wikipedia 119,050 (54,000 kg) | exact vs Jane's; -7.4% vs Wikipedia | Real by the game's own text |
+| Max takeoff, lb | 273,370 | 273,370 (124,000 kg, `TU26.INF`); Wikipedia 277,782 (126,000 kg) | exact vs Jane's; -1.6% | Real |
+| Thrust dry, lbf (total) | 59,986 | 2 x 33,000 = 66,000 (NK-25, 145 kN) | -9.1% | Near, not exact |
+| Thrust afterburning, lbf | 88,180 | 2 x 55,000 = 110,000 (NK-25 245 kN); Wikipedia M3 page 2 x 55,700 = 111,400 | -19.8% | Low |
+| Fuel flow dry / afterburning, lb/s | 10 / 66 | NK-25 SFC 0.58 and 2.1 kg/kgf/h at 66,000 / 110,000 lbf: 10.5 / 64.3 | -5% / +2.6% | **Real already** (at the real thrust) |
+| Engines | 2 | 2 | | Correct |
+| Top speed | 1,145 kt at 36,000 ft (1,933 ft/s row edge) | Mach 1.88, 1,080 kt (`TU26.INF`); Wikipedia 1,997 km/h at 30,000 ft | +6% | Close; trim to 1,080 is a record edit |
+| Sea-level 1 G edge | 598 kt | Mach 0.86, 567 kt at low altitude (`TU26.INF`) | +5.5% | Close |
+| Minimum speed (1 G, sea level) | 145 kt | landing 154 kt, take-off 200 kt (`TU26.INF`) | | Consistent |
+| Ceiling, ft | 60,000 | 43,635 (13,300 m, `TU26.INF`, Wikipedia) | +37% | **High**: the G rows run to 60,000 ft |
+| G limit | rows -2 to +4 | +2.5 (`TU26.INF`) | | See below |
+| Year | 1987 | Tu-22M3 service 1987 | | Retail value; gates availability |
+| Hit points | 253 | none | | Own |
+
+**The weights add up.** Empty 110,230 plus fuel 110,230 plus the Jane's maximum
+weapon load 52,910 lb (24,000 kg) is **273,370 lb, exactly the maximum takeoff
+weight**. So the record's empty weight is a derived number (maximum takeoff minus
+fuel minus payload), not the airframe's real empty weight (127,868 lb by
+Wikipedia). The BMB-A2 rule (validators reject only an empty weight at or above
+the maximum; a default load starts at what the maximum allows) already covers a
+corrected empty weight.
+
+**G rows** (speed ft/s at altitude ft; points up the slow edge, down the fast
+edge). Seven rows, G -2 to +4, **all real polygons, not stubs** (the Tu-160
+review's remark that the Tu-26 rows were stubs of the same kind was wrong; its
+own rows were the stubs):
+
+| G | Points |
+| ---: | --- |
+| -2 and +4 (same polygon) | 405@0, 492@16,000, 731@33,500, 870@41,000, 1,105@41,000, 1,307@35,500, 1,390@27,000, 940@0 |
+| -1 and +2 (same polygon) | 290@0, 374@18,562, 536@36,843, 668@47,125, 870@54,000, 1,240@54,000, 1,565@45,500, 1,760@35,000, 980@0 |
+| 0 | 180@0, 225@18,000, 313@39,000, 521@54,000, 870@65,000, 1,337@65,500, 1,840@52,750, 2,084@36,000, 1,040@0 |
+| 1 | 245@0, 309@19,500, 423@38,000, 591@50,000, 870@60,000, 1,302@60,000, 1,712@50,000, 1,933@36,000, 1,010@0 |
+| 3 | 345@0, 442@17,000, 631@34,500, 765@43,750, 880@48,000, 1,185@48,000, 1,428@40,500, 1,552@31,000, 960@0 |
+
+The 1 G row tops out at 1,933 ft/s (1,145 kt) at 36,000 ft and 1,010 ft/s (598 kt)
+at sea level: the catalog speeds. The +4 row repeats the -2 polygon and the +2 row
+the -1 polygon, so the rows above +3 are copies, not a real +4 envelope (Jane's
++2.5). The 1 G row's 60,000 ft edge is where the 60,000 ft ceiling comes from.
+
+### Tu-26 dependency closure: shape, HUD, AI, sensors, ECM, stores
+
+| Resource | Role | Note |
+| --- | --- | --- |
+| `TU26.SH` | Shape | 310 runtime faces, 0 lines, 0 billboards, one texture `_TU26.PIC`, six state words (`7880`, `788c`, `7892`, `789e`, `78a4`, `78aa`), **no sweep word**; streamer record pivot (15,360, -1,024, 4,096), points (24,576, 0, -12,288) twice, unrelated to the mesh as the Tornado's and Tu-160's |
+| `TU26_S.SH` | Shadow | 14 faces |
+| `TU26_A.SH` / `TU26_C.SH` | Damage bodies | 322 / 335 faces |
+| `TU26_B.SH` / `TU26_D.SH` | Damage pieces | 41 / 44 faces |
+| `bmbroh.HUD` | HUD | the AC-130 panel family; see "HUD" below |
+| `b.BI` | AI script | present, shared |
+| `VIS300.SEE` | Visual sensor | type 0, 60,760 ft; same file as the Tu-160's |
+| `TU26R.SEE` | Radar | the Tu-160 radar record with **range 607,600 ft (100 nmi)** against 911,400 (150 nmi); 51 differing bytes |
+| `TU26.ECM` | Jammer | type 9, 345 bytes; not in any roster |
+| `SU37L.SEE` | Built-in laser designator | same file as the Tu-160's; see "Sensors" |
+| `T23_1.JT` | Tail gun | see "Tail gun" |
+| `AS16.JT` | External store | in the TORE roster (live); `kikbk.SH` 15.7 ft long, 1.49 ft body, 3.0 ft span |
+
+### Tu-26 shape state words (rule 11 fold table)
+
+Six state words, **the same six kinds and the same slot order as the Tu-160**.
+Counts from `Shape::with_state` (neutral 310 faces; coordinates raw shape units,
+x right, y forward, z up). **Object scale 4, so one unit is 4/3 ft.** A value
+sweep of -1, 1, 2, 3, 5, 10, 100 and 1,000 was run on every word.
+
+| Word | Values | Faces | Geometry | Reading | Status |
+| --- | --- | --- | --- | --- | --- |
+| `7880` | 1 | +8 | Four prisms behind the nozzles (x -4 to 4, y -53 to -29, z -1 to 2, two windings each) | Afterburner flames | Confirmed by position (nozzle plane y -29) |
+| `788c` | 1 | +8 | Two vertical plates at x -2 and x 2, y 11 to 23, z -5 to -1, two windings each (4 faces a side) | Slot 2 (**brake** by family order); see the note below | Slot order only |
+| `7892` | 1 | +12 | Mains: x +-3 plates (y -8 to 2, z -2 to -10) and y -3 cross plates (x 1 to 5); nose: x 0 plate y 34 to 38 and y 36 cross plate (x -1 to 1), z -4 to -11 | Gear down | Confirmed (low point -11) |
+| `789e` | -1 / 1 and up | +4 -2 / -2 | Left outer trailing strip `4f8d` `4fb4` (x -36 to -10, y -9 to -3, z -1) deleted by 1 or more; -1 deletes it and adds four faces `5006` `502d` `504e` `506f` (z -4 to -1) | Left flap, signed (-1 drooped) | Slot order and geometry |
+| `78a4` | -1 / 1 and up | +4 -2 / -2 | The same for the right strip (`4b4c` `4b73`, drooped `4bc5` `4bec` `4c0d` `4c2e`) | Right flap | As above |
+| `78aa` | -1 / 1 / 2 and up | +2 -2 / +2 -2 / -2 | The rudder strip `517d` `51a4` (x 0, y -33 to -24, z 9 to 21) swapped for a copy leaning to x +3 (value 1: `50a3` `50ca`) or x -3 (-1: `5110` `5137`); 2 or more deletes it | Rudder, signed | Confirmed by geometry |
+
+**There is no sweep word, no slat, spoiler, fence, tailplane, hook, canopy,
+bay-door, probe or reverser word.** The wing is one fixed pose, so any sweep is a
+**fitted rig** (the Tornado, MiG-23 and F-14 method), as for the Tu-160.
+
+**A reading for the `788c` plates, not decided.** By the family slot order they
+are the airbrake. The Tu-26 has no airbrake in the Jane's text (it brakes with a
+parachute and wheels). The plates stand 4 units (5.3 ft) apart, centred on the
+belly at y 17 (the bay row sits at y 18), 12 units (16 ft) long and 4 units (5.3
+ft) deep; the real bay is 5.9 ft wide and 23 ft long (`TU26.INF`). The record
+carries `bayDrag` 25 and the HUD has a BAY annunciator. The plates therefore also
+read as the **bay doors open**, as the B-52's `7a20` does by position. The same
+pattern holds for the Tu-160 (plates y 6 to 16, bay y 11.4), which that review
+read as a ventral airbrake. Options below.
+
+**The sweep word: none.** Measured wing, spread pose: span x -38 to 38 (76
+units); the movable panel's leading edge from (14, 3) to (38, -5) is **18.4
+degrees** from the lateral axis (real 20 degrees); its trailing strip's leading
+edge from (11, -3) to (36, -7) is 9.1 degrees, and the strip's trailing edge (10,
+-7) to (36, -9) 4.4 degrees (one unit is 1.3 ft, so a unit of rounding over 25 is
+2.3 degrees: the mesh is quantised).
+
+**The fixed gloves and the panel.** The fixed centre section is small: the glove
+runs from x 5 (the intake trunk side) to x 14-15, leading edge from (5, 18) to (14,
+4), y 4 to -6 at the trailing end (x 10 to 14), z -2 to -1. The movable outer
+panel is **13 faces a side** (right: `4b4c 4b73 498f 49b2 49db 49fe 4a21 4a44 4a67
+4a8a 4ab3 4ad6 4af9`; left: `4f8d 4fb4 4dd0 4df9 4e1c 4e3f 4e62 4e85 4ea8 4ecb 4ef4
+4f17 4f40`), **9 distinct vertices a side** (the panel and its two-faced flap
+strip all at z -1), x 10 to 38. **It shares exactly one vertex with the fixed
+airframe: (14, 3, -1) right and (-14, 3, -1) left, the glove's leading-edge
+corner** (unlike the Tu-160's, which shared none). That vertex is a natural
+pivot (the Tornado's glove-corner idea) and is measured, not fitted (swing
+survey below).
+
+**The fence: not in the shape.** Jane's: "leading-edge fence towards tip of
+centre-section each side" (a fixed fence, not a hinged one as the Tu-160's). The
+mesh has no geometry above the wing (every wing and glove face is at z -2 to 0, the
+highest outer-wing vertex z -1). None invented; a fixed fence would be authored
+geometry, a follow-up.
+
+**Rule 11 face table** (exact coordinates against all other faces):
+
+| Surface | Faces | Moved | On hinge/spindle | Fixed off axis |
+| --- | --- | --- | --- | --- |
+| Movable wing panel (swing), per side | 13 (incl. 2 strip faces), 9 vertices | all 9 | 1 shared vertex, the glove corner (14, 3, -1), which is the pivot, so it does not move | 0 |
+| Flap strip, right (`4b4c` `4b73`) | 2, 4 vertices each | 2 each (trailing edge (10, -7), (36, -9)) | the leading edge (11, -3), (36, -7) shared with panel faces only | 0 |
+| Flap strip, left (`4f8d` `4fb4`) | 2 | 2 each | mirror | 0 |
+| Drooped flap copies (`789e` / `78a4` = -1) | 4 faces a side | strip edge z -4 / -3 | leading edge z -1 | 0 |
+| Tailplane, right (`4085` `40bd` `40eb` `4118` `413c`) | 5, 8 vertices | all | **none shared with any other face** | 0 |
+| Tailplane, left (`45a7` `45dd` `4605` `462c` `464d` `4670`) | 6, 6 vertices | all | none shared | 0 |
+| Rudder strip (both poses) | `517d` `51a4`; `50a3` `50ca`; `5110` `5137` | the trailing edge (0, -28, 9), (0, -33, 21) | the leading edge (0, -24, 9), (0, -31, 21) shared with the fin faces `3c11` `3aee` | `(0, -28, 9)` also on `3b52` `3c75` (the fin base beneath), as in the retail pose swap |
+| Upper fin (z 9 to 22, six faces `3aee 3b75 517d 51a4 3c11 3c98`) | 6 | all | `(0, -28, 9)` `(0, -24, 9)` `(0, -11, 9)` shared with the lower fin | 0 |
+| Gear plates (`7892`) | 12 | rigid | top edge z -2 sits on the belly, none shared | 0 |
+| Flames (`7880`), plates (`788c`) | 8 and 8 | placed only | none shared | 0 |
+
+Verdict: no face folds. The whole-surface gate (no diagonal or partial surface) is
+met by every candidate: each face is a complete polygon wholly on one side of its
+hinge or spindle. The tailplane, as in the Tu-160's, is the one surface whose
+whole face set is free of shared vertices, so its pitch turn leaves no seam in the
+mesh (the root edge stays at x +-5 against the fuselage side).
+
+### Tu-26 surfaces (for John)
+
+- **Swing wing: 13 whole faces a side, one rigid panel.** The turn is a vertical
+  axis through the glove corner; the seam is below.
+- **Tailplane (low-set, mid-height on the rear fuselage, z -2 to 0, roots x +-5,
+  tips x +-13, y -36 to -14; 26 units, 34.7 ft span at 4/3).** No state word. 5
+  faces right and 6 left (an extra left face; not mirror-identical, a mesh
+  asymmetry). Whole surface about a lateral spindle through the root chord midpoint
+  (x +-5, y -21.5, z -1): a pitch turn moves the root chord ends up to 7.5 units
+  (10 ft) times the sine, in z, and a roll turn splits the two roots by the same
+  at the fuselage; the faces share no vertex so no fixed face is dragged. Jane's
+  says only "all-swept tail surfaces". The real Tu-22M tailplanes are all-moving
+  (not in the sources read here), so rule 12 (pitch plus differential roll) is
+  recommended, an opinionated reading.
+- **Fin and rudder.** A single fin on the centre line (x 0 plane, two windings).
+  The source's rudder is the aft strip only (`517d` `51a4`: chord 4 units at the
+  base to 2 at z 21, i.e. 5.3 ft to 2.7 ft), swapped by the word for a signed skew
+  (x +3 or -3 at the strip's aft edge, a 3-unit lean over 12 units of height:
+  about 14 degrees). Rig the strip, hinged on its leading edge (0, -24, 9) to (0,
+  -31, 21), at the word's lean as the limit (the B-52 and Tornado precedent). The
+  real fin is also fixed, with a dorsal fin ("large dorsal fin", Jane's).
+- **Flaps: one strip a side** (x 10 to 36, 21 units to 34 ft long), the drooped
+  copy at 3 units (4 ft) is the source pose; the retail "retracted" is the strip
+  deleted. No slats, spoilers, ailerons or elevons in the mesh: none invented.
+- **The `788c` plates**: airbrake or bay doors (above). Options: (a) rig them as the
+  bay-door open pose for the bay station (the plates stand where the doors would,
+  spacing equals the real bay width within 10%); (b) an airbrake as the family
+  slot (not real); (c) leave unrigged and cut authored door leaves into the belly
+  as for the B-1B and Tu-160 (T26-5).
+- **No refuelling probe in the shape.** Real: a fixed probe on the nose can be
+  fitted (Wikipedia); not drawn, none invented.
+
+### Tu-26 gear
+
+Plate gear, no wheels or doors, state word `7892`: the nose plate at y 34 to 38
+(x 0, two windings) with a y 36 cross plate (x -1 to 1), z -4 to -11; the mains at
+x +-3 (long plates y -8 to 2, z -2 to -10) with cross plates at y -3 (x 1 to 5 and
+-5 to -1). Low point **-11 units**, 7 units (9.3 ft) below the belly skin (z -4 on
+the keel, z -3 either side). At 4/3 ft a unit: wheelbase from the nose plate (y 36)
+to the main plates' centre (y -3) 39 units, **52 ft**; the mains stand at x +-3 so
+the track is **8 ft** between the plates (13.3 ft across the cross plates). The
+real mains are bogies of three pairs of wheels that "pivot inwards from vestigial
+fairing under centre-section on each side into bottom of fuselage" (`TU26.INF`);
+the real track and wheelbase were not found in the sources read. Height: gear
+down z -11 to 22 is 33 units, **44 ft against the real 36.25 ft (+21%)**; gear up
+(z -4 to 22) 26 units, 34.7 ft (-4.4%): the plates are about 9 ft longer than the
+real clearance, as the Tu-160's were 7 ft. Gear rig options: each plate set rigid
+about its top edge, the nose folding aft and the mains aft about a lateral axis
+(the Tornado and Tu-160 precedent) rather than the real inward fold (the two mains
+are 6 units apart and each plate is 8 tall, so an inward turn would cross the
+centre line); optionally shorten the plates by 6 units (8 ft) in the rig. No
+bogie rotation or doors in the source. The fold check passes trivially (whole
+plates, nothing shared).
+
+### Tu-26 real size (for John)
+
+Measured on the neutral state (gear up) and the gear word. Header exponent 10, so
+the **object scale is 4** (2^(10 - 8); the Tornado and B-52 are scale 2, the
+Tu-160 8, the B-2 and F-117 1). One unit is **4/3 ft**. `combat::debris::scale`
+would need a `Tu26 => 4/3` arm: the default 1/3 ft a unit would draw it **4 times
+too small**.
+
+| Axis | Units | At 4/3 ft | Real | Verdict |
+| --- | ---: | ---: | ---: | --- |
+| Span, spread (x -38 to 38) | 76 | 101.3 ft | 112.5 ft (34.28 m, 20 degrees; `TU26.INF`, Wikipedia) | **-10.0%** |
+| Length (y -36 to 62) | 98 | 130.7 ft | 139.3 ft (42.46 m) | **-6.2%** |
+| Height, gear up (z -4 to 22) | 26 | 34.7 ft | 36.25 ft (11.05 m) | -4.4% |
+| Height, gear down (z -11 to 22) | 33 | 44.0 ft | 36.25 ft | +21.4% |
+| Tailplane span (x -13 to 13) | 26 | 34.7 ft | not found | |
+| Swept span, turned 46.6 degrees about the glove corner | 49.4 | 65.8 ft | 76.4 ft (23.30 m, 65 degrees) | -13.9% |
+
+(The swept-span row is the measured full span after the turn described in the swing survey: the spread to swept ratio is 0.649 against the real 0.680.) The patch shape's coordinates (4 times finer, scale
+1) give 104.7 ft by 130 ft: the same planform. **Verdict.** Unlike the Tu-160 (true
+size), the Tu-26's mesh is **uniformly 4 to 10% smaller than the real aircraft at
+the header scale**, and the gear is long. A uniform scale of about 1.066 (length
+exact) would give span 108 ft (-4%), height 37 ft (+2%). Options (none chosen): (1)
+draw at 4/3 ft a unit (the header scale; Tornado, B-52 and Tu-160 precedent;
+span -10%); (2) the same plus a per-axis fit via `shape_axis_scale` (the F-111F
+route, x 1.11, y 1.066, z 1.04; opinionated, makes the swept span 73 ft); (3) keep
+(1) and shorten the gear plates in the rig (fitted).
+
+### Tu-26 swing-wing survey
+
+**Real schedule (cited).** The outer panels are variable "from 20 degrees to 65
+degrees sweepback" (`TU26.INF`); Wikipedia gives span 34.28 m (112.5 ft) at 20
+degrees and 23.3 m (76 ft) at 65 degrees, wing area 183.6 m2 spread and 175.8 m2
+swept. Aerospace summaries differ on the number of detents: one lists three
+positions (20 degrees take-off and landing, 30 cruise, 65 dash), another five; the
+30 degree detent is single-sourced and **not used**. Selection is by the crew, not
+a speed law; no published speed bands were found. The range is a **45 degree**
+turn (the Tu-160's is 45, the Tornado's 42). Real cruising 485 kt, take-off 200
+kt, landing 154 kt (`TU26.INF`); the 65 degree position is the high-speed setting
+(Mach 1.88).
+
+**Real pivot (derived, not cited).** Treating each outer panel as a rigid sleeve
+turning about a vertical axis, the two cited spans give a panel length of 10.6 m
+(34.8 ft) from the pivot to the tip and a pivot **7.2 m (23.5 ft) out**
+(half-span 17.14 m = 7.16 + 10.62 cos 20; 11.65 = 7.16 + 10.62 cos 65). The mesh's
+glove corner at x 14 is 18.7 ft out at 4/3; scaled by the shape's own 0.90 span
+factor the real 23.5 ft corresponds to x 13.2: within a unit of (14, 3).
+
+**Pivot (measured).** The glove-corner vertex (14, 3, -1) is the only vertex the
+panel shares with a fixed face; turned about it by **46.6 degrees** (from the
+mesh's 18.4 degree leading edge to 65), the panel gives half-span 49.4 / 2 = 24.7
+units; full span 65.8 ft against the spread 101.3 (ratio **0.649** against the real
+0.680, so 3 points short; a fitted pivot (8.5, 0) gets 0.661 at 46.6 degrees and
+0.680 at 45 degrees, but is inside the fuselage). Candidates at 45 degrees: (14,
+3) 0.666, (12, 0) 0.707, (10, -2) 0.728, (8, 0) 0.676, (4.8, 0) 0.651. **Seam at
+the glove-corner pivot, 46.6 degrees:** the leading root (14, 3) stays; the second
+leading root vertex (14, 2) moves to (13.3, 2.3), a 0.7 unit (0.9 ft) shift; the
+trailing root vertices (11, -3) and (10, -7) swing in to (7.6, 1.1) and (4.0,
+-1.0), which lie inside the fuselage and intake side (x less than 5, the duct
+plane), so the seam is hidden except for the glove trailing edge. This is a much
+smaller seam than the Tu-160's (nacelle overlap) and the F-111F's (4.7 ft). No
+glove plate is expected; judge on frames in T26-3.
+
+**How the shared `SwingSpec` (SWING-1) applies.** SWING-1 turns `swing.rs` (Tornado
+constants today) into a per-aircraft spec. The Tu-26 entry, **fitted**: sweep min 20
+and max 65 degrees (the drawn mesh sits at 18.4: the rig's 0 turn is the spread pose
+and 46.6 degrees is the full turn, so the spec needs a "rest sweep" offset or the
+turn limit stated directly), pivot (14, 3) units on each side (18.7 ft out, 4 ft
+forward at 4/3), unit scale 4/3 ft, panel face lists as above (right and left, 13
+each, including the flap strips), and a speed schedule. No swivelling stations (the
+record's wing rows are fixed, see the bay survey), so only the drawn sweep is
+needed: a pure function of speed and flaps (`State::speed`, `State::flaps`), not
+stored in checkpoints (the Tornado rule). The replay converter test in
+`replay/convert.rs` must take the aircraft (the Tu-160 survey made the same
+finding). The flight model reads no sweep (the Tornado finding): the 1 G rows carry
+the speed-dependent result, so none of this changes flight.
+
+**Proposed schedule (opinionated; the real selection is the crew's).** Spread (20
+degrees) to 300 kt and with flaps or gear out (take-off 200 kt, landing 154 kt);
+linear sweep from 300 kt to full sweep (65 degrees) by 560 kt (cruise is 485 kt
+at about 50 degrees, which agrees with the real "swept for the low-level dash,
+Mach 0.86 = 567 kt"); 65 degrees above 560 kt. The Tornado's schedule is 304 to 600
+kt; the Tu-160 proposal 20 up to 250 kt, 35 from 320 to 520 kt, 65 from 600 kt. A
+three-position law adds nothing without the single-sourced 30 degree detent.
+Option: a player-selectable control (new input and checkpoint state), not
+recommended.
+
+### Tu-26 bay and station survey
+
+**The shape has no bay.** The belly under the fuselage is flat skin: |x| 2 to 5 at
+z -3, a one-unit centre keel at |x| 1 and less to z -4 from y -18 to 51 (a 1.3 ft
+ridge, the only feature), no opening, no door panel and no overlay. The
+bay doors and interiors are authored geometry (as for the B-52, B-2 and Tu-160).
+There are **no pylon faces** under the glove or intake trunk either.
+
+**The record's nine hardpoints** (original order; location byte 0 Centerline, 1
+Fuselage, 2 Internal Gun, 3 Internal Bay, 4 Wing, 5 Wingtip; feet are record units
+divided by 3; shape units are feet divided by 4/3):
+
+| Row | Location | Flags | Record x / up / fwd | Feet right / up / fwd | Shape units x / y (fwd) | Max items | Class | Default | Role |
+| ---: | --- | ---: | --- | --- | --- | ---: | ---: | --- | --- |
+| 0 | Fuselage | `0x1008` | 0 / 0 / 0 | 0 / 0 / 0 | | 1 | 0 | `VIS300.SEE` | Fixed visual sensor |
+| 1 | Fuselage | `0x1008` | 0 / 0 / 0 | 0 / 0 / 0 | | 1 | 0 | `TU26R.SEE` | Fixed radar |
+| 2 | Fuselage | `0x1008` | 0 / 0 / -100 | 0 / 0 / -33.3 | | 1 | 0 | `TU26.ECM` | Fixed jammer |
+| 3 | Fuselage | `0x180a` | 0 / 22 / -130 | 0 / 7.3 / -43.3 | 0 / -32.5 | 2,000 | 0 | `T23_1.JT` | Tail gun, slewed aft |
+| 4 | Fuselage | `0x1008` | 0 / 0 / 0 | 0 / 0 / 0 | | 1 | 0 | `SU37L.SEE` | Fixed laser row |
+| 5 | Internal Bay | `0x1500` | 0 / -40 / 72 | 0 / -13.3 / 24.0 | 0 / 18.0 | 8 | 120 | none | Bay row |
+| 6 | Fuselage | `0x1185` | 19 / -40 / 29 | +-6.3 / -13.3 / 9.7 | +-4.75 / 7.25 | 2 | 54 | `AS16.JT` | Under the intake trunk, pair |
+| 7 | Wing | `0x1185` | 34 / -35 / 13 | +-11.3 / -11.7 / 4.3 | +-8.5 / 3.25 | 4 | 108 | `AS16.JT` | Glove, inner, pair |
+| 8 | Wing | `0x1185` | 50 / -35 / -1 | +-16.7 / -11.7 / -0.3 | +-12.5 / -0.25 | 6 | 160 | `AS16.JT` | Glove, outer, pair |
+
+Findings. **The nine rows are five fixed sensor and gun rows, one bay row and
+three external rows**; there is no centreline row, so **no Kh-22 station** (the
+real semi-recessed centreline Kh-22) and no row on the underside for it. (a) The
+**record's "up" values** (-13.3 ft bay and intake rows, -11.7 ft glove rows) are
+below the gear low point at 4/3 (-14.7 ft; belly -5.3 ft): as on the B-2, F-22 and
+B-52, they are not measured positions, so the placement code puts the stores, not
+the raw number. (b) **Fore and aft** the rows fall on the drawn airframe: the bay
+at y 18 sits in the flat belly (the belly runs y -18 to 26 flat); the intake row
+at x +-4.75, y 7.25 is under the intake trunk side (x 5); the glove rows at x +-8.5
+and +-12.5, y 3.25 and -0.25 are under the fixed glove (chord y 4 to -6 at x 12.5,
+about 13 ft): the same glove that carries the real Kh-22 and the "racks under
+wings". (c) Row 5's flags `0x1500` are `0x1000` (the reviewed-row bit), the bomb
+bit `0x100` and the **designator bit `0x400`**, with no pair flag; the three
+external rows are `0x1185` (reviewed, bomb, infrared/laser mask `0x80`, base `0x01`
+and the **pair flag `0x4`**). (d) `maxItems` is the capacity of the row for the
+pair (the MiG-27 and Mirage rows read the same way), so the default is **12 AS-16 on
+the external rows in all (2 + 4 + 6) at 31,680 lb**, 32,200 lb of class (5,400 +
+10,800 + 16,000); the real underwing Kh-15 is four.
+
+**What the rows accept** (the loading rule replayed over the 135 retail `JT`
+records; the TORE roster admits a subset). Row 5 (the bay): 27 records: bombs
+(`MK82` and the Mk 82 family, `MK84` 6, `FAB250`/`500` 8 and `FAB1000` 5, `GBU29`
+6, `GBU30` 8, `CBU87`, `CBU89`, `MK20`, `RBK250`/`500`, `AT2`, `~BLDR`, `~MOOSE`),
+the passive `AGM45` and `AGM88` (8), and, because of the designator bit, the rocket
+and gun pods `LAU10`, `LAU61`, `SUU16` and `B13`, `B8` (**B7: a bay carries no
+pod**; clearing `0x400` leaves 22). It **refuses `AS16.JT`** (signature 3 needs the
+active-radar bit `0x20`, which the row lacks), the air-to-ground missile class
+(signature 1 and 2 need `0x80`), and every air-to-air missile. The external rows
+(`0x1185`) take 34 records each (2 a row for the pair row, the class limits 6 and
+4 on the others): bombs, the AGM class (`AGM65`, `AGM84E`, `AS14`, `AS30`, `AT12`),
+the guided bombs `GBU10`, `GBU28`, `PAVEWAY`, `PAVEWA3` and `AS16.JT` (the row's own
+default). **No Kh-22 (`AS4`) record exists in the retail data** (sweeps `AS4*`,
+`KH*` of every archive found none); the Kh-55 `AS15.JT` stand-in (220 lb, 9.87
+nmi; the Tu-160 review) is refused by the masks (support bit `0x200` needs `0x40`).
+
+**Real loads (cited).** Jane's (`TU26.INF`), Wikipedia "Tupolev Tu-22M" (read
+2026-11-15), and a web search (read 2026-11-15; aggregator pages, approximate):
+
+| Place | Load | Source |
+| --- | --- | --- |
+| Internal bay | 7.00 m (22.97 ft) long, 1.80 m (5.9 ft) wide; internal bombs replaceable by a rotary launcher for six Kh-15P | `TU26.INF` |
+| Max weapon load | 24,000 kg (52,910 lb), half internal and half on racks under the wings and the engine intake trunks | `TU26.INF` |
+| Normal load | one Kh-22 or 12,000 kg (26,455 lb) of bombs | `TU26.INF` |
+| Typical bombs | 2 FAB-3000, 8 FAB-1500, 42 FAB-500, 69 FAB-250 or -100; 8 1,500 kg or 18 500 kg mines | `TU26.INF` |
+| Missiles | three Kh-22: one semi-recessed under the centre fuselage, one under the fixed glove each side; Kh-15 six internal plus four underwing as an alternative to the Kh-22s | `TU26.INF`; Wikipedia: up to 3 Kh-22/Kh-32, 6 Kh-15 internal plus 4 underwing, 4 Kh-47M2, 18 FAB-500 across bay and pylons |
+| Pylons | outboard glove stations with adaptors for a pair of Kh-22 (a single source) | web search |
+
+The Kh-15 is 15.7 ft long, 3.0 ft span, 2,640 lb (`AS16.INF`, `store_sizes.rs`).
+Real 6 + 4 Kh-15 is 10 against the record's default 12 external: the record's
+external default is **three times the real underwing Kh-15**, with none in the bay.
+
+**Mechanism.** `Location::InternalBay` rows are never drawn; the other bays' rows
+are re-placed as `Location::Magazine` rows in `combat::bays::STATIONS` with a door
+state in `State::bay` (F-22, F-117, B-2; the Tu-160 and B-1B proposals). The shared
+bay grid (width, length and ceiling a row, the B-2 slice's `BayGrid`, with
+`ALTERNATIVES` for rows sharing a bay) takes the Tu-26 bay as one row.
+
+**Proposed authored stations (opinionated, for John; geometry fitted to the shape
+and the record, counts from the source rows).**
+
+| Item | Proposal | Label |
+| --- | --- | --- |
+| Bay row | Row 5 becomes a `Location::Magazine` for the Tu-26 in `combat::bays::STATIONS`: x 0, y 18.0 units = 24.0 ft forward (the record's), real size 22.97 ft long (17.2 units, y 9.4 to 26.6) by 5.9 ft wide (4.4 units, x +-2.2), floor 1 to 2 ft below the belly (z -3); clear `0x400` (B7) | fitted (record position, `TU26.INF` size); the bit clear is a record edit like the B-2's and B-1B's |
+| Bay count | Option A: the record's 8 and class 120 (12,000 lb): 8 Mk 82 or FAB-500, 6 Mk 84 or FAB-1000 class stores by weight (the grid: 3 long by 2 abreast by 1 tier for Mk 82, 2 by 1 for Mk 84); Option B: raise to the real half load, 12,000 kg (26,455 lb), 24 stores by 3 long x 4 abreast x 2 tiers, class 265 | A source; B opinionated, public figures |
+| Kh-15 in the bay | The record's mask refuses `AS16.JT` in the bay though the real jet carries six on a rotary launcher: set `0x20` on row 5 (record edit; adds `AGM84A`, `AM39` and `AS16.JT`, 4 by class 120) or leave refused. A launcher drawn only as the stores' own positions, 1 long x 1 across x 6 in a circle is not a grid | opinionated |
+| Intake row 6 | Keep as the record: x +-4.75 units (6.3 ft), y 7.25 (9.7 ft fwd), under the intake trunk side; stores' axes 1 ft below the trunk underside (z -3); bomb rack (the real "racks under ... engine air intake trunks") at class 54, 2 a row | fitted (position record, height measured) |
+| Glove rows 7 and 8 | Keep as the record: x +-8.5 and +-12.5, y 3.25 and -0.25, store axes 1 ft below the glove underside (z -2); fixed (no swivel: the glove is fixed, it is the panel that turns). The 4 and 6 AS-16 default is three times real: cap the default at 2 + 2 (real 4 underwing) or keep | cap opinionated, positions fitted |
+| Kh-22 | No record: the centreline semi-recessed station is **not authored** (no weapon to carry; bombs belong in the bay) | John |
+| Doors | Two leaves a bay hinged at the outboard edge, one belly polygon cut a bay; rotary launcher drawn only as the stores' own positions. If the `788c` plates are the doors, use them as the open pose | fitted, rig in T26-3 or T26-5 |
+| Signature | Bay stores add nothing; the open-bay term applies once the row is in `STATIONS` (`bay_available()`) | existing rule |
+| Load Ordnance rows | The mask admits 22 to 27 records on the bay and 34 on each external row; add no rows, only audit | B7 |
+
+### Tu-26 tail gun (`T23_1.JT`)
+
+Row 3: `T23_1.JT`, flags `0x180a` (the gun-row flag word the B-52, Tu-95 and Tu-26 share), **slew heading 32,760 (180 degrees, aft), pitch 0,
+limits 5,460 (30 degrees) each way in heading and pitch**, 2,000 rounds. The
+fields equal the B-52 row's (the Tu-95 carries the same row). `T23_1.JT` is the
+`M61.JT` record with **hit chances 30 / 22 / 15 against 100 / 75 / 50 and damage
+10 / 1 / 3 / 3 / 10 against 25 / 2 / 7 / 7 / 25**: it is the shared 20 mm record
+re-tuned down to a 23 mm turret ("23mmx1 turret", sound `&su33gun.11k`).
+
+**Position (cited, measured).** The row sits at (0, 7.3, -43.3) ft: 43.3 ft aft
+of the reference point and 7.3 ft up. The drawn nozzle plane is at y -29 (38.7 ft
+aft), the flame prisms end at y -53, the fin trailing edge is y -33 at z 21 and
+the lowest tail faces end at y -36 (48 ft). So the mount is **4.6 ft aft of the
+nozzle plane and below the fin's aft edge**, at z 5.5 (about 2.5 units above the
+nozzle tops, between the nozzles): the position of the real tail turret
+(Jane's: "radar directed tail mounting" with the "Box Tail" radar above the guns,
+at the tail between and above the nozzles). **No retouch needed to place it**,
+unlike the B-52's mount (19 ft ahead of the cone). Real: one 23 mm GSh-23,
+remotely controlled from the crew compartment (Wikipedia "Tu-22M3: 1 x 23 mm
+GSh-23 in a remotely controlled tail turret", `TU26.INF` "radar directed"), with
+the Tu-22M3's gun twin-barrel (Jane's), 2,000 rounds against a real magazine not
+found. **Reuse.** The B-52's rear-facing mount (B52-6) is planned (the B-52 gun
+fires forward at present because the aircraft slew columns are not yet read), so
+this gun is a **reuse of B52-6's work, not a new mechanism**: the same slew, the
+same limits, the gun record only. Until B52-6 lands the Tu-26's would fire
+forward too. Options: (1) retail row; (2) retail row at the real magazine if one is
+found; (3) no gun. The radar-directed aiming ("Box Tail") has no rig or row.
+
+### Tu-26 sensors (B7, `SU37L.SEE`)
+
+`SU37L.SEE` is the same built-in laser designator the Tu-160, Tu-95 and Su-34
+rows carry (468 bytes, same hash), on **hardpoint row 4 as a fixed fuselage row**
+(flags `0x1008`, position 0, 0, 0): not a station and not a pod. The real Tu-22M3
+carries no laser designator; it is a **video camera fairing under the front
+fuselage** ("flat glazed front panel", `TU26.INF`) for weapon aiming from high
+altitude, with no row and no geometry. The external rows admit `GBU10`, `GBU28`,
+`PAVEWAY` and `PAVEWA3` (the laser class), so the designator is what makes those
+usable. Options: (1) keep as retail (a built-in sensor, no pod drawn, the Tornado,
+B-2 and Tu-160 precedent); (2) drop the row and refuse the laser stores by mask
+(B7, opinionated). Radar `TU26R.SEE` (100 nmi, own), jammer `TU26.ECM` (own),
+`VIS300.SEE`: keep as retail. No pod row or pod body exists (B7 satisfied).
+
+### Tu-26 HUD and cockpit
+
+The record names **`bmbroh.HUD`**: the AC-130 HUD module with seven changed bytes
+(the B-52 review); panels `~ac130`, `~ac130h`, `~ac130s`, `~ac130_p`, `~ac130_w`,
+annunciators GEAR, FLAP, BRAKE, BAY. The base copy's hash equals the B-52's. **No
+Tu-26 cockpit art exists** (sweeps above), so retail flies the Tu-26 with the AC-130
+panel family (`~AC130*.PIC`), the B-52's choice (BMB-A1: whole-picture AC-130
+aperture). The module sets only HUD byte `+0x23a` (the HAB sight mode, no pipper,
+the bomb-sight rule in [the weapons format](weapons.md)), so a bomb store shows
+no CCIP pipper. Options (none chosen): (1) follow the record: `bmbroh.HUD`, the
+AC-130 stem, shared with the B-52 and Tu-95 (the same one-line arms; the BAY
+annunciator driven by the bay word, or `788c` if the plates are doors); (2) a
+substitute (opinionated); (3) no HUD. **The eye**: `viewOffset` (0, 20, 60), 6.7
+ft up and 20 ft forward of the reference point, that is **y 15, z 5 units**; the
+drawn canopy starts at y 26 (top z 3 to 4, y 26 to 49 in the cockpit faces), so
+the record's eye is **11 units (14.7 ft) behind the canopy rear edge and at the
+fuselage skin**: a Tu-160-style copied value needing a fitted eye in T26-7 if
+John wants the cockpit view. Real crew: four (pilot, co-pilot, navigator,
+weapons officer; `TU26.INF`); the batch plan is pilot only.
+
+### Tu-26 roster note
+
+`TU26.PT` is the first aircraft of bomber batch C; `AircraftId` stays append-only in
+batch order and is assigned by BMB-C1. `fa-aircraft.csv` already carries the
+decoded row. Per the Tu-95, Tu-160 and Su-34, the strike class and the Attack
+override are a BMB-C1 decision.
+
+### Tu-26 unknowns and next steps
+
+- The real pivot (derived above, not cited), the sweep speed bands, the 30 degree
+  detent, the real track and wheelbase, the tailplane span, the real gun magazine
+  and the Kh-22 carriage geometry were not found in the sources read. The empty
+  weight of "about 118,000 lb" in the plan was not re-found (Wikipedia 127,868).
+- No Kh-22 record exists in the retail data; the Kh-15 range (`AS16.JT` 6.58 nmi
+  against the real 81 nmi) is a weapon-data question outside this aircraft.
+- T26-2 sets the 4/3 ft scale and any per-axis fit; T26-3 builds the swing rig and
+  the surfaces; T26-5 the bay and stations; T26-7 the HUD and eye.
+
 ## Bomber batch B identities (BMB-B1, 2026-11-15)
 
 Implementation, batch slice BMB-B1 (with BMB-B2 below, run together), Claude Sonnet.
@@ -13594,6 +14194,193 @@ edge and 1.6 degree rest sweep (T26-3); the Su-34's G limit (+9, the page lists 
 +7), ceiling (55,000 ft, the usual figure is 48,000) and retail designator-pod flag on rows 6
 and 7 (two pod placements); the Tu-26's glove-row bomb capacity (cut with the AS-16 count);
 the Tu-26 bay's admission of the Harpoon and AM-39 with the AS-16 bit.
+
+## Tu-26 shape and rig (T26-2/3, 2026-11-15)
+
+Implementation, slices T26-2 and T26-3 of bomber batch C, run together (Claude Sonnet).
+Worktree `m3-tu26` on `90c5643a`. Plan `.local/m3-aircraft/PLAN-T26.md`; decisions
+`.local/m3-aircraft/BOMBERS-DECISIONS-C.md` (Tu-26 items 2 to 5 and 11). One own-source rig file,
+`crates/tore-app/src/tu26_animation.rs`, with its probe witnesses in
+`crates/tore-app/src/aircraft_animation_probe/tu26.rs`, loaded through
+`variety_animation.rs` (`SpecificRig::Tu26`) on the existing `TU26.SH` row (CODE 26,812, 310
+faces, six state words). Frames: `.local/m3-aircraft/frames/T26-2/` (local only). The numbers
+below are measured on the loaded shape and the rig's own output unless they are marked fitted.
+
+### Size and scale (T26-2)
+
+The decision stands: draw at the header scale, **4/3 ft a unit**, with no per-axis fit (the mesh is 4
+to 10 percent under real, accepted). Every consumer already read 4/3 (BMB-C1): `debris::scale`
+(`Tu26 => 4/3`, pinned beside the B-1B's), the variety rig spec (`4. / 3.`, which the generic
+rig and the new rig take as `Rig::scale()`), the gear low point (`models::variety`: 11 units,
+14.67 ft), the swing spec (`feet_per_unit` 4/3), the damage looks and their extents, the stores
+preview and the drawn vapor point. None is still at 1/3; the T26-0 note that the default would draw
+the aircraft four times small does not apply.
+
+| Axis | Units | Feet at 4/3 | Real Tu-22M3 | Difference |
+| --- | ---: | ---: | ---: | ---: |
+| Span, mesh pose (18.4 degrees) | 76 | 101.3 | 112.8 ft (112.5 in `TU26.INF`) | -10.2% |
+| Span, drawn spread (20 degrees, after the 1.6 degree rest turn) | 75.5 | 100.7 | 112.8 | -10.7% |
+| Length (y -36 to 62) | 98 | 130.7 | 139.4 ft (139.3) | -6.2% |
+| Height, gear up (z -4 to 22) | 26 | 34.7 | 36.3 ft | -4.4% |
+| Height, gear down (z -11 to 22) | 33 | 44.0 | 36.3 ft | +21% |
+| **Swept span, 65 degrees, after the rig** | 49.3 | **65.8** | 76.4 ft | **-13.9%** (ratio 0.653 against 0.680) |
+
+The swept span is the tip vertex (38, -5) carried to x 24.66, y -19.94 (32.9 ft out, 26.6 ft aft
+of the reference point); the tip of the other panel vertex (38, -9) is 21.8 units out. A per-axis
+fit (x 1.11, y 1.066, z 1.04 would bring the spread span to 111.8 ft and the swept to 73 ft) is **not
+applied**; on the frames the spread and the swept planforms read as the Backfire and nothing looks
+undersized beside its own gloves, tailplane or gear, so the coordinator's choice holds. The gear
+length (+21%) is likewise kept (decision 3); see Gear below for what it does to the stow.
+
+A retail-reading test, `crates/tore-import/tests/tu26_shape.rs` (skips without media), pins the
+header scale, the face count, the extents (x -38 to 38, y -36 to 62, z -4 to 22, gear low point -11),
+the size ratios above, the damage looks and the twin check below.
+
+### Skin, decals, damage looks, hit volume and eye (T26-2)
+
+- **Twin panels.** 29 exact-vertex twin groups, all double-sided panels with opposite stored
+  normals: no same-side sliver (no MiG-21 exception, no Tornado centreline sliver), so the smooth path
+  pairs them and the top and under frames show no show-through or z-fighting. Where the swept
+  panel's root overlaps the glove at z -1 (the flat outer glove, x 12 to 14) the frames at 40 and 65
+  degrees (seam close-ups) show no flicker or crack.
+- **Decals.** None: the export path and the runtime path give the same 310 faces, so `TU26.SH` has
+  no `E0` decal slot (the B-52 has two, the B-2 one) and nothing is left blank or skin-filled. The
+  textured nose, fuselage and fin art draw whole.
+- **Damage looks.** `TU26_A.SH` 322 faces (the body with the wing cut at x 23; x -39 to 23, y -37 to
+  60, z -5 to 21), `TU26_B.SH` 41 (the cut section, authored about its own origin: x -10 to 19, y -6 to
+  5, z 0), `TU26_C.SH` 335 (the body with the fin cut to z 13; x -39 to 39, y -37 to 60) and
+  `TU26_D.SH` 44 (the fin plate, x 0, y -11 to 15, z -10 to 10). All four load at the intact shape's
+  header scale (exponent 10, so 4/3 ft a unit) and the bodies lie within a unit of the intact extents
+  (x -38 to 38, y -36 to 62, z -4 to 22). No whole-body variant is registered for the Tu-26
+  (`debris::damage_variant`), as for the B-52, Tornado and Mirage 2000: a destroyed Tu-26 draws the
+  intact skin with regional cuts. Registering the wing cut as variant 0 and the fin cut as variant 1 is
+  a one-line decision for John (the pair `A`/`B`, `C`/`D` is reviewed above); not done here.
+- **Hit volume (shared, not changed).** One 28 ft sphere for every aircraft
+  (`AIRCRAFT_RADIUS_FT`). Against the Tu-26's 50 ft half-span (33 ft swept), 83 ft nose and 48 ft tail,
+  gunfire and fuzed weapons touch only the middle of the aircraft, as for the B-52 and the
+  transports. A per-aircraft radius changes every aircraft, so it stays John's call.
+- **Eye (shared, not changed; T26-7 owns it).** `mirrors::pilot_eye` is 7 ft up and 10 ft ahead of the
+  origin. The drawn flight deck is the glass at y 44 to 49 (59 to 65 ft ahead of the origin), z 1 to 4
+  (1.3 to 5.3 ft up) under a spine at z 4: the shared eye is about 50 ft behind it. A fitted eye of
+  about 6.5 ft up and 56 ft ahead would sit at the windscreen; measured only, nothing applied.
+
+### Swing wing (T26-3)
+
+**Rig.** The panel is **13 whole faces a side** (right `4b4c 4b73 498f 49b2 49db 49fe 4a21 4a44
+4a67 4a8a 4ab3 4ad6 4af9`; left `4f8d 4fb4 4dd0 4df9 4e1c 4e3f 4e62 4e85 4ea8 4ecb 4ef4 4f17
+4f40`), 9 vertices, all at z -1, with the two flap-strip faces among them, so the strip sweeps with
+the panel. `Rig::load` refuses a shape whose panel shares any vertex with a fixed face other than the
+glove corner **(14, 3, -1)** (left (-14, 3, -1)), the **measured pivot**, which is also the point the
+simulation's spec carries (`swing::TU26.pivot_right/left`; the load checks they agree). The panel
+turns whole about that vertical axis by `swing::TU26.turn(speed, flaps, gear)`:
+
+| Sweep | Speed | Right tip (feet out, aft) | Span | Reading |
+| ---: | --- | --- | ---: | --- |
+| 20 degrees (the rest, a 1.6 degree turn from the mesh) | to 300 kt, and with flaps or gear out at any speed | 50.4, 7.6 | 100.7 ft | spread |
+| 40 degrees | about 416 kt | 44.5, 17.7 | 89.0 ft | linear |
+| 65 degrees (a 46.6 degree turn from the mesh) | 560 kt and over | 32.9, 26.6 | 65.8 ft | fully swept |
+
+The speed schedule, the range and the rest offset are SWING-1's (fitted, decision 4: the real
+selection is the crew's); the rig takes them from the spec and invents none. The sweep is a pure
+function of speed, flaps and gear, not stored in checkpoints. No fence and no glove plate are
+drawn, as decided; no sweep word exists.
+
+**Rule 11 fold check (confirmed on the shape and on frames).** Per side: moved 9 vertices, 1 on the
+pivot, 0 fixed off the axis; a fold-free rigid panel. At the full 46.6 degree turn:
+
+- The second leading root vertex (14, 2) moves 0.79 units, **1.05 ft** (to (13.27, 2.31)); 0.5 ft
+  at 40 degrees. The review's "under 1 ft" is 1.05 ft at the very end of the range. The vertex lies
+  0.2 units inside the glove's outer edge (the line (14, 4) to (12, -2)), so no gap opens.
+- The trailing root corners (11, -3) and (10, -7) go to **(7.58, 1.06) and (3.99, -0.96)**. Both are
+  inside the glove slab (x 5 to 14, z -2 below, the top sloping from 0 at x 5 to -1 at x 12), under
+  its top skin and over its bottom skin; the review's "x less than 5, the intake side" holds only for
+  the second corner. Hidden either way.
+- Frames: `seam-200/416/560-top.png` and `-rear.png` (zoom 3 to 4, the glove roots at the
+  frame's edges), `top-20/40/65.png`. No hole, no crack, no panel through the fuselage skin and no
+  z-fight is visible at any sweep. One feature to know: at 40 degrees the flap strip's inboard end
+  (a grey wedge in `seam-416-top.png`) shows a little aft of the glove, where the strip root
+  (10, -7) ends in the open; it is the source's strip, not a defect of the turn.
+
+**Vapor.** The shape's streamer record (hinge scale 0, its pivot added: 52 ft out, 1.3 ft down,
+10.7 ft aft) is the drawn wing's tip plane, one unit outboard of the tip edge, so it needs no fix at
+the spread pose. It has no hinge, so `aircraft.rs` carries it by the wing's own turn about the pivot
+(`tu26_animation::streamer_point`, the Tornado's method): 51.6 ft out and 11.6 ft aft at rest,
+30.9 ft out and 30.3 ft aft fully swept, the left side the mirror (unit-tested).
+
+### Surfaces, gear, plume and the bay plates (T26-3)
+
+| Control | Tu-26 | How |
+| --- | --- | --- |
+| Elevator | rigged | both tailplane quads, trailing edges up for a pull |
+| Aileron | rigged (**differential tailplane**) | the shape has no aileron, spoiler or slat: roll is the tailplane, decision 11 |
+| Rudder | rigged | the aft strip only (`517d 51a4`), on the signed command |
+| Flaps | rigged | the outer trailing strip a side (`4b4c 4b73`, `4f8d 4fb4`), droop about its leading edge |
+| Gear | rigged | word `7892`, 12 faces, fitted hinges and timing below |
+| Exhaust | rigged | word `7880`, two plumes (a cross of plates per engine) grown from the nozzle plane y -29 |
+| Bay | rigged, **interim** | word `788c`: the plates draw as the bay-door open pose; **T26-5 cuts the real bay** |
+| Brake | none | the `788c` plates are the bay doors, not an airbrake (decision 5); the lever moves nothing, probe `not-applicable` |
+| Sweep | rigged | above |
+
+The rig never sets a flap or rudder word: it keeps the strips and the strip of the fin drawn and
+turns them, so nothing vanishes in flight. Fitted values (agent decisions 2026-11-15, no real Tu-22M
+limit found):
+
+- **Tailplane.** Right 5 faces, left 6 (`4085 40bd 40eb 4118 413c`; `45a7 45dd 4605 462c 464d 4670`),
+  no vertex shared with any other face (checked at load), roots on x +-5 and z -2, tips on x +-13 and z 0.
+  Each side turns whole about the lateral axis through its root chord midpoint (+-5, -21.5, -2), so no
+  vertex is held while another turns. Angle (positive lowers the trailing edge): `-0.14 x elevator -+
+  0.08 x aileron`, held to **0.20 rad (11.5 degrees)**; the aft tip corner, 14.5 units (19.3 ft) behind
+  the spindle, travels 2.7 ft for a full pull and 3.8 ft at the limit. Tornado precedent for the sign
+  (a positive aileron raises the right and lowers the left); the fleet's clamp is 0.40, the Tornado's
+  0.25.
+- **Flap.** The word's drooped copy is a 45 degree droop (it also pulls the chord in); the rig droops
+  the strip rigidly by **0.40 rad (23 degrees)**, the fleet's flap travel, so the seam at the
+  strip's outer edge is 0.8 units (1.1 ft). The hinge is the strip's leading edge, from (11, -3, -1) to
+  (36, -7, -1), the left side mirrored; flaps also hold the wing spread.
+- **Rudder.** The word is a rigid turn about the strip's leading edge (0, -24, 9) to (0, -31, 21) of
+  **0.858 rad (49 degrees)**, to +X for 1 and -X for -1 (checked at load; the T26-0 review's "about
+  14 degrees" was a misreading). That is more than any real rudder; the rig takes **0.50 rad (29
+  degrees)**, which puts the aft base vertex 1.7 units (2.3 ft) off the fin.
+- **Gear.** Plates only (no wheels), the mesh's low point -11. Retracting, the nose leg folds first
+  (gear 1 to 0.3) and then the mains (0.7 to 0); extending, the mains come down first. Mains: a line
+  along Y at x +-5, z -1 (the fuselage side wall), the legs swinging **inward**, the real direction,
+  through a quarter turn to lie flat at z 1 inside the 10 by 8 unit fuselage section at y -8 to 2
+  (x +-5, z -3 to 3, top 4); a search over longitudinal hinges found this one, and a lateral-axis fold
+  (the Tornado's) would stand the 10 unit plate up to z 8 against a roof at 4. Nose: a lateral axis at the plate's forward edge (y 38, z -4),
+  folding aft along the belly inside the 4 unit wide nose section, steering about its vertical axis
+  (y 36) first. The probe's dense sweep (202 values) is rigid per leg at every value, the source pose at 1,
+  and every leg vertex inside the section at 0.05 and below. The wheels sit on the ground in
+  `ground-under.png`, the nose and both mains planted on the runway; the +21% length shows as long
+  legs, not as sunk or floating wheels.
+- **Plume.** Two engines, a cross of one vertical and one horizontal plate each (x +-2), 24 units
+  (32 ft) from the nozzle exit plane, scaled from that plane by the exhaust fraction and hidden at 0
+  (the Tornado method). `afterburner-rear.png` and `-side.png` show two flames.
+- **Bay plates (interim).** `788c`: a plate pair a side at x +-2, y 11 to 23, hanging 3 to 4
+  units under the belly, the same place and width as the real 23 by 5.9 ft bay. Drawn at the bay
+  fraction (hung from the belly line z -2, hidden shut); they are **not** an airbrake. There is no
+  frame: `--flight-bay` refuses an aircraft with no reviewed bay (`bay_available`), which T26-5
+  adds.
+
+### Probe, tests and checks
+
+- `--animation-probe` for `tu26`: **0 required/check failures** (310 neutral faces). Required
+  controls moved with 5 poses or more: elevator, rudder, aileron, flaps, gear (22), bay, exhaust, sweep
+  (3 distinct: spread, partial, full); brake `not-applicable`. No acceptances were needed.
+  The neutral state is isolated at 200 kt (the wing sweeps from 300), as for the Tornado.
+  Combination sweeps in `probe/`: `sweep-grid.csv` (the wing at 200, 450 and 700 kt, and flaps and
+  gear holding it spread at 700 kt), `pitch-roll-combinations.csv` (25 poses) and `dense-gear.csv`.
+- One rig test, `tu26_animation::tests::the_tu26_rig_turns_whole_panels_about_their_hinges` (synthetic
+  faces, shape units): the 1.6 degree rest offset, the 300 and 560 kt ends and linear middle, the flaps
+  and gear holding the wing, the 65.8 ft swept span, the pivot staying, the 1.05 ft root seam and
+  the corners inside the glove, the left mirror, the flap droop, the tailplane pitch, differential roll
+  and limit, the rudder, the gear folds and stow, the interim plates, the plume and the vapor point.
+- Battery: `flight-animation-tu26` (the probe, the three CSVs) and `render-tu26-skin` (top and
+  under, the new skin scenario, `tools/battery_scenarios/render.py`, listed in
+  `docs/testing/lane-flight.md`).
+
+**Not decided here, left for John.** Whether to register the wing cut and fin cut as the Tu-26's
+damage variants; the per-aircraft hit radius; the eye (T26-7); the 1.05 ft seam at the very end of the
+range (not visible); the fitted limits above.
 
 ## Bomber batches A, B and C integration: the tail guns and the pins (2026-11-16)
 
