@@ -602,6 +602,40 @@ def scenarios() -> list[Scenario]:
         problems += rc.file_problems(work, "log-b52-ripple/log.jsonl", rc.check_jsonl)
         return problems
 
+    # T160-9: a Tu-160's bay ripple (six Mk 82 from the forward row, 0.5 s apart, the doors opened by the run) recorded,
+    # replayed tick for tick with `--verify-render` and read back as six releases and outcomes; the recorded bay device
+    # opens for the release and shuts after it.
+    tu160_args = [*RUN, "UKR", "QUCOL", "--attack", "release", "--from", "1", "--altitude", "20000", "--speed", "300", "--repeat", "6",
+                  "--gap", "0.5", "--aircraft", "tu160", "--station", "0", "--load", "MK82", "--count", "6",
+                  "--record", "{work}/tu160-ripple.tore-replay", "--verify-render"]
+
+    def tu160_check(work: Path, output: str) -> list[str]:
+        problems = verify_problems(output, "the Tu-160 ripple", 3_000)
+        rows = events(work, "tu160-ripple")
+        for name in ("weapon.release", "weapon.outcome"):
+            got = len(kind(rows, name))
+            if not 5 <= got <= 6:
+                problems.append(f"{got} {name} events for a ripple of 6 presses")
+        if len(kind(rows, "stores.items")) < 5:
+            problems.append("fewer stores.items entries than releases")
+        path = work / "log-tu160-ripple" / "log.jsonl"
+        rows_all = [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+        bay = [(r["t"], r["devices"]["bay"]) for r in rows_all
+               if r.get("id") == 0 and isinstance(r.get("devices"), dict) and "bay" in r["devices"]]
+        releases = [r["t"] for r in kind(rows, "weapon.release")]
+        if not bay or not releases:
+            problems.append("the Tu-160 ripple: no recorded bay device samples or no release")
+        else:
+            if bay[0][1] != 0 or bay[-1][1] != 0:
+                problems.append(f"the Tu-160 ripple: the doors were not shut at the start and end: {bay[0]}, {bay[-1]}")
+            for t in releases:
+                near = [b for tt, b in bay if abs(tt - t) <= 0.4]
+                if not near or max(near) < 0.95:
+                    problems.append(f"the Tu-160 ripple: the doors were not open at the release at {t} s: {near}")
+                    break
+        problems += rc.file_problems(work, "log-tu160-ripple/log.jsonl", rc.check_jsonl)
+        return problems
+
     return [
         Scenario(
             name="replay-a2g",
@@ -640,5 +674,18 @@ def scenarios() -> list[Scenario]:
             check_work=b52_check,
             notes="A B-52 bay ripple (eight Mk 82 from the forward bay row) recorded, replayed tick for tick and read back "
                   "as eight releases and outcomes (B52-9).",
+        ),
+        Scenario(
+            name="replay-a2g-tu160-ripple",
+            lane="replay",
+            args=tu160_args,
+            timeout=300,
+            expect=[r"a2g-run: done"],
+            outputs=["tu160-ripple.tore-replay"],
+            then=[Step(["--recording-log", "{work}/tu160-ripple.tore-replay", "--out", "{work}/log-tu160-ripple", "--rate", "5"],
+                       timeout=300)],
+            check_work=tu160_check,
+            notes="A Tu-160 bay ripple (six Mk 82 from the forward bay row) recorded, replayed tick for tick and read back "
+                  "as six releases and outcomes (T160-9).",
         ),
     ]

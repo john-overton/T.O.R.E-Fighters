@@ -626,6 +626,20 @@ def scenarios() -> list[Scenario]:
         )
     )
 
+    # The Tu-160 Blackjack as the player and in both wings (slice T160-9): a 2 v 2 recorded three times, so the
+    # TU160.PT identity (its checkpoint code, four engines, the two bay rows and 12 AS-16 as the default load) round-trips
+    # through the recording, plays back with nothing missing and records the same twice. Its bay-release recording is
+    # `replay-a2g-tu160-ripple`.
+    out.append(
+        record_scenario(
+            "replay-rec-tu160-2v2",
+            ["--ai-probe-ticks", "2400", "--aircraft", "tu160", "--probe-friendly-aircraft", "tu160",
+             "--probe-enemy-aircraft", "tu160", "--probe-fight", "2:2", "--separation", "5",
+             "--probe-attack", "300:10"],
+            timeout=500,
+        )
+    )
+
     # Every imported aircraft as the enemy and as the player.
     for ac in AIRCRAFT:
         out.append(

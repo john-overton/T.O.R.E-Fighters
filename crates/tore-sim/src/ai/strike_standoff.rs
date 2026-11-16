@@ -104,7 +104,7 @@ impl Strike {
         let own = cx.own;
         let height = own.position[1] - target[1];
         let usual = if store.kind.seeker() {
-            reach::ground_reach(store.fire_range_ft, height)
+            reach::ground_reach(store.fire_range_from(height), height)
         } else {
             solution?.bar_ft?
         };

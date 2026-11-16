@@ -16383,3 +16383,160 @@ are real figures given a fitted shape (agent decision 2026-11-16); the flows are
 pound (agent decision following the coordinator's 104 lb/s note); the drag shape, stall fraction, brake
 deceleration and alignment are fitted (agent decisions); the battery windows are fitted. No retail bytes
 committed.
+
+## Tu-160 AI, missions, multiplayer and replay (T160-9, 2026-11-16)
+
+Implementation and verification mode, slice T160-9 (the Tu-160's counterpart of B52-9, B2-9 and F117-9). The
+AI work was asked for by John through the bomber program (AGENTS.md: no AI work unless John asks). Everything
+here is `fitted`, agent decisions of 2026-11-16, except where a number is a record's. The Tu-160 has two bay
+rows (the forward row, station 0, and the aft row, station 1) and no pylon, rail, gun or air-to-air store, so
+there is no pylon strike or air-to-air fight to fly; its default load is the twelve AS-16 of T160-6.
+
+### The AI never fired the AS-16 (fixed)
+
+`--pilot ai --load AS16` picked `kind=RadarAgm` and then logged `no release` against the T-90 and over the
+Kiev. The cause was not the missile or the target, it was the AI's fire range. A seeker store is fired inside
+`max(10,000 ft, half its zone-1 maximum)` of its target, and the lock needs the target inside the zone's
+look-down limit. The AS-16's zone 1 is 500 to 40,000 ft with a 45 degree limit above and below the nose, so
+its fire range is 20,000 ft, and from the 20,000 ft the strike flew at, a target 20,000 ft below can stand
+inside 20,000 ft only straight underneath, where the elevation is 90 degrees, outside the limit. The two
+conditions had no common point: the lock never held inside the fire range and the AI overflew the target
+(closest approach 154 ft, `releases=0`). Any seeker fired from higher than 0.7 times its fire range (14,100 ft
+for the AS-16) had the same hole. A Mk 82 or a laser store is not a seeker and never read it.
+
+The fix is general and small (`tore_sim::ai::strike::reach::seeker_fire_range`, used by the host's lock test in
+`tore_world::ai_wings::strike`, the release estimate and the stand-off planner): `Store::fire_range_from(height)`
+returns the usual fire range wherever the target stands inside the look-down limit at it (height at most the fire
+range times the limit's sine), exactly as before, and from higher up the range where the target stands 80 percent
+of the limit below the nose (36 degrees for the AS-16: 34,000 ft slant from 20,000 ft), at most 95 percent of the
+zone's maximum. A new `Store::look_deg` carries the limit (180 for every non-seeker store, so every laser, bomb,
+rocket and gun is unchanged). It applies to any aircraft with an active radar surface missile (or any other
+seeker) flying a strike above 0.7 times its fire range.
+
+| Run (`--a2g-run UKR ... --pilot ai --aircraft tu160 --load AS16 --altitude 20000`) | Before | After |
+| --- | --- | --- |
+| `QUCOL`, T-90, 10 nm | doors open at 74.2 s, pass exits at 79.7 s, `releases=0` | doors open at 42.6 s, release at 43.3 s from 27,537 ft slant (forward bay, right -1.59 ft), impact 6 ft from the aim at 59.0 s, T-90 killed |
+| `QUSFLT --unit Krivak`, 15 nm | `no release` (T160-6) | release at 92.85 s from 27,509 ft, impact 47 ft from the ship at 109.0 s, Krivak left with 150 of 500 (the human's shot in T160-6 left 150 too) |
+
+`ai-strike-tu160-antiship` and `ai-strike-tu160-as16-tank` hold both. After the shot the Tu-160 defends
+(`Defend` at 92.9 s) and the fleet shoots it down at 119.4 s (it jettisons its load first), so the anti-ship
+run stops at 115 s; the missile hits at 109 s. A second AS-16 never leaves in the same pass (`first &&`: one
+seeker round a pass, the helicopter and fighter rule), so the Krivak is not sunk by one AI pass.
+
+### The AI strike from 12 nm
+
+T160-8 moved `ai-strike-tu160-stick` to 10 nm because "from 12 nm the bay doors open a second late and the pass
+leaves without bombing". **The doors are not the cause.** Traced with a per-tick log of the release test (the
+cue's closest approach, the bay demand and the door travel):
+
+- The doors ask 1.5 s before the estimated release (`BAY_LEAD_S`) and take 1.14 s to read 0.95, so they are
+  open about 0.4 s ahead; at 12 nm they read 1.00 at 65.9 s and the estimate reaches 0 at 66.2 s. From 10 nm
+  they open at 46.7 s and the first bomb leaves at 47.2 s.
+- No release was ever due at 12 nm (`fire`, `due` and `passing` are false on every tick). The cue's closest pass
+  lay 207 ft from the aim against a circle of 197 ft, and 331 ft from the led target.
+- The reason is the target. The `QUCOL` column is moving and turns a corner at about 60.5 s: its velocity
+  changes from (0.5, -50) to (35, -36) ft/s, and the led aim jumps 320 ft sideways 5 s before the 12 nm pass
+  releases. The 10 nm pass drops at 47 s, before the corner. The same pass over the standing Ukraine factory
+  (`QUFACT`) from 12 nm bombs with the unchanged binary (six releases, doors open 0.5 s ahead of the first),
+  and with a 4 s door lead the 12 nm column pass still did not bomb.
+- A heavy's heading answers slowly, so the cue pointing (gain 0.6, one second of damping on the cue's
+  lateral rate) swung 207 ft past the aim after the shift. A smaller gain with more damping settles it.
+
+Two changes, both fitted:
+
+1. **Heavy cue pointing** (`HEAVY_CUE_POINT_GAIN` 0.4, `HEAVY_CUE_DAMPING_S` 3.0, `strike.rs`): a
+   `StrikeClass::Heavy` level run points its cue with the smaller gain and the longer damping; every other class
+   keeps 0.6 and one second. A sweep of five gain and damping pairs on the 12 nm column and the Quick Mission
+   wing found 0.4 and 3 the one that bombs both (the neighbours 0.4 and 2, 0.3 and 2 each lost one of the two),
+   so it is a tuning of one point; it also bombed the column from 8, 10 and 14 nm, the aft row, the factory
+   from 12 nm and the B-2 and B-52 stick, pylon and Quick Mission passes (all in the final battery run).
+2. **The bay lead is unchanged.** Scaling it with the time to release would not have helped: no due release was
+   ever lost to the doors in this trace. (A release that comes due with the doors shut still waits for them, but a
+   `passing` release is a single-tick event, so a doors-late pass can still leave without bombing; holding it
+   would need a checkpointed field. Open.)
+
+`ai-strike-tu160-stick` stays at 10 nm (T160-6's, as T160-8 left it). The 12 nm column pass is back as
+`ai-strike-tu160-stick-12nm`: the doors read 0.96 at 65.8 s, the first Mk 82 leaves at 66.3 s (0.5 s later) and
+the six land, where it used to leave without bombing. `ai-strike-tu160-stick-12nm-factory` is the same pass over
+the standing factory, which bombed before the pointing changed (doors open 72.7 s, first release 73.2 s).
+
+### The AI strike from the bay
+
+| Run | What the log shows |
+| --- | --- |
+| `ai-strike-tu160-stick` (T160-6, 10 nm), forward bay row | six Mk 82 from the grid's places (four abreast then two), doors open before the first, impacts, egress |
+| `ai-strike-tu160-stick-12nm`, column, 12 nm | doors 0.96 at 65.8 s, six releases from 66.3 s from the same places, impacts, egress |
+| `ai-strike-tu160-stick-12nm-factory`, Ukraine factory, 12 nm | doors open at 72.7 s, six releases 73.2 to 74.5 s from the same places, factory destroyed, egress |
+| `ai-strike-tu160-aft`, aft row (`--station 1 --count 6`) | six Mk 82 from right -1.95, 1.95, -0.65, 0.65 then -1.95, 1.95, up 0.72 (the flat belly; the forward row's keel plane is -1.95), forward -5.60 then -13.15, doors open for them, egress |
+| `ai-strike-tu160-quick-wing` (`--quick-wing`, factory) | `ROLE strike`; the wing starts 7.5 nm out at 5,000 ft and about 570 kt, too fast to line up in that distance, so the first passes (a `Defend` at 43.6 s, an exit at 58.9 s) leave without bombing; the third attack (206.7 s) drops the forward row's six at 5,054 ft (the 5,000 ft heavy floor) at 324.2 s, 253 kt, then egress. With the unchanged cue pointing it flew three passes in 560 s without a release |
+| `ai-strike-tu160-as16-tank`, `ai-strike-tu160-antiship` | above |
+
+### Quick Mission
+
+`quick_mission::tests::the_tu160_is_a_quick_mission_player_and_a_wing_choice`: `TU160.PT` is offered as the
+player's aircraft and in every AI wing field, a draft carries it as the player and in every wing, and the night
+stealth rule (the B-2 and the F-117) does not take it. The strike is `ai-strike-tu160-quick-wing`. Two 2 v 2
+probes: `ai-tu160-quick-mission-2v2` (all Tu-160: nobody fires, the probe's usual checks hold, every Tu-160
+holds its twelve AS-16 and no gun) and `ai-tu160-vs-su27-2v2` (the same against Su-27s: the AS-16 is refused
+against an aircraft).
+
+### The airfield
+
+No airfield law changed and none is gated: the Tu-160 is outside the BMB-AI heavy class (flaps-up minimum 151
+kt), so the B-52's two laws (`Situation::taxi_throttle_floor` above zero) do not reach it, and it needs
+neither: `ai-merged-airfield-tu160-wing2` (Southampton, 100,000 lb of fuel, the land order at 167 s) takes off
+at 52 s, is airborne at 105 s, lands at 486.7 s at 107 kt, clears at 517.6 s and parks at 976.4 s, 100,277 ground
+samples and none off the pavement. `ai-heavy-takeoff-tu160-gre-a1` and `ai-heavy-land-tu160-ukr-a2` (T160-8)
+still pass. No airfield file changed, so the BMB-AI baseline comparison (129 airfield logs on the binary before
+and after) was not needed.
+
+**Open (BMB-AI item 3, the AI has no fuel shedding):** at its full takeoff weight (600,532 lb, about 570,000 lb at
+the land order) the AI cannot land it. Sent home at 300 s from Southampton it reaches the marshal at 529 s,
+approaches at 228 kt and flies into the ground 10,800 ft short of the runway at 806 s. `--probe-fuel` is
+capped at 100,000 lb, so the scenario uses that; a landing at the real maximum landing weight (341,710 lb) is
+within it.
+
+### Multiplayer
+
+`net-a2g-stores-tu160`: both players in Tu-160s (`TU160_STORES_MISSION`, one wing of two). `tore-bot --load
+MK82.JT --a2g bomb` hangs two Mk 82 in the forward row (the bot loads the first station that takes them; the
+Tu-160 has no pylon). The watching client draws the bomber's stores (16 Stores events, 220 bytes, 16 at most),
+sees a Mk 82 leave plane 0 (`saw MK82.JT 0 from plane 0`) and the bomber's emptied stations (0 2 3: the Mk 82 row
+and the AI's), and reads plane 0's bay doors at 1.00 on its screen.
+
+### Replay
+
+`replay-rec-tu160-2v2`: the Tu-160 as the player and in both wings, a 2 v 2 recorded three times;
+`--verify-render` passes (2,401 ticks, none missing or differing) and two runs record the same, so the `TU160.PT`
+identity round-trips. `replay-a2g-tu160-ripple`: a human ripple of six presses from the forward bay row,
+recorded and replayed with `--verify-render` (6,156 ticks, none missing or differing), read back as five releases
+and five outcomes of the six presses (the B-2's and B-52's give 11 of 12 and 7 of 8; not traced), the recorded bay
+device shut at the start and the end and at 0.95 or more at every release.
+
+### Open for John
+
+1. The heavy cue pointing (0.4 and 3 s) is a tuning found by a sweep of two scenarios; it changes the B-2, B-52
+   and any other Heavy strike (their scenarios pass). The standing question is whether a heavy's pointing should
+   instead follow its measured heading response.
+2. The AI Tu-160 cannot land at its full takeoff weight (above); fuel shedding or a longer final is BMB-AI item 3.
+3. The quick-wing Tu-160 needs three passes (the first starts 7.5 nm out at 570 kt): the 570 kt run-in at 5,000
+   ft is the fitted flight model's corner speed (T160-8), not an AI choice.
+4. One AS-16 leaves a pass (the seeker rule): the Krivak is hurt, not sunk, by one AI pass; the fleet then shoots
+   the Tu-160 down at 119 s. A second pass is not flown inside the run.
+5. A doors-late release is still lost when the due test is a single-tick `passing` event (no case seen).
+6. The 12 nm column pass depends on where the column's corner falls against the release time: it bombs
+   from 8, 10, 12 and 14 nm with the new pointing, and was not run from other distances.
+
+### Checks
+
+All through `.local/m3-imports/light3.sh`, own profile `.local/m3-aircraft/profile-tu160`; logs in
+`.local/m3-aircraft/checks/T160-9/`: `cargo fmt` clean, clippy `-D warnings` clean, `cargo test --locked --workspace
+--no-fail-fast` 7,884 passed, 0 failed, 108 ignored (7,878 before), `--validate-ordnance` passed, `python3 -B -m
+unittest discover -s tools` 597 OK (skipped 5), `tools/check_docs.py` passed (382 files), and the battery
+(`--jobs 2 --windows 1`) 91 of 91: every `*tu160*`, `ai-heavy-*`, `ai-strike-*`, `ai-merged-airfield-*`,
+`net-a2g-*`, `net-ai-strike-*` and `replay-a2g*` scenario. New tests: `Tu160Tests` in
+`tools/test_battery_ai_strike.py`, `the_tu160_mission_scenarios_exist_and_the_fight_check_reads_guns_stores_and_shots`,
+the two `seeker_range_tests` in `strike_reach.rs`, and `the_tu160_is_a_quick_mission_player_and_a_wing_choice`.
+Provenance: the zone numbers are the retail record's, read by the code; the fire-range rule, the cue pointing
+gains, the scenarios and the fuel and order of the airfield cycle are fitted (agent decisions 2026-11-16). No
+retail bytes committed.

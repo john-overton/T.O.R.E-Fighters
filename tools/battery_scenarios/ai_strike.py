@@ -1252,6 +1252,98 @@ def tu160_stick_problems(output: str) -> list[str]:
     return problems
 
 
+# The Tu-160's aft bay row (station 1, T160-9): Mk 82 four abreast, 0.72 ft up (the flat belly; the forward row
+# stands on the keel skin at -1.95), the back row 5.60 ft and the next 13.15 ft aft of the mount.
+TU160_AFT_COLUMNS = (-1.95, 1.95, -0.65, 0.65)
+TU160_AFT_ROWS = (-5.60, -13.15)
+
+
+def tu160_aft_problems(output: str) -> list[str]:
+    """`ai-strike-tu160-aft` (T160-9): the six Mk 82 of the aft bay row (station 1) leave from the grid's own
+    places, four abreast then two, doors open for the release, and the pass leaves."""
+    runs = parse_runs(output)
+    if len(runs) != 1:
+        return [f"expected one strike run, got {len(runs)}"]
+    run, label = runs[0], "Tu-160 aft bay"
+    problems = consistency_problems(run, label)
+    problems += bay_door_problems(run, label)
+    releases = run.of("RELEASE")
+    if len(releases) != 6:
+        problems.append(f"{label}: {len(releases)} releases, want the row's six")
+    origins = [(float(r), float(u), float(f), st) for _, _, st, r, u, f in ORIGIN_LINE.findall(output)]
+    if len(origins) != len(releases):
+        problems.append(f"{label}: {len(origins)} origin lines for {len(releases)} releases")
+    for n, (right, up, forward, station) in enumerate(origins):
+        want = (TU160_AFT_COLUMNS[n % 4], 0.72, TU160_AFT_ROWS[(n // 4) % 2])
+        if abs(right - want[0]) > 0.1 or abs(up - want[1]) > 0.1 or abs(forward - want[2]) > 0.5:
+            problems.append(f"{label}: bomb {n + 1} left from {right} {up} {forward}, the grid's place is {want}")
+        if station != "1":
+            problems.append(f"{label}: bomb {n + 1} left station {station}, want the aft bay's row 1")
+    if not run.of("IMPACT"):
+        problems.append(f"{label}: no bomb landed")
+    if not run.of("EGRESS"):
+        problems.append(f"{label}: no EGRESS after the stick")
+    if run.of("LOST"):
+        problems.append(f"{label}: the Tu-160 was lost")
+    return problems
+
+
+def tu160_quick_wing_problems(output: str) -> list[str]:
+    """`ai-strike-tu160-quick-wing` (T160-9): a Quick Mission with the Ukraine factory as the ground target: the
+    Tu-160 wing takes the Strike role (the mission's bomber-class default) and flies the forward bay's stick."""
+    problems = tu160_stick_problems(output)
+    runs = parse_runs(output)
+    role = (runs[0].first("ROLE") or {}).get("role") if len(runs) == 1 else None
+    if role != "strike":
+        problems.append(f"Tu-160 quick wing: the wing was given role {role}, want strike")
+    return problems
+
+
+def tu160_as16_problems(output: str, target: str, label: str, kill: bool) -> list[str]:
+    """An AI Tu-160's AS-16 (T160-9): it leaves the forward bay row's first place (three abreast, -1.59 ft), the
+    doors open for it, it hits its target (a ship: the missile's own radar; or a tank), and the pass leaves.
+    Before T160-9 the AI never fired it: a high flier's seeker could not lock inside its fire range."""
+    runs = parse_runs(output)
+    if len(runs) != 1:
+        return [f"expected one strike run, got {len(runs)}"]
+    run = runs[0]
+    problems = consistency_problems(run, label)
+    problems += bay_door_problems(run, label)
+    releases = run.of("RELEASE")
+    if len(releases) != 1 or releases[0].get("weapon") != "AS16.JT" or releases[0].get("station") != "0":
+        problems.append(f"{label}: releases {[(r.get('weapon'), r.get('station')) for r in releases]}, want one AS16.JT from station 0")
+    origins = [(float(r), float(u), float(f)) for _, _, _, r, u, f in ORIGIN_LINE.findall(output)]
+    if origins and (abs(origins[0][0] + 1.59) > 0.1 or abs(origins[0][2] - 38.61) > 0.5):
+        problems.append(f"{label}: the AS-16 left from {origins[0]}, the grid's first place is (-1.59, -1.09, 38.61)")
+    if releases and not number(releases[0].get("range_ft")) >= 20_000:
+        problems.append(f"{label}: released at {releases[0].get('range_ft')} ft, want a stand-off shot")
+    if len(run.of("IMPACT")) != 1:
+        problems.append(f"{label}: {len(run.of('IMPACT'))} impacts, want 1")
+    now, _, start = run.summary.get("target_hp", "").partition("/")
+    if not now or not start or int(now) >= int(start):
+        problems.append(f"{label}: the target is unhurt ({run.summary.get('target_hp')})")
+    if kill and not any(k.get("victim") == target for k in run.of("KILL")):
+        problems.append(f"{label}: the target ({target}) was not destroyed")
+    if run.setup.get("target") != target:
+        problems.append(f"{label}: aimed at {run.setup.get('target')}, want {target}")
+    if run.setup.get("aircraft") != "Tu160":
+        problems.append(f"{label}: flew {run.setup.get('aircraft')}, want Tu160")
+    return problems
+
+
+def tu160_antiship_problems(output: str) -> list[str]:
+    """`ai-strike-tu160-antiship`: an AI Tu-160 with its AS-16 loaded fires one at the Krivak of the Ukraine
+    surface fleet from the forward bay (T160-9; the AS-16 is an active radar surface missile, so it wants a
+    ship). The run stops at 115 s: the missile hits at 109 s (the ship left with 150 of 500) and the fleet
+    shoots the Tu-160 down at about 119 s."""
+    return tu160_as16_problems(output, KRIVAK_ID, "Tu-160 AS-16 at the Krivak", kill=False)
+
+
+def tu160_as16_tank_problems(output: str) -> list[str]:
+    """`ai-strike-tu160-as16-tank`: the same AS-16 against the T-90 of the column kills it."""
+    return tu160_as16_problems(output, "0x50000001", "Tu-160 AS-16 at the T-90", kill=True)
+
+
 def b2_climb_problems(output: str) -> list[str]:
     """`ai-strike-b2-climb`: from 5,000 ft 30 nm out an AI B-2 climbs to its release floor (10,000 ft
     or more) before it bombs, then bombs and gets out; it never gets low."""
@@ -1780,6 +1872,57 @@ def scenarios() -> list[Scenario]:
               "from the grid's own places, the same cells a human's release uses (`a2g-release-origin-tu160`), "
               "with the doors open for the release, then egress (T160-6).",
     ))
+    # T160-9 (2026-11-16): the Tu-160's bay rows, its AS-16 and the 12 nm start (docs/formats/aircraft-variety.md,
+    # "Tu-160 AI, missions, multiplayer and replay").
+    extra.append(Scenario(
+        name="ai-strike-tu160-stick-12nm", lane="flight",
+        args=pilot_run("UKR", "QUCOL", "--aircraft", "tu160", "--load", "MK82", "--altitude", "20000", "--from", "12",
+                       "--seconds", "200", "--follow-egress"),
+        timeout=600, expect=[r"RELEASE", r"ORIGIN", r"IMPACT", r"EGRESS"], check=tu160_stick_problems,
+        notes="The 12 nm start `ai-strike-tu160-stick` lost to the lower corner speed of T160-8, back (T160-9). The "
+              "doors were never the cause: the column turns a corner 5 s before this pass releases, the led aim jumps "
+              "320 ft sideways and the old cue pointing swung 207 ft past it. A heavy's cue now points with a gain of "
+              "0.4 and 3 s of damping, and the six Mk 82 leave with the doors open."))
+    extra.append(Scenario(
+        name="ai-strike-tu160-stick-12nm-factory", lane="flight",
+        args=pilot_run("UKR", "QUFACT", "--aircraft", "tu160", "--load", "MK82", "--altitude", "20000", "--from", "12",
+                       "--seconds", "200", "--follow-egress"),
+        timeout=600, expect=[r"RELEASE", r"ORIGIN", r"IMPACT", r"EGRESS"], check=tu160_stick_problems,
+        notes="The same 12 nm pass over the standing Ukraine factory, which bombed before the cue pointing changed: "
+              "the doors open 0.5 s before the first release and the six Mk 82 leave (T160-9)."))
+    extra.append(Scenario(
+        name="ai-strike-tu160-quick-wing", lane="flight",
+        args=pilot_run("UKR", "QUFACT", "--aircraft", "tu160", "--load", "MK82", "--quick-wing", "--seconds", "400",
+                       "--follow-egress"),
+        timeout=900, expect=[r"ROLE", r"RELEASE", r"IMPACT", r"EGRESS"], check=tu160_quick_wing_problems,
+        notes="A Quick Mission with the Ukraine factory as the ground target: a Tu-160 wing gets the Strike role from the "
+              "mission's bomber-class default, starts 7.5 nm out at 5,000 ft at about 570 kt (too fast to line up in "
+              "that distance), flies two passes that leave without bombing (a threat to defend against, then the "
+              "cue's line), and drops the six Mk 82 of its forward bay on the third (324 s) at the 5,000 ft heavy "
+              "floor, then egresses (T160-9)."))
+    extra.append(Scenario(
+        name="ai-strike-tu160-aft", lane="flight",
+        args=pilot_run("UKR", "QUCOL", "--aircraft", "tu160", "--load", "MK82", "--station", "1", "--count", "6",
+                       "--altitude", "20000", "--from", "10", "--seconds", "200", "--follow-egress"),
+        timeout=600, expect=[r"RELEASE", r"ORIGIN", r"IMPACT", r"EGRESS"], check=tu160_aft_problems,
+        notes="An AI Tu-160 with six Mk 82 in the aft bay row (station 1): they leave from that row's grid places, "
+              "four abreast then two, on the flat belly, with the doors open for them (T160-9)."))
+    extra.append(Scenario(
+        name="ai-strike-tu160-as16-tank", lane="flight",
+        args=pilot_run("UKR", "QUCOL", "--aircraft", "tu160", "--load", "AS16", "--altitude", "20000", "--from", "10",
+                       "--seconds", "100"),
+        timeout=600, expect=[r"RELEASE", r"ORIGIN", r"IMPACT", r"KILL"], check=tu160_as16_tank_problems,
+        notes="An AI Tu-160 with its AS-16 at 20,000 ft against the column's T-90: one missile leaves the forward bay "
+              "from 27,500 ft (the target inside the seeker's 45 degree look-down limit) and kills the tank. Before "
+              "T160-9 the AI overflew the target without a shot (`no release`)."))
+    extra.append(Scenario(
+        name="ai-strike-tu160-antiship", lane="flight",
+        args=pilot_run("UKR", "QUSFLT", "--unit", KRIVAK_ID, "--aircraft", "tu160", "--load", "AS16",
+                       "--altitude", "20000", "--from", "15", "--seconds", "115"),
+        timeout=600, expect=[r"RELEASE", r"ORIGIN", r"IMPACT"], check=tu160_antiship_problems,
+        notes="An AI Tu-160 with its AS-16, 15 nm from the Ukraine surface fleet at 20,000 ft: one missile leaves the "
+              "forward bay at 27,500 ft and hits the Krivak (150 of 500 left). The fleet then shoots the Tu-160 down "
+              "(about 119 s), so the run stops at 115 s."))
     extra.append(Scenario(
         name="ai-strike-b2-climb", lane="flight",
         args=pilot_run("UKR", "QUCOL", "--aircraft", "b2", "--load", "MK82", "--from", "30", "--seconds", "500",

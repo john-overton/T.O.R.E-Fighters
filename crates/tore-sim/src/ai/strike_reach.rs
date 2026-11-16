@@ -115,3 +115,58 @@ pub fn ranges_beyond(beyond_ft: f64, cap_ft: f64) -> impl Iterator<Item = f64> {
 pub fn ground_reach(slant_ft: f64, height_ft: f64) -> f64 {
     (slant_ft * slant_ft - height_ft * height_ft).max(0.).sqrt()
 }
+
+/// A seeker fired from high up is aimed so that the target stands this share
+/// of the seeker's look-down limit below the nose (fitted, agent, T160-9,
+/// 2026-11-16): the nose pitches a little in flight, and a lock on the
+/// limit's edge is lost with it.
+pub const LOOK_DOWN_SHARE: f64 = 0.8;
+/// The most of a seeker's zone-1 maximum range the AI fires at when it must
+/// fire from farther than its usual range (fitted, agent, T160-9).
+pub const REACH_SHARE: f64 = 0.95;
+
+/// The slant range the AI fires a seeker from, `height_ft` over its target.
+/// `fire_ft` is its usual fire range (10,000 ft or half the zone's maximum
+/// `max_ft`, whichever is farther) and `look_deg` the seeker's look-down
+/// limit. When the target stands within the limit at the usual range (the
+/// height no more than `fire_ft` times the limit's sine) the usual range
+/// stands, exactly as before; from higher up the seeker can lock nothing
+/// inside it, so the range is where the target stands
+/// [`LOOK_DOWN_SHARE`] of the limit below the nose, capped at
+/// [`REACH_SHARE`] of the maximum (and never less than the usual range).
+pub fn seeker_fire_range(fire_ft: f64, max_ft: f64, look_deg: f64, height_ft: f64) -> f64 {
+    if look_deg >= 90. || look_deg <= 0. || height_ft <= fire_ft * look_deg.to_radians().sin() {
+        return fire_ft;
+    }
+    let wanted = height_ft / (look_deg * LOOK_DOWN_SHARE).to_radians().sin();
+    wanted.min(max_ft * REACH_SHARE).max(fire_ft)
+}
+
+#[cfg(test)]
+mod seeker_range_tests {
+    use super::seeker_fire_range;
+
+    #[test]
+    fn the_usual_range_stands_where_the_seeker_can_lock_in_it() {
+        // An AS-16 (zone 40,000 ft, 45 degrees down, usual range 20,000 ft)
+        // from 14,000 ft, a Maverick-like 10,000 ft from 7,000 ft, and every
+        // seeker with no limit.
+        assert_eq!(seeker_fire_range(20_000., 40_000., 45., 14_000.), 20_000.);
+        assert_eq!(seeker_fire_range(10_000., 20_000., 45., 7_000.), 10_000.);
+        assert_eq!(seeker_fire_range(10_000., 20_000., 180., 50_000.), 10_000.);
+        assert_eq!(seeker_fire_range(10_000., 20_000., 0., 50_000.), 10_000.);
+    }
+
+    #[test]
+    fn a_high_flier_fires_from_where_the_target_is_inside_the_look_down_limit() {
+        // 20,000 ft up the AS-16 fires from 34,000 ft slant (36 degrees down).
+        let range = seeker_fire_range(20_000., 40_000., 45., 20_000.);
+        assert!(
+            (range - 20_000. / 36f64.to_radians().sin()).abs() < 1e-6,
+            "{range}"
+        );
+        assert!(range > 33_000. && range < 35_000.);
+        // From 30,000 ft the wanted range is past the zone's maximum: capped.
+        assert_eq!(seeker_fire_range(20_000., 40_000., 45., 30_000.), 38_000.);
+    }
+}

@@ -138,6 +138,7 @@ pub(super) fn gun_stores(
                 rounds: if spec.store.inhibited { 0 } else { rounds },
                 cadence_ticks: tore_sim::ai::QUARTER_SECOND_TICKS,
                 fire_range_ft: f64::from(zone.maximum_range.max(0)),
+                look_deg: 180.,
                 minimum_range_ft: f64::from(zone.minimum_range.max(0)),
                 maximum_range_ft: f64::from(zone.maximum_range.max(0)),
                 round_speed_fps: Some(f64::from(w.movement.initial_speed)),

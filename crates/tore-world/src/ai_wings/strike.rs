@@ -509,6 +509,11 @@ pub(super) fn describe(
                 rounds: if spec.store.inhibited { 0 } else { rounds },
                 cadence_ticks,
                 fire_range_ft: strike::GUIDED_CLOSE_FT.max(f64::from(zone.maximum_range) / 2.),
+                look_deg: if kind.seeker() {
+                    look_down_deg(&zone)
+                } else {
+                    180.
+                },
                 minimum_range_ft: f64::from(zone.minimum_range.max(0)),
                 maximum_range_ft: f64::from(zone.maximum_range.max(0)),
                 round_speed_fps: (kind == StoreKind::Rocket)
@@ -642,6 +647,11 @@ impl SeekerLock {
     }
 }
 
+/// How far below its nose a zone's seeker looks, degrees (180 for none).
+fn look_down_deg(zone: &tore_formats::weapons::Zone) -> f64 {
+    missiles::half_angle(zone.pitch).to_degrees()
+}
+
 fn seeker_lock(
     kind: StoreKind,
     w: &tore_formats::weapons::Weapon,
@@ -659,7 +669,12 @@ fn seeker_lock(
             + basis.forward[i] * mount[2]
     });
     let range = missiles::length(missiles::sub(target, origin));
-    let fire_range = strike::GUIDED_CLOSE_FT.max(f64::from(zone.maximum_range) / 2.);
+    let fire_range = strike::reach::seeker_fire_range(
+        strike::GUIDED_CLOSE_FT.max(f64::from(zone.maximum_range) / 2.),
+        f64::from(zone.maximum_range),
+        look_down_deg(&zone),
+        origin[1] - target[1],
+    );
     SeekerLock {
         locked: missiles::geometry(&zone, origin, basis, target, None)
             && (kind != StoreKind::AntiRadiation || emitting),

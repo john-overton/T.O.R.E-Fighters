@@ -829,6 +829,7 @@ fn strike_inputs() -> crate::ai::strike::Inputs {
             rounds: 4,
             cadence_ticks: 30,
             fire_range_ft: 10_000.,
+            look_deg: 180.,
             minimum_range_ft: 0.,
             maximum_range_ft: 20_000.,
             round_speed_fps: None,

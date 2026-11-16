@@ -109,6 +109,7 @@ pub(super) fn bomb(rounds: u32) -> Store {
         rounds,
         cadence_ticks: 30,
         fire_range_ft: 10_000.,
+        look_deg: 180.,
         minimum_range_ft: 0.,
         maximum_range_ft: 20_000.,
         round_speed_fps: None,

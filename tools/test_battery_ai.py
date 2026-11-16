@@ -347,7 +347,7 @@ class HeavyBomberTests(unittest.TestCase):
             "ai-merged-airfield-b2-wing2", "ai-merged-airfield-b52-wing2",
             "ai-heavy-takeoff-b2-gre-a1", "ai-heavy-takeoff-b52-gre-a1", "ai-heavy-takeoff-f117-gre-a2",
             "ai-heavy-land-b2-ukr-a2", "ai-heavy-land-b52-ukr-a2", "ai-heavy-land-f117-ukr-a2",
-            "ai-heavy-takeoff-tu160-gre-a1", "ai-heavy-land-tu160-ukr-a2",
+            "ai-heavy-takeoff-tu160-gre-a1", "ai-heavy-land-tu160-ukr-a2", "ai-merged-airfield-tu160-wing2",
         ):
             self.assertIn(name, names)
 
@@ -364,6 +364,24 @@ class HeavyBomberTests(unittest.TestCase):
         self.assertFalse([p for p in problems if "Harpoon" in p or "shot" in p or "stores" in p], problems)
         self.assertTrue(any("Harpoons" in p for p in ai.b52_gun_fight_problems(text.replace("AGM-84E x12", "AGM-84E x11", 1))))
         self.assertTrue(any("never fired" in p for p in ai.b52_gun_fight_problems(text.replace("shots=251", "shots=0"))))
+
+    def test_the_tu160_mission_scenarios_exist_and_the_fight_check_reads_guns_stores_and_shots(self):
+        names = {s.name for s in ai.scenarios()}
+        self.assertIn("ai-tu160-quick-mission-2v2", names)
+        self.assertIn("ai-tu160-vs-su27-2v2", names)
+        actors = "\n".join(
+            f"actor={n} Friendly 1-{n} Tu160 activity=Flying alive=true rounds=12 x=1 y=2 z=3" for n in (1, 2)
+        )
+        stores = "\n".join(
+            f"AI stores: actor={n} tanks=0 external_fuel=0 payload=16588 stations=[AS-16 x12, MK-82 x0]" for n in (1, 2)
+        )
+        text = actors + "\n" + stores + "\nAI probe attack: wings=2 missiles=0 gun_bursts=0 gun_rounds=0 \n"
+        check = ai.tu160_no_air_to_air_checker()
+        problems = check(text)
+        self.assertFalse([p for p in problems if "Tu-160" in p], problems)
+        self.assertTrue(any("a gun?" in p for p in check(text.replace("rounds=12", "rounds=1254", 1))))
+        self.assertTrue(any("carries" in p for p in check(text.replace("AS-16 x12", "AIM-9M x2", 1))))
+        self.assertTrue(any("fired" in p for p in check(text.replace("missiles=0", "missiles=1"))))
 
 
 if __name__ == "__main__":
