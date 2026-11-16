@@ -1148,3 +1148,27 @@ The `menus-ordnance-availability` expected line reads 54 aircraft, 23 recovered 
 5,395 weapon and 257 tank placements; `a2g-catalog` carries 54, 23, 257 and 278;
 `test_battery_a2g.py` carries 54, 23 and 257. Earlier sections quoting 22 recovered stations,
 5,447 weapon placements or 276 Cheat-only placements stay as written for their own states.
+
+## The Su-34's stations: pins (SU34-5, 2026-11-16)
+
+The Su-34's rows 6 and 7 lose the designator bit `0x400` (B7: no sensor pod on a station the
+real aircraft does not have), which also admits the multi-pod rocket stores, and `weapon_allowed`
+refuses the stores that clip the drawn airframe on rows 6, 7 and 8 (22, 4 and 4). Measured by
+`--validate-ordnance` on the slice's tree (profile refreshed first), on top of the integrated
+5,395:
+
+| Pin | Before | After | Why |
+| --- | ---: | ---: | --- |
+| Weapon placements | 5,395 | 5,357 | Su-34 137 to 99: rocket pods 8 (both rows), refusals 30 |
+| Designator pod placements | 82 | 80 | rows 6 and 7 lose the bit |
+| Aircraft, tanks, recovered stations, Cheat-only, records | 54, 257, 23, 278, 82/9 | unchanged | |
+
+```text
+ordnance SU34.PT: 4 source rows, 0 optional weapon rows, 99 compatible weapon placements, 8 tank placements; defaults and restart passed; catalog 54 normal, 83 Cheat
+ordnance audit: 54 aircraft, 23 recovered weapon stations, 5357 weapon placements, 257 tank placements, 82 weapon and 9 tank records; passed
+ordnance audit: 1 designator pods, 80 pod placements, one to an aircraft, loaded and restored through the saved mission; passed
+```
+
+The `menus-ordnance-availability` expected line carries 5,357. The `a2g-catalog` and
+`test_battery_a2g.py` lines match any weapon and pod count and are unchanged. At the next
+integration the coordinator recomputes the totals (B4); this section is the slice's own count.

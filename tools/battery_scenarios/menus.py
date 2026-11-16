@@ -503,7 +503,8 @@ def scenarios() -> list[Scenario]:
             # Batch A integration (2026-11-15): 4,732, measured. The B-2 bays refuse four stores (B-2 86 to 78) and the B-52 bays, folded onto the shared grid, hold three stores (B-52 71 to 27); the slices alone gave 4,776 and 4,746, not added.
             # BMB-B1/B2 (2026-11-15): 51 aircraft and 249 tank placements after the B-1B, Tu-160 and F-111F joined (F-111F 16 tank); the integration of batches A and B is dated in ordnance_audit.rs.
             # Bomber batches A, B and C integration (2026-11-16): 54 aircraft, 23 recovered stations, 5,395 weapon, 257 tank, 278 Cheat-only and 82 designator pod placements, measured: 5,093 plus the Tu-26 (129), Tu-95 (36) and Su-34 (137 weapon, 8 tank) joined with their BMB-C2 station corrections (the batch's own 5,447 was from the pre-round-2 5,145; not added). Dated in ordnance_audit.rs.
-            expect=[r"ordnance audit: 54 aircraft, 23 recovered weapon stations, 5395 weapon placements, 257 tank placements, 82 weapon and 9 tank records; passed"],
+            # SU34-5 (2026-11-16): 5,357 weapon placements and 80 designator pod placements, measured: the Su-34 holds 99 (from 137); its rows 6 and 7 lose the designator bit 0x400 (B7), which also admits the multi-pod rocket stores (8 placements), and 30 stores are refused by name (22 on row 6, four on row 7, four on the tips). The coordinator recomputes the total at integration (B4).
+            expect=[r"ordnance audit: 54 aircraft, 23 recovered weapon stations, 5357 weapon placements, 257 tank placements, 82 weapon and 9 tank records; passed"],
             notes="All reviewed source stations, compatible supported weapons/tanks, empty defaults and accepted-load restoration. The audit fails when a supported weapon or tank record is missing or a pinned count moves (ordnance_audit.rs).",
         )
     )

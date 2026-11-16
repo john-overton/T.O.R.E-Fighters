@@ -1039,3 +1039,11 @@ at least 0.05 ft with the doors open, and no two touch).
 Update (B2-5, 2026-11-15): the B-2's default load is the two Mk 82 bays alone (64 bombs, 32,000 lb), so
 `flight-liftoff-b2` records 155.2 kt after 7,232 ft (was 158.1 kt) and `flight-approach-b2` 167.5 kt (was 166.2 kt);
 the windows (140 to 165 kt and 140 to 170 kt) are unchanged.
+
+Update (SU34-5, 2026-11-16): `su34` joins `STATIONS` (`[180, 4, 4, 2]`), so the slot and
+jettison scenarios cover its gun, fuselage, wing and wingtip rows. New scenarios:
+`flight-bay-fire-su34-pylon-row6`, `-row7` and `-row8` (windowed stores-preview fire: a Mk 82 or
+GBU-12 leaves the intake, wing or tip station; nothing opens, the Su-34 has no bay), and
+`render-su34-clearance` and `render-su34-clearance-mk82` (headless: the default and a Mk 82 load
+clip the airframe by at most 0.75 ft, no two stores touch, and every store stays at least 1 ft
+from the gear-down plates).

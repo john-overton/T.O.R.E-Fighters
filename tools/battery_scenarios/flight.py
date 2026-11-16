@@ -123,6 +123,10 @@ STATIONS["faxx"] = STATIONS["f22n"]
 # six a wing); its three bay rows (3, 5 and 6, nine Mk 82 each) start empty and keep an
 # empty Mk 82 selection, so three never-loaded slots follow.
 STATIONS["b52"] = [1242, 12, 0, 0, 0]
+# The Su-34 (SU34-5, 2026-11-16): the GSh-30-1 (row 5, 180 rounds, the real magazine) and the
+# default AS-14 (row 6, four, two tandem pairs under the intake ducts), AT-12 (row 7, four, one a
+# pylon on the middle and outer underwing pylons) and AA-11 (row 8, two, the wingtip rails).
+STATIONS["su34"] = [180, 4, 4, 2]
 
 
 def _numbers(output: str, prefix: str) -> dict:
@@ -1397,6 +1401,20 @@ def slot_scenarios() -> list[Scenario]:
         timeout=300,
         notes="B-52 pylon release: a Mk 82 leaves the underwing beam with the bay doors shut (18 loaded, nine a wing; the Harpoon default needs a target the preview does not give it, its live-fire slot scenario covers it).",
     ))
+    # SU34-5 (2026-11-16): the Su-34 has no bay; its fuselage (two tandem pairs under the intake
+    # ducts), wing (middle and outer underwing pylons) and wingtip rows fire a bomb from the
+    # stations they hang at, with the stores preview's fixed-tick simulation.
+    for row, load in ((6, "MK82.JT:4"), (7, "MK82.JT:4"), (8, "GBU12.JT:2")):
+        out.append(Scenario(
+            name=f"flight-bay-fire-su34-pylon-row{row}", lane="flight",
+            args=["--stores-preview", "{work}/frames"], window=True,
+            env={"TORE_STORES_PREVIEW_AIRCRAFT": "su34", "TORE_STORES_PREVIEW_FIRE": str(row),
+                 "TORE_STORES_PREVIEW_RECORDS": f"{row}={load}", "TORE_STORES_PREVIEW_FUEL": "15000"},
+            expect=[f"Stores firing: su34 row={row} PASS"],
+            outputs=[f"frames/su34-fire-row{row}-t000.png", f"frames/su34-fire-row{row}-t400.png"],
+            timeout=300,
+            notes=f"Su-34 row {row} release: {load.split(':')[0]} leaves its station (no bay: nothing opens).",
+        ))
     return out
 
 

@@ -15563,3 +15563,114 @@ astern with no further change; the Tu-95's dorsal and ventral rows (5 and 6, cle
 BMB-C2) stay empty and are not stations. Pinned by
 `the_retail_tu26_and_tu95_gun_rows_are_slewed_tail_guns_that_fire_astern` in
 `ai_wings/tail_gun_tests.rs`. The "rear-facing mount lands later" caveats above are met.
+
+## Su-34 stations, bays and pylons (SU34-5, 2026-11-16)
+
+Opinionated and **fitted**, agent-authored (SU34-5), applying the coordinator's first-pass
+decisions for the Su-34 (`BOMBERS-DECISIONS-C.md`, "Su-34" item 5 and "BMB-C1/C2", for John
+to review). Earlier sections stay as written; the SU34-0 review's station table and BMB-C2's
+gun count and row 6 height are what this builds on. The numbers and the clearance tables are
+in the [stores specification](../spec/stores-on-pylons.md#the-su-34-stations-su34-5-2026-11-16).
+
+**No bay.** The Su-34 has no internal bay, so there is no door leaf, belly cut or bay cell
+in this slice. The slice is wing, fuselage and intake stations only.
+
+**Stations after SU34-5.** The record keeps its nine rows (no row is added, none moved to
+another location byte); rows 6 and 7 lose a flag bit and take the Flankers' station table.
+
+| Row | What it is | Where it hangs now | Capacity, class | Default |
+| ---: | --- | --- | --- | --- |
+| 5 | GSh-30-1 gun | the record's point (BMB-C2: 180 rounds) | 180 | `GSH301.JT` x 180 |
+| 6 | fuselage row, flags `0x07e5` to `0x03e5` | two tandem pairs under the intake ducts: 4.5 ft out, 2.0 ft forward of the reference point, the stores' middles 6.9 ft either side (the shared fuselage-pair rule), hung under the lowest part of the duct over the store's length (`Hang::Lowest { half: 6 }`); the record's own point (BMB-C2) is 6 ft below the reference | 4, class 80 | `AS14.JT` x 4 |
+| 7 | wing row, flags `0x07e5` to `0x03e5` | the middle and outer underwing pylons, one store each: 14 and 18 ft out, 0.4 and 3.4 ft back (the Su-27's numbers, new `Location::Separate` use for this aircraft); the outer pair leaves first | 4, class 80 | `AT12.JT` x 4 |
+| 8 | wingtip rails, flags `0x85` | the tip's edge, as the record and the shared wingtip rule have them; unchanged | 2, class 10 | `AA11.JT` x 2 |
+
+The wing table is the Su-27's, not the Su-35's: the Su-34's half span (25.9 ft) is the
+Su-27's (26.3 ft), not the Su-35's 24.3 ft, and the drawn leading edge is swept the same
+way. The intake and wing numbers are the Flankers' constants (`FLANKER_INTAKE`,
+`SU27_WING`) reached through two named Su-34 aliases (`SU34_INTAKE`, `SU34_WING`) so a
+future Su-34 source can move them without touching the Flankers. The Su-34's gun row 5 is
+not the Flankers' tunnel row (the Su-27's row 5), which the Su-34 record does not have.
+
+**The 12 real hardpoints and the unplaced two.** The real jet has 12 weapon stations (two
+wingtip, six underwing, two under the intake ducts, two in the tunnel). The record has
+10 stores on them: 2 tip, 4 wing, 4 fuselage. The four fuselage stores stand for the two
+intake pylons and the two tunnel stations (one record row cannot span two kinds of station,
+so they are drawn as the shared tandem pairs under the ducts). The two **unplaced real
+stations are the inner underwing pair (about 10 ft out)**, the same two the Su-27 and Su-35
+leave unplaced; the record has no row for them and nothing is drawn there. No per-station
+source for the Su-34 was found (SU34-0), so the table is the Flankers' (opinionated).
+
+**Designator bit.** Rows 6 and 7 lose `0x400` (BMB-C1/C2 decision, B7: never hang a
+sensor pod on a station the real aircraft does not have). The retail bit would have offered
+the Pave Spike on an intake pylon and a wing pylon. A consequence the decision did not
+state: `0x400` is also the bit that admits the multi-pod rocket stores, so **`B8.JT`,
+`B13.JT`, `LAU10.JT` and `LAU61.JT` leave both rows** (8 placements). The real Su-34 does carry
+rocket pods on its wing pylons (open for John below). The pod placement pin falls by two.
+
+**What the rows admit and refuse.** Every catalog store was loaded at its full count on each
+row and measured with the stores preview (`TORE_STORES_PREVIEW_CLEARANCE=1`): its worst point
+against the drawn airframe's underside (`clip`), the closest pair of stores and the gap to
+the gear-down plates. A store is refused when it enters the airframe by more than 0.75 ft
+(the Flanker stations the Su-34 reuses carry default clips up to 0.72 ft, and the AS-14 default
+here clips 0.57 ft), when two stores overlap, or when it comes within 1 ft of the gear
+(none did). The lists are in `aircraft_stations.rs` and enforced by `weapon_allowed`:
+
+| List | Row | Stores | Measured |
+| --- | ---: | ---: | --- |
+| `SU34_FUSELAGE_REFUSED` | 6 | 22: `AA6`, `AA9`, `AGM45`, `AGM84E`, `AGM88`, `AIM7`, `AIM7E`, `AM39`, `AS30`, `AT12`, `GBU10`, `GBU10A`, `GBU12`, `GBU16`, `GBU29`, `GBU29P`, `GBU30`, `MK84`, `PAVEWA3`, `PAVEWAY`, `PL10`, `PL7` | clips 0.81 to 3.69 ft (the PL10 pair overlaps by 0.07 ft) |
+| `SU34_WING_REFUSED` | 7 | 4: `GBU29`, `GBU29P`, `GBU30`, `PAVEWA3` | the front pair enters the wing by 1.10 ft and the stores on the two pylons overlap by 1.40 ft |
+| `SU34_TIP_REFUSED` | 8 | 4: `AGM65A`, `AGM65G`, `PL7`, `R550` | clips 0.83 to 1.09 ft on the tip's edge |
+
+Tanks (F150, F250, F350, F500) report a clip of 0.00 on both rows and stay. The wing row
+admits everything else, including the Mk 84, GBU-12 and GBU-16 (the GBU-10 class clips 0.12 ft
+and its pair gap is 0.21 ft). The Su-34 placements fall from 137 to 99 (rocket pods 8, refusals 30).
+
+**Default load.** Unchanged: 4 `AS14.JT`, 4 `AT12.JT`, 2 `AA11.JT` and the gun at 180. The
+loadout counts the same weight as before, so the start tank is unchanged.
+
+**Clearance of the default load (feet, stores preview).**
+
+| Row | Store | Clip into the airframe | Closest neighbour | Gear plate gap |
+| ---: | --- | ---: | ---: | ---: |
+| 6 | `KEDGE.SH` (AS-14) | 0.57 (fins into the belly under the rear pair's tail) | 1.44 | 2.23 (rear pair, left), 3.74 (front) |
+| 7 | `SWNGR.SH` (AT-12) | 0.00 | 1.44 | 4.72 |
+| 8 | `ARCHR.SH` (AA-11) | 0.59 (the same as the Su-27's tip) | 1.44 | 16.4 |
+
+**Gear down.** The Su-34's gear plates stand 26 units (8.67 ft) below the reference point
+(the mains 8.33 ft). The rear under-intake store's lowest point is 7.31 ft below the
+reference point: **1.36 ft above the ground contact line**, and the nearest of its points
+to a gear plate is 2.23 ft (to the left main, 2.56 ft to the right). The front pair hangs
+higher (5.35 ft above the ground). So the under-intake stores clear the gear. There is no
+centreline station: the record has no centreline row, so there is no centreline tandem to
+check (the tunnel pair is drawn under the ducts as above). Measured with the clearance
+report's new Su-34 gear arm (`tore-app` `stores_preview.rs`, the Tornado's gear check
+generalised to a face list), neutral pose (gear down).
+
+**Reading the preview.** The front AS-14 of each intake pair hangs about 4 ft higher than the
+rear one: the forebody underside rises toward the nose, and the pair's two pylons read the
+underside separately (the F-14 tunnel precedent). That is how the shared rule draws a
+fuselage pair; no extra mechanism was added.
+
+**AI release.** An AI bomb leaves the wing row from one of its two pylons through the shared
+release (`ai_wings::release`, a new test pins 14 or 18 ft out). The fuselage and tip rows
+use the same racks as the Su-27's. The slot scenarios fire all four stations (below).
+
+**Pins** (`ordnance_audit.rs`, dated): weapon placements 5,357 from 5,395 (Su-34 137 to 99),
+designator pod placements 80 from 82; aircraft 54, tank placements 257, recovered stations 23
+and Cheat-only 278 unchanged. At integration the coordinator recomputes (B4).
+
+**Open for John.**
+
+1. The designator bit decision also removes the rocket pods (B-8, B-13, LAU-10, LAU-61) from
+   both rows. The real Su-34 carries rocket pods on its wing pylons. The fix, if wanted, is
+   a guarded `extra_weapon` for those four stores on rows 6 and 7 (the F-117's Paveway II
+   precedent), with the audit's expected count following it.
+2. The row 6 refusal list is long (22) because the shape's intake underside is low and
+   curved. The laser bombs (GBU-10, 12, 16) and the Mk 84 and AS-30 are on it though the real
+   jet carries heavy bombs. A different threshold (0.9 ft keeps the GBU-12 and GBU-16) is a
+   one-line change.
+3. The AS-14 default clips the belly by 0.57 ft (fin tips), inside the Flankers' accepted
+   band (0.54 to 0.72).
+4. The four fuselage stores stand for four real stations (two intake, two tunnel). A tunnel
+   row of their own would need a new record row.

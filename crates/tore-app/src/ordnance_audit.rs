@@ -152,7 +152,13 @@ const TANK_RECORDS: usize = 9;
 /// AS-16 alone, one placement. Measured with the batch's own station
 /// corrections only (the retail rows were not measured separately: the bay
 /// row cannot take its default selection before the active-radar bit).
-const WEAPON_PLACEMENTS: usize = 5395;
+/// 5,357 from 5,395 (SU34-5, 2026-11-16, measured by `--validate-ordnance`): the
+/// Su-34's rows 6 and 7 lose the designator bit `0x400` (B7), and that bit is
+/// also the one that admits the multi-pod rocket stores, so B-8, B-13, LAU-10
+/// and LAU-61 go from both rows (8 placements); the named refusals take 22
+/// stores off row 6, four off row 7 and four off the wingtip row (30). The
+/// Su-34 holds 99 placements, from 137.
+const WEAPON_PLACEMENTS: usize = 5357;
 /// 188 from 182: the F-16A's centreline tank row (F150.GAS or F250.GAS) plus
 /// the tank selection its two 0x07e5 wing rows accept, 6 tank placements.
 /// 192 from 188: the MiG-31 (M31-1). 201 from 192: the Mirage 2000 (M2K-1).
@@ -210,7 +216,10 @@ const NOVELTY_PLACEMENTS: usize = 278;
 /// `0x07e5`) carry the decoded designator bit, one pod each (BMB-C1,
 /// 2026-11-15, measured, retail flags kept: the Tu-26's bay row and the
 /// Tu-95's pylon row lose the bit in BMB-C2, so they add none).
-const POD_PLACEMENTS: usize = 82;
+/// 80 from 82 (SU34-5, 2026-11-16): the Su-34's rows 6 and 7 lose the designator
+/// bit `0x400` (B7: no sensor pod on a station the real aircraft does not
+/// have), so the two pod placements they added in BMB-C1 are gone.
+const POD_PLACEMENTS: usize = 80;
 
 pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
     if AircraftId::ALL.len() != AIRCRAFT {
