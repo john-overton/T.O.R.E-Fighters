@@ -123,6 +123,11 @@ STATIONS["faxx"] = STATIONS["f22n"]
 # six a wing); its three bay rows (3, 5 and 6, nine Mk 82 each) start empty and keep an
 # empty Mk 82 selection, so three never-loaded slots follow.
 STATIONS["b52"] = [1242, 12, 0, 0, 0]
+# The Tu-26 Backfire-C (T26-5 and T26-6, 2026-11-16): the 23 mm tail turret (row 3, 2,000 rounds, on the
+# nozzle exit plane, slewed aft) and the default six AS-16: the intake-trunk pair (row 6), the inner glove
+# pair (row 7) and the outer glove pair (row 8), two each. The bay row (5) starts empty and keeps an empty
+# AS-16 selection, so one never-loaded slot follows.
+STATIONS["tu26"] = [2000, 2, 2, 2, 0]
 
 
 def _numbers(output: str, prefix: str) -> dict:
@@ -1236,6 +1241,10 @@ REFUSED_SLOTS = {
     # its radar (`B52R.SEE`, enabled), so the Harpoon wants a surface target as everyone's does.
     # `a2g-antiship-b52` fires it at the Krivak.
     ("b52", 2),
+    # The Tu-26's AS-16 (Kh-15) rows are surface missiles with an active radar seeker (T26-6,
+    # 2026-11-16): the three default rows (slots 2 to 4) refuse the practice aircraft. The
+    # `a2g-sarh-as16-tu26` runs fire them from a glove row and from the bay at a target on the ground.
+    ("tu26", 2), ("tu26", 3), ("tu26", 4),
 }
 
 
@@ -1550,6 +1559,13 @@ def countermeasure_scenarios() -> list[Scenario]:
     out.append(Scenario(name="flight-countermeasures-b2", lane="flight", args=args, window=True,
                         check=check_countermeasures, timeout=180,
                         notes="The B-2's retail F18.ECM row: 30 chaff and 30 flares, five and three released (B2-6)."))
+    # T26-6: the Tu-26's record (TU26.ECM, the jammer row of the record, no RF mode): its chaff and flares.
+    args = ["--live-fire", "--aircraft", "tu26"] + ["--combat-command", "chaff"] * 5
+    args += ["--combat-command", "flare"] * 3
+    args += ["--countermeasure-preview", "240", "--capture-flight", "{work}/cm.ppm", "--no-audio"]
+    out.append(Scenario(name="flight-countermeasures-tu26", lane="flight", args=args, window=True,
+                        check=check_countermeasures, timeout=180,
+                        notes="The Tu-26's TU26.ECM row: its chaff and flares, five and three released (T26-6)."))
     out.extend(tornado_countermeasure_scenarios())
     return out
 
@@ -2627,17 +2643,39 @@ def fight_scenarios() -> list[Scenario]:
                   "BMB-AI: with an aim error, a lag and a swing rate, so a minority of the rounds hit (2 of 176, was 89 of 128).",
         )
     )
+    # T26-6 (2026-11-16): the Tu-26's tail turret (the 23 mm T23_1.JT on the nozzle exit plane, T26-5) is the same
+    # slewed mount: an AI Tu-26 fires astern at a fighter closing from behind.
+    out.append(
+        Scenario(
+            name="flight-tu26-tail-gun",
+            lane="flight",
+            args=[
+                "--aircraft", "f22", "--probe-enemy-aircraft", "tu26", "--probe-enemy-skill", "ace",
+                "--probe-geometry", "rear", "--separation", "1", "--probe-guns",
+                "--ai-probe-ticks", "3000", "--no-audio",
+            ],
+            check=tu26_tail_gun_problems,
+            timeout=600,
+            notes="T26-6: an AI Tu-26's slewed T23_1.JT fires astern at a fighter in its rear arc (enemy_gun counts on the "
+                  "player); with BMB-AI's aim error, lag and swing rate a few rounds hit (4 of 253).",
+        )
+    )
     return out
 
 
-def b52_tail_gun_problems(output: str) -> list[str]:
+def tu26_tail_gun_problems(output: str) -> list[str]:
+    """T26-6: the Tu-26's 23 mm tail turret, on the nozzle exit plane, fires astern like the B-52's."""
+    return b52_tail_gun_problems(output, "Tu-26")
+
+
+def b52_tail_gun_problems(output: str, aircraft: str = "B-52") -> list[str]:
     m = re.search(r"enemy_gun=(\d+)/(\d+)", output)
     if not m:
         return ["no debrief line with enemy_gun"]
     hits, shots = int(m.group(1)), int(m.group(2))
     problems = []
     if shots == 0:
-        problems.append("the B-52's tail gun never fired at the fighter behind it")
+        problems.append(f"the {aircraft}'s tail gun never fired at the fighter behind it")
     elif hits > TAIL_GUN_MAX_SHARE * shots:
         # BMB-AI (2026-11-16): the gunner has an aim error, a lag and a swing rate; the exact, instant
         # swing hit 89 of 128 rounds here. The fighter closes 1,800 ft off the tail from 5,800 ft, so

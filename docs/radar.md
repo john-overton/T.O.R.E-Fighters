@@ -160,7 +160,7 @@ flying channel, instead of borrowing a preset.
 | Preset | Radar records | Notch half-width, ft/s | Range factor at notch centre | Reference burn-through B, nmi | Angular coupling half-width / sidelobe floor |
 | --- | --- | ---: | ---: | ---: | --- |
 | Basic | F4BR, MIG21R, MIG27R | Disabled | 1.0 | 5 | 3 degrees / 0.05 |
-| Transitional | F14R, B52R (B52-7, 2026-11-15, fitted: the Tu-160's record renamed, a long-range bomber set; the AC-130's class) | 100 | 0.20 | 8 | 2 degrees / 0.02 |
+| Transitional | F14R, B52R (B52-7, 2026-11-15, fitted: the Tu-160's record renamed, a long-range bomber set; the AC-130's class), TU26R (T26-7, 2026-11-16, fitted, agent decision: the Tu-26's own record, the same class as the B-52's) | 100 | 0.20 | 8 | 2 degrees / 0.02 |
 | Advanced | F18R, MIG29R, SU24R, SU27R, F22R, MIG31R | 60 | 0.45 | 10 | 1 degree / 0.005 |
 
 Basic sets are primarily vulnerable to ground clutter and carry no Doppler notch,
@@ -230,6 +230,14 @@ John assigned it Late-Cold-War on 2026-11-08 (opinionated), the generation of
 the identical SU27.ECM. F22.ECM has deception chance 50; every other RF record
 has 30, the reference strength below. The [retail record
 values](spec/radar.md#installed-ecm-records) are in the spec.
+
+Update (T26-7, 2026-11-16): the Tu-26 carries `TU26.ECM`, read as Early with no RF mode and strength 0.00
+(`--sensor-summary`: `jammer TU26.ECM EARLY strength 0.00 (no RF mode)`), the class of `F4.ECM`, `F104.ECM` and
+`AV8.ECM` (fitted, agent decision), so it emits no RF noise and never reaches the matchup table; the record gives
+it chaff and flares (99 and 99). Its radar `TU26R.SEE` (search and track 100 nmi, 60 and 45 degree cones, look-down 0)
+is `Preset::Transitional` (the presets table above), the B-52's class: before this slice the record was unreviewed and the
+Tu-26 flew with no radar. A test pins both (`sensors::profile::tests::the_tu26_radar_and_jammer_records_are_reviewed`).
+See [the Tu-26 section](formats/aircraft-variety.md#tu-26-backfire-c-ordnance-sensors-hud-and-cockpit-t26-67-2026-11-16).
 
 Update (F5E-10, 2026-11-10): the F-5E carries `F104.ECM` (John's pick, round 2), read
 as Early with no RF mode and strength 0.00 (F5E-7 sensor summary), so like the

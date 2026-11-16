@@ -148,6 +148,11 @@ impl Preset {
             // AC-130's class (Transitional). Without it the record decodes
             // as unreviewed and the B-52 flew with no radar at all.
             "B52R.SEE" => Some(Self::Transitional),
+            // The Tu-26's radar (T26-7, 2026-11-16, fitted, agent decision):
+            // the same long-range bomber record family as the B-52's, so the
+            // same class (Transitional). Without it the record decodes as
+            // unreviewed and the Tu-26 flew with no radar at all.
+            "TU26R.SEE" => Some(Self::Transitional),
             "F18R.SEE" | "MIG29R.SEE" | "SU24R.SEE" | "SU27R.SEE" | "F22R.SEE" | "F15R.SEE"
             | "E3R.SEE" | "E2R.SEE" | "MIG31R.SEE" => Some(Self::Advanced),
             _ => None,
@@ -253,7 +258,10 @@ impl Generation {
     pub fn for_record(record: &str) -> Option<Self> {
         match record.to_ascii_uppercase().as_str() {
             "F4.ECM" | "MIG21.ECM" | "AV8.ECM" | "YAK141.ECM" | "KA50.ECM" | "A7.ECM"
-            | "F104.ECM" => Some(Self::Early),
+            | "F104.ECM" | "TU26.ECM" => Some(Self::Early),
+            // The Tu-26's jammer (T26-7, 2026-11-16, fitted): the record has no
+            // RF mode and strength 0, like the F-4's and the F-104's, so it is
+            // Early and emits no RF noise; the chaff and flares are its load.
             "F14.ECM" | "MIG29.ECM" | "SU24.ECM" | "AC130.ECM" | "B52.ECM" | "A10.ECM" => {
                 Some(Self::Transitional)
             }
@@ -835,6 +843,20 @@ mod tests {
         assert_eq!(Preset::for_record("b52r.see"), Some(Preset::Transitional));
         // The Tu-160's record it renames stays unreviewed until its own slice.
         assert_eq!(Preset::for_record("TU160R.SEE"), None);
+    }
+
+    /// T26-7: the Tu-26's radar record has its preset (Transitional, as the
+    /// B-52's) and its jammer record its generation (Early: no RF mode), so
+    /// both are enabled.
+    #[test]
+    fn the_tu26_radar_and_jammer_records_are_reviewed() {
+        assert_eq!(Preset::for_record("TU26R.SEE"), Some(Preset::Transitional));
+        assert_eq!(Preset::for_record("tu26r.see"), Some(Preset::Transitional));
+        assert_eq!(Generation::for_record("TU26.ECM"), Some(Generation::Early));
+        // The records of the other bombers that fly the same family stay
+        // unreviewed until their own slices.
+        assert_eq!(Preset::for_record("TU160R.SEE"), None);
+        assert_eq!(Generation::for_record("TU160.ECM"), None);
     }
 
     #[test]

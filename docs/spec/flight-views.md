@@ -355,3 +355,12 @@ to 18.8 feet ahead with its crown 4.6 feet up at 14.6 feet; the seat is the cano
 feet over the crown, so Back looks over the glass and down the spine (frame
 `cockpit-view-back-f2`). The replay's Back, cockpit and HUD cameras and the listening seat use the
 same table. Evidence in [the F-117 section](../formats/aircraft-variety.md#f-117-ordnance-sensors-and-cockpit-f117-67-2026-11-15).
+
+## Pilot's eye on the Tu-26 (2026-11-16, T26-7)
+
+The per-identity Back eye table (`mirrors::eye_offset`) gains the Tu-26: 7 feet up and 56 feet ahead of the model origin (fitted, agent decision), where every
+other aircraft except the B-2 (10 and 20), the F-117 (6 and 14), the B-52 (9 and 63) keeps 7 and 10. Measured on the Tu-26 shape (4/3 ft a unit): the fuselage top is flat at 5.33
+feet from 16 to 61.3 feet ahead and the glasshouse (45.3 to 65.3 feet ahead, 5.3 feet wide) stands no higher than that crown, so the shared seat was 46 feet aft of the
+windscreen and 1.7 feet over the top skin. The new seat is the glasshouse's middle, 1.7 feet over the crown, so Back looks down the spine to the fin and the nozzles (frame
+`cockpit-view-back-f2`). The replay's Back, cockpit and HUD cameras and the listening seat use the same table. Evidence in [the Tu-26
+section](../formats/aircraft-variety.md#tu-26-backfire-c-ordnance-sensors-hud-and-cockpit-t26-67-2026-11-16).

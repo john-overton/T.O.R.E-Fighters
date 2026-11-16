@@ -306,3 +306,10 @@ row and `--cockpit-sheet OUT_DIR f117` prints `f117 NO MIRRORS FITTED`, as for t
 feed camera stays on the shared seat; only the Back view and the replay cameras take the per-aircraft
 eye, which gives the F-117 6 feet up and 14 feet ahead. See [the F-117 section](../formats/aircraft-variety.md#f-117-ordnance-sensors-and-cockpit-f117-67-2026-11-15).
 Frames are under `.local/m3-aircraft/frames/F117-6/`.
+
+## 2026-11-16 Tu-26 cockpit: the AC-130 art, no mirrors, its own eye (T26-7)
+
+The Tu-26 flies the AC-130 family by its record (`bmbroh.HUD`, stem `AC130`, `~AC130H.PIC`, 1280 x 490; coordinator first pass, Tu-26 item 10), as the B-52 does. The
+rear feed camera (`mirrors::camera`) stays on the shared seat for every aircraft; only the Back view and the replay cameras take the per-aircraft eye
+(`mirrors::eye_offset`), which gives the Tu-26 7 feet up and 56 feet ahead (the shared seat is 7 and 10). See [the Tu-26
+section](../formats/aircraft-variety.md#tu-26-backfire-c-ordnance-sensors-hud-and-cockpit-t26-67-2026-11-16). Frames are under `.local/m3-aircraft/frames/T26-6/`.

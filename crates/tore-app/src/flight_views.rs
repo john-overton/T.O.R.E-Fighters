@@ -1336,6 +1336,14 @@ mod tests {
             crate::mirrors::pilot_eye_of(Some(AircraftId::B52), [0., 1000., 0.], level)
         );
         assert_ne!(deck, shared);
+        // T26-7: the Tu-26's seat is the drawn glasshouse, 56 ft ahead.
+        body.aircraft = Some(AircraftId::Tu26);
+        let glasshouse = body_camera(body, 3).position;
+        assert_eq!(
+            glasshouse,
+            crate::mirrors::pilot_eye_of(Some(AircraftId::Tu26), [0., 1000., 0.], level)
+        );
+        assert_ne!(glasshouse, shared);
     }
     #[test]
     fn back_from_another_aircraft_sits_at_its_pilot_eye_and_shows_it() {

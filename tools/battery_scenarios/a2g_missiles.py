@@ -239,6 +239,30 @@ def antiship_b52_problems(output: str) -> list[str]:
     return problems
 
 
+def antiship_tu26_problems(output: str) -> list[str]:
+    """T26-6 (2026-11-16): two AS-16 (Kh-15) from the Tu-26's outer glove row (station 3 of the run) and from
+    its belly bay (station 4, loaded by the run) at the Krivak: each designated on the A-G page through the
+    Tu-26's radar, launched, seeker active, the ship hit. The bay's launch comes about a second after the
+    glove row's (the doors open first)."""
+    parts = runs(output)
+    if len(parts) != 2:
+        return [f"{len(parts)} runs finished, want 2"]
+    problems: list[str] = []
+    for run, label in ((parts[0], "Tu-26 glove AS-16"), (parts[1], "Tu-26 bay AS-16")):
+        designated = DESIGNATED.search(run)
+        if designated is None or designated.group(1) != KRIVAK:
+            problems.append(f"{label}: the Krivak was not designated on the A-G page")
+        launch = _launch(run, label, problems)
+        if launch and (launch.group(3) != KRIVAK or launch.group(5) != "Midcourse"):
+            problems.append(f"{label}: launched at {launch.group(3)} seeker {launch.group(5)}, want the Krivak midcourse")
+        if not any(f[1] == "Pitbull" and f[2] == KRIVAK for f in FLIGHT.findall(run)):
+            problems.append(f"{label}: the seeker never went active on the Krivak")
+        end = _end(run, label, problems)
+        if end and int(end.group(3)) >= int(end.group(4)):
+            problems.append(f"{label}: the Krivak was not hit ({end.group(3)}/{end.group(4)})")
+    return problems
+
+
 def sarh_problems(output: str) -> list[str]:
     parts = runs(output)
     if len(parts) != 2:
@@ -464,6 +488,14 @@ def scenarios() -> list[Scenario]:
             timeout=300,
             check=antiship_b52_problems,
             notes="B52-6: two AGM-84E from the B-52's underwing pylons at the Krivak, designated through the B-52's radar.",
+        ),
+        Scenario(
+            name="a2g-antiship-tu26", lane="flight",
+            args=fleet + ["--aircraft", "tu26", "--load", "AS16", "--station", "3", "--count", "2"],
+            timeout=300,
+            then=[Step(fleet + ["--aircraft", "tu26", "--load", "AS16", "--station", "4", "--count", "2"], timeout=300)],
+            check=antiship_tu26_problems,
+            notes="T26-6: two AS-16 from the Tu-26's outer glove row and from its bay at the Krivak, designated through the Tu-26's radar (TU26R.SEE, enabled in T26-7).",
         ),
         Scenario(
             name="a2g-sarh", lane="flight",

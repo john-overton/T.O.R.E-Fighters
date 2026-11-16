@@ -15867,3 +15867,109 @@ coordinator recomputes the total at integration (B4). See
    intake rows); the intake pair refuses 17 stores, the glove rows four or five.
 5. Two door leaves are drawn, hinged on the outer edges (real count not found).
 6. The tail gun moved 4.6 ft forward and 4.6 ft down onto the nozzle plane (fitted).
+
+## Tu-26 Backfire-C ordnance, sensors, HUD and cockpit (T26-6/7, 2026-11-16)
+
+Slices T26-6 (ordnance, default load, countermeasures, tail gun) and T26-7 (sensors, HUD, cockpit, instruments) ran together
+(implementation mode, bomber batch C, Claude Sonnet). They apply the coordinator's first-pass decisions of 2026-11-15 and 2026-11-16
+(`BOMBERS-DECISIONS-C.md`, "Tu-26 Backfire-C" items 7 to 10 and "Tu-26 stations (T26-5)") for John to review. Earlier Tu-26 sections stay as written (B11): the
+[bay and stations section](#tu-26-bay-stations-and-pylons-t26-5-2026-11-16) said the live-fire slots and the AS-16 release from the bay were not run (the preview
+has no target); this section runs them. It reuses the B-52's slewed tail-gun mount
+([B52-6/7](#b-52-ordnance-tail-gun-sensors-and-cockpit-b52-67-2026-11-15)) and BMB-AI's aim model unchanged. Frames are in `.local/m3-aircraft/frames/T26-6/`, logs in
+`.local/m3-aircraft/checks/T26-6/`.
+
+### T26-6: the load, the live fire and the guided stores (checked)
+
+- **Default load (no change).** Load Ordnance shows the Fuselage row `23mmx1 turret 2000 (max 2000)`, an empty Internal Bay row, the Fuselage pair `AS-16 Kickback 2
+  loaded (max 2)` and the two Wing rows `AS-16 Kickback 2 loaded (max 2)`: 2,000 rounds and six AS-16, 253,971 of 273,370 lb with 110,230 lb of fuel, 19,399 lb
+  available, and the helper line `Built-in laser designator: no pod needed for laser ordnance.` (frame `load-ordnance`). The bay row has no default store in the
+  record and keeps an empty AS-16 selection (T26-5); nothing was added to it. **Open for John: the brief for this slice described the default as the bay's AS-16 plus the six
+  external; the record and T26-5 leave the bay empty (loadable with the AS-16, 4 by class), and it was kept that way.** `--validate-ordnance` before and after: no pin moved
+  (54 aircraft, 23 recovered stations, 5,350 weapon placements, 257 tank placements, 82 pod placements, 278 Cheat-only; `TU26.PT` 84).
+- **Live fire** (`flight-livefire-tu26-slot1` to `slot5`, new `STATIONS["tu26"] = [2000, 2, 2, 2, 0]`): slot 1, the tail turret, fires astern (75 rounds in 1,200 ticks,
+  ammo 1,925); slots 2 to 4, the three AS-16 rows, fire nothing against the practice aircraft (`TARGET TYPE` on the HUD, the same as the Harpoon: a surface missile) and
+  are in `REFUSED_SLOTS`; slot 5, the bay row, is never loaded and stays empty. `SHOTS_PER_ROUND` needed no entry (no pack store; the Tu-26 has no pack default).
+  The three `flight-jettison-tu26-slot2` to `slot4` runs release their AS-16 pairs (payload 15,873 to 10,582 lb).
+- **Guided stores against a target.** `a2g-antiship-tu26`: over `~QUSFLT` two AS-16 leave the outer glove row (station 3) and then the bay (station 4) at the Krivak,
+  designated on the A-G page through the Tu-26's radar (below); each launches midcourse, goes active (`Pitbull`) and hits the ship (500 to 458 hit points each). The bay
+  launch is a second later than the glove's (the doors open first, as the F-117's and the B-52's do). **This is the AS-16 release from the bay and from a glove row against
+  a target that T26-5 could not run.** `a2g-laser-tu26`: a GBU-16 from the inner glove pair guides onto the spot of the built-in `SU37L.SEE` designator and destroys a tank
+  (the glove mask admits the GBU-12 and GBU-16, so the laser row has something to guide; a GBU-12 alone leaves the tank at 100 of 200 hit points).
+  An AI Tu-26 loaded only with AS-16 does not release at a ground vehicle (`kind=RadarAgm`, a surface radar missile wants a ship), so the AI strike is flown with Mk 82.
+- **Release origin, human and AI cells.** `a2g-release-origin-tu26` (five runs): the intake pair leaves from (-6.33, -4.91, 9.67) then (6.33, ...) off a 2 inch rail; each
+  glove pair from (+-11.33, -4.41, 4.33) and (+-16.67, -4.41, -0.33) off a 1 ft pylon; the bay's AS-16 three abreast at 1.59 ft (-1.59, 1.59, 0) 19.63 ft forward and 2.42 ft
+  under the reference point, the fourth on the second tier at -0.83 ft; the bay loaded with Mk 82 four abreast (-1.95, 1.95, -0.65, 0.65) at 27.18 ft forward, then at 19.63 ft,
+  3.29 ft under. Each leaves within 0.05 ft of where it hangs. `ai-strike-tu26-stick` (an AI Tu-26, a Heavy, eight Mk 82 in the bay, 20,000 ft): a stick of eight 0.25 s apart,
+  the doors open at every release and shut after, from exactly the same eight cells (the `ai-strike: ORIGIN` lines), so the human's and the AI's cells match.
+- **Countermeasures (as the record gives them).** `TU26.ECM` gives 99 chaff and 99 flares; the chaff and flare commands release them (five and three leave 94 and 96, six flares
+  burning and 210 chaff puffs after 240 ticks, `flight-countermeasures-tu26`), the Weapons window reads `99 CHAFF 99 FLARE`, and `--jammer-on` lights `JAM` on the RWR window
+  (frame `systems-rwr-weapons-strip-jam-chaff-flare`). The record has no RF mode and strength 0.00, so the jammer adds no noise (the annunciator follows the command, as for
+  the F-4's and the F-104's records).
+
+### The tail gun (checked, no new code)
+
+The `T23_1.JT` row (record position moved onto the nozzle exit plane by T26-5) is a slewed mount (heading 32,760, 30 degree arcs), so the B-52-6 mechanism applies unchanged
+(`ai_wings::tail_gun_tests::the_retail_tu26_and_tu95_gun_rows_are_slewed_tail_guns_that_fire_astern` already pinned the retail row). The HUD gun line is `TAIL 2000 23MMX1`
+(frame `cockpit-front-view`); a human's rounds leave astern from the tail (frames `tail-gun-side`, `tail-gun-external`). New scenario `flight-tu26-tail-gun`
+(`--aircraft f22 --probe-enemy-aircraft tu26 --probe-enemy-skill ace --probe-geometry rear --separation 1 --probe-guns`): the AI Tu-26 fired 253 rounds at the closing
+F-22 and 4 hit (1.6 percent, inside BMB-AI's 35 percent cap; the B-52's run is 2 of 176). No rear cue exists (the rear views draw no HUD).
+
+### T26-7: sensors
+
+`--sensor-summary` reads `Tu26: radar TU26R.SEE search 100 nmi 60x60 deg track 100 nmi 45x45 deg look-down 0 TRANSITIONAL; infrared none; visual VIS300.SEE search 10 nmi 150x120 deg track 5
+nmi 150x120 deg; jammer TU26.ECM EARLY strength 0.00 (no RF mode); signature radar 100 infrared 100`.
+
+- **The radar was not enabled; it is now (agent decision, fitted, John to confirm).** `TU26R.SEE` had no preset, so it decoded as `UNREVIEWED (not enabled)` and the
+  Tu-26 flew with no radar, as the B-52 did before B52-7. It is `Preset::Transitional` (the B-52's class: a 100 ft/s Doppler notch, burn-through 8 nmi;
+  [radar](../radar.md#presets)). `TU26.ECM` is `Generation::Early` (no RF mode, strength 0, the class of `F4.ECM` and `F104.ECM`). One line each to revert. The radar gives the AI
+  Tu-26 its radar too. Same modes as the B-52's: RWS and TWS to 100 nmi, scope 5 to 100 nmi, no ground-mapping mode (a sensor change, John's call), no infrared channel.
+- **Every sensor row against the real aircraft.** The record's four sensor rows are `VIS300.SEE` (the visual sight), `TU26R.SEE` (the radar), `TU26.ECM` (the jammer, chaff and flares) and
+  `SU37L.SEE` (a built-in laser designator, a fixed row at the origin, flags `0x1008` with no designator-pod bit). The real Tu-22M3 has the radar and the defensive suite
+  but no laser designator, so the laser is a retail extra kept as decided (item 9). **No pod body hangs anywhere**: no station was added or changed, the designator-pod
+  placements stay at 82 (none to the Tu-26), and the external frames show nothing under the nose or the glove (frames `tail-gun-external`).
+- **RCS page.** Page 0 reads `SIG 150` closed and `SIG 225` with the bay open (frame `crop3x-rcs-closed-vs-bay-open`; `--flight-bay 1`). The open-bay term of 1.5 reaches only
+  the RCS page, as for the B-52.
+
+### T26-7: HUD and cockpit
+
+- **HUD (item 10): the record.** `BMBROH.HUD`, the instrument frame `~ac130_p`, the forward art `~AC130H.PIC` (1280 x 490), the cockpit stem `AC130`, no overlays: the AC-130
+  family as the B-52 flies it. It draws the gun line `TAIL 2000 23MMX1`, the weapon `ARM 2 AS-16` and the refusal `TARGET TYPE` against a non-surface target, the radar window
+  `TWS 10 ... TRACK` once the radar is on, and the target camera window `SLEW`/`ZOOM` for the laser row (frames `cockpit-front-view`, `radar-mfd-livefire-track`). No Tu-26 cockpit art exists.
+- **Glass (measured, not failed closed).** BMB-C1 gave the Tu-26 the AC-130 family's whole-picture aperture (the polygon is the picture, trimmed by the art). It is now
+  measured on the imported art: `~AC130H.PIC` is 1280 x 490 with 504,831 transparent pixels (80.5 percent; the rest is the cockpit frame), the mask is exactly those pixels, and it equals the
+  B-52's mask (`hud_aperture::tests::the_tu26_glass_is_the_transparent_part_of_the_imported_ac130_art`, retail-reading).
+- **Eye (fitted, measured).** `mirrors::eye_offset` gains the Tu-26: **7 ft up and 56 ft ahead** of the model origin (the shared seat is 7 up and 10 ahead). Measured on
+  `TU26.SH` (4/3 ft a unit): the fuselage top is flat at 5.33 ft (z 4) from 16 ft to 61.3 ft ahead, the windscreen faces (y 46 to 49) fall to 2.67 ft at 65.3 ft and 1.33 ft at 68 ft,
+  the glasshouse (side glass and roof, y 34 to 49, 45.3 to 65.3 ft ahead, 5.3 ft wide) stands no higher than the fuselage behind it. The shared seat is 46 ft aft of the windscreen and 1.7 ft over the top
+  skin, out of its own cockpit. The seat is the glasshouse's middle, 1.7 ft over the crown (the B-52's margin), so F2 Back clears the spine and looks down it to the fin and the nozzles (frame
+  `cockpit-view-back-f2`). Readers and tests are the B2-7 ones (`mirrors::tests::only_the_b2_the_f117_the_b52_and_the_tu26_have_their_own_pilot_eye`,
+  `flight_views::tests::back_from_a_b2_sits_at_its_own_seat`); the forward cockpit, mirrors, padlock and target camera do not read the eye. The record's `viewOffset` (0, 20, 60) is not used
+  (pinned by the retail-reading test `tore-import/tests/tu26_cockpit.rs`).
+- **Rear view.** F2 Back draws no HUD (none exists in the game), so there is no rear cue for the tail gun; the tracers show the line.
+
+### Tests
+
+`tore-sim`: `sensors::profile::tests::the_tu26_radar_and_jammer_records_are_reviewed`. `tore-app`: the eye table and the Back camera (`mirrors`, `flight_views`), the retail-reading glass test (`hud_aperture`).
+`tore-import`: `tests/tu26_cockpit.rs` (bindings: four sensor rows, `BMBROH.HUD`, the AC-130 stem and art, the panel, the unread `viewOffset`). Battery (all new): `flight-livefire-tu26-slot1..5`,
+`flight-jettison-tu26-slot2..4`, `flight-countermeasures-tu26`, `flight-tu26-tail-gun`, `a2g-antiship-tu26`, `a2g-laser-tu26`, `a2g-release-origin-tu26`, `ai-strike-tu26-stick`.
+
+### Checks
+
+All through `.local/m3-imports/light3.sh`, profile `.local/m3-aircraft/profile-tu26` refreshed first (logs in `.local/m3-aircraft/checks/T26-6/`): `cargo fmt --all -- --check`
+clean; `cargo clippy --workspace --all-targets --locked -- -D warnings` clean; `cargo test --locked --workspace --no-fail-fast` 7,874 passed, 0 failed, 108 ignored;
+`--validate-ordnance` before and after identical (no pin moved); `--aircraft tu26 --headless-flight 600` 428 kt level at 5,000 ft, 0 non-finite, no crash; battery
+(`--jobs 2 --windows 1`) 24 of 24: every `*tu26*` scenario (22, 14 of them new), `menus-ordnance-availability` and `a2g-catalog`; `python3 -B -m unittest discover -s tools` OK;
+`tools/check_docs.py` passed. **Not run:** the guns and live fire of every other aircraft (no shared gun or sight code was touched), `check_assets`, the mission, net, replay and
+AI battery lanes, `--smoke-test`.
+
+### Open for John
+
+1. **Default load.** The bay stays empty (the record's); six AS-16 are the default, as T26-5 left them. Loading the bay with its four AS-16 by default is a one-row change if wanted (about 10,600 lb more, 264,550 of 273,370).
+2. **Radar enabled** as Transitional and the jammer as Early (above). The alternative is a Tu-26 with no radar.
+3. **Laser row and laser bombs.** The real Tu-22M3 has no designator; the retail row and the glove masks (GBU-12, GBU-16, GBU-38) are kept as the record has them.
+4. **No ground-mapping radar mode**, so the strike aids are the A-G designation of a radar contact (ships) and the bomb sights; the AS-16 cannot be fired at a ground vehicle by the AI.
+5. **Eye** 7 ft up, 56 ft ahead: fitted, change in `mirrors::eye_offset`.
+6. **`JAM` lights** with a jammer that has no RF mode (the annunciator follows the command).
+7. The B-52's AI tail-gun lethality and rear-cue questions apply unchanged.
+
+Provenance: slew words, sensor rows, HUD module, art spec-derived (retail); the radar and jammer assignments, the eye and the scenarios fitted, agent decisions 2026-11-16. No retail bytes committed.

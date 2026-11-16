@@ -1177,3 +1177,11 @@ ordnance audit: 2 novelty records, 278 Cheat-only placements, refused without Ch
 The `menus-ordnance-availability` expected line reads 5,350 weapon placements (`a2g-catalog` takes any
 count). At the merge the coordinator recomputes the total (B4). Earlier sections stay as written for
 their own states.
+
+## Tu-26 ordnance, load and live fire: no pin moved (T26-6, 2026-11-16)
+
+T26-6 changed no row, mask, count or position, so every pin stays where T26-5 left it: 54 aircraft, 23 recovered weapon stations, 5,350 weapon
+placements (`TU26.PT` 84), 257 tank placements, 82 pod placements, 278 Cheat-only. `--validate-ordnance` before and after: identical lines. The default load
+is the record's after BMB-C2 and T26-5: the 23 mm tail turret (2,000 rounds), six `AS16.JT` (two on the intake-trunk pair, two on each glove pair), the bay row empty with an empty
+AS-16 selection (273,370 lb maximum, 253,971 lb with the default load and 110,230 lb of fuel). The live-fire slots, in the default-store order, are the gun (slot 1), the three AS-16 rows (slots 2 to 4,
+refused by the practice aircraft, a surface missile) and the never-loaded bay row (slot 5). See [the Tu-26 section](../formats/aircraft-variety.md#tu-26-backfire-c-ordnance-sensors-hud-and-cockpit-t26-67-2026-11-16).

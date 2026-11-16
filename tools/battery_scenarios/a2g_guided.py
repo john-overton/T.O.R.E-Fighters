@@ -132,6 +132,10 @@ def f15e_laser_problems(output: str) -> list[str]:
     return _own_laser_problems(output, "F-15E GBU-10 on the Pave Spike's spot")
 
 
+def tu26_laser_problems(output: str) -> list[str]:
+    return _own_laser_problems(output, "Tu-26 GBU-16 from the inner glove on the SU37L designator's spot")
+
+
 def f117_laser_problems(output: str) -> list[str]:
     return _own_laser_problems(output, "F-117 GBU-27 from the bay on the IRADS spot")
 
@@ -339,6 +343,15 @@ def scenarios() -> list[Scenario]:
             timeout=300,
             check=f117_laser_problems,
             notes="The F-117's IRADS turret (the fixed Pave Spike row, no pod body) lases a tank and a GBU-27 from the left bay guides onto it and destroys it (F117-6).",
+        ),
+        Scenario(
+            name="a2g-laser-tu26", lane="flight",
+            args=run("UKR", "QUCOL", "laser", "--aircraft", "tu26", "--load", "GBU16", "--station", "2",
+                     "--count", "2", "--altitude", "15000", "--speed", "480", "--from", "6", "--seconds", "120"),
+            timeout=300,
+            check=tu26_laser_problems,
+            notes="The Tu-26's built-in laser designator (SU37L.SEE, the fixed row, no pod body) lases a tank and a GBU-16 from the inner glove "
+                  "pair guides onto it and destroys it (T26-6, T26-7).",
         ),
         Scenario(
             name="a2g-laser-b2", lane="flight",

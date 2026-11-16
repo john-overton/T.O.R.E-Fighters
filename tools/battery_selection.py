@@ -82,7 +82,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
     "flight-combat": (
         "guns, missiles, F-22A/F-22N bays and live fire, jettison, countermeasures, combat smoke and evidence",
         (
-            "flight-fight-*", "flight-b52-tail-gun", "flight-attack-*", "flight-livefire-*", "flight-combatevidence-*",
+            "flight-fight-*", "flight-b52-tail-gun", "flight-tu26-tail-gun", "flight-attack-*", "flight-livefire-*", "flight-combatevidence-*",
             "flight-combatsmoke-*", "flight-missileacceptance-*", "flight-missile-sag", "flight-missile-energy", "flight-missile-defeat", "flight-jettison-*", "flight-bay-*",
             "flight-wreckcontact-*", "flight-ac130-*",
             "flight-countermeasures-*",  # Includes the fixed-tick AI cadence regression.

@@ -1215,6 +1215,52 @@ def b2_stick_problems(output: str) -> list[str]:
     return problems
 
 
+# The Tu-26's bay (T26-6, 2026-11-16; T26-5's grid): the Mk 82s hang four abreast at 1.3 ft (outermost left,
+# right, then the inner pair), the first row 27.18 ft forward, the second 19.63 ft, 3.29 ft under the
+# reference point; the release-origin scenario `a2g-release-origin-tu26` shows the human's trigger leaves from
+# the same cells.
+TU26_MK82_CELLS = [(x, -3.29, f) for f in (27.18, 19.63) for x in (-1.95, 1.95, -0.65, 0.65)]
+TU26_OPENING_FORWARD = (12.5, 35.5)
+
+
+def tu26_stick_problems(output: str) -> list[str]:
+    """`ai-strike-tu26-stick`: an AI Tu-26 (a Heavy) at 20,000 ft drops a stick of eight Mk 82 from its belly bay
+    grid (T26-6): one every 0.25 s from the grid's own eight places, the doors opened for the release and shut
+    after, egress after the last; each place is the one the human's trigger uses."""
+    runs = parse_runs(output)
+    if len(runs) != 1:
+        return [f"expected one strike run, got {len(runs)}"]
+    run = runs[0]
+    problems = consistency_problems(run, "Tu-26 stick")
+    problems += bay_door_problems(run, "Tu-26 stick")
+    releases = run.of("RELEASE")
+    if len(releases) != 8:
+        problems.append(f"{len(releases)} releases, want a stick of 8")
+    times = run.times("RELEASE")
+    if any(abs((b - a) - 0.25) > 0.02 for a, b in zip(times, times[1:])):
+        problems.append(f"the stick is not 0.25 s apart: {times}")
+    origins = [(float(r), float(u), float(f)) for _, _, _, r, u, f in ORIGIN_LINE.findall(output)]
+    if len(origins) != len(releases):
+        problems.append(f"{len(origins)} origin lines for {len(releases)} releases")
+    for n, (origin, want) in enumerate(zip(origins, TU26_MK82_CELLS)):
+        if abs(origin[0] - want[0]) > 0.1 or abs(origin[1] - want[1]) > 0.1 or abs(origin[2] - want[2]) > 1.0:
+            problems.append(f"bomb {n + 1} left from {origin}, the grid's place is {want}")
+        lo, hi = TU26_OPENING_FORWARD
+        if not lo < origin[2] < hi or not abs(origin[0]) < 2.95:
+            problems.append(f"bomb {n + 1} left from {origin}, outside the opening")
+    if len(set(origins)) != len(origins):
+        problems.append("two bombs left from one place")
+    if not run.of("IMPACT"):
+        problems.append("no bomb landed")
+    if not run.of("EGRESS"):
+        problems.append("no EGRESS after the stick")
+    if run.of("LOST"):
+        problems.append("the Tu-26 was lost")
+    if run.setup.get("aircraft") != "Tu26":
+        problems.append(f"flew {run.setup.get('aircraft')}, want Tu26")
+    return problems
+
+
 def b2_climb_problems(output: str) -> list[str]:
     """`ai-strike-b2-climb`: from 5,000 ft 30 nm out an AI B-2 climbs to its release floor (10,000 ft
     or more) before it bombs, then bombs and gets out; it never gets low."""
@@ -1582,6 +1628,16 @@ def scenarios() -> list[Scenario]:
         notes="An AI B-2 (a Heavy) on the column at 20,000 ft, 12 nm out: a stick of eight Mk 82 from the left "
               "bay's grid, 0.25 s apart, from the grid's own first eight places (front row, bottom tier, "
               "outermost first), then egress. Doors stay shut for the AI's release (coordinator decision).",
+    ))
+    # T26-6: the Tu-26's belly bay (T26-5) with its own grid; the AI's cells are the human's.
+    extra.append(Scenario(
+        name="ai-strike-tu26-stick", lane="flight",
+        args=pilot_run("UKR", "QUCOL", "--aircraft", "tu26", "--load", "MK82", "--station", "4", "--count", "8",
+                       "--altitude", "20000", "--from", "12", "--seconds", "200", "--follow-egress"),
+        timeout=600, expect=[r"RELEASE", r"ORIGIN", r"IMPACT", r"EGRESS"], check=tu26_stick_problems,
+        notes="An AI Tu-26 (a Heavy) on the column at 20,000 ft, 12 nm out: a stick of eight Mk 82 from the belly "
+              "bay's grid (loaded into the bay row, station 4), 0.25 s apart, from the grid's own eight places, "
+              "the same cells a human's trigger uses (`a2g-release-origin-tu26`), then egress.",
     ))
     extra.append(Scenario(
         name="ai-strike-b2-climb", lane="flight",
