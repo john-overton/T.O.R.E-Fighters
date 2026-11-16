@@ -346,8 +346,9 @@ class HeavyBomberTests(unittest.TestCase):
         for name in (
             "ai-merged-airfield-b2-wing2", "ai-merged-airfield-b52-wing2",
             "ai-heavy-takeoff-b2-gre-a1", "ai-heavy-takeoff-b52-gre-a1", "ai-heavy-takeoff-f117-gre-a2",
-            "ai-heavy-takeoff-tu26-gre-a1",
+            "ai-heavy-takeoff-tu26-gre-a1", "ai-merged-airfield-tu26-wing2",
             "ai-heavy-land-b2-ukr-a2", "ai-heavy-land-b52-ukr-a2", "ai-heavy-land-f117-ukr-a2",
+            "ai-heavy-land-tu26-ukr-a2",
         ):
             self.assertIn(name, names)
 
@@ -364,6 +365,25 @@ class HeavyBomberTests(unittest.TestCase):
         self.assertFalse([p for p in problems if "Harpoon" in p or "shot" in p or "stores" in p], problems)
         self.assertTrue(any("Harpoons" in p for p in ai.b52_gun_fight_problems(text.replace("AGM-84E x12", "AGM-84E x11", 1))))
         self.assertTrue(any("never fired" in p for p in ai.b52_gun_fight_problems(text.replace("shots=251", "shots=0"))))
+
+
+    def test_the_tu26_mission_scenarios_exist_and_the_gun_fight_check_reads_the_missiles_the_shots_and_the_hits(self):
+        names = {s.name for s in ai.scenarios()}
+        self.assertIn("ai-tu26-quick-mission-2v2", names)
+        self.assertIn("ai-tu26-vs-su27-2v2", names)
+        stores = "\n".join(
+            f"AI stores: actor={n} tanks=0 external_fuel=0 payload=15873 stations=[23mmx1 x1900, AS-16 x{h}, AS-16 x2, AS-16 x2, AS-16 x0]"
+            for n, h in ((1, 2), (2, 2), (3, 2))
+        )
+        actors = "\n".join(f"actor={n} Friendly 1-{n} Tu26 activity=Landed alive=true rounds={1950 - n} x=1.0 y=2.0 z=3.0 hdg=1.0" for n in (1, 2, 3))
+        text = (stores + "\n" + actors + "\nAI probe attack: clicks=2 steps=0 hits=3 destroyed=0 lost_friendly=0/1\n"
+                "AI probe totals: wings=3 ticks=7200 shots=189 dropped=0 warnings=0\n")
+        problems = ai.tu26_gun_fight_problems(text)
+        self.assertFalse([p for p in problems if "AS-16" in p or "shot" in p or "hit" in p or "round" in p or "stores" in p], problems)
+        self.assertTrue(any("AS-16" in p for p in ai.tu26_gun_fight_problems(text.replace("AS-16 x2", "AS-16 x1", 1))))
+        self.assertTrue(any("never fired" in p for p in ai.tu26_gun_fight_problems(text.replace("shots=189", "shots=0"))))
+        self.assertTrue(any("never connected" in p for p in ai.tu26_gun_fight_problems(text.replace("hits=3", "hits=0"))))
+        self.assertTrue(any("spent" in p for p in ai.tu26_gun_fight_problems(text.replace("rounds=1949", "rounds=2006").replace("rounds=1948", "rounds=2006").replace("rounds=1947", "rounds=2006"))))
 
 
 if __name__ == "__main__":

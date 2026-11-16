@@ -1261,6 +1261,96 @@ def tu26_stick_problems(output: str) -> list[str]:
     return problems
 
 
+# The Tu-26's glove pylons (T26-9; T26-5's rows 7 and 8, stations 2 and 3 of the run): a store hangs 10.6 to
+# 12.0 ft out of the centre line, 4.33 ft forward of the reference point, 4.1 to 4.7 ft under it (the Mk 82s
+# in a 3 abreast beam, the Harpoon at the outermost place of the same row); the left and the right glove
+# alternate, the left first. The belly doors do not move for a pylon release.
+TU26_GLOVE_OUT_FT = (10.5, 12.1)
+TU26_GLOVE_FORWARD = 4.33
+TU26_GLOVE_UP_FT = (-4.8, -4.0)
+
+
+def tu26_glove_problems(run: Run, output: str, label: str, count: int, weapon: str | None = None) -> list[str]:
+    """The release cells of `count` stores from a glove row: forward 4.33 ft, 10.5 to 12.1 ft out, the sides
+    alternating from the left, the belly doors untouched."""
+    problems: list[str] = []
+    releases = run.of("RELEASE")
+    if len(releases) != count:
+        problems.append(f"{label}: {len(releases)} releases, want {count}")
+    if weapon and any(r.get("weapon") != weapon for r in releases):
+        problems.append(f"{label}: released {sorted({r.get('weapon') for r in releases})}, want {weapon}")
+    origins = [(float(r), float(u), float(f)) for _, _, _, r, u, f in ORIGIN_LINE.findall(output)]
+    if len(origins) != len(releases):
+        problems.append(f"{label}: {len(origins)} origin lines for {len(releases)} releases")
+    for n, (right, up, forward) in enumerate(origins):
+        side = -1.0 if n % 2 == 0 else 1.0
+        if right * side <= 0 or not TU26_GLOVE_OUT_FT[0] <= abs(right) <= TU26_GLOVE_OUT_FT[1]:
+            problems.append(f"{label}: store {n + 1} left {right} ft out, want {'left' if side < 0 else 'right'}, "
+                            f"{TU26_GLOVE_OUT_FT[0]} to {TU26_GLOVE_OUT_FT[1]} ft")
+        if abs(forward - TU26_GLOVE_FORWARD) > 0.5 or not TU26_GLOVE_UP_FT[0] <= up <= TU26_GLOVE_UP_FT[1]:
+            problems.append(f"{label}: store {n + 1} left from up {up}, forward {forward}, the glove's place is forward "
+                            f"{TU26_GLOVE_FORWARD}, up {TU26_GLOVE_UP_FT}")
+    if any(r.get("station") != "2" for r in releases):
+        problems.append(f"{label}: released from stations {sorted({r.get('station') for r in releases})}, want the glove row (2)")
+    if any(number(r.get("bay")) > 0.05 for r in releases) or run.of("BAY"):
+        problems.append(f"{label}: the bay doors moved for a glove release")
+    if run.of("LOST"):
+        problems.append(f"{label}: the Tu-26 was lost")
+    if run.setup.get("aircraft") != "Tu26":
+        problems.append(f"{label}: flew {run.setup.get('aircraft')}, want Tu26")
+    return problems
+
+
+def tu26_pylon_problems(output: str) -> list[str]:
+    """`ai-strike-tu26-pylon`: six Mk 82 on the inner glove row (station 2) leave one every 0.25 s from the two
+    gloves, left and right alternating, with the belly doors untouched, then impact and egress."""
+    runs = parse_runs(output)
+    if len(runs) != 1:
+        return [f"expected one strike run, got {len(runs)}"]
+    run, label = runs[0], "Tu-26 pylon"
+    problems = consistency_problems(run, label) + tu26_glove_problems(run, output, label, 6, "MK82.JT")
+    times = run.times("RELEASE")
+    if any(abs((b - a) - 0.25) > 0.02 for a, b in zip(times, times[1:])):
+        problems.append(f"{label}: the stick is not 0.25 s apart: {times}")
+    if not run.of("IMPACT"):
+        problems.append(f"{label}: no bomb landed")
+    if not run.of("EGRESS"):
+        problems.append(f"{label}: no EGRESS")
+    return problems
+
+
+def tu26_quick_wing_problems(output: str) -> list[str]:
+    """`ai-strike-tu26-quick-wing`: a Quick Mission with the Ukraine factory as the ground target: the Tu-26
+    wing takes the Strike role (the mission's bomber-class default) and flies the same stick from its belly bay
+    as the plain run does, doors and all."""
+    problems = tu26_stick_problems(output)
+    runs = parse_runs(output)
+    if len(runs) == 1:
+        role = (runs[0].first("ROLE") or {}).get("role")
+        if role != "strike":
+            problems.append(f"Tu-26 quick wing: the wing was given role {role}, want strike")
+    return problems
+
+
+def tu26_antiship_problems(output: str) -> list[str]:
+    """`ai-strike-tu26-antiship`: an AI Tu-26 with two AGM-84E on its inner glove row sinks the Krivak of the
+    Ukraine surface fleet from 15 nm: one Harpoon leaves each glove, the doors stay shut, both hit and the ship
+    is destroyed. (The Tu-26's own AS-16 is not flown by the AI at a ship or a ground vehicle: the radar missile
+    path of T160-9, docs/formats/aircraft-variety.md, T26-9.)"""
+    runs = parse_runs(output)
+    if len(runs) != 1:
+        return [f"expected one strike run, got {len(runs)}"]
+    run, label = runs[0], "Tu-26 Harpoon"
+    problems = consistency_problems(run, label) + tu26_glove_problems(run, output, label, 2, "AGM84E.JT")
+    if len(run.of("IMPACT")) != 2:
+        problems.append(f"{label}: {len(run.of('IMPACT'))} impacts, want 2")
+    if not any(k.get("victim") == KRIVAK_ID for k in run.of("KILL")):
+        problems.append(f"{label}: the Krivak ({KRIVAK_ID}) was not destroyed")
+    if run.setup.get("target") != KRIVAK_ID:
+        problems.append(f"{label}: aimed at {run.setup.get('target')}, want the Krivak")
+    return problems
+
+
 def b2_climb_problems(output: str) -> list[str]:
     """`ai-strike-b2-climb`: from 5,000 ft 30 nm out an AI B-2 climbs to its release floor (10,000 ft
     or more) before it bombs, then bombs and gets out; it never gets low."""
@@ -1788,6 +1878,34 @@ def scenarios() -> list[Scenario]:
         notes="An AI Tu-26 (a Heavy) on the column at 20,000 ft, 12 nm out: a stick of eight Mk 82 from the belly "
               "bay's grid (loaded into the bay row, station 4), 0.25 s apart, from the grid's own eight places, "
               "the same cells a human's trigger uses (`a2g-release-origin-tu26`), then egress.",
+    ))
+    # T26-9: the glove pylons, the Quick Mission wing and the anti-ship strike.
+    extra.append(Scenario(
+        name="ai-strike-tu26-pylon", lane="flight",
+        args=pilot_run("UKR", "QUCOL", "--aircraft", "tu26", "--load", "MK82", "--station", "2", "--count", "6",
+                       "--altitude", "20000", "--from", "12", "--seconds", "200", "--follow-egress"),
+        timeout=600, expect=[r"RELEASE", r"ORIGIN", r"IMPACT", r"EGRESS"], check=tu26_pylon_problems,
+        notes="An AI Tu-26 with six Mk 82 on its inner glove row (row 7, station 2): a stick of six leaves 0.25 s "
+              "apart from the two gloves, left and right alternating, with the belly doors shut throughout, then "
+              "egress.",
+    ))
+    extra.append(Scenario(
+        name="ai-strike-tu26-quick-wing", lane="flight",
+        args=pilot_run("UKR", "QUFACT", "--aircraft", "tu26", "--load", "MK82", "--station", "4", "--count", "8",
+                       "--quick-wing", "--seconds", "400", "--follow-egress"),
+        timeout=900, expect=[r"ROLE", r"RELEASE", r"IMPACT", r"EGRESS"], check=tu26_quick_wing_problems,
+        notes="A Quick Mission with the Ukraine factory as the ground target: a Tu-26 wing gets the Strike role from "
+              "the mission's bomber-class default, opens its belly doors and drops the stick of eight from the "
+              "bay row, then egresses.",
+    ))
+    extra.append(Scenario(
+        name="ai-strike-tu26-antiship", lane="flight",
+        args=pilot_run("UKR", "QUSFLT", "--unit", KRIVAK_ID, "--aircraft", "tu26", "--load", "AGM84E",
+                       "--station", "2", "--count", "2", "--altitude", "20000", "--from", "15", "--seconds", "60"),
+        timeout=600, expect=[r"RELEASE", r"ORIGIN", r"IMPACT", r"KILL"], check=tu26_antiship_problems,
+        notes="An AI Tu-26 with two AGM-84E on its inner glove row, 15 nm from the Ukraine surface fleet at 20,000 "
+              "ft: one Harpoon leaves each glove, the doors stay shut, both hit the Krivak and it is destroyed. "
+              "The Tu-26's own AS-16 is the T160-9 dependency (no AI release at a ship or a vehicle yet).",
     ))
     extra.append(Scenario(
         name="ai-strike-b2-climb", lane="flight",

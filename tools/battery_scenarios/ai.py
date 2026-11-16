@@ -298,6 +298,33 @@ def b52_gun_fight_problems(output: str) -> list[str]:
     return problems
 
 
+AI_ATTACK_HITS = re.compile(r"^AI probe attack: .*? hits=(\d+) ", re.M)
+
+
+def tu26_gun_fight_problems(output: str) -> list[str]:
+    """`ai-tu26-quick-mission-2v2` (slice T26-9): the probe's usual checks, every Tu-26 still holds all six
+    AS-16 (a surface radar missile is refused against an aircraft, so nothing fires one), and the tail guns
+    engaged: the fight has shots in it, at least one round hit, and at least one Tu-26 spent rounds of its
+    2,000."""
+    problems = probe_problems(output)
+    lines = STORES_LINE.findall(output)
+    if len(lines) < 3:
+        problems.append(f"{len(lines)} AI stores lines, want one per Tu-26")
+    for actor, stations in lines:
+        if stations.count("AS-16 x2") != 3:
+            problems.append(f"actor {actor} lost AS-16: {stations}")
+    total = SHOTS.search(output)
+    if total is None or int(total.group(1)) == 0:
+        problems.append("no shot in an all-Tu-26 fight: the tail guns never fired")
+    hits = AI_ATTACK_HITS.search(output)
+    if hits is None or int(hits.group(1)) == 0:
+        problems.append("no hit in an all-Tu-26 fight: the tail guns never connected")
+    spent = [2006 - int(m.group(1)) for m in re.finditer(r"^actor=\d+ \S+ [\d-]+ Tu26 .*? rounds=(\d+) ", output, re.M)]
+    if not spent or max(spent) <= 0:
+        problems.append(f"no Tu-26 spent a round of its 2,006 (spent {spent})")
+    return problems
+
+
 def b2_no_air_to_air_checker() -> Callable[[str], list[str]]:
     """The B-2 wing in a fight (slice B2-9): the probe's usual checks, and the B-2s carry no gun (rounds=0) and
     nothing but Mk 82 and GBU-27 on their stations, so they fire no air-to-air shot; the player's own run
@@ -1704,18 +1731,22 @@ def scenarios() -> list[Scenario]:
     # full takeoff weights, and every one of the three flies the pieces at the field lengths of the
     # retail missions (docs/spec/ai-airfield.md, "Heavy bombers"). The land order comes after the
     # climb-out (a B-2 is airborne at 205 s, a B-52 at 200 s).
-    for aircraft, order, ticks, kt, pavement in (("b2", 30000, 150000, 175, True), ("b52", 36000, 150000, 175, True)):
+    for aircraft, order, ticks, kt, pavement in (("b2", 30000, 150000, 175, True), ("b52", 36000, 150000, 175, True),
+                                                 ("tu26", 30000, 150000, 175, True)):
         out.append(probe(f"merged-airfield-{aircraft}-wing2", [
             "--theater", "FRA", "--ground-start", "14",
             "--aircraft", aircraft, "--probe-friendly-aircraft", aircraft,
             "--probe-wing-size", "2", "--maneuver", "takeoff",
             "--probe-wing-order", f"{order}:land-selected", "--separation", "200",
-            "--probe-wing-only", "--probe-pavement"],
+            "--probe-wing-only", "--probe-pavement", *(["--probe-fuel", "70000"] if aircraft == "tu26" else [])],
             ticks=ticks, timeout=3000,
             check=heavy_cycle(kt, taxi_in=pavement),
             notes=f"An AI {aircraft.upper()} at Southampton at its full weight: it taxis, takes off, climbs out with its "
                   "flaps down until it can raise them, lands on the order at 175 kt or slower and parks, all on the "
-                  "pavement (B52-9: the B-52's taxi-in used to leave it for six seconds at a corner)."))
+                  "pavement (B52-9: the B-52's taxi-in used to leave it for six seconds at a corner)."
+                  + (" The Tu-26 starts with 70,000 lb of fuel (213,700 lb): the AI lands it with 75,000 lb of fuel and "
+                     "less, not above (80,000 lb sinks short on the approach; the shared heavy limit, T26-9)."
+                     if aircraft == "tu26" else "")))
     # Takeoff alone: the B-2 and B-52 from Athens (GRE 1, 12,000 ft; at their full weights they need about
     # 7,200 ft and the scripted player's own B-2 runs off the end of Mikonos' 7,246 ft), the F-117 from
     # Mikonos (GRE 2, 7,246 ft). Each leaves the ground, climbs out and flies on.
@@ -1728,7 +1759,7 @@ def scenarios() -> list[Scenario]:
             notes="BMB-AI: the heavy takeoff (flaps and gear kept until the speed is there) at its full weight."))
     # Landing at Simferopol (UKR 2, 5,532 ft, the Ukraine's default field), sent home from the air, at a
     # landing weight: B-2 60,000 lb of fuel, B-52 80,000 lb, F-117 7,000 lb.
-    for aircraft, fuel, kt in (("b2", 60000, 150), ("b52", 80000, 145), ("f117", 7000, 190)):
+    for aircraft, fuel, kt in (("b2", 60000, 150), ("b52", 80000, 145), ("f117", 7000, 190), ("tu26", 70000, 175)):
         out.append(probe(f"heavy-land-{aircraft}-ukr-a2", [
             "--theater", "UKR", "--aircraft", aircraft, "--probe-friendly-aircraft", aircraft,
             "--probe-wing-size", "2", "--probe-wing-order", "600:bug-out", "--probe-fuel", str(fuel),
@@ -2120,6 +2151,25 @@ def scenarios() -> list[Scenario]:
                                               "--probe-enemy-aircraft", "su27",
                                               "--separation", "5", *attack), ticks=7200,
                      notes="The B-52 wing against Su-27s: the probe's usual checks hold for the B-52s and the "
+                           "Su-27s, whoever wins."))
+    # 13l. The Tu-26 Backfire-C in a mission (slice T26-9, 2026-11-16): the strike class is Heavy by the rule,
+    # the record's tail gun is the B-52's slewed mount (it fires astern with BMB-AI's aim error), and the
+    # AS-16 rows are surface radar missiles, refused against an aircraft. In an all-Tu-26 fight the tail
+    # guns are the only weapons: the probe's usual checks must hold, the guns must have fired and hit.
+    # The strike itself is `ai-strike-tu26-*` (ai_strike.py).
+    out.append(probe("tu26-quick-mission-2v2", fight(2, 2, "--aircraft", "tu26",
+                                                     "--probe-friendly-aircraft", "tu26",
+                                                     "--probe-enemy-aircraft", "tu26",
+                                                     "--separation", "5", *attack), ticks=7200,
+                     check=tu26_gun_fight_problems,
+                     notes="All Tu-26: the player's wing and the enemy wing fly the TU26.PT identity (two NK-25 "
+                           "class engines, swing wing, tail gun, six AS-16 on the pylons, an empty bay) in a 2 v 2. "
+                           "The AS-16 rows are refused against aircraft; the tail guns do the shooting and hit."))
+    out.append(probe("tu26-vs-su27-2v2", fight(2, 2, "--aircraft", "tu26",
+                                               "--probe-friendly-aircraft", "tu26",
+                                               "--probe-enemy-aircraft", "su27",
+                                               "--separation", "5", *attack), ticks=7200,
+                     notes="The Tu-26 wing against Su-27s: the probe's usual checks hold for the Tu-26s and the "
                            "Su-27s, whoever wins."))
     # 14. The fixed acceptance probes.
     out.append(Scenario(name="ai-roster-probe", lane="ai", args=["--ai-roster-probe-ticks", "3600", "--no-audio"], timeout=1800))

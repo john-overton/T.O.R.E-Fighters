@@ -538,3 +538,15 @@ B-52 at every weight, nobody else in the roster), so every other aircraft's law 
 Evidence is in the [aircraft variety](../formats/aircraft-variety.md#b-52-ai-missions-multiplayer-and-replay-b52-9-2026-11-16)
 B52-9 section: the full Southampton cycle is on the pavement from takeoff to parking (743 ticks off before, none
 after), the 80,000 lb landing at Simferopol is on it from the touchdown (1,201 ticks off before, none after).
+
+**Update (T26-9, 2026-11-16): the Tu-26 under the B-52's final law.** **Fitted**, agent decision; no airfield code
+changed. The B52-9 rules above are gated on `Situation::taxi_throttle_floor` above zero. Since T26-8 fitted the Tu-26's
+rolling deceleration (6.0 ft/s squared, 66,000 lbf of dry thrust) its floor is about 0.66 at 213,700 lb, so the
+3,000 ft final lookahead and the taxi coast reach it, and the landing at Simferopol that flew into the ground short
+(T26-8) now touches down at 166 kt on the line and parks on the pavement (`ai-heavy-land-tu26-ukr-a2`; with the
+lookahead forced back to 1,500 ft the same run snakes 183 ft right and 137 ft left and flies into the ground about
+2,000 ft short). The full Southampton cycle at 70,000 lb of fuel is on the pavement from takeoff to parking (0 of
+84,357 ground samples, `ai-merged-airfield-tu26-wing2`). **Limit:** above about 75,000 lb of fuel (219,000 lb) the AI
+final sinks short on the line (80,000 lb: 3,600 ft short), the shared heavy approach-speed limit; the law holds only
+while the taxi throttle floor does, which for the Tu-26 depends on T26-8's ground fit. Evidence:
+[aircraft variety](../formats/aircraft-variety.md#tu-26-backfire-c-ai-missions-multiplayer-and-replay-t26-9-2026-11-16).

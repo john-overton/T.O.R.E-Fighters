@@ -16308,3 +16308,171 @@ code was touched).
    238,000 lb aircraft (9,400 ft/min at 5,000 ft); no figure at a stated weight and power was
    found, so the model's climb is reported, not fitted.
 10. **Roll rate** 30 degrees a second has no published figure.
+
+## Tu-26 Backfire-C AI, missions, multiplayer and replay (T26-9, 2026-11-16)
+
+Implementation and verification mode, slice T26-9 (the Tu-26's counterpart of B52-9, B2-9 and F117-9). The AI
+work was asked for by John through the bomber program (AGENTS.md: no AI work unless John asks). Everything here
+is `fitted`, agent decisions of 2026-11-16, except where a number is a record's. The shared heavy-bomber rules of
+[BMB-AI](#ai-fixes-for-the-bombers-bmb-ai-2026-11-16) and the B-52's final and taxi-in laws of
+[B52-9](#b-52-ai-missions-multiplayer-and-replay-b52-9-2026-11-16) came in with the merge of `m3-aircraft`
+(d277aed5) into this branch. **No simulation or AI code changed in this slice**: one unit test, ten scenarios,
+their checks and the docs.
+
+### The AI landing that flew into the ground (T26-8's open item)
+
+T26-8 found the AI Tu-26 at Simferopol (5,532 ft, `--probe-fuel 70000`, 166 kt) flying into the ground short of
+the runway, with or without its ground fit. **The B-52's final law already fixes it, and the merge was all it
+needed.** The B52-9 rule (`airfield.rs`: the final's lateral lookahead is at least 3,000 ft instead of 1,500 ft
+where `Situation::taxi_throttle_floor` is above zero) is gated on the wheels needing over 0.2 throttle to taxi.
+The Tu-26 passes that gate since T26-8: its fitted rolling deceleration is 6.0 ft/s squared against 66,000 lbf
+of dry thrust, so `taxi_throttle_of` returns a floor of about 0.66 at 213,700 lb (balance 0.60 against the 0.5 x
+`TAXI_THROTTLE_MAX` test). With the shared 0.8 ft/s squared the balance would be 0.08 and the gate would stay
+shut, so **the law reaches the Tu-26 only through T26-8's ground fit** (by the formula; not run without it): reverting
+that fit takes the landing's fix with it.
+
+| Run (Simferopol, sent home from 4,500 ft, 70,000 lb of fuel, `--probe-trace 2`) | Final | Wheels over the line | Result |
+| --- | --- | --- | --- |
+| Heavy lookahead on (the merged tree) | 233.8 s | +183 ft at 240 s, -26 ft at 246 s, then within 3 ft of the line from 250 s | touchdown 264.5 s at 166 kt, rollout, clear at 297.6 s, parked 514.0 s; 0 of 40,256 ground samples off the pavement |
+| Heavy lookahead forced off (the 1,500 ft law, one-line experiment, reverted, not committed) | 233.8 s | +183 ft at 240 s, -137 ft at 248 s, +34 ft at 254 s | 38 ft up at z 586,357 (134 ft on the gated final at the same place); flies into the ground at 258 s at z 586,876, about 2,000 ft short of the gated touchdown (z 588,870) |
+
+So the cause is the shared one of B52-9: a heavy that is slow to roll and yaw snakes across the line on the 1,500 ft
+lookahead, and the aircraft ends 100 ft under the path with the swing (inferred from the two traces, not traced
+to a line of code). It is not the glide path, the flare or the heavy-class flaps law: with the 3,000 ft lookahead they
+are unchanged and the aircraft lands. The two runs are identical until the first turn back across the line.
+Landing weights (the same run, `--probe-fuel`; the log names are in `checks/T26-9/land-*.log`):
+
+| Fuel | 30,000 lb | 50,000 lb | 70,000 lb | 75,000 lb | 80,000 lb | 85,000 lb | 90,000 lb |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Result | touchdown 142 kt | 155 kt | 166 kt | 170 kt | into the ground at 266 s, on the line, about 3,600 ft short | into the ground at 274 s | into the ground at 560 s on the approach |
+
+**Limit (recorded, not fixed): the AI cannot land the Tu-26 above about 75,000 lb of fuel (219,000 lb).** From
+80,000 lb it flies the line and sinks about 3,600 ft short, the same family as T26-8's scripted full-fuel landing
+(its 0.85 landing cap sits under the loaded flapped minimum) and BMB-AI's open item 3 (an AI that sheds fuel or
+avoids short fields). The merged Southampton cycle therefore starts at `--probe-fuel 70000`; at the full tank
+(110,230 lb, 253,971 lb) the AI takes off (`ai-heavy-takeoff-tu26-gre-a1`, airborne at 196 s) but cannot land.
+A fix is in the shared approach speed for heavies (`approach_minimum_of` reads the clean stall times 0.75 and
+the loaded-elevator slope, which the Tu-26's loaded flapped minimum exceeds), a separate follow-up for John.
+
+**Baseline comparison.** No airfield law changed in this slice, so the BMB-AI 129-scenario comparison was not
+repeated: the law is the B-52's, proved bit-identical for everyone else in
+[B52-9](#b-52-ai-missions-multiplayer-and-replay-b52-9-2026-11-16). Whether the Tu-26 behaves under that law
+is what `ai-heavy-land-tu26-ukr-a2` and `ai-merged-airfield-tu26-wing2` pin.
+
+### The AI airfield cycle
+
+| Scenario | What it pins | Result |
+| --- | --- | --- |
+| `ai-merged-airfield-tu26-wing2` | An AI Tu-26 at Southampton (FRA ground start 14, 12,000 ft), `--probe-fuel 70000`, takes off, climbs out, lands on the order at 30,000 ticks, clears and parks, all on the pavement, touchdown 175 kt or slower | Taxi 35.0 s, takeoff roll 54.4 s, airborne 153.2 s, final 630.5 s, rollout 660.9 s, parked 1,104.1 s; 0 of 84,357 ground samples off the pavement |
+| `ai-heavy-land-tu26-ukr-a2` | Sent home to Simferopol at 70,000 lb of fuel: touchdown 175 kt or slower, rollout, clear, park, on the pavement | Final 233.8 s, rollout 264.5 s at 166 kt, parked 514.0 s; 0 of 40,256 off |
+| `ai-heavy-takeoff-tu26-gre-a1` (T26-8) | The takeoff and climb-out from Athens at the default load | airborne at 196 s |
+
+The full-fuel Southampton cycle (253,971 lb) takes off, then flies into the ground on the final at 593 s
+(`checks/T26-9/merged-tu26.log`): the same limit as above.
+
+### The AI strike from the bay and the glove pylons
+
+The B-2's stick rules (a heavy's bombs leave as a stick of up to eight, 0.25 s apart, doors opened first) needed
+no change: they read the station rows. The Tu-26's rows are the bay (station 4 of the run, `bays::GRIDS`) and the
+three pylon rows (stations 1, 2 and 3: intake pair, inner glove, outer glove; T26-5). Run with
+`--a2g-run UKR QUCOL --pilot ai --aircraft tu26 --load MK82 --station N --count M`:
+
+| Run | What the log shows |
+| --- | --- |
+| Eight Mk 82 in the bay (`ai-strike-tu26-stick`, T26-6), 20,000 ft, 12 nm | `BAY` open at 76.2 s (0.96), eight releases 76.7 to 78.5 s from the grid's own eight places, shut at 80.4 s, 8 impacts, egress at 22,411 ft, not lost |
+| Six Mk 82 on the inner glove row (`ai-strike-tu26-pylon`, station 2) | six releases 0.25 s apart, `bay=0.00`, no `BAY` line, the left and right glove alternating from the left: right -11.33, 11.33, -12.02, 12.02, -10.64, 10.64 ft, up -4.69 then -4.12, forward 4.33; six impacts, egress, not lost |
+| Quick Mission wing (`ai-strike-tu26-quick-wing`: `--quick-wing`, Ukraine factory, bay row loaded with eight) | `ROLE strike` (the mission's bomber-class default), doors open at 227.8 s, the same stick of eight at 4,949 ft (the 5,000 ft heavy floor), shut at 232.1 s, the factory killed at 246.4 s, egress, not lost |
+| Two AGM-84E on the inner glove row against the Krivak (`ai-strike-tu26-antiship`, `QUSFLT --unit 0x50000003`, 15 nm, 20,000 ft) | both leave at 0.017 s from the reach (a stand-off store), one a glove (right -11.33 and 11.33, up -4.23, forward 4.33), doors untouched, both hit at 29.3 s (96 ft) and the Krivak is destroyed |
+
+The glove rows accept a Harpoon in the run's load (T26-5 refuses it by name only in the bay): it is the one
+anti-ship store besides the AS-16 that the Tu-26 can carry, and the one the AI flies. The stores' own offsets
+differ (a Mk 82 hangs at up -4.69 or -4.12 ft, a Harpoon at -4.23).
+
+**The AS-16 is not flown by the AI at a ship or a vehicle (open, T160-9's).** An AI Tu-26 loaded only with
+AS-16 (the default) at the Krivak from 15 nm, 20,000 ft or 5,000 ft, never releases: at 20,000 ft it flies over
+the ship (closest 1,089 ft) and is destroyed by the fleet's defences at 169 s (`reach_margin_ft=-93377`); at 5,000 ft it ends `Searching` 62,182
+ft away. The same strike code fires the B-52's Harpoon from the same place, so the difference is the AS-16's
+record (the strike driver reads `seeker_lock`'s zone for a `RadarAgm`: `fire_range = max(GUIDED_CLOSE_FT, zone
+maximum / 2)` and the cone `missiles::geometry`), not the Tu-26. T160-9 (the Tu-160's, `m3-tu160`, not committed)
+is working in `ai/strike.rs` and `ai_wings/strike.rs` on exactly this path, so this slice **records the
+dependency and changes no AI**: no fork. When T160-9 lands, an `ai-strike-tu26-as16` scenario (six AS-16 at the
+Krivak from the three pylon rows and from the bay) belongs beside `ai-strike-tu26-antiship`; the human's AS-16 at
+the Krivak from the glove and the bay is `a2g-antiship-tu26` (T26-6).
+
+### Quick Mission
+
+`quick_mission::tests::the_tu26_is_a_quick_mission_player_and_a_wing_choice`: `TU26.PT` is offered as the player's
+aircraft ("Tu- 26 Backfire-C") and in every AI wing field, a draft carries it as the player and in every wing, it is
+distinct from `TU95.PT` and `TU160.PT`, and the night stealth rule (the B-2 and the F-117) does not take it. The
+strike is `ai-strike-tu26-quick-wing`. Two 2 v 2 probes: `ai-tu26-quick-mission-2v2` (all Tu-26) and
+`ai-tu26-vs-su27-2v2`.
+
+### The tail gun in a fight
+
+`ai-tu26-quick-mission-2v2` is the 2 v 2 in which the tail gun engages: all six aircraft are Tu-26s, the AS-16 rows
+are surface radar missiles and are refused against an aircraft (every aircraft still holds all three rows of two),
+so the slewed tail guns (BMB-AI's aim model: 30 degrees a second, 0.2 s lag, 1.0 degree error, 0.35 degree scatter)
+do all the shooting. The recorded run: 189 shots, one round-hit, rounds spent 56, 53 and 80 of 2,006, one
+aircraft damaged (0.8 percent), no crash into the ground, the known `activity flapping` anomaly only. The check
+requires shots, at least one hit and a spent round. `ai-tu26-vs-su27-2v2`: the Tu-26 leader defends itself (jettisons
+its six AS-16, payload 0), 8 shots, hurt to 0.91 damage, none lost; the probe's usual checks hold. The human's
+tail gun is `flight-tu26-tail-gun` (T26-6). **Not covered:** the gun's rounds on a watching client (`tore-bot` has no
+gun role, as in B52-9).
+
+### Multiplayer
+
+`net-a2g-stores-tu26`: both players in Tu-26s (`TU26_STORES_MISSION`). `tore-bot --load` hangs each store on the
+first station after the others that takes it, two of each. The Tu-26's station order is gun, intake pair (row 6),
+inner glove (7), outer glove (8), bay (5), and every pylon row takes a Mk 82, so `AS16.JT,AS16.JT,AS16.JT,MK82.JT`
+fills the three pylon rows with AS-16 and leaves the bay for the Mk 82; `--a2g bomb` takes the Mk 82. The watching client
+draws the bomber's stores, sees the Mk 82 leave plane 0, the bomber's emptied stations and an AI aircraft's, and reads
+plane 0's belly doors at 0.95 or more on its screen (158 s). A first try with `AS16.JT,MK82.JT` put the Mk 82 on the
+inner glove (the first station after the AS-16) and failed only on the doors, which a pylon release leaves shut.
+
+### Replay
+
+`replay-rec-tu26-2v2`: the Tu-26 as the player and in both wings, a 2 v 2 recorded three times; `--verify-render`
+finds nothing missing or differing (2,401 ticks), and the two recordings of the same run read back identical (973 flight and aircraft events each). `replay-a2g-tu26-ripple`: eight Mk 82 from
+the bay row (`--station 4 --count 8 --repeat 10 --gap 0.5`, `--record --verify-render`): 6,315 ticks compared with none
+missing or differing, eight `weapon.release` and `weapon.outcome` events, rounds 8 to 0, and the recorded `bay`
+device shut at the start and the end and open (0.95 or more) at every release. Ten presses are used for eight bombs:
+two presses are lost while the doors open (an eight-press ripple fired six; the B-52's nine-round row got seven or eight).
+
+### Scenarios and tests added
+
+| Name | What it pins |
+| --- | --- |
+| `quick_mission::the_tu26_is_a_quick_mission_player_and_a_wing_choice` | `TU26.PT` as player and wing choice, no stealth night rule |
+| `ai-merged-airfield-tu26-wing2`, `ai-heavy-land-tu26-ukr-a2` | the AI Tu-26's cycle at 70,000 lb of fuel and its Simferopol landing, on the pavement all the way (the AI landing fix is the merged B52-9 law) |
+| `ai-strike-tu26-pylon`, `ai-strike-tu26-quick-wing`, `ai-strike-tu26-antiship` | the glove-row stick, the Quick Mission wing's bay stick, the Harpoons against the Krivak |
+| `ai-tu26-quick-mission-2v2`, `ai-tu26-vs-su27-2v2` | the all-Tu-26 fight (tail guns shoot and hit) and the Su-27 fight |
+| `net-a2g-stores-tu26` | the Tu-26's stores and belly doors on a watching client |
+| `replay-rec-tu26-2v2`, `replay-a2g-tu26-ripple` | the identity through a recording and the bay ripple with the doors |
+| `tools` unit tests (`Tu26Tests`, the scenario lists, `tu26_gun_fight_problems`) | the strike and fight checks |
+
+### Checks
+
+All through `.local/m3-imports/light3.sh`, profile `.local/m3-aircraft/profile-tu26` refreshed first (no write to
+the default profile), logs in `.local/m3-aircraft/checks/T26-9/`. `cargo fmt --all -- --check` clean; `cargo clippy
+--workspace --all-targets --locked -- -D warnings` clean; `cargo test --locked --workspace --no-fail-fast` 7,880
+passed, 0 failed, 108 ignored (the new `the_tu26_is_a_quick_mission_player_and_a_wing_choice` among them);
+`--validate-ordnance` passed with no pin moved (54 aircraft, 23 recovered stations, 5,350 weapon placements, 257
+tank placements, 82 pod placements, 278 Cheat-only; `TU26.PT` 84); `python3 -B -m unittest discover -s tools` 599
+OK (5 skipped); `tools/check_docs.py` passed (382 files); battery (`--jobs 2 --windows 1`, own profile) **94 of
+94**: every `*tu26*` scenario (the T26-2 to T26-8 ones and the ten new), `ai-heavy-*` (8), `ai-strike-*` (37),
+`ai-merged-airfield-*` (8), `net-a2g-*` and `net-ai-strike-*` (8) and `replay-a2g*` (5). The merge of
+`m3-aircraft` is commit 54be1ced (one docs conflict, `lane-ai.md`'s heavy bombers row, both sides kept).
+
+**Not run:** `check_assets`, a windowed `--smoke-test`, the rest of the AI lane (the 862-scenario run) and the
+other lanes, the BMB-AI 129-scenario comparison (no airfield law changed), the human-flown landing at other fields
+(`flight-approach-tu26` only), an AI Tu-26 flying a Quick Mission to the end (landing and parking after a strike),
+the tail gun over the wire.
+
+### Open for John
+
+1. The AI cannot land the Tu-26 above about 75,000 lb of fuel (a shared heavy approach limit); the full-tank
+   cycle takes off and crashes on the final. BMB-AI's open item 3 and T26-8's scripted full-fuel landing.
+2. The AI does not fire the AS-16 at a ship or a vehicle (T160-9's path); `ai-strike-tu26-as16` waits for it.
+3. After a kill the AI keeps searching (B52-9's open item, not traced for the Tu-26 either: the antiship run stops at 60 s).
+4. The stick walks past the aim point as the B-2's and B-52's do.
+5. The tail gun's rounds over the wire are not covered (`tore-bot` has no gun role).

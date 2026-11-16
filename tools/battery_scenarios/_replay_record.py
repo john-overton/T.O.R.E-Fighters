@@ -626,6 +626,21 @@ def scenarios() -> list[Scenario]:
         )
     )
 
+    # The Tu-26 Backfire-C as the player and in both wings (slice T26-9): a 2 v 2 recorded three times, so the
+    # TU26.PT identity (a swing wing, two engines, the belly bay with its doors, the slewed tail gun, six AS-16 on the
+    # pylons) round-trips through the recording, plays back with nothing missing and records the same twice. The
+    # tail guns fire in an all-Tu-26 fight, so the slewed rounds are in the recording too. Its bay-release
+    # recording is `replay-a2g-tu26-ripple`.
+    out.append(
+        record_scenario(
+            "replay-rec-tu26-2v2",
+            ["--ai-probe-ticks", "2400", "--aircraft", "tu26", "--probe-friendly-aircraft", "tu26",
+             "--probe-enemy-aircraft", "tu26", "--probe-fight", "2:2", "--separation", "5",
+             "--probe-attack", "300:10"],
+            timeout=500,
+        )
+    )
+
     # Every imported aircraft as the enemy and as the player.
     for ac in AIRCRAFT:
         out.append(
