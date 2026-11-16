@@ -247,6 +247,11 @@ pub enum AircraftId {
     B52,
     B2,
     F117,
+    /// Bomber batch B (BMB-B1, 2026-11-15): appended after the F-117 in batch
+    /// order, each its own retail record and never an alias.
+    B1b,
+    Tu160,
+    F111,
 }
 impl AircraftId {
     /// Retail donor for an opinionated runtime variant.
@@ -264,7 +269,7 @@ impl AircraftId {
             other => other.pt(),
         }
     }
-    pub const SELECTABLE: [Self; 50] = [
+    pub const SELECTABLE: [Self; 53] = [
         Self::F18,
         Self::Rafale,
         Self::F14,
@@ -315,6 +320,9 @@ impl AircraftId {
         Self::B52,
         Self::B2,
         Self::F117,
+        Self::B1b,
+        Self::Tu160,
+        Self::F111,
     ];
     /// Whether the AI can fly this aircraft in a mission (`opinionated`, agent
     /// decision 2026-10-08, revised 2026-10-12). Every selectable aircraft is
@@ -343,7 +351,7 @@ impl AircraftId {
         matches!(self, Self::Ah64 | Self::Mi24 | Self::Ch47)
     }
     /// Retail import identities. Runtime variants reuse these dependencies.
-    pub const ALL: [Self; 48] = [
+    pub const ALL: [Self; 51] = [
         Self::F18,
         Self::Rafale,
         Self::F14,
@@ -392,6 +400,9 @@ impl AircraftId {
         Self::B52,
         Self::B2,
         Self::F117,
+        Self::B1b,
+        Self::Tu160,
+        Self::F111,
     ];
     pub fn parse(name: &str) -> Result<Self> {
         match name.to_ascii_lowercase().as_str() {
@@ -445,8 +456,11 @@ impl AircraftId {
             "b52" | "b52.pt" => Ok(Self::B52),
             "b2" | "b2.pt" => Ok(Self::B2),
             "f117" | "f117.pt" => Ok(Self::F117),
+            "b1b" | "b1.pt" => Ok(Self::B1b),
+            "tu160" | "tu160.pt" => Ok(Self::Tu160),
+            "f111" | "f111.pt" => Ok(Self::F111),
             _ => Err(invalid(
-                "supported aircraft: f18, rafale, f14, a4e, x31, mig29, su27, mig21, su25, mig23, su35, f22, f22n, faxx, c130, ac130, e3, il76, e2, av8, yak141, v22, ah64, mi24, ch47, mig17, f4b, f4j, f4e, f4g, a7, f15, f16c, f16a, f104, a10, b747, a310, mig25, mig31, m2000, f15e, gripen, f5e, tornado, tornadoc (the Tornado IDS Clean), mf1, b52, b2, f117",
+                "supported aircraft: f18, rafale, f14, a4e, x31, mig29, su27, mig21, su25, mig23, su35, f22, f22n, faxx, c130, ac130, e3, il76, e2, av8, yak141, v22, ah64, mi24, ch47, mig17, f4b, f4j, f4e, f4g, a7, f15, f16c, f16a, f104, a10, b747, a310, mig25, mig31, m2000, f15e, gripen, f5e, tornado, tornadoc (the Tornado IDS Clean), mf1, b52, b2, f117, b1b, tu160, f111",
             )),
         }
     }
@@ -500,6 +514,9 @@ impl AircraftId {
             Self::B52 => "B52.PT",
             Self::B2 => "B2.PT",
             Self::F117 => "F117.PT",
+            Self::B1b => "B1.PT",
+            Self::Tu160 => "TU160.PT",
+            Self::F111 => "F111.PT",
         }
     }
     pub fn hud(self) -> &'static str {
@@ -572,6 +589,13 @@ impl AircraftId {
             Self::B52 => "BMBROH.HUD",
             Self::B2 => "B2.HUD",
             Self::F117 => "F117.HUD",
+            // Bomber batch B (BMB-B1, 2026-11-15; coordinator first pass,
+            // BOMBERS-DECISIONS-B): each follows its record. B1.PT names
+            // bmbrcc.HUD (the B-2's module, three bytes changed), TU160.PT
+            // b2.HUD and F111.PT ac130.HUD.
+            Self::B1b => "BMBRCC.HUD",
+            Self::Tu160 => "B2.HUD",
+            Self::F111 => "AC130.HUD",
         }
     }
     pub fn stem(self) -> &'static str {
@@ -629,6 +653,11 @@ impl AircraftId {
             Self::B52 => "B52",
             Self::B2 => "B2",
             Self::F117 => "F117",
+            // B1.PT names b1.SH, TU160.PT tu160.SH and F111.PT f111.SH, each
+            // with its own _A..D damage looks (BMB-B1).
+            Self::B1b => "B1",
+            Self::Tu160 => "TU160",
+            Self::F111 => "F111",
         }
     }
     pub fn cockpit_stem(self) -> &'static str {
@@ -692,6 +721,11 @@ impl AircraftId {
             Self::B52 => "AC130",
             Self::B2 => "B2",
             Self::F117 => "F117",
+            // No B-1B, Tu-160 or F-111 cockpit art exists: the first two fly
+            // the B-2's, the F-111F the AC-130's (the families their HUD
+            // records name; BMB-B1).
+            Self::B1b | Self::Tu160 => "B2",
+            Self::F111 => "AC130",
             _ => self.stem(),
         }
     }
@@ -749,6 +783,8 @@ impl AircraftId {
             Self::B52 => "~AC130H.PIC",
             Self::B2 => "~B2H.PIC",
             Self::F117 => "~F117H.PIC",
+            Self::B1b | Self::Tu160 => "~B2H.PIC",
+            Self::F111 => "~AC130H.PIC",
         }
     }
     /// Compact identity for lobby columns and server seat logs.
@@ -826,6 +862,10 @@ impl AircraftId {
             // Retail's own spelling, stray space and all (decision 15).
             Self::B2 => "B- 2 Spirit",
             Self::F117 => "F-117A Nighthawk",
+            // Retail's own spellings (stray space in the B-1B's).
+            Self::B1b => "B- 1B Lancer",
+            Self::Tu160 => "Tu-160 Blackjack-A",
+            Self::F111 => "F-111F Aardvark",
         }
     }
     /// Exact reviewed short/long retail names, absent for the original loose fixtures.
@@ -878,6 +918,9 @@ impl AircraftId {
             Self::B52 => Some(("B-52", "B-52 Stratofortress")),
             Self::B2 => Some(("B-2", "B- 2 Spirit")),
             Self::F117 => Some(("F-117", "F-117A Nighthawk")),
+            Self::B1b => Some(("B-1B", "B- 1B Lancer")),
+            Self::Tu160 => Some(("Tu-160", "Tu-160 Blackjack-A")),
+            Self::F111 => Some(("F-111F", "F-111F Aardvark")),
             _ => None,
         }
     }
@@ -934,6 +977,9 @@ impl AircraftId {
             Self::B2 => Some("F18R.SEE"),
             // F117.PT has no radar row (VIS340, Pave Spike, F18.ECM, AV8IR).
             Self::F117 => None,
+            Self::B1b => Some("F18R.SEE"),
+            Self::Tu160 => Some("TU160R.SEE"),
+            Self::F111 => Some("A6R.SEE"),
         }
     }
     /// Primary installed gun. Multi-gun identities expose every type in `guns`.
@@ -1013,6 +1059,8 @@ impl AircraftId {
             // no gun.
             Self::B52 => &["M61.JT"],
             Self::B2 | Self::F117 => &[],
+            // The B-1B, Tu-160 and F-111F records carry no gun row.
+            Self::B1b | Self::Tu160 | Self::F111 => &[],
         }
     }
     /// Reviewed optional left, centre and right cockpit overlays.
@@ -1060,6 +1108,9 @@ impl AircraftId {
                 | Self::Tornado
                 | Self::Mf1
                 | Self::B52
+                | Self::B1b
+                | Self::Tu160
+                | Self::F111
         )
     }
 }
@@ -1151,6 +1202,11 @@ impl Aircraft {
             AircraftId::B52 => 612,
             AircraftId::B2 => 660,
             AircraftId::F117 => 588,
+            // Bomber batch B source reviews (2026-11-15): B1.PT 636,
+            // TU160.PT 588, F111.PT 660.
+            AircraftId::B1b => 636,
+            AircraftId::Tu160 => 588,
+            AircraftId::F111 => 660,
             _ => 660,
         };
         if object["structType"].number()? != 5 || object["typeSize"].number()? != size {
@@ -2028,6 +2084,9 @@ mod profile_tests {
             (AircraftId::B52, "B-52", "B-52 Stratofortress", 612),
             (AircraftId::B2, "B-2", "B- 2 Spirit", 660),
             (AircraftId::F117, "F-117", "F-117A Nighthawk", 588),
+            (AircraftId::B1b, "B-1B", "B- 1B Lancer", 636),
+            (AircraftId::Tu160, "Tu-160", "Tu-160 Blackjack-A", 588),
+            (AircraftId::F111, "F-111F", "F-111F Aardvark", 660),
         ] {
             let text = fixture()
                 .replace("F18.PT", id.pt())
@@ -2075,8 +2134,9 @@ mod profile_tests {
             );
         }
         // Update (BMB-A1, 2026-11-15): the bomber batch appends three more.
-        assert_eq!(AircraftId::ALL.len(), 48);
-        assert_eq!(AircraftId::SELECTABLE.len(), 50);
+        // Update (BMB-B1, 2026-11-15): batch B appends three more.
+        assert_eq!(AircraftId::ALL.len(), 51);
+        assert_eq!(AircraftId::SELECTABLE.len(), 53);
         assert_eq!(
             AircraftId::ALL[40..45],
             [
@@ -2107,7 +2167,8 @@ mod profile_tests {
             );
         }
         // Separate records: no neighbour key reaches them.
-        for key in ["B1.PT", "B1B", "B52G.PT", "F117A", "F22.PT"] {
+        // (BMB-B1: B1.PT and B1B are batch B's own keys now.)
+        for key in ["B52G.PT", "F117A", "F22.PT"] {
             assert!(
                 !matches!(
                     AircraftId::parse(key),
@@ -2117,11 +2178,11 @@ mod profile_tests {
             );
         }
         assert_eq!(
-            AircraftId::ALL[45..],
+            AircraftId::ALL[45..48],
             [AircraftId::B52, AircraftId::B2, AircraftId::F117]
         );
         assert_eq!(
-            AircraftId::SELECTABLE[47..],
+            AircraftId::SELECTABLE[47..50],
             [AircraftId::B52, AircraftId::B2, AircraftId::F117]
         );
         // The bindings John accepted (decisions 14, 15, 17, 28).
@@ -2142,6 +2203,65 @@ mod profile_tests {
         }
         assert!(!AircraftId::B52.has_pts());
         assert!(AircraftId::B2.has_pts() && AircraftId::F117.has_pts());
+    }
+    #[test]
+    fn the_bomber_batch_b_aircraft_parse_by_key_and_follow_their_records() {
+        // BMB-B1 (2026-11-15): checkpoint codes 50 to 52, in batch order.
+        for (key, id, pt) in [
+            ("b1b", AircraftId::B1b, "B1.PT"),
+            ("B1.PT", AircraftId::B1b, "B1.PT"),
+            ("tu160", AircraftId::Tu160, "TU160.PT"),
+            ("TU160.PT", AircraftId::Tu160, "TU160.PT"),
+            ("f111", AircraftId::F111, "F111.PT"),
+            ("F111.PT", AircraftId::F111, "F111.PT"),
+        ] {
+            assert_eq!(AircraftId::parse(key).unwrap(), id, "{key}");
+            assert_eq!(id.source(), id);
+            assert_eq!(id.pt(), pt);
+        }
+        // Separate records: no neighbour key reaches them.
+        for key in [
+            "B1", "B1A", "B1.PTS", "TU26.PT", "Tu-160", "F111A", "F22.PT",
+        ] {
+            assert!(
+                !matches!(
+                    AircraftId::parse(key),
+                    Ok(AircraftId::B1b | AircraftId::Tu160 | AircraftId::F111)
+                ),
+                "{key}"
+            );
+        }
+        assert_eq!(
+            AircraftId::ALL[48..],
+            [AircraftId::B1b, AircraftId::Tu160, AircraftId::F111]
+        );
+        assert_eq!(
+            AircraftId::SELECTABLE[50..],
+            [AircraftId::B1b, AircraftId::Tu160, AircraftId::F111]
+        );
+        // The bindings the coordinator's first pass fixed (BOMBERS-DECISIONS-B).
+        assert_eq!(AircraftId::B1b.hud(), "BMBRCC.HUD");
+        assert_eq!(AircraftId::B1b.stem(), "B1");
+        assert_eq!(AircraftId::B1b.cockpit_stem(), "B2");
+        assert_eq!(AircraftId::B1b.cockpit(), "~B2H.PIC");
+        assert_eq!(AircraftId::B1b.label(), "B- 1B Lancer");
+        assert_eq!(AircraftId::B1b.radar(), Some("F18R.SEE"));
+        assert_eq!(AircraftId::Tu160.hud(), "B2.HUD");
+        assert_eq!(AircraftId::Tu160.stem(), "TU160");
+        assert_eq!(AircraftId::Tu160.cockpit_stem(), "B2");
+        assert_eq!(AircraftId::Tu160.cockpit(), "~B2H.PIC");
+        assert_eq!(AircraftId::Tu160.radar(), Some("TU160R.SEE"));
+        assert_eq!(AircraftId::F111.hud(), "AC130.HUD");
+        assert_eq!(AircraftId::F111.stem(), "F111");
+        assert_eq!(AircraftId::F111.cockpit_stem(), "AC130");
+        assert_eq!(AircraftId::F111.cockpit(), "~AC130H.PIC");
+        assert_eq!(AircraftId::F111.radar(), Some("A6R.SEE"));
+        for id in [AircraftId::B1b, AircraftId::Tu160, AircraftId::F111] {
+            // No gun row, no overlay pictures, no PTS companion.
+            assert_eq!(id.gun(), None, "{id:?}");
+            assert_eq!(id.cockpit_overlays(), [None, None, None], "{id:?}");
+            assert!(!id.has_pts(), "{id:?}");
+        }
     }
     #[test]
     fn the_mirage_2000_reads_one_engine_and_one_m53_p2s_thrust_everyone_else_retail() {
@@ -2590,6 +2710,197 @@ mod profile_tests {
         // (891 + 109 x 2,000 / 36,000 = 897).
         assert_eq!(env(-1).points[6], [897., 34_000.]);
         assert_eq!(env(-1).points[7], [980., 0.]);
+    }
+    #[test]
+    fn the_b1b_tu160_and_f111_read_their_real_figures_only_while_retail() {
+        // BMB-B2 (coordinator first pass, 2026-11-15).
+        // B-1B: maximum 477,000, fuel 265,274, thrust 69,560 / 123,120, the
+        // high-altitude fast edge at Mach 1.25 (1,210 ft/s above 36,089 ft).
+        let mut rows = plain_rows(-2, 5);
+        let row = |p: &[[i32; 2]]| p.to_vec();
+        rows[2].1 = row(&[
+            [170, 0],
+            [200, 15_500],
+            [290, 34_250],
+            [420, 46_625],
+            [610, 58_000],
+            [917, 57_875],
+            [1_235, 52_750],
+            [1_465, 42_375],
+            [1_475, 36_000],
+            [1_180, 0],
+        ]);
+        let one = row(&[
+            [220, 0],
+            [250, 15_000],
+            [350, 33_500],
+            [460, 44_750],
+            [630, 55_000],
+            [900, 55_000],
+            [1_200, 50_000],
+            [1_400, 41_500],
+            [1_410, 36_000],
+            [1_120, 0],
+        ]);
+        rows[1].1 = one.clone();
+        rows[3].1 = one;
+        let b1b = [
+            ("engines", 4),
+            ("weight", 192_000),
+            ("thrust", 58_400),
+            ("aftThrust", 140_000),
+            ("maxTakeoffWeight", 447_000),
+            ("internalFuel", 105_000),
+            ("fuelConsumption", 6),
+            ("aftFuelConsumption", 16),
+        ];
+        let text = batch_text("B1.PT", "B-1B", "B- 1B Lancer", 636, (-2, 5), &rows, &b1b);
+        let a = Aircraft::parse(text.as_bytes()).unwrap();
+        assert_eq!(a.id, AircraftId::B1b);
+        assert_eq!(
+            (a.number("thrust"), a.number("aftThrust")),
+            (69_560., 123_120.)
+        );
+        assert_eq!(
+            (a.number("internalFuel"), a.number("maxTakeoffWeight")),
+            (265_274., 477_000.)
+        );
+        // Weight, ceiling and the flows stay.
+        assert_eq!(a.number("weight"), 192_000.);
+        assert_eq!(a.number("fuelConsumption"), 6.);
+        assert!(a.number("weight") + a.number("internalFuel") < a.number("maxTakeoffWeight"));
+        let env = |g: i32| a.envelopes.iter().find(|e| e.g == g).unwrap();
+        assert_eq!(
+            env(1).points[6..],
+            [
+                [1_200., 50_000.],
+                [1_210., 41_500.],
+                [1_210., 36_000.],
+                [1_120., 0.]
+            ]
+        );
+        // The 0 G polygon keeps its 65 ft/s step over the 1 G edge.
+        assert_eq!(
+            env(0).points[6..],
+            [
+                [1_235., 52_750.],
+                [1_275., 42_375.],
+                [1_275., 36_000.],
+                [1_180., 0.]
+            ]
+        );
+        // The -1 G row repeated the 1 G row and is held to the new edge.
+        assert_eq!(env(-1).points[7..9], [[1_210., 41_500.], [1_210., 36_000.]]);
+        // One changed number keeps the whole record retail.
+        let edited = b1b.map(|(k, v)| if k == "thrust" { (k, 58_500) } else { (k, v) });
+        let text = batch_text(
+            "B1.PT",
+            "B-1B",
+            "B- 1B Lancer",
+            636,
+            (-2, 5),
+            &rows,
+            &edited,
+        );
+        let a = Aircraft::parse(text.as_bytes()).unwrap();
+        assert_eq!(
+            (a.number("thrust"), a.number("maxTakeoffWeight")),
+            (58_500., 447_000.)
+        );
+        assert_eq!(
+            a.envelopes.iter().find(|e| e.g == 1).unwrap().points[8],
+            [1_410., 36_000.]
+        );
+        // Tu-160: empty 242,500, fuel 326,285, thrust 123,600 / 220,400; the
+        // maximum, engines and ceiling stay.
+        let tu160 = [
+            ("engines", 4),
+            ("weight", 202_260),
+            ("maxAlt", 50_000),
+            ("thrust", 158_092),
+            ("aftThrust", 232_398),
+            ("maxTakeoffWeight", 606_260),
+            ("internalFuel", 368_000),
+        ];
+        let text = batch_text(
+            "TU160.PT",
+            "Tu-160",
+            "Tu-160 Blackjack-A",
+            588,
+            (-2, 5),
+            &plain_rows(-2, 5),
+            &tu160,
+        );
+        let a = Aircraft::parse(text.as_bytes()).unwrap();
+        assert_eq!(a.id, AircraftId::Tu160);
+        assert_eq!(
+            (a.number("weight"), a.number("internalFuel")),
+            (242_500., 326_285.)
+        );
+        assert_eq!(
+            (a.number("thrust"), a.number("aftThrust")),
+            (123_600., 220_400.)
+        );
+        assert_eq!(
+            (a.number("maxTakeoffWeight"), a.number("maxAlt")),
+            (606_260., 50_000.)
+        );
+        // F-111F: fuel 32,663 lb (the record's 5,025 is gallons), thrust
+        // 29,120 / 50,200 and the flows refitted to 5 and 35 lb/s.
+        let f111 = [
+            ("engines", 2),
+            ("weight", 47_481),
+            ("thrust", 50_200),
+            ("aftThrust", 80_000),
+            ("maxTakeoffWeight", 100_000),
+            ("internalFuel", 5_025),
+            ("fuelConsumption", 3),
+            ("aftFuelConsumption", 6),
+        ];
+        let text = batch_text(
+            "F111.PT",
+            "F-111F",
+            "F-111F Aardvark",
+            660,
+            (-2, 5),
+            &plain_rows(-2, 5),
+            &f111,
+        );
+        let a = Aircraft::parse(text.as_bytes()).unwrap();
+        assert_eq!(a.id, AircraftId::F111);
+        assert_eq!(a.number("internalFuel"), 32_663.);
+        assert_eq!(
+            (a.number("thrust"), a.number("aftThrust")),
+            (29_120., 50_200.)
+        );
+        assert_eq!(
+            (a.number("fuelConsumption"), a.number("aftFuelConsumption")),
+            (5., 35.)
+        );
+        assert_eq!(a.number("weight"), 47_481.);
+        assert!(a.number("weight") + a.number("internalFuel") < a.number("maxTakeoffWeight"));
+        // A record whose fuel is already in pounds is left as it is.
+        let edited = f111.map(|(k, v)| {
+            if k == "internalFuel" {
+                (k, 32_663)
+            } else {
+                (k, v)
+            }
+        });
+        let text = batch_text(
+            "F111.PT",
+            "F-111F",
+            "F-111F Aardvark",
+            660,
+            (-2, 5),
+            &plain_rows(-2, 5),
+            &edited,
+        );
+        let a = Aircraft::parse(text.as_bytes()).unwrap();
+        assert_eq!(
+            (a.number("thrust"), a.number("fuelConsumption")),
+            (50_200., 3.)
+        );
     }
     #[test]
     fn the_mirage_f1_reads_one_atar_9k_50_and_the_f5e_its_real_fuel_g_and_ceiling() {

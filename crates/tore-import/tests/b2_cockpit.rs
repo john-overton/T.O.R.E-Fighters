@@ -74,11 +74,19 @@ fn the_b2_flies_its_own_hud_and_cockpit_family_with_the_b1b_sensor_rows() {
     assert_eq!(id.stem(), "B2");
     assert_eq!(id.cockpit(), "~B2H.PIC");
     assert_eq!(id.instrument_panel(), "~B2_P.PIC");
-    // No other flyable identity uses the family.
+    // No other flyable identity uses the family, except the two batch B
+    // bombers whose records name the B-2's art (BMB-B1, 2026-11-15): the
+    // B-1B (`bmbrcc.HUD`, the B-2's module with three bytes changed) takes
+    // the cockpit stem, and the Tu-160 (`b2.HUD`) takes the stem and the HUD.
     for other in AircraftId::ALL {
         if other != id {
-            assert_ne!(other.cockpit_stem(), "B2", "{other:?}");
-            assert_ne!(other.hud(), "B2.HUD", "{other:?}");
+            let shares_art = matches!(other, AircraftId::B1b | AircraftId::Tu160);
+            assert_eq!(other.cockpit_stem() == "B2", shares_art, "{other:?}");
+            assert_eq!(
+                other.hud() == "B2.HUD",
+                other == AircraftId::Tu160,
+                "{other:?}"
+            );
         }
     }
     // `B2.HUD` references exactly the instrument window frame the identity

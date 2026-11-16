@@ -1138,6 +1138,13 @@ impl Configuration {
                 AircraftId::B52 => ["M61.JT", "AGM84E.JT"].contains(&name),
                 AircraftId::B2 => ["MK82.JT", "PAVEWA3.JT"].contains(&name),
                 AircraftId::F117 => ["PAVEWA3.JT"].contains(&name),
+                // Bomber batch B (BMB-B1, 2026-11-15): the retail default
+                // stores. The B-1B's retarded Mk 82 on its three bay rows,
+                // the Tu-160's AS-16 (Kh-15) on its two bay rows and the
+                // F-111F's GBU-28, Mk 82 six-pack and Maverick.
+                AircraftId::B1b => ["MK82AIR.JT"].contains(&name),
+                AircraftId::Tu160 => ["AS16.JT"].contains(&name),
+                AircraftId::F111 => ["GBU28.JT", "MK82P.JT", "AGM65G.JT"].contains(&name),
             };
             if weapon.movement.acceleration > i32::MAX / 256
                 || weapon.movement.deceleration > i32::MAX / 256
