@@ -9694,3 +9694,439 @@ press, 0.958 in the actual one-press probe), the doors stay 1 s after the releas
 reads `State::bay` on the RCS page only (no change to a row a radar reads), so it now applies
 to the F-117 at 1.5 times with the doors fully open, and the F-22's values are unchanged.
 Update to [F117-3 bay (interim)](#bay-interim-f117-4-f117-5-replaces-it): replaced.
+
+## Tu-95 source review (2026-11-15)
+
+Research mode, slice T95-0 (bomber batch C). This reviews `TU95.PT` (Tu-95 "Bear-H") and its
+dependency closure before `AircraftId::Tu95` exists. `TU95.PT` is not a parked target. No original
+module was executed. PT, SEE, ECM, JT and HUD are read as bounded BRF data with the shared field
+order in `aircraft_schema.rs`; SH is inspected as data with the `shape_inspect` example. Slice done
+by Claude Sonnet. Nothing here changes code or behaviour. Real-aircraft figures are cited and never
+establish game behaviour. The game's own Jane's text (`TU95.INF`) is reference media, quoted by
+figure only.
+
+Questions open for John, **not decided here**: the record values ([below](#tu-95-the-template-copy-list-for-john)),
+the thrust and engine model ([below](#tu-95-propulsion-thrust-and-propellers-for-john)), the
+surfaces ([below](#tu-95-surfaces-and-the-whole-surface-gate-for-john)), the bay and pylons
+([below](#tu-95-bay-and-pylon-survey-for-john)), the guns ([below](#tu-95-guns-for-john)), the
+sensors and HUD ([below](#tu-95-sensors-hud-and-cockpit-for-john)).
+
+### Tu-95 build and extraction
+
+The same `FA_1.LIB` / `FA_2.LIB` pair as the earlier bomber reviews. The closure was extracted
+locally with `tore-extract --include` filters (`TU95*`, `_TU95*`, the SEE, ECM, JT and HUD files the
+record names, `^ACTU95.5K`, and comparison records `C130`, `AC130`, `ATL`, `E2`, `TU26`, `TU160`,
+`B52`, with `C130*.SH`, `ATL*.SH`, `E2C*.SH` for the propeller comparison) to
+`.local/m3-imports/scratch/tu95` (157 resources, the usual five unrelated archive errors). The
+other comparison records (`KC135`, `E3`, `AF1`, `B747`, `B707`, `C5`, `C17`, `B1`, `IL76`, `A310`)
+were read from the B-52 review's scratch copy. `*TU95*` name sweeps find no Tu-95 cockpit art
+(`~TU95*` does not exist): only the shapes, skins, `^ACTU95.5K`, `TU95_0` to `TU95_3.PIC`, `TU95_E.PIC`
+and `TU95.INF` in `disc2/FA_3.LIB`. The SETUP.ESA copy of `FA_2.LIB` holds identical bytes.
+`variety_flight` cannot run the record: `Aircraft::parse` refuses a PT with no registered identity,
+so no flight probe was run (T95-8).
+
+### Tu-95 identity and record
+
+| Field | Decoded value |
+| --- | --- |
+| PT | `TU95.PT`, 8,990 bytes, SHA-256 `c3d0544544064b03d43de4fc6aa7440a6b03fff04216df2127773889c581c548` |
+| Displayed names | `Tu-95`, `Tu- 95 Bear-H`, `TU95.PT` |
+| Schema | OBJECT + NPC + PLANE; `structType` 5; **`typeSize` 660** (the default; no arm needed, as the Tu-26); `instanceSize` 626 |
+| Object class / year / hit points | `0x4000` (attack) / 1984 / 393; `expType` 30 |
+| PLANE flags | `0x04` (multi-crew only; no hook, no seat bit, no carrier), as `C130.PT` |
+| Engines | **4**, thrust **355,080 lbf**, no afterburner (0), throttle accel 10 / decel 60 |
+| Weights | empty 264,550 lb, internal fuel 100,000 lb, maximum takeoff 407,850 lb, fuel flow 4 lb/s |
+| Envelope | G rows -1 to +3; ceiling (`maxAlt`) 40,750 ft; minimum altitude 300 ft |
+| Shape | `tu95.SH` (12,800 bytes, header exponent 9, **header scale 2**), shadow `tu95_s.SH` (8 faces) |
+| Damage looks | `TU95_A.SH` 154 faces, `_B` 33, `_C` 146, `_D` 45 |
+| Skins | `_TU95.PIC` 81,444 bytes; `_TU95_A/B/C/D.PIC` 80,664 / 38,024 / 71,564 / 39,844 |
+| Sounds | `&prop2.11k` loop and `&prop.11k` second (the C-130's pair), `&powerup.5k`, `&powerdn.5k` (all present) |
+| HUD / AI | `bmbroh.HUD`, `b.BI` (both byte-identical to the B-52's) |
+| Sensors / jammer / gun | `VIS300.SEE`, `TU95R.SEE`, `TU95.ECM`, `SU37L.SEE`, `T23_1.JT` x3; store `AS16.JT` |
+| PTS / callout | no `TU95.PTS`; `^ACTU95.5K` exists (2,945 bytes) |
+| Encyclopedia | `TU95.INF` (Jane's, Bear-F dimensions, Bear-H performance), `TU95_0`..`3`, `TU95_E.PIC` |
+| Checkpoint code / CLI key | assigned by the batch C identity slice |
+
+The decoded record equals the catalog row in [`fa-aircraft.csv`](fa-aircraft.csv) field for field.
+`strike_class.rs` already tests `TU95.PT` as `Heavy`. The three shapes' header exponents differ
+across the bombers: Tu-95 9 (scale 2), C-130 and AC-130 9, B-52 9, Tu-26 10, Tu-160 11, B-2 and
+F-117 8.
+
+Hashes of the files later slices depend on (those not listed are in the scratch extraction report):
+
+| Resource | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `TU95.SH` | 12,800 | `c24ed0b896a05c703f3069c11084d3ccba363c7a63c0f4197e73a1bac005e4d8` |
+| `TU95_S.SH` | 4,608 | `228c7c74222ca1e0a3c6038cd63482c10bb7cd25d244638cd75da1e682259a75` |
+| `TU95_A.SH` | 12,800 | `f5032da7f092be2c3cdc30d6a36e08db7a9f7db69c650f8853b37a41fe1ea650` |
+| `TU95_B.SH` | 4,608 | `cbeede73c92982a021464f660f9e75773c0647b30898826d17e5efc6b508035d` |
+| `TU95_C.SH` | 12,800 | `e827d39142ce2a22dad1007558a499656c0a16a3d30de331461aa75f35076e1a` |
+| `TU95_D.SH` | 4,608 | `80b05ab5ee238de75664251c8bad416e57fa49be579c10c761c359c35230d73c` |
+| `_TU95.PIC` | 81,444 | `cc132bf3c0ab7c522558042c3dd6a324dad87b4ab6ca8e8cac3953142b68e9cc` |
+| `TU95R.SEE` | 488 | `5efe5ce704e77865bd2b7d8defd058f5260d7ed1b0ea7a3e5f5a12be5c15f4af` |
+| `TU95.ECM` | 345 | `9484e7e298b3e19046adadd6e1f35c7a61ad1de474f44e514ab00b40017372bb` |
+| `SU37L.SEE` | 468 | `f5d6d7fac00841a2e8caa0ecb9b0603cad52947cb2bcc1220519e3f5b6179940` |
+| `T23_1.JT` | 2,704 | `031db9b6035eeaa2b24bc8d3e120cf65f41091b6c4173da5edf94ea9fb164963` |
+| `AS16.JT` | 2,768 | `6920952d86e7fcd8de90fe710d94b215afad0e855dcfa25984a6f727e38b6e06` |
+| `BMBROH.HUD` | 4,608 | `3eb15857d970c2f3f48f3f9482cbfaa8c1463aef4275a2198d6065d55ef7bbf9` |
+| `B.BI` | 4,608 | `781f27cddf73075f36659fe0910dda009a457cdd3f2386de6c9b8bb78946e7ae` |
+
+### Tu-95 dependency closure
+
+All present: `tu95.SH`, `tu95_s.SH`, the four damage looks and five skins above; sounds `&prop2.11k`,
+`&prop.11k`, `&powerup.5k`, `&powerdn.5k`; `bmbroh.HUD`, `b.BI`; `VIS300.SEE`, `TU95R.SEE`,
+`TU95.ECM`, `SU37L.SEE`; `T23_1.JT` (shape `bullet.SH`, sound `&su33gun.11k`) and `AS16.JT`
+(shape `kikbk.SH`, sound `&ashvmis.11k`). The shape has no billboards or lines. Missing and
+therefore authored if wanted: a cockpit picture set (none for the Tu-95), a weapon record for the
+real Kh-55 (`AS15.JT` exists as a 220 lb, 9.87 nm stand-in, refused for the Tu-160 in
+BOMBERS-DECISIONS-B). None of the closure is imported yet (`TU95R.SEE` and `TU95.ECM` are
+"Tu-95 only; non-roster" in the asset inventory).
+
+### Tu-95 the template copy list (for John)
+
+`TU95.PT` has no single template. Of its 207 non-pointer statements it equals `C130.PT` in 173,
+`TU26.PT` 170, `KC135`, `E3` and `AC130` 168, `IL76` and `B52` 167, `ATL` 166, `E2` 165, `TU160` 164
+(the 45 system-damage bytes equal all of them). So the **flight-tuning block** (stall, spin, turn
+rates, drag and crash words) is the shared large-aircraft family template, closest to the C-130.
+
+Values held by **no other record** (authored for the Tu-95): year 1984, `dmgDebrisPos.x` 180,
+`sigs[3]` 400, hit points 393, empty weight 264,550, `maxAlt` 40,750, `envMin` -1,
+`turbulencePercent` 141, **thrust 355,080**, fuel flow 4, internal fuel 100,000, `flapsLift` 38,
+`loadedDrag` 60, `loadedGpullDrag` 12, loaded elevator, aileron and rudder 26, maximum takeoff 407,850.
+Values shared with a few records (family or coincidence): `typeSize`, `instanceSize`, `numHards` 9
+(Tu-26); object flags `0x12bf3` (C-130, E-2); `sigs[2]` 75 (C-130, AC-130); `maxVisDist` and
+`sigs[0..1]` (C-17); `PLANE.flags` `0x04` (C-130); `viewOffset.y` 20 (C-130, Tu-26, E-2); `bayDrag` 25
+(Tu-26, Tu-160, B-52); `throttleAcc` 10 (AC-130, C-130, B-52); `_gpullDrag` 20 (AF-1, 747, C-5,
+Tu-160); sounds (the C-130's `&prop2.11k` and `&prop.11k` pair).
+
+**The thrust is not a template copy and not a unit error: it is authored from the engine power by
+a fixed rule.** 355,080 = 4 x 14,795 x 6 exactly (the Jane's text in `TU95.INF` gives the NK-12MV
+at "11,033 kW (14,795 ehp)"). The C-130's 108,192 follows the same rule: 4 x 4,508 shp x 6 = 108,192
+(4,508 shp is the T56-A-15 figure in Jane's; the same engine is 4,591 shp in Wikipedia). So the
+retail author multiplied the shaft horsepower by six to get "pounds of thrust" for both
+turboprops. John's 2026-10-13 correction already replaced the C-130's value (108,192 to the
+AC-130U record's 40,000, `spec/aircraft-records.md`); the Tu-95's equals it in kind and is the same
+sort of error, only 3.3 times larger.
+
+| Field | Record | Real | Difference | Verdict |
+| --- | ---: | ---: | ---: | --- |
+| Empty weight, lb | 264,550 (120,000 kg) | 198,415 (90,000 kg, Jane's Bear-H; Wikipedia Tu-95MS 198,416) | +33% | Authored high; matches neither source |
+| Internal fuel, lb | 100,000 | 148,150 (67,200 kg, Wikipedia MS); Jane's Bear-F max 191,800; "95,000 L normal" is about 167,000 lb | -33% | Authored low |
+| Maximum takeoff, lb | 407,850 (185,000 kg) | 407,850 (Jane's Bear-F); 414,470 (188,000 kg, Jane's Bear-H and Wikipedia) | 0% / -1.6% | Agrees with Jane's Bear-F |
+| Engines | 4 | 4 x NK-12MV / NK-12MP | none | Agrees |
+| Military thrust, lbf (total) | 355,080 | no cited thrust; 4 x 14,795 shp | see propulsion | Shaft power x 6, not a thrust |
+| Top speed, kt (1 G row, 36,000 ft) | 462 | 499 (Mach 0.83, 25,000 ft, Jane's and Wikipedia 925 km/h); 447 (Mach 0.78 at 38,000 ft) | -7% / +3% | Agrees with Jane's at altitude |
+| Sea-level maximum, kt | 355 | 350 (Jane's) | +1.4% | Agrees |
+| Ceiling, ft | 40,750 | 39,370 (Jane's service); 45,000 (Wikipedia) | +3.5% / -9% | Between the two |
+| G limit | -1 / +3 | none cited | | Authored |
+| Hit points | 393 | none | | Authored |
+| Year | 1984 | Bear-H entered service 1984 (Wikipedia, not examined further) | | Agrees |
+
+The record's 1 G fast edge reads 600 ft/s (355 kt) at sea level and 780 ft/s (462 kt) at 36,000 ft,
+so at 25,000 ft it is about 430 kt against Jane's 499 (-14%): the shape of the envelope is low in
+the middle, right at the two ends. Nothing here is a copy of another record, so the "template
+list" for John is the thrust (a derived figure, six times the shaft power), the empty weight (+33%)
+and the fuel (-33%).
+
+Options for John (none chosen):
+
+1. Keep every value as retail.
+2. Correct thrust only (see the propulsion section for the number).
+3. Thrust, empty weight 198,415 lb and fuel 148,150 lb (Wikipedia MS figures; Jane's agrees for the
+   empty weight), keep the maximum takeoff 407,850 (Jane's) or take 414,470. The sum 198,415 +
+   148,150 = 346,565 lb leaves 61,285 lb (or 67,900 lb at 414,470) for stores; 16 AS-16 are 42,240
+   lb. At the retail 264,550 + 100,000 the headroom is 43,300 lb, so 16 AS-16 just fit.
+
+### Tu-95 propulsion, thrust and propellers (for John)
+
+**How TORE's turboprop precedents represent thrust.** There is no propeller or turboprop flight
+model. The C-130, AC-130, E-2C and the Atlantique fly the shared variety fixed-wing integration with
+one scalar, `military_thrust_lbf` (times throttle, times an altitude lapse `exp(-h / 70,000 ft)`),
+and the hybrid drag law reaches that thrust at the 1 G top speed
+(`spec/variety-flight.md`, "Top speeds"). There is no thrust-versus-speed curve and no propeller
+efficiency, so one constant has to stand for both takeoff and cruise. Transports take a fitted level-speed fraction 0.96
+and 0.4/s ground alignment (`variety.rs`). The retail thrust of each turboprop record:
+
+| Record | Engines | Shaft power each | Retail thrust, lbf | Per shp | Status in TORE |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `C130.PT` | 4 | 4,508 shp (Jane's) | 108,192 | 6.0 | Corrected to 40,000 (John, 2026-10-13) |
+| `AC130.PT` | 4 | 4,591 shp (Wikipedia, T56-A-15) | 40,000 | 2.18 | Kept; sibling of the correction |
+| `E2.PT` | 2 | 4,910 shp (T56-A-427, not examined here) | 16,000 | about 1.6 | Kept |
+| `ATL.PT` | 4 | 6,100 shp (Tyne, not examined here) | 84,000 | 3.4 | Template (the E-3's, `KC135`/`IL76` share it) |
+| `TU95.PT` | 4 | 14,795 shp | 355,080 | 6.0 | Not imported |
+
+The C-130 correction set the precedent: where the record's thrust is an arithmetic artefact, use a
+sibling record's value on the same engine class, and say so (`fitted`). The Tu-95 has no sibling.
+The nearest authored turboprop-per-shp figure is the AC-130U's 2.18 lbf per shp.
+
+**What the real engine gives (cited).** Wikipedia "Kuznetsov NK-12": NK-12MV and NK-12MP 11,033 kW
+(14,795 hp); "11,000 kW (14,750 shp) + 2.78 kN (625 lbf)" residual jet thrust at 9,250 rpm; two
+four-bladed contra-rotating propellers (AV-60, 5.6 m, 18 ft 4 in); specific fuel consumption
+0.219 kg/kWh (0.360 lb/hp/h). Jane's text in `TU95.INF`: "eight-blade contra-rotating reversible-pitch
+Type AV-60N propellers", propeller diameter 5.60 m (18 ft 4.5 in), max power loading 6.89 lb/shp
+(Bear-F), takeoff speed 162 kt, landing speed 146 kt. Secondary search snippets quote the AV-60K at
+736 rpm (about 12.3 rev/s); not verified against a primary source. **No static thrust, and no thrust
+at speed, was found in a source that could be cited**; a search for them returned none. A turboprop's
+thrust is `eta x shaft power / speed`; with an assumed propeller efficiency of 0.8 (an assumption,
+not a cited figure) and 4 x 14,795 shp:
+
+| True airspeed | Thrust (lbf) |
+| --- | ---: |
+| 162 kt, takeoff speed (eta 0.6 to 0.8 at low speed, assumed) | 71,600 to 95,400 |
+| 355 kt, the record's sea-level maximum | 43,500 |
+| 430 kt | 35,900 |
+| 462 kt, the record's top speed | 33,400 |
+
+plus 2,500 lbf residual jet thrust (4 x 625 lbf). So the thrust of the real aircraft in flight is
+about **a tenth** of the record's 355,080 lbf; at the C-130's accepted ratio it would be 2.8 times the
+at-speed figure (the AC-130U's 40,000 lbf against about 14,200 lbf by the same formula at 338 kt).
+
+**Recommended record correction (fitted, opinionated).** Military thrust **129,000 lbf**: 4 x 14,795
+shp x 2.18 lbf per shp, the AC-130U's authored ratio for the same kind of engine. Cross-check: 2.8 x
+the 355 kt thrust gives 121,500, within 6%. The thrust-to-weight at the 407,850 lb maximum is 0.32
+(the C-130's 0.26, the E-2C's 0.30, the retail Tu-95's 0.87). Alternative: 105,000 lbf, which gives the
+C-130's thrust-to-weight of 0.26. Keep the fuel flow 4 lb/s: full takeoff power burns 5.9 lb/s at the
+cited specific fuel consumption (4 x 14,795 x 0.36 / 3,600), and cruise power about 60% of that.
+All of it waits for T95-8's flight review (takeoff roll, climb, level speed), which is the first time the
+record can fly.
+
+**Propellers (drawn).** `TU95.SH` has one state word, the gear (`33b0`); there is no propeller
+word, no spin branch and no contra-rotation geometry. Each of the four propellers is **one flat quad
+(a blur disc) drawn as eight coincident faces**: four image phases (picture rows 21 to 52, 53 to 84,
+85 to 116, 117 to 148) each facing both ways. TORE's precedent
+(`variety_rotors::keep_face` and `animate`, `spec/rotor-presentation.md`) keeps one phase per facing
+panel and turns it about the hub at 15 rev/s while the engine runs with fuel (a fitted constant for
+every fixed-wing propeller; the real AV-60 is about 12.3 rev/s). Hub centres from the quads (source units,
+x right, y forward, z up): right inboard `(35.2, 47.5, -1.5)`, faces `1aa2 1ac1 1ae0 1aff` and
+`1b27 1b46 1b65 1b84` (disc x 24 to 46, z -11 to 8, y 47 to 48); right outboard `(65.5, 30, -2.5)`,
+`1d20 1d3f 1d5e 1d7d` and `1da5 1dc4 1de3 1e02` (x 55 to 76, z -12 to 7); left inboard `(-34, 47.5, -1.5)`,
+`243f 245e 247d 249c` and `24c4 24e3 2502 2521` (x -45 to -23); left outboard `(-64, 30, -2.5)` drawn
+as **two half panels** along a slanted line (z -2 to -1): upper `2610 262f 264e 266d`, `2694 26b3 26d2
+26f1` and lower `2850 286f 288e 28ad`, `28d5 28f4 2913 2932`, all one rigid disc. Every vertex of every
+disc face turns about the hub axis (parallel to Y); none is fixed. The disc is 22 units wide and 19 tall
+(14.7 x 12.7 ft at 2/3 ft per unit), against a real 18.4 ft: the shape draws 20 to 30% under size
+(the blur art is the retail one). Discs are 1.3 ft from the ground line (disc bottom z -12, gear low z -14).
+
+**Contra-rotation.** The art cannot show it: the blur disc is one image per phase, so a disc
+turning either way looks the same, and the two faces of one winding are the two sides of the same
+plane. Options: (1) one disc per engine, all four the same way (the C-130, AC-130 and E-2C
+precedent), no contra-rotation drawn (recommended); (2) alternate the direction between
+neighbouring engines (cosmetic; the real handing was not verified); (3) draw a second
+fitted disc 0.5 ft behind turning the other way (invented geometry, little to see). The sound
+pair (`&prop2.11k`, `&prop.11k`) is the C-130's and needs nothing. Spin speed: keep the shared
+15 rev/s or add a fitted per-aircraft 12.3 rev/s (736 rpm, secondary source).
+
+### Tu-95 state words and the rule 11 fold table
+
+One state word, `33b0` (gear). `tu95.SH` has 155 faces with it unset (gear up) and **161 with it set
+to 1** (down): six wheel plates, nothing else.
+
+| Face | Value 0 | Value 1 | Geometry |
+| --- | --- | --- | --- |
+| `29f9`, `2a2f` | absent | present | left main wheel plate, x -33, y 3 to 9, z -14 to -6 (two windings) |
+| `2a14`, `2a4a` | absent | present | right main wheel plate, x 34, same extent |
+| `2a65`, `2a88` | absent | present | nose wheel plate, x 0, y 70 to 76, z -14 to -7 |
+
+Each plate is one flat 6 x 8 unit panel in a longitudinal plane (4 x 5.3 ft), matching Jane's "tyres
+approx 1.50 m (5 ft) diameter"; there are no struts, doors or bogies in the shape (real: four-wheel
+main bogies and a twin nose wheel; "all units retract rearward, main units into nacelles built on to
+wing trailing-edge", Jane's). The main plates sit in the nacelle planes (nacelle x 31 to 36, z -7 to
+1). Gear low point **z -14, or 9.33 ft** below the origin at 2/3 ft per unit. Rule 11 fold table
+(retraction about a lateral axis at the plate's top edge centre, one rigid plate, rearward as Jane's):
+each plate 4 vertices, 4 turned, 0 on the hinge axis, 0 fixed off axis; no face folds. A
+retract of 90 degrees lays a main plate flat at z -6, just under the nacelle's z -7 skin (inside
+it within about 1 unit). The nose plate stows against the belly (z -7 to -5). The wheel plates are
+flat, so a retract that keeps them in their plane shows nothing wrong at near-zero pose.
+
+Other devices are **not** state words: the four propeller discs (above), no bay-door word, no flap
+word, no airbrake, no hook, no refuelling-probe word, no flame plate.
+
+### Tu-95 surfaces and the whole-surface gate (for John)
+
+Every wing and tail polygon of `tu95.SH` is a single large facet per side; there is no separate
+elevator, aileron or flap strip except the rudder.
+
+| Surface | Source faces | Gate |
+| --- | --- | --- |
+| **Rudder** | `2117`, `2135`: triangle (0,-112,42), (0,-124,42), (0,-121,3), two windings, behind the fin's hinge line | **Passes**: a whole source panel with its own faces. Hinge axis (0,-112,42) to (0,-121,3). Fold table: 3 vertices, 1 turned, 2 on axis, 0 fixed off axis; the fin faces `20d3`, `2154` (vertices (0,-121,3), (0,-112,42), (1,-86,9)) keep both axis vertices; no face folds |
+| Fin | `20d3`, `2154`, dorsal fillet `2172`, `2184` | Fixed |
+| Tailplane | right `20f1`, `2104` (x 0 to 33, y -94 to -130, z 8 to 9); left root `2196`, `21a9` (x -5 to 0) and `23fb`, `240f` (x -33 to -5) | Whole panels with no elevator strip; the tail has no real incidence in the source. As a whole-tailplane pitch it is a fitted stabilator (the real Bear has fixed stabilizers with elevators): **fails** as an elevator, would be fitted. The left side is two panels, the right one |
+| Ailerons | none (outer wing `1ec6`, `1ee1`, `25ce`, `25e9`: one quad a side, x 63 to 124) | **Fails**: partial surface needed |
+| Flaps | none (wing facets `1bbb`, `1caa`, `1e71`, `1e8c` inboard) | **Fails**: no strip in the source |
+| Spoilers, airbrake, reverser | none | Not in the source |
+| Nacelles | `1c33` to `1cf1`, `2791` to `2821` (thin plates) | Fixed |
+
+Options for roll and pitch (none chosen): (1) rig the rudder only and draw no pitch or roll surface
+(the B-52 and F-15E precedents; recommended); (2) add a fitted whole-tailplane pitch about the root
+(`x = 0` for the right panel, hinge along the root edge from (0,-116,9) to (0,-94,9)) with a small
+limit; (3) add fitted authored elevator and aileron strips (partial surfaces, John's gate). The
+flaps lever then drives nothing. Flight roll and pitch still follow the PT's rates.
+
+### Tu-95 real size (for John)
+
+Measured on the neutral shape (clean): x -123 to 124, y -130 to 96, z -12 to 42, gear down low z -14.
+One unit is 2/3 ft at the header scale 2 (the C-130, AC-130, B-52 and Tornado precedent;
+`debris::scale` has no Tu-95 arm, so the default 1/3 ft would draw it at half size).
+
+| Axis | Units | At 2/3 ft | Real | Verdict |
+| --- | ---: | ---: | ---: | --- |
+| Span | 247 | 164.7 ft | 164.4 ft (50.1 m, Wikipedia MS); Jane's Bear-F 167.7 ft | +0.2% |
+| Length, nose to the tailplane tips | 226 | 150.7 ft | 151.6 ft (46.2 m, Wikipedia MS); Jane's Bear-F 162.4 ft | -0.6% |
+| Length, nose to the tail cone | 217 | 144.7 ft | 151.6 ft | -4.6% |
+| Height, fin tip z 42 to gear low z -14 | 56 | 37.3 ft | 39.8 ft (12.12 m, Wikipedia and Jane's) | -6.1% |
+
+**Verdict.** The shape is true size at 2/3 ft per unit, as the B-52 was (the length depends on whether
+the tailplane tips, y -130, or the tail cone, y -121, count). Gear lengthening is the B-52's
+question (the legs are 6% short); the fuselage is 11 x 12 units, 7.3 x 8 ft against the real 2.9 m
+(9.5 ft) diameter. Options: (1) draw at the header scale 2/3 (recommended); (2) 2/3 plus a fitted gear
+stretch if T95-2's frames show the belly too low; (3) default 1/3.
+
+### Tu-95 bay and pylon survey (for John)
+
+**The rows.** Nine rows, decoded with the standard field order (location byte 0 Centerline, 1 Fuselage,
+2 Internal Gun, 3 Internal Bay, 4 Wing, 5 Wingtip; feet are record units divided by three;
+position right / up / forward):
+
+| Row | Location | Flags | x / y / z | Feet | Slew heading / pitch / limits | Max items | Class | Default |
+| ---: | --- | ---: | --- | --- | --- | ---: | ---: | --- |
+| 0 | Fuselage | `0x1008` | 0 / 0 / 0 | 0 / 0 / 0 | | 1 | 0 | `VIS300.SEE` |
+| 1 | Fuselage | `0x1008` | 0 / 0 / 0 | | | 1 | 0 | `TU95R.SEE` |
+| 2 | Fuselage | `0x1008` | 0 / 0 / -100 | 0 / 0 / -33.3 | | 1 | 0 | `TU95.ECM` |
+| 3 | Fuselage | `0x180a` | 0 / 0 / -100 | 0 / 0 / -33.3 | 32,760 / 0 / 8,190 / 8,190 | 2,000 | 0 | `T23_1.JT` |
+| 4 | Fuselage | `0x1008` | 0 / 0 / 0 | | | 1 | 0 | `SU37L.SEE` |
+| 5 | Fuselage | `0x180a` | 0 / 16 / 20 | 0 / 5.3 / 6.7 | 32,760 / 3,640 / 8,190 / 910 | 2,000 | 0 | `T23_1.JT` |
+| 6 | Fuselage | `0x180a` | 0 / -15 / -20 | 0 / -5 / -6.7 | 32,760 / -3,640 / 8,190 / 910 | 2,000 | 0 | `T23_1.JT` |
+| 7 | **Internal Bay** | `0x1180` | 0 / -35 / 38 | 0 / -11.7 / 12.7 | | 6 | 160 | `AS16.JT` x1 |
+| 8 | **Wing** (paired) | `0x17e5` | 27 / -35 / 35 | +-9 / -11.7 / 11.7 | | 6 | 160 | none |
+
+**Reading the rows.** Row 7 is the **MS bay with its rotary launcher**: one one-sided bay row,
+6 items, class 160 (16,000 lb; 6 AS-16 weigh 6 x 2,640 = 15,840 lb), flags `0x1180` (bomb `0x100` and
+infrared `0x80`; no pod bit). Row 8 is the **MS16's wing row**: paired, 6 items, class 160 (6 AS-16 =
+15,840 lb), x +-9 ft. Its flags `0x17e5` are the F-16C's wing mask: base, pair, **pod `0x400`**, tank
+`0x200`, bomb `0x100` and all three seeker bits, so in TORE it would admit tanks, pods, bombs and
+air-to-air missiles on a bomber; the mask is the record's own and needs trimming (B7: no pod on a
+station the real aircraft lacks). The rows' heights (-11.7 ft) are 2.4 ft **below the gear's
+ground-contact plane** (-9.3 ft) and 7 ft below the belly (z -7, -4.7 ft), the same finding as the
+B-52's bay rows; the position is the record's reference point, not geometry.
+
+**Real loads (cited).** Wikipedia "Tupolev Tu-95": Tu-95MS6 carries six Kh-55, Kh-55SM or Kh-555 on a
+rotary launcher in the weapons bay; the Tu-95MS16 adds four underwing pylons for a maximum of 16
+Kh-55 (14 Kh-55SM); modernised aircraft carry eight Kh-101/102 on four double pylons. Wikipedia
+"Kh-55": 16 Kh-55 on the MS16, **10 on underwing hardpoints and 6 on an MKU-5-6 rotary launcher**
+(sources disagree on the external count and the pylon arrangement; the 10 is the one that adds to
+16); missile diameter 51.4 cm (20.2 in), wingspan 3.10 m. The Kh-15 (AS-16): 1,200 kg (2,650 lb), 4.78 m,
+45.5 cm diameter, and Wikipedia lists the Tu-95MS-6 among its carriers; TORE's `AS16.JT` is 2,640 lb,
+radar seeker, 6.58 to 8.23 nm. The real Kh-55 is the AS-15, which TORE holds only as the 220 lb stand-in.
+
+**Retail against the real aircraft.** The bay row matches the MS bay exactly (6 on the launcher).
+The wing row's 6 (3 a side) is below the MS16's 10; its x +-9 ft is inside the fuselage (the shape's
+wing root is at x 6 to 7, the fuselage half width 5.5 units = 3.7 ft). The default is one AS-16 in the
+bay, no wing load.
+
+**Shape.** The belly is closed skin (`1a38`, `1a50`, `22a7`, `22c1`: four strips x -5 to 6, y 0 to 71,
+z -7 to -5); there are no door panels, no bay word, no pylons. The free underwing span between the
+fuselage (x 6) and the inboard nacelle (x 31) is 25 units, 16.7 ft; the wing underside there is
+z +1 to +2 (above the gear plane by 10 to 12 ft).
+
+**Proposal (stations at the retail rows' count where public data supports them; fitted or opinionated).**
+
+1. **Bay (row 7).** Lift it to a fitted belly bay under the wing centre section, record forward
+   offset 38 units (12.7 ft, shape y 19), opening about 26 ft long (shape y 0 to 39) by 5 ft wide, two
+   door leaves cut in the belly strips (the F-22 and F-117 machinery). Default **6 AS-16** (the
+   row's own count: the loaded rotary launcher), not the retail 1.
+2. **Pylons (row 8).** Keep the row as the MS16's external station, move it to the free span at
+   x +-12 ft (shape x 18), 1.5 ft below the wing underside (so the pylon hangs a store at about z -1 to
+   -3), drop the pod, tank, bomb and air-to-air bits from the mask so that only the AS-16 fits, and set
+   the count to **10** (5 a side; class 270, 27,000 lb) as on the MS16. Four pylon bodies would be
+   authored (the Tornado pylon precedent); the 10 and the positions are opinionated (the arrangement of the real
+   pylons was not found). No default load on the pylons: the Load Ordnance menu adds them.
+3. **Shared bay grid.** The rotary launcher's six missiles sit in a ring around a longitudinal axis
+   (a Kh-55 is 1.7 ft in diameter; a six ring is about 5 ft across, inside the fuselage's 7.3 ft). A
+   rectangular grid cannot be a ring; the fitted approximation is **one station long x 3 wide x 2 high**
+   (spacing 1.7 ft), six slots, all the stores' length (the AS-16 is 15.7 ft, the bay 26 ft). Use the
+   shared grid code from batch A and B with those numbers; if the grid insists on a lane count, a
+   single 3 x 2 cell is the fit. Label it fitted.
+4. Weight: 6 + 10 AS-16 are 42,240 lb against 43,300 lb of takeoff headroom at the retail empty and
+   fuel (61,285 lb with the Wikipedia MS values); the loadout total should include the bay (batch A
+   open item).
+
+Options (none chosen): (a) keep the retail rows untouched (the bay under the ground, 6 on the wing);
+(b) the proposal above; (c) bay only, no pylons (the retail aircraft is the Tu-95MS6; standing
+decision 2 allows pylons where public data supports them, and it does); (d) hide the wing row.
+
+### Tu-95 guns (for John)
+
+`T23_1.JT` (`fa-weapons.csv:128`): "23mmx1 turret", gun round, 1956, 2,933 ft/s muzzle, 6,000 ft
+sound distance, damage 10 / 1 / 3 / 3 / 10, **2 rounds per shot** (the twin barrel of a GSh-23 or
+AM-23), seeker 0, shape `bullet.SH`, sound `&su33gun.11k`. The Tu-26 names it too (as a tail row).
+
+The record carries **three gun rows**, each 2,000 rounds, flags `0x180a`, all slewed **aft**
+(heading 32,760 = 180 degrees; 65,520 is a full turn):
+
+| Row | Position (ft right / up / forward) | Slew | Reading |
+| ---: | --- | --- | --- |
+| 3 | 0 / 0 / -33.3 | pitch 0, limits +-8,190 (45 degrees) both ways | tail gun, at the reference height |
+| 5 | 0 / 5.3 / +6.7 | pitch +3,640 (+20 degrees), limits 45 degrees in heading, 5 degrees in pitch | an upper rear turret |
+| 6 | 0 / -5 / -6.7 | pitch -3,640 (-20), same limits | a lower rear turret |
+
+**The real Bear-H has one gun position: a tail turret with two 23 mm GSh-23 cannon** (Wikipedia
+"Tupolev Tu-95"; Jane's "gunner in rear turret compartment" in `TU95.INF`). The older Bear-A to F
+carried dorsal and ventral turrets too, which is what rows 5 and 6 resemble (fuselage-mounted,
+upper and lower, aft-facing). The retail record keeps all three rows as defaults: 6,000 rounds.
+
+**Position.** Row 3's z -33.3 ft is the fuselage middle; the drawn tail cone ends at y -121 (80.7 ft
+aft, fuselage tail cone; the fin tip at y -124), so the mount is 47 ft forward of the real tail turret.
+A fitted record position at the cone tip is about (0, +1.3 ft up, -80 ft), record units
+`(0, 4, -241)`. Rows 5 and 6 are at the wing/belly (z +-20, y +-15 to 16) with no turret drawn.
+
+**Aim and the mount.** The slew words give a rear-facing mount, but **aircraft gun slew is not read
+anywhere in the simulation** (B52-5 found the B-52's tail gun fires along the nose; the rear-facing
+mount was B52-6's slice). The Tu-95 needs the same rear-facing mount, a limited arc (45 degrees
+each way) and the shared gunner aim; as a bomber with a rear gun it has no forward-firing gun, so
+the player's fire button would use the tail gun at the aft arc.
+
+Options (none chosen): (1) the tail gun only (row 3), moved to the tail cone, with rows 5 and 6
+defaults cleared (the F-117 jammer precedent; keeps the rows' source ordinals); the real Bear-H
+carries one turret (recommended); (2) all three rows, 6,000 rounds: the Bear-A to F layout, not
+the Bear-H; (3) all three, moved to drawn turrets (no turret geometry exists). Rounds: the real
+magazine was not found; keep 2,000 or take the B-52 plan's own number for the M61 (1,242, a different
+gun). A rear-facing mount is needed in any option.
+
+### Tu-95 sensors, HUD and cockpit (for John)
+
+- **`VIS300.SEE`**: the large-aircraft visual sensor, the same file the transports use.
+- **`TU95R.SEE`** (488 bytes): the **Tu-160's radar record renamed** (43 bytes differ from
+  `TU160R.SEE`, names only; range 911,400, search arcs 10,920). Real Bear-H radars (Jane's): "Clam
+  Pipe" nav/bombing radar under the nose, a weather radar, a tail gun-fire-control "Box Tail". Keep
+  as retail.
+- **`TU95.ECM`** (345 bytes): the jammer record with **no chaff and no flare dispenser** (the
+  Tu-160's `TU160.ECM` adds 30 and 40; here the counts are zero); a jammer with no dispenser.
+  The real Bear-H carries "Ground Bouncer" jamming and pylon-mounted ECM pods at the tail (Jane's).
+  Keep as retail; the countermeasure slice decides about dispensers.
+- **`SU37L.SEE` (B7 check).** A laser designator record (seeker byte 1, range 60,760 = 10 nm, the
+  visual sensor's range), in a fixed internal row (4, flags `0x1008`, position 0 / 0 / 0). It is
+  **not a pod and has no station**: B7 is satisfied if no pod body is drawn and none is
+  hung. The real Tu-95MS has no laser designator (its missiles use inertial and terrain-reference
+  guidance), so it is retail-only; the Tu-160 decision kept it ("fixed row, not a pod"). Options:
+  keep with no body (recommended, consistent with the Tu-160 and Tu-26); drop (as the F-117's jammer).
+- **HUD.** `bmbroh.HUD` is byte-identical to the B-52's: the AC-130 module with 7 bytes changed (panels
+  `~ac130*`, annunciators GEAR, FLAP, BRAKE and BAY, HAB high-altitude bombing sight mode, no
+  CCIP pipper; [the B-52 section](#b-52-hud-and-cockpit-for-john)). **No Tu-95 cockpit art exists.**
+  Follow the record (the AC-130 family, as the B-52 does) is the recommendation; the BAY annunciator
+  needs a bay word the shape lacks, so it would be driven by the fitted door.
+- **Pilot eye.** The record's `viewOffset` (0, 20, 60) places the eye 6.7 ft up and 20 ft forward of the
+  origin, in the wing area, while the flight deck glazing is at shape y 71 to 96 (47 to 64 ft forward,
+  z 3 to 5). The batch B decisions fit the eye to the drawn deck; do the same (about record units
+  `(0, 6, 165)`, to be measured against T95-7 frames).
+- **AI.** `b.BI` is the shared bomber script (also B-52, Tu-26, Tu-160); the strike class rule gives
+  `Heavy` (`strike_class.rs` already tests it).
+
+### Tu-95 roster note and next steps
+
+Facts to carry into the identity slice: `AircraftId::Tu95` needs `typeSize` 660 (default), a
+`debris::scale` arm at 2/3 ft per unit, the shape's reader accepts the file as is (no reader change),
+and the propeller registration in `variety_rotors` (four hubs, eight faces each, the left outboard
+disc split in two). Propeller phase selection reuses `keep_face`. Not run: a flight probe (the
+identity does not exist), the extraction against `FA_1.LIB` pictures beyond the extraction
+listed. Next: BMB-C1 (identity), BMB-C2 (record), T95-2 (shape and decals), T95-3 (rig: rudder,
+gear, propellers).
