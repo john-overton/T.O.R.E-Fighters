@@ -587,6 +587,9 @@ mod tests {
     fn a_replayed_tornado_draws_the_wing_sweep_it_flew() {
         use tore_sim::combat::{hardpoints::Rack, swing};
         let dir = TempDir::new("convert-tornado");
+        // SWING-1: the sweep schedule is the aircraft's swing spec's, not the
+        // Tornado's constants.
+        let spec = swing::spec(AircraftId::Tornado).expect("the Tornado swings its wing");
         let pose = |id: u32, knots: f64, flaps: f64| {
             let mut devices = [0.; DEVICES];
             devices[1] = flaps;
@@ -626,7 +629,7 @@ mod tests {
         let replayed = round_trip(dir.path(), "tornado.tore-replay", &live);
         let turn = |p: &AircraftPose| {
             let d = p.devices.expect("a Tornado's devices are recorded");
-            swing::wing_turn(d[9], d[1])
+            spec.turn(d[9], d[1], d[0])
         };
         // The sweep may differ by the speed and flap precision, no more.
         let bound = tolerance::SPEED * 0.00125 + tolerance::UNIT_DEVICE * 0.74 + 1e-9;
@@ -646,14 +649,14 @@ mod tests {
             }
         }
         let high = turn(&replayed[1].player);
-        let full = (swing::SWEEP_MAX - swing::SWEEP_MIN).to_radians();
+        let full = spec.max_turn() - spec.min_turn();
         assert!((high - full).abs() < 1e-9, "700 kt is fully swept: {high}");
         let middle = turn(&replayed[1].targets[1]);
         assert!(
             (middle
-                - full * (425.4 - swing::SWEEP_FROM_KNOTS)
-                    / (swing::SWEEP_TO_KNOTS - swing::SWEEP_FROM_KNOTS))
-                .abs()
+                - full * (425.4 - spec.law.from_knots())
+                    / (spec.law.to_knots() - spec.law.from_knots()))
+            .abs()
                 < 0.01,
             "{middle}"
         );

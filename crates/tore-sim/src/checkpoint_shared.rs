@@ -97,6 +97,12 @@ crate::checkpoint_enum!(tore_formats::aircraft::AircraftId {
     B52 = 47,
     B2 = 48,
     F117 = 49,
+    B1b = 50,
+    Tu160 = 51,
+    F111 = 52,
+    Tu26 = 53,
+    Tu95 = 54,
+    Su34 = 55,
 });
 
 crate::checkpoint_tuple!(Side(side));
