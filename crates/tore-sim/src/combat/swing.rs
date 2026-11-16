@@ -616,8 +616,8 @@ pub const ALL: [&SwingSpec; 5] = [&TORNADO, &B1B, &TU160, &F111F, &TU26];
 pub fn spec(id: AircraftId) -> Option<&'static SwingSpec> {
     match id.source() {
         AircraftId::Tornado => Some(&TORNADO),
-        // AircraftId::B1b => Some(&B1B),
-        // AircraftId::Tu160 => Some(&TU160),
+        AircraftId::B1b => Some(&B1B),
+        AircraftId::Tu160 => Some(&TU160),
         // AircraftId::F111F => Some(&F111F),
         // AircraftId::Tu26 => Some(&TU26),
         _ => None,
@@ -1119,11 +1119,15 @@ mod tests {
             assert!(!spec.has_swivel() && spec.outline.is_none());
             assert_eq!(spec.placement, Placement::NONE);
         }
-        // Unwired aircraft: no id resolves to them yet.
-        assert!(
-            AircraftId::ALL
-                .iter()
-                .all(|id| spec(*id).is_none() || id.source() == AircraftId::Tornado)
-        );
+        // Update (coordinator, 2026-11-15): the B-1B and Tu-160 are wired
+        // with their identities (BMB-B1); the F-111F and Tu-26 are not yet.
+        assert!(AircraftId::ALL.iter().all(|id| match spec(*id) {
+            None => true,
+            Some(s) => {
+                (id.source() == AircraftId::Tornado && s.name == TORNADO.name)
+                    || (*id == AircraftId::B1b && s.name == B1B.name)
+                    || (*id == AircraftId::Tu160 && s.name == TU160.name)
+            }
+        }));
     }
 }
