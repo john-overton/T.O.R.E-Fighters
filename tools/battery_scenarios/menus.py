@@ -498,7 +498,8 @@ def scenarios() -> list[Scenario]:
             # BMB-A1 (2026-11-15): 48 aircraft, 20 recovered stations and 4,792 weapon placements after the B-52 (71), B-2 (102) and F-117 (38) joined; tanks stay 233.
             # BMB-A2 (2026-11-15): 4,776 weapon placements, the B-2's four bay rows lose the designator bit 0x400 (B-2 102 to 86; designator pods 84 to 80).
             # F117-5 (2026-11-15): 4,784, the F-117's two bay rows take the Paveway II bombs (F-117 38 to 46).
-            expect=[r"ordnance audit: 48 aircraft, 20 recovered weapon stations, 4784 weapon placements, 233 tank placements, 82 weapon and 9 tank records; passed"],
+            # BMB-B1 and BMB-B2 (2026-11-15): 51 aircraft, 5,145 weapon and 249 tank placements after the B-1B (63), Tu-160 (70) and F-111F (228 weapon, 16 tank) joined with their station corrections (designator bit cleared on the B-1B bay rows and the F-111F wing rows; BMB-B1 alone measured 5,173).
+            expect=[r"ordnance audit: 51 aircraft, 20 recovered weapon stations, 5145 weapon placements, 249 tank placements, 82 weapon and 9 tank records; passed"],
             notes="All reviewed source stations, compatible supported weapons/tanks, empty defaults and accepted-load restoration. The audit fails when a supported weapon or tank record is missing or a pinned count moves (ordnance_audit.rs).",
         )
     )

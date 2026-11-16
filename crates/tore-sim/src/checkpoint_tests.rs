@@ -255,9 +255,10 @@ fn the_f5e_round_trips_at_code_43_and_no_identity_shares_it() {
     // The code after the last identity (46, the Tornado IDS (Clean), is the
     // runtime variant appended in TOR-13) is still unknown.
     let unknown = Coded {
-        // Update (BMB-A1, 2026-11-15): 47 to 49 are the bomber batch, so
-        // 50 is the first unknown code.
-        body: vec![50],
+        // Update (BMB-A1, 2026-11-15): 47 to 49 are the bomber batch A.
+        // Update (BMB-B1, 2026-11-15): 50 to 52 are batch B, so 53 is the
+        // first unknown code.
+        body: vec![53],
         records: Vec::new(),
     };
     assert!(from_bytes::<AircraftId>(&unknown, &NONE).is_err());
@@ -283,9 +284,10 @@ fn the_tornado_round_trips_at_code_44_and_no_identity_shares_it() {
     // The code after the last identity (46, the Tornado IDS (Clean), is the
     // runtime variant appended in TOR-13) is still unknown.
     let unknown = Coded {
-        // Update (BMB-A1, 2026-11-15): 47 to 49 are the bomber batch, so
-        // 50 is the first unknown code.
-        body: vec![50],
+        // Update (BMB-A1, 2026-11-15): 47 to 49 are the bomber batch A.
+        // Update (BMB-B1, 2026-11-15): 50 to 52 are batch B, so 53 is the
+        // first unknown code.
+        body: vec![53],
         records: Vec::new(),
     };
     assert!(from_bytes::<AircraftId>(&unknown, &NONE).is_err());
@@ -311,9 +313,10 @@ fn the_mf1_round_trips_at_code_45_and_no_identity_shares_it() {
     // The code after the last identity (46, the Tornado IDS (Clean), is the
     // runtime variant appended in TOR-13) is still unknown.
     let unknown = Coded {
-        // Update (BMB-A1, 2026-11-15): 47 to 49 are the bomber batch, so
-        // 50 is the first unknown code.
-        body: vec![50],
+        // Update (BMB-A1, 2026-11-15): 47 to 49 are the bomber batch A.
+        // Update (BMB-B1, 2026-11-15): 50 to 52 are batch B, so 53 is the
+        // first unknown code.
+        body: vec![53],
         records: Vec::new(),
     };
     assert!(from_bytes::<AircraftId>(&unknown, &NONE).is_err());
@@ -344,7 +347,7 @@ fn the_clean_tornado_round_trips_at_code_46_and_shares_no_code() {
 /// Slice BMB-A1 (2026-11-15): the bomber batch A identities are checkpoint
 /// codes 47 (B-52), 48 (B-2) and 49 (F-117), appended after the Tornado IDS
 /// (Clean)'s 46 in batch order. Each round-trips as itself, no two share a
-/// code, and code 50 is still unknown.
+/// code. (Code 50 was the first unknown code until BMB-B1 appended batch B.)
 #[test]
 fn the_bomber_batch_a_round_trips_at_codes_47_to_49_and_shares_no_code() {
     for (id, code) in [
@@ -364,8 +367,33 @@ fn the_bomber_batch_a_round_trips_at_codes_47_to_49_and_shares_no_code() {
         );
     }
     assert_eq!(codes.len(), AircraftId::SELECTABLE.len());
+}
+
+/// Slice BMB-B1 (2026-11-15): the bomber batch B identities are checkpoint
+/// codes 50 (B-1B), 51 (Tu-160) and 52 (F-111F), appended after the F-117's
+/// 49 in batch order. Each round-trips as itself, no two share a code, and
+/// code 53 is still unknown.
+#[test]
+fn the_bomber_batch_b_round_trips_at_codes_50_to_52_and_shares_no_code() {
+    for (id, code) in [
+        (AircraftId::B1b, 50),
+        (AircraftId::Tu160, 51),
+        (AircraftId::F111, 52),
+    ] {
+        assert_eq!(same(&id).body, vec![code], "{id:?}");
+        let loaded: AircraftId = from_bytes(&same(&id), &NONE).unwrap();
+        assert_eq!(loaded, id);
+    }
+    let mut codes = std::collections::BTreeSet::new();
+    for id in AircraftId::SELECTABLE {
+        assert!(
+            codes.insert(same(&id).body.clone()),
+            "{id:?} repeats a code"
+        );
+    }
+    assert_eq!(codes.len(), AircraftId::SELECTABLE.len());
     let unknown = Coded {
-        body: vec![50],
+        body: vec![53],
         records: Vec::new(),
     };
     assert!(from_bytes::<AircraftId>(&unknown, &NONE).is_err());

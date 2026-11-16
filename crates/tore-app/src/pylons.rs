@@ -189,7 +189,7 @@ pub fn swung<'a>(
     if !swing::has_swivel(id) {
         return std::borrow::Cow::Borrowed(stores);
     }
-    let turn = swing::wing_turn(state.speed, state.flaps) as f32;
+    let turn = swing::wing_turn_of(id, state.speed, state.flaps, state.gear) as f32;
     let mut posed = stores.to_vec();
     for store in &mut posed {
         store.rack.turn = if swing::swivels(id, usize::from(store.hardpoint)) {
