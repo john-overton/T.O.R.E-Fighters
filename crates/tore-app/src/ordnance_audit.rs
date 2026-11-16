@@ -108,9 +108,19 @@ const TANK_RECORDS: usize = 9;
 /// `MK82P3`, `FAB250`, `GBU38`, `RBK250`; 20 refused for fit, the 3 ft span
 /// missiles among them) and the new underwing pylon row (row 7) takes 22 less
 /// the five long stores it refuses, so `B52.PT` goes from 71 to 33 placements
-/// (B52-5, 2026-11-15, fitted; normal catalog 18 stores). Dated note, B4: the
-/// coordinator recomputes the total at integration with the B-2's bay rows.
-const WEAPON_PLACEMENTS: usize = 4746; // TBD
+/// (B52-5, 2026-11-15, fitted; normal catalog 18 stores; the integration
+/// total below replaces this slice's own 4,746).
+/// 4,732 from 4,784 (batch A integration, 2026-11-15, measured by
+/// `--validate-ordnance`): the B-2's two Mk 82 bay rows refuse four stores
+/// (B2-5, `B2.PT` 86 to 78, minus 8) and the B-52's bay rows, folded onto the
+/// shared magazine grid (B2-5's 1.3 ft pitch), hold three stores (`MK82`,
+/// `MK82P3`, `FAB250`; 22 refused for fit, `GBU38` and `RBK250` joining the 20
+/// that B52-5's own grid refused) while the new pylon row takes 22 less the
+/// five it refuses, so `B52.PT` goes from 71 to 27 placements (minus 44; B52-5
+/// alone gave 33). The F-117's F117-6 to F117-9 slices move no placement
+/// (`F117.PT` stays 46). The two slices' separate totals, 4,776 and 4,746,
+/// are not added: 4,784 - 8 - 44 = 4,732.
+const WEAPON_PLACEMENTS: usize = 4732;
 /// 188 from 182: the F-16A's centreline tank row (F150.GAS or F250.GAS) plus
 /// the tank selection its two 0x07e5 wing rows accept, 6 tank placements.
 /// 192 from 188: the MiG-31 (M31-1). 201 from 192: the Mirage 2000 (M2K-1).

@@ -3602,7 +3602,7 @@ It reuses the F-117's bay machinery
 
 | Row | Station | Mount | Capacity, class |
 | ---: | --- | --- | --- |
-| 3 | bay, forward row, `Location::Magazine`, 3 x 3 grid | 0 / -6.0 / +13.87 | 9, 7,000 lb |
+| 3 | bay, forward row, `Location::Magazine`, shared grid | 0 / -6.0 / +13.87 | 9, 7,000 lb |
 | 5 | bay, middle row | 0 / -6.0 / +5.20 | 9, 7,000 lb |
 | 6 | bay, aft row | 0 / -6.0 / -3.46 | 9, 7,000 lb |
 | 7 | underwing pair, `Location::Beam`, one beam a wing, record `[52, 8, 31]` | +/-17.33 / 2.67 (record; the stores' lugs hang 1 ft under the wing) / +10.33 | 18, 17,000 lb |
@@ -3612,49 +3612,60 @@ It reuses the F-117's bay machinery
 +/-3.0, 26.0 long (-8.67 to +17.33 forward); recess 6.0 deep (roof 0.0); two doors 3.0 wide
 hinged on the outer edges, swinging 90 degrees down in the flight's 1.00 s bay travel, hanging
 to -9.0 (0.3 ft above the gear contact line, -9.33). A lined box (ceiling and four walls) closes
-the recess under an intact top skin (13.3 ft above the belly). Three rails hang 0.6 ft from the
-ceiling over the lanes (x -1.42, 0 and +1.42 for a 500 lb class store) and six posts stand from the
+the recess under an intact top skin (13.3 ft above the belly). Four rails hang 0.6 ft from the
+ceiling over the lanes (x -1.95, -0.65, +0.65 and +1.95 for a 500 lb class store on the shared
+grid; they were three at -1.42, 0 and +1.42 on B52-5's own grid) and eight posts stand from the
 floor to the ceiling at the two inner row boundaries; the lining draws only while the doors are
-off their seat. Code: `bays::CENTRE_BAYS`, `bay_doors::{centre_doors, centre_lining}`,
-`b52_animation.rs`.
+off their seat. Code: the B-52 row of `bays::OPENINGS` (`centre` 0, `inner` 0, `outer` 3.0,
+`inner_depth` equal to `depth`), `bay_doors::{centre_doors, centre_lining}` (the one-bay variants
+of the shared door helper, taking the opening and the shape's feet a unit), `b52_animation.rs`.
 
-**Grid (`bays::GRIDS`, `BayGrid`).** Each bay row is one 8.67 ft slab, three lanes by three tiers,
-one store long. Pitch between lanes and tiers is the larger of the store's span and its
-diameter, plus 0.15 ft. The bottom tier is nearest the belly (axis half the span plus 0.08 ft
-above the plane). Stores fill from the bottom tier and, in a tier, from the middle lane, then
-the right, then the left; the highest slot, last filled, leaves first, so a row releases bottom
-tier first and nothing falls through another store. The row's mount is its slab middle plus
-0.87 ft, the `MK82.SH` family's origin offset (it spans -4.52 to +2.78 ft about the point a store
-hangs and leaves from), so the drawn 500 lb bomb is centred in its slab. **Relation to B2-5:**
-the existing `Location::Magazine` hangs stores in one tandem lane only (nine Mk 82 would be 67 ft
-long). B2-5 builds a general multi-lane magazine grid in parallel; this one is the minimum the
-B-52 needs, kept as per-aircraft data (`GRIDS`, one row per bay station) plus one `if let` in
-`Rack::store_point` that finds the grid by the station's mount. At the merge the rows move to B2-5's
-grid and these three items are deleted; the 3 x 3 layout and the pitch rule are the data to carry.
-(B2-5's committed grid arrived mid-slice and was not visible here: the per-row numbers are the named
-constants `B52_ROW_FLOOR_WIDTH` 6.0, `B52_ROW_LENGTH` 8.67 and `B52_ROW_CEILING` 6.0 in `combat::bays`,
-shaped for a `GRIDS` row; `centre` 0 and `inner_depth` equal to `depth`.)
+**Grid (`bays::GRIDS`, the shared magazine grid of B2-5).** Folded onto the shared grid at the
+batch A integration (2026-11-15): B52-5's own per-aircraft `GRIDS`, `BayGrid`, `CentreBay` and the
+`if let` in `Rack::store_point` are deleted. The three B-52 rows are rows of the shared `GRIDS`
+(floor width `B52_ROW_FLOOR_WIDTH` 6.0 ft, length `B52_ROW_LENGTH` 8.67 ft, ceiling the roof,
+`B52_BELLY + B52_ROW_CEILING` = 0.0 ft up of the reference point, flat so `inner_depth` equals
+`depth`), the carried grid comes from `Rack::grid()`, and the layout follows `grid_cells` and
+`grid_point`: stores stand a span plus 0.03 ft apart (at most 1.3 ft, at least a diameter plus
+0.1 ft), as many abreast and along as the floor holds and as many tiers as the ceiling allows
+(`grid_capacity`). For a 500 lb class bomb (a Mk 82, 1.27 ft span, 7.3 ft long) that is **4 abreast,
+1 long (an 8.67 ft slab), 4 tiers a row**, so a row holds up to 16 by room and 9 by its record (the
+caps stay 9 stores and class 70): nine Mk 82 hang as 4, 4 and 1 on three tiers (B52-5's own grid
+was 3 x 3 at a 1.42 ft pitch). The ripple order is B2-5's: the bottom tier first, front to back,
+the stores of a row abreast outermost first, alternating sides (B52-5's was the middle lane first);
+it still releases bottom tier first, so nothing falls through another store. The row's mount is
+unchanged: its slab middle plus 0.87 ft, the `MK82.SH` family's origin offset (it spans -4.52 to
++2.78 ft about the point a store hangs and leaves from), so the drawn 500 lb bomb is centred in its
+slab; mounts 13.87, 5.20 and -3.46 ft forward, belly plane -6.0 ft. **Effect of the fold on counts:**
+the stores' caps are unchanged (9 and class 70 a row, 27 Mk 82), but the tighter 1.3 ft pitch
+(B52-5's span plus 0.15 ft was 1.42 ft) lets two more store types touch their neighbours' fins,
+so the admitted bomb types fall from five to three (below).
 
 **What the bay admits.** Capacity 9 and class 70 a row (21,000 lb); 27 stores of 500 lb class, or
 fewer of heavier ones by weight. Retail masks `0x1100` (row 3) and `0x1120` (rows 5 and 6). The
-bay sweep loaded each admitted store full in all three rows. Worst clearances in feet over the
-27 stores, doors open (`.local/m3-aircraft/checks/B52-5/bay-sweep.txt`; 0.05 ft is the line):
+bay sweep (re-run on the shared grid, 2026-11-15, with the refusal list emptied and then
+rebuilt; `.local/m3-aircraft/checks/bomber-merge2/bay-sweep-unrefused.txt`, the three 3 ft span
+missiles on rows 5 and 6 in `bay-sweep-missiles.txt`) loaded each admitted store full in all three
+rows (the 3 ft span missiles in the two rows that admit them). Worst clearances in feet over the
+27 stores, doors open (0.05 ft is the line):
 
 | Store (shape) | Side wall | Door leaf | Aft end | Fore end | Roof | Above belly plane | Rails and posts | Nearest store |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `MK82`, `MK82P3` (`MK82.SH`) | 1.13 | 1.15 | 0.68 | 0.68 | 2.00 | 0.25 | 0.58 | 0.51 |
-| `FAB250` (`F250.SH`) | 1.02 | 1.06 | 1.79 | 0.48 | 1.77 | 0.28 | 0.38 | 0.55 |
-| `GBU38` (`GB38.SH`) | 0.34 | 0.35 | 0.80 | 0.16 | 0.61 | 0.08 | 0.06 | 0.15 |
-| `RBK250` (`RBK2.SH`) | 0.82 | 0.85 | 1.52 | 0.75 | 1.71 | 0.22 | 0.65 | 0.15 |
+| `MK82`, `MK82P3` (`MK82.SH`) | 0.60 | 0.65 | 0.68 | 0.68 | 2.24 | 0.25 | 0.58 | 0.39 |
+| `FAB250` (`F250.SH`) | 0.57 | 0.64 | 1.79 | 0.48 | 2.17 | 0.28 | 0.38 | 0.35 |
 
-Refused by name (`aircraft_stations::B52_BAY_REFUSED`, 20 stores): `AGM45`, `AGM84A`, `AGM84E`,
-`AGM88`, `AM39`, `AS16`, `AT2`, `CBU87`, `CBU89`, `FAB1000`, `FAB500`, `GBU29`, `GBU29P`,
-`GBU30`, `MK20`, `MK82AIR`, `MK82HD`, `MK82P`, `MK84`, `RBK500`. Measured at full load they
-leave under 0.05 ft to a wall, the roof, the floor, a rail or post or a neighbour, or pass
-through one (worst cases: `MK84` fore end -1.04 and nearest store 0.00; the GBU-27 class side wall
--5.25; `AGM84E`, 12.6 ft, is a pylon store; the HARM side wall -2.16; the Snakeye and `MK20` fore
-end -1.12 and -0.87, because their origins are not the `MK82.SH`'s). The open door leaves hang
-against the side walls (3.0 ft out), so the leaf figure is read below the belly plane.
+Refused by name (`aircraft_stations::B52_BAY_REFUSED`, **22** stores, was 20 on B52-5's grid):
+`AGM45`, `AGM84A`, `AGM84E`, `AGM88`, `AM39`, `AS16`, `AT2`, `CBU87`, `CBU89`, `FAB1000`,
+`FAB500`, `GBU29`, `GBU29P`, `GBU30`, `GBU38`, `MK20`, `MK82AIR`, `MK82HD`, `MK82P`, `MK84`,
+`RBK250`, `RBK500`. Measured at full load they leave under 0.05 ft to a wall, the roof, the
+floor, a rail or post or a neighbour, or pass through one. **Two joined at the fold:** `GBU38` and
+`RBK250` (their nearest-store gap fell from 0.15 ft to 0.00 ft at the 1.3 ft pitch, and `GBU38`'s
+and `RBK250`'s side walls fell from 0.34 and 0.82 to 0.21 and 0.37 ft, still clear; the fins of
+neighbours now touch). Worst cases: `MK84` fore end -1.10 ft and nearest store 0.00; the GBU-27
+class aft end -2.74 ft and side wall -1.65 ft; `AGM84E`, 12.6 ft, is a pylon store; the HARM side
+wall -0.26 ft; `AGM84A` (side wall -0.01 ft), `AM39` (-0.75 ft) and `AS16` (rails 0.00 ft) are the
+3 ft span missiles of rows 5 and 6. The open door leaves hang against the side walls (3.0 ft out),
+so the leaf figure is read below the belly plane.
 **The real 8 heavy stores (Mk 84) are not carried.** Per-shape centring (each shape's own origin
 offset in `store_sizes`) would admit the Snakeye, the MK20 and the cluster bombs; it is not
 built (open for John).
@@ -3696,7 +3707,7 @@ and under 3 ft up.
 (`flight-bay-fire-b52-pylon-row7`, an 18 Mk 82 load). Live fire: `flight-livefire-b52-slot1` to
 `-slot5` (the gun 1,242 rounds, the 12 Harpoons, three never-loaded bay rows). **AI:** the AI's
 release does not wait for doors and its bay doors stay drawn shut (the F-22's and the F-117's
-precedent; `an_ai_bomb_leaves_the_b52_bay_row_from_its_mount_on_the_centre_line`).
+precedent; `an_ai_bomb_leaves_a_b52_bay_grid_inside_the_centred_opening`).
 
 **Signature.** `State::bay_available()` is true for the B-52 (rows in `bays::STATIONS`), and the
 open-bay term (1.5 times at full travel) applies by itself; it reaches the RCS page only (as for

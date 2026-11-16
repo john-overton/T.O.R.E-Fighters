@@ -515,7 +515,11 @@ mod tests {
         places.sort_by(|a, b| a.partial_cmp(b).unwrap());
         places.dedup();
         assert_eq!(places.len(), 9);
-        assert!(places.iter().all(|p| p[0].abs() + mk82.width / 2. < B52_BAY_HALF));
+        assert!(
+            places
+                .iter()
+                .all(|p| p[0].abs() + mk82.width / 2. < B52_BAY_HALF)
+        );
         assert!(places.iter().all(|p| p[2] == mount[2]));
         // Four loaded sit on the bottom tier.
         assert!((0..4).all(|k| (at(4, k)[1] - bottom).abs() < 1e-9));

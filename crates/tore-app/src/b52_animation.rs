@@ -405,13 +405,14 @@ impl Rig {
         // drawn itself).
         let template = one(&bay, BAY[0])?.clone();
         let (rails, posts) = furniture(&opening);
-        let lining_faces = crate::bay_doors::centre_lining(&template, &opening, UNIT, &rails, &posts)
-            .into_iter()
-            .enumerate()
-            .map(|(k, mut f)| {
-                f.address = LINING_BASE + k;
-                f
-            });
+        let lining_faces =
+            crate::bay_doors::centre_lining(&template, &opening, UNIT, &rails, &posts)
+                .into_iter()
+                .enumerate()
+                .map(|(k, mut f)| {
+                    f.address = LINING_BASE + k;
+                    f
+                });
         let mut extra: Vec<Face> = gear
             .faces
             .into_iter()

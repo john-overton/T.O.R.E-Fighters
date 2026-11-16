@@ -10295,51 +10295,43 @@ ft deep, so its roof is at the reference height; the fuselage top skin is 13.3 f
 belly (z 11 units), so nothing opens to the sky. Two doors, each 3 ft wide, hinged on the outer
 edges, swing 90 degrees down and hang to -9.0 ft, 0.3 ft above the ground contact line. The
 real bay has three interconnected sections each side; two leaves are drawn (fitted, as the
-F-117's two). A lined box (ceiling, four walls) closes the recess; three rails hang from the
-ceiling over the lanes and six posts stand from the floor to the ceiling at the two inner row
+F-117's two). A lined box (ceiling, four walls) closes the recess; four rails hang from the
+ceiling over the lanes and eight posts stand from the floor to the ceiling at the two inner row
 boundaries, drawn only while the doors are off their seat. The interim plates are no longer
 drawn (their word is still reviewed, and one plate is the lining's material).
 
-**Layout and B2-5's grid.** Rows 3, 5 and 6 each own one 8.67 ft slab of the bay (the retail
-13, 4.3 and -4.3 ft are the slab middles) and hold nine stores as a 3 x 3 grid, three lanes
-across and three tiers high, one store long: the real bay's 27 bombs (three clips of nine).
-Stores fill from the bottom tier and, in a tier, from the middle lane outward; the highest slot
-leaves first, so a row drops its bottom tier first and nothing falls through another store. The
-lane and tier pitch is the store's span plus 0.15 ft (1.42 ft for a 500 lb class bomb). The
-existing `Location::Magazine` code supports one tandem lane only, and nine Mk 82 in a tandem lane
-would be 67 ft long, so a grid was needed. B2-5 was building a general magazine grid at the same
-time; this is **not** a second shared grid. It is the minimum that the B-52 needs, kept as per-
-aircraft data in a new table (`combat::bays::GRIDS`, one row per bay station: lanes and tiers),
-read in `Rack::store_point` through the station's mount (`BayGrid::at`), with the rows' mounts in
-`bays::STATIONS` and the opening in `bays::CENTRE_BAYS`. At the merge the B-52's rows move onto
-B2-5's grid by deleting `GRIDS`, `BayGrid` and the one `if let` in `store_point`, and the
-B-52's three numbers (3 lanes, 3 tiers, pitch rule) become its grid parameters. The mounts
-include the drawn store's origin: a `MK82.SH` bomb spans -4.52 to +2.78 ft about the origin
-the stores hang and leave from, so each row's mount is its slab middle plus 0.87 ft
-(`B52_ORIGIN_AHEAD`) and the drawn bomb is centred. Other shapes have other origins (below). B2-5 committed its grid (`GRIDS` rows of floor
-width, length and ceiling, `grid_cells` sized from the store, `Rack::grid()`, `Opening` fields `centre`
-and `inner_depth`) while this slice ran, and its code was not visible here, so this slice kept its
-own data and shaped it for the move: the three per-row numbers are named constants in
-`combat::bays` (`B52_ROW_FLOOR_WIDTH` 6.0 ft, `B52_ROW_LENGTH` 8.67 ft, `B52_ROW_CEILING` 6.0 ft,
-flat roof), the mounts are rows of `STATIONS` and the opening is a `CentreBay` row; at the merge the
-coordinator moves them onto `GRIDS`, takes B2-5's pitch rule (span plus 0.03 ft, at most 1.3 ft)
-in place of the span plus 0.15 ft used here, uses `centre` 0 and `inner_depth` equal to `depth`,
-and re-measures the five admitted bombs with the clearance sweep (`B52_BAY_REFUSED` may shrink).
-The B-52's `Location::Beam` for the pylons is separate from the grid and carries over as is.
+**Layout and the shared grid.** Rows 3, 5 and 6 each own one 8.67 ft slab of the bay (the
+retail 13, 4.3 and -4.3 ft are the slab middles) and hold nine stores, the real bay's 27 bombs
+(three clips of nine). B52-5 first built its own small per-aircraft grid (3 x 3, pitch the span
+plus 0.15 ft) because B2-5's general magazine grid was not visible while it ran. At the batch A
+integration (2026-11-15) the B-52 was **folded onto B2-5's grid**: B52-5's `GRIDS`, `BayGrid`,
+`CentreBay`/`CENTRE_BAYS` and the one `if let` in `Rack::store_point` are deleted; the three rows
+are rows of the shared `bays::GRIDS` (floor 6.0 ft by 8.67 ft, the roof at 0.0 ft up of the
+reference point, flat), the opening is a row of `bays::OPENINGS` (`centre` 0, `inner` 0, `outer`
+3.0, `inner_depth` equal to `depth`) and the layout is `grid_cells` and `grid_point`. B2-5's pitch
+(span plus 0.03 ft, at most 1.3 ft) replaces the span plus 0.15 ft, so a Mk 82 row is 4 abreast, 1
+long and 3 tiers for nine (up to 4 tiers by room), not 3 x 3, and the ripple is B2-5's: bottom
+tier first, front to back, outermost first alternating sides. The mounts (13.87, 5.20 and -3.46 ft
+forward, -6.0 ft up), the 9-store and class-70 caps and the 0.87 ft Mk 82 origin offset
+(`B52_ORIGIN_AHEAD`; a `MK82.SH` bomb spans -4.52 to +2.78 ft about the origin the stores hang and
+leave from, so each mount is its slab middle plus 0.87 ft and the drawn bomb is centred) are
+unchanged. The `Location::Beam` of the pylons is separate from the grid and carries over as is.
 
 **What the bay admits (the caps).** The retail masks (`0x1100` on row 3, `0x1120` on rows 5 and
 6) admitted 71 placements in all on the record. Capacity 9 a row and 7,000 lb a row (21,000 lb
 in all) are **opinionated**, from the cited real loads (27 Mk 82 class, or 8 heavy stores, 12
 Mk 52 mines, 6 CBU-87; aircraftinformation.info) and B52-0's proposal. A bay sweep loaded each
-admitted store full in all three rows and measured the open bay: five stores clear everything by
-at least 0.05 ft (`MK82`, `MK82P3`, `FAB250`, `GBU38`, `RBK250`) and 20 are refused by name
-(`aircraft_stations::B52_BAY_REFUSED`): the 10.8 ft and longer stores (Mk 84, the FAB-500 and
+admitted store full in all three rows and measured the open bay; the sweep was re-run on the
+shared grid at the integration: three stores clear everything by at least 0.05 ft (`MK82`,
+`MK82P3`, `FAB250`) and 22 are refused by name (`aircraft_stations::B52_BAY_REFUSED`; B52-5's grid
+admitted five, the 1.3 ft pitch of the shared grid puts `GBU38` and `RBK250` against their
+neighbours' fins): the 10.8 ft and longer stores (Mk 84, the FAB-500 and
 FAB-1000, the GBU-27 class, the HARM, MK20), the 3 ft span missiles the `0x20` bit admits on rows
 5 and 6 (`AGM84A`, `AM39`, `AS16`), the Harpoon `AGM84E` (12.6 ft; it is a pylon store), the
-cluster bombs and the Snakeye and its pack, whose fins or length put them through a wall, a
+cluster bombs (`CBU87`, `CBU89`, `RBK250`, `RBK500`), the Snakeye and its pack and `AT2`, whose fins or length put them through a wall, a
 post or a neighbour. **The real "8 heavy stores" load cannot be carried**: a Mk 84 is 10.8 ft in
 an 8.67 ft slab. Options for John: keep (the bay carries the 500 lb class); a second layout for
-long stores (two lanes of four across 26 ft); per-shape centring (below). The stores
+long stores (two lanes of four across 26 ft); per-shape centring (below). Only 500 lb class bombs without wide fins (the Mk 82 and its pack, the FAB-250) stay. The stores
 specification holds every number.
 
 **Pylons (decision 8).** Row 7 is an authored pair, not a source row: 17.3 ft out and 10.3 ft
@@ -10400,10 +10392,12 @@ the B-52 now (it has rows in `bays::STATIONS`), so `--flight-bay` works and the 
 (1.5 times at full travel, `Deployment::bay`) applies by itself; it reaches only the RCS page, as
 for the F-22 and F-117 (no radar row carries the bay state).
 
-**Pins.** `--validate-ordnance`: 48 aircraft, 21 recovered stations (from 20: row 3 is a third
-empty bay row), 4,746 weapon placements (from 4,784: `B52.PT` 71 to 33), 233 tank placements, 80
-pod placements, 242 Cheat-only placements (from 240: the pylon row). The normal catalog is 18
-stores.
+**Pins.** `--validate-ordnance` for B52-5 alone: 48 aircraft, 21 recovered stations (from 20: row 3
+is a third empty bay row), 4,746 weapon placements (from 4,784: `B52.PT` 71 to 33), 233 tank
+placements, 80 pod placements, 242 Cheat-only placements (from 240: the pylon row). **After the
+fold onto the shared grid and the merge with the B-2's bays (integration, 2026-11-15):** 4,732 weapon
+placements (`B52.PT` 71 to 27, `B2.PT` minus 8), the rest unchanged; the normal catalog is 18
+stores. See [ordnance availability](../baselines/ordnance-availability.md).
 
 **Open for John.**
 1. The bay carries 500 lb class bombs only; the real "8 heavy stores" (Mk 84) are refused for

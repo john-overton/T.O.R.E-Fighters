@@ -36,6 +36,8 @@ AIRCRAFT = re.compile(
 # 240 Cheat-only placements after the B-52, B-2 and F-117 joined; tank placements stay 233.
 # B52-5 (2026-11-15): 21 recovered stations (the B-52's third empty bay row) and 242 Cheat-only
 # placements (the B-52's underwing pylon row).
+# Batch A integration (2026-11-15): 4,732 weapon placements measured after the B-2 bay refusals and
+# the B-52 fold onto the shared grid; the recovered (21) and Cheat-only (242) counts are unchanged.
 AUDIT = re.compile(r"^ordnance audit: 48 aircraft, 21 recovered weapon stations, \d+ weapon placements, "
                    r"233 tank placements, (\d+) weapon and 9 tank records; passed$", re.M)
 # Aircraft with a bomb or rocket station the A2G records fit; the cargo and

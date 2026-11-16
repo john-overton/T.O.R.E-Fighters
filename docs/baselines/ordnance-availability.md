@@ -972,3 +972,33 @@ ordnance audit: 2 novelty records, 242 Cheat-only placements, refused without Ch
 The `menus-ordnance-availability` and `a2g-catalog` expected lines read 21 stations, 4,746 and 242.
 At the merge with the B-2's bay work the coordinator recomputes the weapon total (B4). Earlier
 sections stay as written for their own states.
+
+## Batch A integration: the B-2 bays and the B-52 on the shared grid (2026-11-15)
+
+The B-2's bays (B2-5, 4,784 to 4,776) and the B-52's (B52-5, 4,784 to 4,746) were built
+independently, each against its own pin, and the B-52 had its own small grid. At the integration
+the B-52's three bay rows moved onto the B-2's shared magazine grid (floor 6.0 by 8.67 ft, the
+roof 6 ft over the belly plane, the pitch the span plus 0.03 ft at most 1.3 ft) and the bay sweep
+was re-run. Three stores clear by at least 0.05 ft (`MK82`, `MK82P3`, `FAB250`); `GBU38` and
+`RBK250` now touch their neighbours' fins, so the refused list is 22, not 20
+([B-52 bay, pylons and tail gun](../spec/stores-on-pylons.md#b-52-bay-pylons-and-tail-gun-b52-5-2026-11-15)).
+The totals are recomputed from `--validate-ordnance`, not added:
+
+| Pin | From | To | Why |
+| --- | ---: | ---: | --- |
+| Weapon placements | 4,784 | 4,732 | `B2.PT` 86 to 78 (minus 8) and `B52.PT` 71 to 27 (minus 44: three stores on each of three bay rows, 18 less five refusals on the pylon row); the F-117 slices F117-6 to F117-9 move none (`F117.PT` stays 46) |
+| Recovered weapon stations | 20 | 21 | row 3 of the B-52 is a third empty bay row (B52-5) |
+| Cheat-only placements | 240 | 242 | the B-52's pylon row (B52-5); the bay refusals change no novelty count |
+| Aircraft, tank placements, pod placements, records | 48, 233, 80, 82 / 9 | unchanged | |
+
+```text
+ordnance B52.PT: 5 source rows, 3 optional weapon rows, 27 compatible weapon placements, 0 tank placements; defaults and restart passed; catalog 18 normal, 83 Cheat
+ordnance B2.PT: 4 source rows, 0 optional weapon rows, 78 compatible weapon placements, 0 tank placements; defaults and restart passed; catalog 22 normal, 83 Cheat
+ordnance audit: 48 aircraft, 21 recovered weapon stations, 4732 weapon placements, 233 tank placements, 82 weapon and 9 tank records; passed
+ordnance audit: 1 designator pods, 80 pod placements, one to an aircraft, loaded and restored through the saved mission; passed
+ordnance audit: 2 novelty records, 242 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
+```
+
+The `menus-ordnance-availability` expected line reads 4,732; `a2g-catalog` and `test_battery_a2g.py`
+match any weapon count and carry 21 and 242. Earlier sections quoting 4,776, 4,746 or 4,784 stay as
+written for their own states.
