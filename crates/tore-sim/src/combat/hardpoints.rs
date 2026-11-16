@@ -1555,15 +1555,15 @@ pub fn placed_on(
         // lies 1.54 ft further out and 0.20 ft further aft than the placed
         // panel the swivelling stations are placed on (TOR-12), so a placed
         // point is read at its retail place.
-        let (read_right, read_forward) =
-            if id.source() == AircraftId::Tornado && super::swing::swivels(id, hardpoint) {
-                (
-                    pylon + pylon.signum() * super::swing::WING_IN_FT,
-                    forward - super::swing::WING_FORWARD_FT,
-                )
-            } else {
-                (pylon, forward)
-            };
+        // SWING-1: the placement is the aircraft's swing spec's.
+        let swing = super::swing::spec(id).filter(|spec| spec.swivels(hardpoint));
+        let (read_right, read_forward) = match swing {
+            Some(spec) => (
+                pylon + pylon.signum() * spec.placement.in_ft,
+                forward - spec.placement.forward_ft,
+            ),
+            None => (pylon, forward),
+        };
         rack.over = sample_points(read_right, read_forward)
             .map(|(r, f)| model.height(r, f, from, 6).map(|h| h as f32));
         if let Hang::PalletsFromBelow { drop, .. } = moved.hang {
@@ -1585,9 +1585,9 @@ pub fn placed_on(
         // simulation reads the retail shape), so the surface a swivelling
         // pylon hangs from is that much higher, and the pylon stays at the
         // same place on the panel (1.0 ft deep, not 1.12).
-        if id.source() == AircraftId::Tornado && super::swing::swivels(id, hardpoint) {
+        if let Some(spec) = swing {
             for over in &mut rack.over {
-                *over = over.map(|h| h + super::swing::WING_UP_FT as f32);
+                *over = over.map(|h| h + spec.placement.up_ft as f32);
             }
         }
         if let Hang::Lowest { half } = moved.hang {

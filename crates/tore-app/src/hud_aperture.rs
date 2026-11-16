@@ -195,7 +195,11 @@ pub fn mask(source: &Sprite, id: AircraftId) -> Vec<u8> {
         | AircraftId::A310
         // The B-52 flies the AC-130 panel family its BMBROH.HUD names
         // (BMB-A1, 2026-11-15; John, decision 14): the same ~AC130H.PIC.
-        | AircraftId::B52 => ((1280, 490), &[(0, 0), (1279, 0), (1279, 489), (0, 489)]),
+        | AircraftId::B52
+        // The F-111F flies the same ~AC130H.PIC its AC130.HUD names (BMB-B1,
+        // 2026-11-15; coordinator first pass, F111 item 8): the whole picture,
+        // as the B-52.
+        | AircraftId::F111 => ((1280, 490), &[(0, 0), (1279, 0), (1279, 489), (0, 489)]),
         // F-117 (F117-7, 2026-11-15): `F117.HUD` and the cockpit art
         // `~F117H.PIC` (1673 x 508, John decision 28, opinionated). BMB-A1
         // left this arm failing closed. The art has no combiner: its
@@ -243,7 +247,12 @@ pub fn mask(source: &Sprite, id: AircraftId) -> Vec<u8> {
         // the left strut), a pixel outside it, so the opaque art trims it and
         // the two side panes stay out. Measured on the imported art,
         // `the_b2_glass_is_the_main_window_of_the_imported_art`. Fitted.
-        AircraftId::B2 => (
+        // The B-1B (bmbrcc.HUD) and the Tu-160 (b2.HUD) fly the B-2's cockpit
+        // picture `~B2H.PIC` by the record (BMB-B1, 2026-11-15; coordinator
+        // first pass, B1B item 7 and Tu-160 item 8), so they take the glass
+        // measured for it (B2-7). Fitted for the B-2; the same art, so the
+        // same polygon.
+        AircraftId::B2 | AircraftId::B1b | AircraftId::Tu160 => (
             (1394, 508),
             &[
                 (398, 90),

@@ -1002,3 +1002,48 @@ ordnance audit: 2 novelty records, 242 Cheat-only placements, refused without Ch
 The `menus-ordnance-availability` expected line reads 4,732; `a2g-catalog` and `test_battery_a2g.py`
 match any weapon count and carry 21 and 242. Earlier sections quoting 4,776, 4,746 or 4,784 stay as
 written for their own states.
+
+## Bomber batch B identities join the roster, with their station corrections (BMB-B1 and BMB-B2, 2026-11-15)
+
+`B1.PT`, `TU160.PT` and `F111.PT` joined `AircraftId` at the end (checkpoint codes 50 to
+52, after the F-117's 49), so the audit now checks 51 aircraft. The pins in
+`ordnance_audit.rs` moved on purpose (each carries a dated note):
+
+| Pin | From | To | Why |
+| --- | ---: | ---: | --- |
+| Aircraft | 48 | 51 | The three identities |
+| Recovered (optional) weapon stations | 20 | 20 | None of the three has a default-less weapon row |
+| Weapon placements | 4,784 | 5,145 | B-1B 63, Tu-160 70, F-111F 228 |
+| Tank placements | 233 | 249 | The F-111F's four wing pair rows take 16 |
+| Cheat-only novelty placements | 240 | 258 | 18 more on the batch B rows |
+| Designator-pod placements | 80 | 80 | BMB-B1 alone measured 87; BMB-B2 clears the bit (below) |
+| Weapon records, tank records | 82, 9 | 82, 9 | No record added |
+
+BMB-B1 alone (retail rows, measured with the corrections off in a separate profile):
+5,173 weapon placements (B-1B 75, Tu-160 70, F-111F 244) and 87 pod placements (the
+B-1B's three bay rows, `0x1500`, and the F-111F's four wing rows, `0x07e5`, carry the
+designator bit `0x400`). BMB-B2 clears that bit on those seven rows (fitted: the B-1B's
+bays are bomb bays, B7, and the F-111F's Pave Tack rides in the bay, not on a pylon), which
+also removes the multi-store pods the bit admitted (B-1B 12, F-111F 16 placements) and
+brings the pods back to 80. The F-111F's wing weight classes (70, 70, 70, 60) drop to 50
+(5,000 lb, the real pylon rating): no placement is lost, because the heaviest store the
+rows accept is the GBU-28 at 4,500 lb. The Tu-160's bay rows (`0x1184`) have no designator
+bit and are untouched.
+
+```text
+ordnance B1.PT: 3 source rows, 0 optional weapon rows, 63 compatible weapon placements, 0 tank placements; defaults and restart passed; catalog 21 normal, 83 Cheat
+ordnance TU160.PT: 2 source rows, 0 optional weapon rows, 70 compatible weapon placements, 0 tank placements; defaults and restart passed; catalog 35 normal, 83 Cheat
+ordnance F111.PT: 4 source rows, 0 optional weapon rows, 228 compatible weapon placements, 16 tank placements; defaults and restart passed; catalog 57 normal, 83 Cheat
+ordnance audit: 51 aircraft, 20 recovered weapon stations, 5145 weapon placements, 249 tank placements, 82 weapon and 9 tank records; passed
+ordnance audit: 1 designator pods, 80 pod placements, one to an aircraft, loaded and restored through the saved mission; passed
+ordnance audit: 2 novelty records, 258 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
+```
+
+The audit also runs the loadout validator for every aircraft: the B-1B's default load
+(twelve bay stores) and the F-111F's start with a lowered tank (243,000 and 28,838 lb) so
+that they pass their maximum take-off check ([aircraft records](../spec/aircraft-records.md#bomber-batch-b-record-corrections-b-1b-tu-160-f-111f-bmb-b2-2026-11-15)).
+The `menus-ordnance-availability` battery expected line reads 51 aircraft, 5,145 weapon and
+249 tank placements; the `a2g-catalog` expected lines and `tools/test_battery_a2g.py` read
+51 aircraft and 249 tank placements (and match any weapon count). Earlier sections that
+quote 48 aircraft, 4,784 weapon placements and 233 tank placements stay as written for
+their own states.
