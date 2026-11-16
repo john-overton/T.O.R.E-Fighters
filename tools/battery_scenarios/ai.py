@@ -930,14 +930,13 @@ def f117_unarmed_problems(output: str, *, shots: int | None = None) -> list[str]
 
 # BMB-AI (2026-11-16): the heavy bombers and the F-117 fly the airfield sequences. The probe prints
 # each phase change with the aircraft's speed: the Rollout line is the touchdown.
-TOUCHDOWN = re.compile(r"^t=\d+ \([\d.]+s\) \S+ \d-\d \S+: phase=Rollout activity=\"[^\"]*\" alive=true agl=-?\d+ kt=(\d+) ", re.M)
-ROLLOUT_LINE = re.compile(r"^AI probe phases: \S+ \d-\d: .*Rollout@", re.M)
+ROLLOUT_KT = re.compile(r"^t=\d+ \([\d.]+s\) \S+ \d-\d \S+: phase=Rollout activity=\"[^\"]*\" alive=true agl=-?\d+ kt=(\d+) ", re.M)
 
 
 def touchdown_problems(output: str, max_kt: int) -> list[str]:
     """The AI touched down at `max_kt` or slower. Before BMB-AI the F-117 and the B-2 held their clean
     minimum, 224 kt, all the way down because the flaps never came down (docs/spec/ai-airfield.md)."""
-    m = TOUCHDOWN.search(output)
+    m = ROLLOUT_KT.search(output)
     if not m:
         return ["no Rollout line: the aircraft never touched down"]
     if int(m.group(1)) > max_kt:
