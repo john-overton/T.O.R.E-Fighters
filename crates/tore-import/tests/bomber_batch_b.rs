@@ -131,8 +131,10 @@ fn the_corrected_records_carry_the_real_figures_and_station_flags() {
         (123_600, 220_400)
     );
     assert_eq!(n(&tu160, "maxTakeoffWeight"), 606_260);
-    // The bay rows never carried the designator bit.
-    assert!(tu160.hardpoints[4..6].iter().all(|h| h.flags == 0x1184));
+    // The bay rows never carried the designator bit. Update (T160-5,
+    // 2026-11-16): the pair flag `0x4` is cleared (`0x1184` to `0x1180`), so a
+    // row is one bay.
+    assert!(tu160.hardpoints[4..6].iter().all(|h| h.flags == 0x1180));
 
     let f111 = read(AircraftId::F111);
     assert_eq!(n(&f111, "internalFuel"), 32_663);

@@ -24,7 +24,7 @@ use tore_sim::combat::bays::opening;
 
 /// One store's triangles at `centre` (feet right, up, forward): the weapon
 /// shape's faces as `pylons::mesh` draws them.
-fn body(store: &StorePose, art: &CombatArt, centre: Vector) -> Vec<Tri> {
+pub(super) fn body(store: &StorePose, art: &CombatArt, centre: Vector) -> Vec<Tri> {
     use crate::snapshot::StoreLook;
     let Some(shape) = store
         .shape
@@ -55,7 +55,7 @@ fn body(store: &StorePose, art: &CombatArt, centre: Vector) -> Vec<Tri> {
     out
 }
 
-fn extremes(tris: &[Tri]) -> (Vector, Vector) {
+pub(super) fn extremes(tris: &[Tri]) -> (Vector, Vector) {
     let (mut low, mut high) = ([f64::MAX; 3], [f64::MIN; 3]);
     for p in tris.iter().flatten() {
         for i in 0..3 {
@@ -68,7 +68,7 @@ fn extremes(tris: &[Tri]) -> (Vector, Vector) {
 
 /// The airframe's triangles (feet right, up, forward) of the faces `keep`
 /// accepts.
-fn faces(
+pub(super) fn faces(
     airframe: &Airframe,
     state: &State,
     keep: impl Fn(&tore_formats::shape::Face, &[Vector]) -> bool,
@@ -91,7 +91,7 @@ fn faces(
     out
 }
 
-fn centroid(p: &[Vector]) -> Vector {
+pub(super) fn centroid(p: &[Vector]) -> Vector {
     let n = p.len().max(1) as f64;
     std::array::from_fn(|i| p.iter().map(|v| v[i]).sum::<f64>() / n)
 }

@@ -122,6 +122,26 @@ def b52_clearance_problems(output: str) -> list[str]:
     return problems
 
 
+def tu160_clearance_problems(output: str) -> list[str]:
+    """The Tu-160's default 12 AS-16 clear the open bays, the doors and each other (T160-5)."""
+    problems = []
+    stores = [line for line in output.splitlines() if re.match(r"Bay clearance: row\d KIKBK\.SH slot\d:", line)]
+    if len(stores) != 12:
+        problems.append(f"{len(stores)} bay stores reported, expected 12")
+    for line in stores:
+        for label in ("side wall", "door leaf", "aft end", "fore end", "roof", "above the belly plane", "rail"):
+            m = re.search(rf"{label} (-?[\d.]+)", line)
+            if not m:
+                problems.append(f"no {label} in {line[:48]}")
+            elif float(m.group(1)) < 0.05:
+                problems.append(f"{line[:46]} clears the {label} by only {m.group(1)} ft")
+    # Store to store is informational: the Kh-15's 3 ft fins cross their neighbours' on the shared
+    # grid's 1.59 ft pitch (as the B-2's Paveway III do), so only the line must be there.
+    if not re.search(r"Bay clearance: tu160 12 stores, nearest pair (-?[\d.]+) ft", output):
+        problems.append("no nearest-pair line for 12 stores")
+    return problems
+
+
 def skin_capture_problems(output: str) -> list[str]:
     """Every aircraft skin capture drew a non-blank frame."""
     captures = [line for line in output.splitlines() if line.startswith("Scene capture:")]
@@ -175,6 +195,14 @@ def scenarios() -> list[Scenario]:
                  "TORE_STORES_PREVIEW_RECORDS": "3=MK82.JT:9,5=MK82.JT:9,6=MK82.JT:9"},
             expect=["Bay clearance: b52 opening", "Pylon clearance: b52 row 7"], check=b52_clearance_problems,
             notes="Headless B-52 clearances in feet (B52-5): 27 Mk 82 in the open bay against the doors, walls, roof, floor, rails and each other; 12 default Harpoons on the pylons against the pod, the flap strip up and down, the fuselage, the gear and the ground.",
+        ),
+        Scenario(
+            name="render-tu160-clearance", lane="flight",
+            args=["--stores-preview", "{work}/stores"],
+            env={"TORE_STORES_PREVIEW_CPU": "1", "TORE_STORES_PREVIEW_TU160CLEAR": "1",
+                 "TORE_STORES_PREVIEW_AIRCRAFT": "tu160"},
+            expect=["Bay clearance: tu160 bay row 4", "Bay clearance: tu160 bay row 5"], check=tu160_clearance_problems,
+            notes="Headless Tu-160 clearances in feet (T160-5): the default 12 AS-16 (six a bay, three abreast and two long) in the open bays against the door leaves, walls, ends, roof, floor, rail and each other.",
         ),
         Scenario(
             name="render-ah64-stub-wing-pylons", lane="flight",

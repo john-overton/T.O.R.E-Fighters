@@ -15563,3 +15563,154 @@ astern with no further change; the Tu-95's dorsal and ventral rows (5 and 6, cle
 BMB-C2) stay empty and are not stations. Pinned by
 `the_retail_tu26_and_tu95_gun_rows_are_slewed_tail_guns_that_fire_astern` in
 `ai_wings/tail_gun_tests.rs`. The "rear-facing mount lands later" caveats above are met.
+
+## Tu-160 stations, bays and pylons (T160-5, 2026-11-16)
+
+Implementation mode, slice T160-5 (bomber batch B), Claude Sonnet, in `T.O.R.E-Fighters-m3-tu160`
+on `m3-tu160` from `bb90005c` (round 4 integration). The coordinator's first pass
+(`BOMBERS-DECISIONS-B.md`, "Tu-160 Blackjack" items 5, 6 and 7 and "Tu-160 rig") is applied:
+two magazine bays on the shared grid, fitted at 42 ft each, six AS-16 (Kh-15) each, the
+retail AS-16 the default, two door leaves a bay cut from the flat belly, the pair flag cleared,
+the Kh-55 (`AS15.JT`) refused, `SU37L.SEE` a fixed row with no pod, and a fitted glove plate over
+the 65 degree root gap. Earlier sections stay as written: the [bay survey](#tu-160-bay-survey) is
+the evidence, [Tu-160 shape and rig](#tu-160-shape-and-rig-t160-23-2026-11-15) is the rig this
+adds to. The numbers and the clearance table are in the
+[stores specification](../spec/stores-on-pylons.md#tu-160-weapon-bays-t160-5-2026-11-16). The
+Tu-160 has **no pylon and no rail**: the real aircraft carries nothing outside (`TU160.INF`: no
+external pylons in the standard fit) and no sensor pod (B7), so there is nothing to place there.
+Frames: `.local/m3-aircraft/frames/T160-5/` (local only).
+
+**Stations after T160-5.** The record is unchanged except the pair flag; its six rows stay.
+
+| Row | What it is | Position (feet right / up / forward) | Capacity, class | Default |
+| ---: | --- | --- | --- | --- |
+| 0 to 3 | fixed sensors (`VIS300`, `TU160R`, `TU160.ECM`, `SU37L`) | 0 / 0 / 0 (ECM -16.7 ft aft) | 1 | the sensor |
+| 4 | forward bay, `Location::Magazine` | 0 / -2.667 (keel plane) / +30.63 (origin; the bay is 14 to 56 ft forward) | 6, class 180 (18,000 lb) | 6 `AS16.JT` |
+| 5 | aft bay, `Location::Magazine` | 0 / 0.0 (belly plane) / -20.70 (the bay is -37.33 to +4.67 ft) | 6, class 180 | 6 `AS16.JT` |
+
+The retail rows 4 and 5 sat on one point 14 ft under the belly (`0 / -16.7 / +30.3`), the same
+sentence as the B-2's: the placement code, not the record, puts the stores. The flags go from
+`0x1184` to `0x1180` (`adjust_defaults`, guarded on the whole retail table, which now has a
+`default_signature` entry for the Tu-160): the pair flag `0x4` mirrored a store at x 0 onto itself and
+alternated "sides" that are one point. No designator bit was ever set and the active-radar bit
+(`0x20`) stays clear.
+
+**Bays (coordinator item 5; geometry fitted, agent decision).** Both bays are on the centre line, one
+behind the other, 42 ft long each (`TU160.INF`, the game's own Jane's: "a rotary launcher can be
+installed in each of two 12.80 m (42 ft) long weapon bays"), with a 9.33 ft divider (the wing
+carry-through box, not measured). The T160-0 survey put them at shape y 3.5 to 19.3 and -15.7 to 0.0
+units; measured against the skin, **both are moved 1.5 units (4 ft) forward** (forward bay y 5.25 to
+21 units, 14 to 56 ft; aft bay y -14 to 1.75 units, -37.33 to +4.67 ft) so that the aft bay ends on the
+belly skin's last edge (y -14) and the forward bay stays on the keel skin, which narrows past y 20.
+The skin is not one polygon, so two belly planes are used: the keel skin (`2019`, `27f7`, `2f1f`,
+`2ed1`, `2f05`, `24d7`, `2ab5`, `2acd`; z -1 unit, -2.667 ft, falling in from z 0 over y 5 to 8) under
+the forward bay and the flat belly (`1ff7`, `203c`, `27e2`; z 0) under the aft one. Each opening is
+**7.6 ft wide** (x +/-3.8 ft, 1.43 units) in a skin 10.7 ft wide, under a **flat roof 6.0 ft over its
+belly plane** (3.33 ft over the reference point forward, 6.0 aft; the fuselage top skin is 10.7 ft up).
+Width and depth are fitted: 3.8 ft is the narrowest half-width at which the laser Paveway family and
+the 3 ft span missiles clear the walls, 6.0 ft holds two tiers of Kh-15. Mounts, grid floors and
+ceilings are rows of the shared `bays::STATIONS`, `GRIDS` and `OPENINGS` (new `bays::openings(id)`
+returns both openings, forward bay first; `opening(id)` is the first). `Opening`, the grid, the door
+helper and the lining are the B-52's centred bay applied twice; no second grid, no new mechanism in the
+sim.
+
+**Layout.** Floor 6.0 ft by 42.0 ft a bay. A Kh-15 (15.7 ft, 1.49 ft body, 3.0 ft fin span) stands at
+the grid's pitch of 1.59 ft (twice its body radius plus 0.1 ft, the shared rule), so **three abreast and
+two long on one tier is six, the record's count**; two tiers (12) also fit under the roof
+(`grid_capacity` 12), so the record's six is the cap, not the room. The coordinator asked for "a
+rotary-launcher-like column arrangement fitted to the grid"; the shared grid is the fit, and the three
+columns on the centre line with a missile ahead of and behind each are the nearest it comes. The shape of
+`KIKBK.SH` has its origin 4.37 ft behind the missile's middle (measured), so each mount is its
+opening's middle minus 4.37 ft (`TU160_ORIGIN_AHEAD`) and the pair stands centred in the 42 ft with 5.17
+ft clear at each end. The fins of neighbouring Kh-15 interleave (3.0 ft span at 1.59 ft pitch), the same
+overlap as the B-2's Paveway III on the shared grid; a real rotary launcher holds them folded.
+
+**Doors and cut.** The belly skin faces (eleven, listed above) are found by the loader (every face in the
+band z -1 to 0 whose plan overlaps an opening) and must cover both openings' plans on a quarter-unit grid
+or the shape is refused ("unreviewed TU160.SH belly skin"). While the doors are off their seat
+(`State::bay` above 0, 1 s travel, the F-22's timing) each face is cut into two leaves a bay, each half
+the width, hinged on its outer edge and swung 90 degrees down (`tu160_animation::Rig::faces`, over
+`roster_animation::cut_door_parts`); the rest of the skin stays whole. A leaf is first flattened onto its
+bay's belly plane over the first sixth of the travel (the forward skin is not level where it starts), so
+nothing jumps on the first tick. A lined box (ceiling, four walls) and one rail down the centre line
+close each recess; they draw only while the doors are open (`tu160_animation` lining at address `0x8200`
+on, 20 faces, taking the colour-only look of the nacelle wall `207d`). The leaves hang to -6.5 ft
+forward and -3.8 ft aft. **The ventral keel plates (word `7ffc`, drawn with the brake lever) stand at x
++/-1 unit, inside the forward opening: they are not drawn while the doors are open.** Two leaves a bay is
+fitted (no door count is cited).
+
+**What the bays admit and refuse.** The retail mask `0x1180` admits the default `AS16.JT` and 34 other
+records (bombs, laser bombs, air-to-ground missiles and the two passive-emitter records; `AS15.JT`
+and every air-to-air missile stay refused, the Kh-55 because the mask lacks `0x40` and the retail record
+is a 220 lb, 9.87 nmi stand-in). A bay sweep loaded each admitted store at its full count (at most six)
+in both bays and measured the open bay (`TORE_STORES_PREVIEW_TU160CLEAR`, log
+`.local/m3-aircraft/checks/T160-5/bay-sweep.txt`). **Five are refused for fit**
+(`aircraft_stations::TU160_BAY_REFUSED`, named for the aircraft as the B-52's list is): `AT12.JT` (0.41
+ft below the belly plane, out of the shut skin) and the GBU-27 class, `GBU29.JT`, `GBU29P.JT`,
+`GBU30.JT` and `PAVEWA3.JT` (5.4 ft fins stand 0.85 ft through the side walls). The rule is the B-52's
+0.05 ft on every wall, leaf, end, roof, floor and rail; store to store is not a test here because the
+default Kh-15's own fins cross their neighbours'. The other 30 admitted stores clear by at least 0.08 ft
+(the Mk 82 family hangs 0.08 to 0.26 ft above the belly plane). `SU37L.SEE` stays a fixed row with no
+pod (coordinator item 7): it is what lets the laser bombs the bay admits work. Real "free-fall weapons"
+and "none have been integrated" (aerospaceweb): nothing here is claimed as the real load.
+
+**Release and AI.** Bay release is the shared machinery: doors open, the weapon leaves once they are at
+0.95, they stay open 1 s and close in 1 s; `State::bay_available` is true for the Tu-160 (it has rows in
+`bays::STATIONS`), so `--flight-bay`, `--stores-preview` bay poses and the open-bay RCS term apply by
+themselves. The ripple is the grid's (bottom tier first, front to back, outermost column first
+alternating sides); the Tu-160's two bays are both on the centre line, so `Ownship::sister_bay` finds no
+partner and the player selects the other bay with the weapon-select key. The AI releases through the
+shared strike release, which does not wait for doors: an AI Tu-160's doors stay drawn shut while its
+missiles leave (the F-22's and F-117's precedent); the test `an_ai_store_leaves_either_tu160_bay_inside_its_own_opening`
+pins both openings.
+
+**Default load and weight.** Unchanged: six `AS16.JT` in each bay, the record's 12 (31,680 lb of
+2,640 lb missiles), under the cited 36,000 lb payload. Empty 242,500 lb plus 31,680 lb of missiles plus
+the 326,285 lb tank is 600,465 lb, 5,795 lb under the 606,260 lb maximum, so the default load with a full
+tank starts (the start-fuel fix of round 4 is not needed here).
+
+**Glove plate (coordinator, "Tu-160 rig", 2026-11-15; the Tornado's TOR-5b and the F-111F's F111-3
+precedent).** At 65 degrees the swept panel's leading root corner (9, 4) lands at (10.6, -0.14), 7 ft off
+the glove, and the root edge shows the ground between the glove's outer wall and itself as far aft as the
+nacelle (frames `seam-65-before`, `top-65-before`, from T160-2). Four new faces (`0x8118` to `0x811b`, a
+plate a side in both windings, past the module's code) fill it: an eight-vertex plate at z -0.5, inside
+the wing's own thickness (z -1 to 0) so the spread wing hides most of it, from the glove's front corner
+(10, 5; the left glove is one unit narrower, (-9, 5), and its root vertex is (-8, 1)) to the swept
+leading corner, along the swept images of the root vertices (right (8.48, -0.85), (7.06, -5.09), (5.65,
+-7.92); left (-7.77, -1.56) and the mirror) and back into the nacelle and the glove. Fixed, not swept:
+fitted to the 65 degree pose. The look is the glove's own top triangle (`2322`, `36cb`: its colours and
+texture coordinate, so a flat patch of skin white). Result: at 65 degrees the gap is closed on both sides
+(`seam-65`, `top-65`); at 35 degrees the plate shows as a thin strip ahead of the root; at 20 degrees it
+shortens the sliver the source already left at the spread root (`seam-20` against `seam-20-before`) but
+does not close it (the rest is the source's, not this slice's). The probe's stowed-gear hull check
+measures against the shape's own skin and ignores the plates.
+
+**Pins.** `--validate-ordnance`: 54 aircraft, 23 recovered stations, **5,385 weapon placements (from
+5,395: `TU160.PT` 70 to 60)**, 257 tank, 278 Cheat-only and 82 designator-pod placements unchanged. The
+grid caps no store (every admitted store's count under the grid is its record count or fewer). See
+[ordnance availability](../baselines/ordnance-availability.md).
+
+**Findings.**
+1. The shape's main gear plates (words `8002`) stand at x 0 to +/-2 units, y -4 to 2, on the centre line,
+   inside the aft bay's footprint, so with the gear down and the bay open the leg plates cross the
+   forward Kh-15 of the aft bay (`.local/m3-aircraft/frames/T160-5/stores-bay-gear/tu160-loaded-below.png`).
+   Only a gear-down pass with the doors open shows it; a release is never flown that way by the AI, and the
+   gear and doors do not share a lock. Not changed (moving the legs is a rig decision).
+2. The keel plates would pass through the forward bay: hidden while the doors are open (above).
+3. `--ground-start` cannot be combined with `--flight-bay`, so a ground frame of the open bay is not
+   capturable (the stores preview with the gear and bay poses stands in for it).
+4. The clearance report's "nearest store" is 0.00 for the default Kh-15 (fins cross by design) and 0.25 ft
+   for the Mk 82; it is informational for this aircraft.
+
+**Open for John.**
+1. The grid's three-abreast column stands for the rotary launcher; the missiles' fins interleave. A
+   launcher body (a drum with six cells) is a drawing decision.
+2. The opening is 7.6 ft wide, fitted. If a narrower bay (6.4 ft) is wanted, the five refusals become
+   fourteen (the laser Paveway family and the 3 ft missiles).
+3. The bays moved 4 ft forward of the T160-0 survey. Both bays on the flat skin would need the keel
+   shape to change.
+4. Two door leaves a bay (the real count is not cited). The real 24 Kh-15 (63,500 lb, over the cited
+   36,000 lb payload) stay at the record's 12.
+5. The gear plates cross the aft bay's stores with the gear down and the doors open (finding 1).
+6. The glove plate is a fixed fit to the 65 degree pose; a plate that follows the sweep would also close
+   the spread sliver.

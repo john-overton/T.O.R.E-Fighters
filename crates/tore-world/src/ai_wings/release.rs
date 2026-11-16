@@ -388,4 +388,63 @@ mod tests {
             assert!(forward > opening.aft && forward < opening.fore, "{forward}");
         }
     }
+    /// T160-5: an AI store leaves either of the Tu-160's two tandem bays (rows 4
+    /// and 5, grid magazines on the shared grid) from inside its own opening,
+    /// on the centre line; its doors stay shut (the F-22's and F-117's
+    /// precedent: the AI's release does not wait for them).
+    #[test]
+    fn an_ai_store_leaves_either_tu160_bay_inside_its_own_opening() {
+        use tore_formats::aircraft::{AircraftId, Hardpoint};
+        use tore_sim::combat::{bays, hardpoints};
+        let openings = bays::openings(AircraftId::Tu160);
+        for (row, opening) in [(4, openings[0]), (5, openings[1])] {
+            let (mut wings, _) = build(None);
+            let mut state = combat_fixture(false);
+            state.projectiles.clear();
+            let id = wings.mission().actors()[1].id();
+            let mut config = state.own().configuration().clone();
+            config.stations[0].weapon = mk82_pack(config.stations[0].weapon.clone());
+            let hardpoint = Hardpoint {
+                location: 3,
+                flags: 0x1180,
+                position: [0; 3],
+                store: None,
+                count: 6,
+                weight_class: 180,
+                slew: [0; 4],
+            };
+            let (mount, rack) = hardpoints::placed_on(AircraftId::Tu160, row, &hardpoint, None);
+            config.stations[0].mount = mount;
+            config.stations[0].rack = rack;
+            config.stations[0].count = 6;
+            wings.configs.insert(id, config.clone());
+            let weapon = config.stations[0].weapon.clone();
+            let ground = |_: f64, _: f64| 0.;
+            let emitted =
+                wings.release(&launch(id, 0x5000_0001), &mut state, &weapon, &[], &ground);
+            assert!(emitted > 0);
+            let launcher = crate::combat::launcher(wings.mission().actor(id).unwrap().flight());
+            // The pack record stages its six rounds 2 ft apart across the grid
+            // point (only the pack does; the real bay's stores are single), so the
+            // rounds' middle is on the centre line and every one starts within
+            // the opening's length.
+            let sides: Vec<f64> = state
+                .projectiles
+                .iter()
+                .map(|p| p.position[0] - launcher.position[0])
+                .collect();
+            let middle = sides.iter().sum::<f64>() / sides.len() as f64;
+            assert!(
+                (-opening.outer..opening.outer).contains(&middle),
+                "row {row}: {sides:?}"
+            );
+            for p in &state.projectiles {
+                let forward = p.position[2] - launcher.position[2];
+                assert!(
+                    forward > opening.aft && forward < opening.fore,
+                    "row {row}: {forward}"
+                );
+            }
+        }
+    }
 }

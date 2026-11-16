@@ -2,7 +2,10 @@
 //! whole-piece all-moving tailplanes, the source rudder strip, the two trailing
 //! flap strips, the keel plates, the rigid gear plates and the four afterburner
 //! plumes. See docs/formats/aircraft-variety.md "Tu-160 shape and rig (T160-2/3,
-//! 2026-11-15)".
+//! 2026-11-15)". Since T160-5 the rig also cuts the two fitted weapon bays out of
+//! the belly skin (two door leaves a bay, a lined recess, drawn through
+//! [`crate::bay_doors`]) and adds the fixed glove plates that close the 65 degree
+//! root gap ("Tu-160 stations, bays and pylons (T160-5, 2026-11-16)").
 //!
 //! `TU160.SH` ships six state words: 0x7ff0 the afterburner flames (16 faces),
 //! 0x7ffc two ventral keel plates (4 faces), 0x8002 the gear (12 plates), 0x800e
@@ -27,7 +30,7 @@ use tore_formats::{
     aircraft::{AircraftId, scale::scale_point},
     shape::{Face, Shape},
 };
-use tore_sim::combat::swing;
+use tore_sim::combat::{bays::Opening, swing};
 
 const ID: AircraftId = AircraftId::Tu160;
 const WORDS: [usize; 6] = [0x7ff0, 0x7ffc, 0x8002, 0x800e, 0x8014, 0x801a];
@@ -259,7 +262,170 @@ fn cap(template: &Face, address: usize, points: [[f32; 3]; 3], back: bool) -> Fa
     face
 }
 
-pub struct Rig;
+/// The shape's feet a unit (it draws at its header scale, 8/3 ft).
+pub(crate) const UNIT: f64 = tore_sim::combat::bays::TU160_UNIT;
+/// The first address of the bays' lining faces (above every face and state
+/// word of the shape); each bay takes [`LINING_STRIDE`] addresses.
+pub(crate) const LINING_BASE: usize = 0x8200;
+const LINING_STRIDE: usize = 0x40;
+/// A face of a bay's lining (either bay).
+fn lining(address: usize) -> bool {
+    (LINING_BASE..LINING_BASE + 2 * LINING_STRIDE).contains(&address)
+}
+/// A flat grey face of the shape the lining takes its material from (a
+/// colour-only wall of the right nacelle).
+const LINING_LOOK: usize = 0x207d;
+/// The belly skin the bays are cut from lies in this band of shape heights
+/// (the flat belly at z 0, the keel skin at z -1, units).
+const SKIN_BAND: [f32; 2] = [-1., 0.];
+/// How far a door leaf is flattened onto its bay's belly plane by the time
+/// the doors are a sixth open (the keel skin is not level where the forward bay
+/// starts, and a leaf is turned about one line).
+const LEAF_FLATTEN: f64 = 6.;
+
+/// The glove plates (T160-5, 2026-11-16; the Tornado's TOR-5b and the
+/// F-111F's F111-3 precedent, the coordinator's decision on the T160-3 frames):
+/// four new faces, a plate a side in both windings. The swung panel's root
+/// edge turns about the pivot (4.8, 0), so at 65 degrees its leading corner
+/// (9, 4) lands at (10.6, -0.14), 7 ft off the glove, and the root edge shows
+/// the ground between the glove's outer wall and itself down to the nacelle.
+/// The fixed plate lies at z -0.5, inside the wing's own thickness (the wing is
+/// z -1 to 0), from the glove's front corner to the swept leading corner, along
+/// the swept root edge (the images of the root vertices) and back into the
+/// nacelle and the glove. Where the spread wing covers it, nothing shows. The
+/// left glove is one unit narrower in the source (front corner x -9, root
+/// vertex (-8, 1)). Fitted geometry, agent decision. Right, then left.
+pub(crate) const GLOVE_ADDRESSES: [usize; 4] = [0x8118, 0x8119, 0x811a, 0x811b];
+pub(crate) const GLOVE_Z: f32 = -0.5;
+pub(crate) const GLOVE_OUTLINE_R: [[f32; 2]; 8] = [
+    [10., 5.],
+    [10.6, -0.14],
+    [8.48, -0.85],
+    [7.06, -5.09],
+    [5.65, -7.92],
+    [5., -7.],
+    [5., -3.],
+    [8., 3.],
+];
+pub(crate) const GLOVE_OUTLINE_L: [[f32; 2]; 8] = [
+    [-9., 5.],
+    [-10.6, -0.14],
+    [-7.77, -1.56],
+    [-7.06, -5.09],
+    [-5.65, -7.92],
+    [-5., -7.],
+    [-5., -3.],
+    [-7.5, 3.],
+];
+/// The fixed glove top faces the plates take their look from (right, left).
+const GLOVE_LOOK_R: usize = 0x2322;
+const GLOVE_LOOK_L: usize = 0x36cb;
+
+/// The four glove plate faces, scaled, each taking colours, texture and flags
+/// from the glove's own top triangle on its side. Stored normals are right, up,
+/// forward: the top plate faces up, the under plate down.
+fn glove_plates(shape: &Shape) -> AppResult<Vec<Face>> {
+    let mut faces = Vec::new();
+    let mut addresses = GLOVE_ADDRESSES.into_iter();
+    for (look, outline) in [
+        (GLOVE_LOOK_R, &GLOVE_OUTLINE_R),
+        (GLOVE_LOOK_L, &GLOVE_OUTLINE_L),
+    ] {
+        let source = one(shape, look)?;
+        let Some(normal) = source.normal else {
+            return Err(format!("unreviewed TU160.SH glove top face {look:x}").into());
+        };
+        if source.positions.len() != 3
+            || source.colors.is_empty()
+            || !source.positions.iter().all(|p| p[2] == 1.)
+        {
+            return Err(format!("unreviewed TU160.SH glove top face {look:x}").into());
+        }
+        let length = normal.iter().map(|v| v * v).sum::<f32>().sqrt();
+        let points: Vec<[f32; 3]> = outline
+            .iter()
+            .map(|p| scale_point(ID, [p[0], p[1], GLOVE_Z]))
+            .collect();
+        let mut reversed = points.clone();
+        reversed.reverse();
+        for (positions, up) in [(points, 1.), (reversed, -1.)] {
+            let n = positions.len();
+            faces.push(Face {
+                address: addresses.next().ok_or("four glove addresses")?,
+                colors: vec![source.colors[0]; n],
+                uv: if source.uv.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![source.uv[0]; n]
+                },
+                positions,
+                texture: source.texture.clone(),
+                subtype: source.subtype,
+                normal: Some([0., up * length, 0.]),
+                fog: source.fog,
+            });
+        }
+    }
+    Ok(faces)
+}
+
+/// The bay belly skin: every face wholly in [`SKIN_BAND`] with a real plan
+/// area that overlaps a bay's opening in plan, in shape units.
+fn belly_skin(shape: &Shape, bays: &[Opening]) -> Vec<usize> {
+    let plan = |f: &Face| {
+        let n = f.positions.len();
+        (0..n)
+            .map(|i| {
+                let (a, b) = (f.positions[i], f.positions[(i + 1) % n]);
+                a[0] * b[1] - b[0] * a[1]
+            })
+            .sum::<f32>()
+            .abs()
+            / 2.
+    };
+    shape
+        .faces
+        .iter()
+        .filter(|f| {
+            f.positions
+                .iter()
+                .all(|p| p[2] >= SKIN_BAND[0] && p[2] <= SKIN_BAND[1])
+                && plan(f) > 0.5
+                && bays.iter().any(|o| {
+                    let (half, aft, fore) = (
+                        (o.outer / UNIT) as f32,
+                        (o.aft / UNIT) as f32,
+                        (o.fore / UNIT) as f32,
+                    );
+                    let xs = f.positions.iter().map(|p| p[0]);
+                    let ys = f.positions.iter().map(|p| p[1]);
+                    xs.clone().fold(f32::MIN, f32::max) > -half
+                        && xs.fold(f32::MAX, f32::min) < half
+                        && ys.clone().fold(f32::MIN, f32::max) > aft
+                        && ys.fold(f32::MAX, f32::min) < fore
+                })
+        })
+        .map(|f| f.address)
+        .collect()
+}
+
+/// Whether the plan point `(x, y)` is inside the polygon of `face`.
+fn plan_inside(face: &Face, x: f32, y: f32) -> bool {
+    let n = face.positions.len();
+    let mut inside = false;
+    for i in 0..n {
+        let (a, b) = (face.positions[i], face.positions[(i + 1) % n]);
+        if (a[1] > y) != (b[1] > y) && x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0] {
+            inside = !inside;
+        }
+    }
+    inside
+}
+
+pub struct Rig {
+    bays: Vec<Opening>,
+    skin: Vec<usize>,
+}
 impl Rig {
     pub fn load(bytes: &[u8], mut shape: Shape) -> AppResult<(Self, Shape)> {
         if tore_formats::module::code(bytes)?.0.len() != 28716
@@ -339,6 +505,36 @@ impl Rig {
                 || !has(face, [0., -26., 14.])
             {
                 return Err(format!("unreviewed TU160.SH rudder strip {address:x}").into());
+            }
+        }
+        // The two fitted bays are cut from the belly skin: every point of each
+        // opening's plan (a quarter unit grid) lies on a skin face, so the
+        // doors cut from them leave no hole in the shut belly.
+        let bays = tore_sim::combat::bays::openings(ID);
+        if bays.len() != 2 {
+            return Err("TU160 bay openings missing".into());
+        }
+        let skin = belly_skin(&shape, &bays);
+        for o in &bays {
+            let (half, aft, fore) = (o.outer / UNIT, o.aft / UNIT, o.fore / UNIT);
+            let faces: Vec<&Face> = shape
+                .faces
+                .iter()
+                .filter(|f| skin.contains(&f.address))
+                .collect();
+            let mut y = aft + 0.125;
+            while y < fore {
+                let mut x = -half + 0.125;
+                while x < half {
+                    if !faces.iter().any(|f| plan_inside(f, x as f32, y as f32)) {
+                        return Err(format!(
+                            "unreviewed TU160.SH belly skin: no face at ({x:.2}, {y:.2})"
+                        )
+                        .into());
+                    }
+                    x += 0.25;
+                }
+                y += 0.25;
             }
         }
         let original: BTreeSet<_> = shape.faces.iter().map(|f| f.address).collect();
@@ -427,7 +623,24 @@ impl Rig {
                 }
             }
         }
+        // The recess of each bay, drawn only while its doors are open, takes the
+        // look of a flat nacelle wall; a lone rail runs under each roof.
+        let template = one(&shape, LINING_LOOK)?.clone();
+        let mut lined = Vec::new();
+        for (k, o) in bays.iter().enumerate() {
+            let rails = [[0., o.rail[0], o.rail[1]]];
+            for (n, mut f) in crate::bay_doors::centre_lining(&template, o, UNIT, &rails, &[])
+                .into_iter()
+                .enumerate()
+            {
+                f.address = LINING_BASE + k * LINING_STRIDE + n;
+                lined.push(f);
+            }
+        }
+        let plates = glove_plates(&shape)?;
         let mut extra: Vec<Face> = Vec::new();
+        extra.extend(lined);
+        extra.extend(plates);
         extra.extend(gear.faces.into_iter().filter(|f| GEAR.contains(&f.address)));
         extra.extend(keel.faces.into_iter().filter(|f| KEEL.contains(&f.address)));
         extra.extend(
@@ -438,7 +651,65 @@ impl Rig {
         );
         extra.extend(caps);
         shape.faces.extend(extra);
-        Ok((Self, shape))
+        Ok((Self { bays, skin }, shape))
+    }
+
+    /// The faces a source face becomes: with the bay doors off their seat the
+    /// belly skin over each bay is cut into two door leaves a bay, turned down
+    /// about their outer hinges by `state.bay` (the doors' 1 second travel is the
+    /// flight's), the lining drawing only then.
+    pub fn faces(&self, source: &Face, state: &State) -> Vec<Face> {
+        let a = source.address;
+        if state.bay > 0. && self.skin.contains(&a) {
+            return self.cut(source, state.bay);
+        }
+        if lining(a) && state.bay <= 0. {
+            return Vec::new();
+        }
+        vec![source.clone()]
+    }
+
+    /// `skin` with each bay's two leaves cut from it and turned. A leaf first
+    /// flattens onto its bay's belly plane (over the first sixth of the travel,
+    /// so nothing jumps), then swings 90 degrees about its outer edge.
+    fn cut(&self, skin: &Face, fraction: f64) -> Vec<Face> {
+        let mut parts = vec![skin.clone()];
+        let mut result = Vec::new();
+        for o in &self.bays {
+            let half = (o.outer / UNIT) as f32;
+            let (aft, fore) = ((o.aft / UNIT) as f32, (o.fore / UNIT) as f32);
+            let belly = (o.belly / UNIT) as f32;
+            for (left, right, hinge, sign) in [(-half, 0., -half, 1.), (0., half, half, -1.)] {
+                let mut next = Vec::new();
+                for part in parts {
+                    let (leaves, rest) = crate::roster_animation::cut_door_parts(
+                        &part,
+                        0.,
+                        [(left, right, hinge, sign)],
+                        aft,
+                        fore,
+                        belly,
+                    );
+                    next.extend(rest);
+                    for mut leaf in leaves {
+                        let flat = (fraction * LEAF_FLATTEN).min(1.) as f32;
+                        for p in &mut leaf.positions {
+                            p[2] += (belly - p[2]) * flat;
+                        }
+                        turn(
+                            &mut leaf,
+                            [hinge, aft, belly],
+                            [0., 1., 0.],
+                            sign * FRAC_PI_2 * fraction,
+                        );
+                        result.push(leaf);
+                    }
+                }
+                parts = next;
+            }
+        }
+        result.extend(parts);
+        result
     }
 
     pub fn animate(&self, source: &Face, state: &State) -> Option<Face> {
@@ -501,9 +772,15 @@ impl Rig {
                 return None;
             }
             gear_positions(&mut result, state.gear, state.nosewheel_angle());
+        } else if lining(a) {
+            if state.bay <= 0. {
+                return None;
+            }
         } else if KEEL.contains(&a) {
             let brake = state.brake.clamp(0., 1.) as f32;
-            if brake <= 0. {
+            // The plates stand at x +-1 unit, inside the forward bay's opening:
+            // they are not drawn while its doors are open (T160-5).
+            if brake <= 0. || state.bay > 0. {
                 return None;
             }
             // The plates drop out of the belly with the brake lever (fitted):
@@ -618,7 +895,10 @@ mod tests {
     /// nozzle plane.
     #[test]
     fn the_tu160_rig_holds_its_detents_and_turns_whole_panels_about_their_hinges() {
-        let rig = Rig;
+        let rig = Rig {
+            bays: tore_sim::combat::bays::openings(ID),
+            skin: Vec::new(),
+        };
         let mut s = state();
         // The three detents, and smooth in between.
         let degrees = |s: &State| sweep_degrees(sweep_turn(s));

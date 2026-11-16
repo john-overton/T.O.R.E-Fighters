@@ -103,6 +103,44 @@ pub const B52_ROW_FLOOR_WIDTH: f64 = 2. * B52_BAY_HALF;
 pub const B52_ROW_LENGTH: f64 = B52_SLAB;
 pub const B52_ROW_CEILING: f64 = B52_BAY_DEPTH;
 
+/// The Tu-160's two bays (T160-5, fitted, agent decision 2026-11-16; the
+/// coordinator's first pass fixes the count, the 42 ft length and the grid):
+/// `TU160.SH` draws at the header scale, 8/3 ft a unit. Two bays in tandem on
+/// the centre line, 42 ft each (`TU160.INF`, the game's own Jane's: "a rotary
+/// launcher can be installed in each of two 12.80 m (42 ft) long weapon
+/// bays"), a 9.33 ft divider between them (the wing carry-through box, not
+/// measured). Feet forward, aft end to fore end: the forward bay on the keel
+/// skin (shape y 5.25 to 21 units, 14 to 56 ft), the aft bay on the flat belly
+/// behind the wing box (y -14 to 1.75 units, -37.33 to 4.67 ft: its aft end is
+/// the belly skin's last edge). Rows 4 (forward) and 5 (aft) of `TU160.PT`.
+pub const TU160_UNIT: f64 = 8. / 3.;
+pub const TU160_BAY_LENGTH: f64 = 42.;
+pub const TU160_BAY_FORE: [f64; 2] = [14., 56.];
+pub const TU160_BAY_AFT: [f64; 2] = [-112. / 3., 14. / 3.];
+/// The belly plane of each bay, feet up (forward, aft): the keel skin is one
+/// unit (8/3 ft) under the flat belly behind it (`TU160.SH` faces at z -1 and
+/// 0; a door leaf is cut from the real skin, so each bay hangs from its own).
+pub const TU160_BELLY: [f64; 2] = [-8. / 3., 0.];
+/// Half the width of each opening, feet: 7.6 ft wide in a keel skin 10.7 ft wide
+/// (fitted: the narrowest that lets the laser-guided Paveway family and the
+/// 3 ft span missiles clear the walls with the doors open, measured in the
+/// open-bay clearance sweep, T160-5; `SU37L.SEE` is what lets those loads work).
+pub const TU160_BAY_HALF: f64 = 3.8;
+/// How deep each recess is over its belly plane, feet (fitted): two tiers of
+/// Kh-15 under the roof, with the fuselage's top skin 10.7 ft (aft) and 13.3 ft
+/// (forward) over the plane.
+pub const TU160_BAY_DEPTH: f64 = 6.0;
+/// Each bay's usable floor, feet: 6.0 wide (three Kh-15 abreast at the grid's
+/// 1.59 ft pitch, a rotary launcher's column on the centre line) and its whole
+/// 42 ft length (two Kh-15 of 15.7 ft along).
+pub const TU160_GRID: [f64; 2] = [6.0, TU160_BAY_LENGTH];
+/// How far ahead of a Kh-15's middle its shape's origin (the point a store hangs
+/// and leaves from) lies, feet: negative, the origin of `KIKBK.SH` is 4.37 ft
+/// behind the missile's middle (measured in the open-bay clearance report,
+/// T160-5). A bay's mount is the middle of its opening plus this, so the pair of
+/// missiles along it stands centred.
+pub const TU160_ORIGIN_AHEAD: f64 = -4.37;
+
 /// Every bay station, in aircraft and row order. Add a row per station.
 pub const STATIONS: &[BayStation] = &[
     BayStation {
@@ -186,6 +224,26 @@ pub const STATIONS: &[BayStation] = &[
         row: 6,
         mount: [0., B52_BELLY, B52_ROW_FORWARD[2] + B52_ORIGIN_AHEAD],
     },
+    // The Tu-160's two tandem bays (T160-5): row 4 the forward bay, row 5 the
+    // aft, both on the centre line, each a grid of [`GRIDS`] over its 42 ft.
+    BayStation {
+        aircraft: AircraftId::Tu160,
+        row: 4,
+        mount: [
+            0.,
+            TU160_BELLY[0],
+            (TU160_BAY_FORE[0] + TU160_BAY_FORE[1]) / 2. + TU160_ORIGIN_AHEAD,
+        ],
+    },
+    BayStation {
+        aircraft: AircraftId::Tu160,
+        row: 5,
+        mount: [
+            0.,
+            TU160_BELLY[1],
+            (TU160_BAY_AFT[0] + TU160_BAY_AFT[1]) / 2. + TU160_ORIGIN_AHEAD,
+        ],
+    },
 ];
 
 /// A bay station whose stores hang in a grid: as many abreast (across the bay)
@@ -267,6 +325,22 @@ pub const GRIDS: &[BayGrid] = &[
         width: B52_ROW_FLOOR_WIDTH,
         length: B52_ROW_LENGTH,
         ceiling: B52_BELLY + B52_ROW_CEILING,
+    },
+    // The Tu-160's two bays (T160-5): 6.0 ft by 42 ft under a flat roof 6 ft
+    // over each bay's belly plane.
+    BayGrid {
+        aircraft: AircraftId::Tu160,
+        row: 4,
+        width: TU160_GRID[0],
+        length: TU160_GRID[1],
+        ceiling: TU160_BELLY[0] + TU160_BAY_DEPTH,
+    },
+    BayGrid {
+        aircraft: AircraftId::Tu160,
+        row: 5,
+        width: TU160_GRID[0],
+        length: TU160_GRID[1],
+        ceiling: TU160_BELLY[1] + TU160_BAY_DEPTH,
     },
 ];
 
@@ -400,12 +474,53 @@ pub const OPENINGS: &[Opening] = &[
         inner_depth: B52_BAY_DEPTH,
         rail: [0., 0.],
     },
+    // The Tu-160 (T160-5, fitted): two centred bays in tandem, drawn like the
+    // B-52's (`bay_doors::centre_doors`), in the order of their rows: the
+    // forward bay (row 4) first, the aft bay (row 5) second ([`openings`]).
+    // `rail` is the lone rail under each roof on the centre line, 6.4 ft
+    // short of either end.
+    Opening {
+        aircraft: AircraftId::Tu160,
+        centre: 0.,
+        inner: 0.,
+        outer: TU160_BAY_HALF,
+        aft: TU160_BAY_FORE[0],
+        fore: TU160_BAY_FORE[1],
+        belly: TU160_BELLY[0],
+        depth: TU160_BAY_DEPTH,
+        inner_depth: TU160_BAY_DEPTH,
+        rail: [TU160_BAY_FORE[0] + 6.4, TU160_BAY_FORE[1] - 6.4],
+    },
+    Opening {
+        aircraft: AircraftId::Tu160,
+        centre: 0.,
+        inner: 0.,
+        outer: TU160_BAY_HALF,
+        aft: TU160_BAY_AFT[0],
+        fore: TU160_BAY_AFT[1],
+        belly: TU160_BELLY[1],
+        depth: TU160_BAY_DEPTH,
+        inner_depth: TU160_BAY_DEPTH,
+        rail: [TU160_BAY_AFT[0] + 6.4, TU160_BAY_AFT[1] - 6.4],
+    },
 ];
 
 /// The opening of `id`, if the shared helper draws its doors.
 pub fn opening(id: AircraftId) -> Option<Opening> {
     let id = id.source();
     OPENINGS.iter().find(|o| o.aircraft == id).copied()
+}
+
+/// Every opening of `id` in table order, for an aircraft with several bays on
+/// one centre line (the Tu-160's two, forward bay first); [`opening`] is the
+/// first.
+pub fn openings(id: AircraftId) -> Vec<Opening> {
+    let id = id.source();
+    OPENINGS
+        .iter()
+        .filter(|o| o.aircraft == id)
+        .copied()
+        .collect()
 }
 
 #[cfg(test)]
@@ -529,6 +644,33 @@ mod tests {
                 assert!(at(loaded, slot)[1] <= at(loaded, slot - 1)[1] + 1e-9);
             }
         }
+    }
+
+    #[test]
+    fn the_tu160_has_two_tandem_42_ft_bays_on_the_centre_line() {
+        let both = openings(AircraftId::Tu160);
+        assert_eq!(both.len(), 2);
+        assert_eq!(opening(AircraftId::Tu160), Some(both[0]));
+        for (k, (row, o)) in [(4, both[0]), (5, both[1])].into_iter().enumerate() {
+            let mount = station(AircraftId::Tu160, row).unwrap();
+            assert!(reviewed(AircraftId::Tu160));
+            // Centred on the centre line, each 42 ft long (Jane's), on its own
+            // belly plane, the mount inside the opening.
+            assert_eq!((o.centre, o.inner, o.outer), (0., 0., TU160_BAY_HALF));
+            assert!((o.fore - o.aft - 42.).abs() < 1e-9);
+            assert_eq!((mount[0], mount[1]), (0., TU160_BELLY[k]));
+            assert!(mount[2] > o.aft && mount[2] < o.fore);
+            assert_eq!(o.belly, TU160_BELLY[k]);
+            assert_eq!(
+                grid(AircraftId::Tu160, row),
+                Some([TU160_GRID[0], TU160_GRID[1], o.belly + o.depth])
+            );
+            assert_eq!(alternative(AircraftId::Tu160, row), None);
+        }
+        // The forward bay is ahead of the aft one by a 9.33 ft divider.
+        assert!((both[0].aft - both[1].fore - 28. / 3.).abs() < 1e-9);
+        assert_eq!(station(AircraftId::Tu160, 3), None);
+        assert_eq!(grid(AircraftId::Tu160, 3), None);
     }
 
     #[test]

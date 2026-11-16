@@ -165,6 +165,25 @@ pub const F111_WING_CLASS: i32 = 50;
 /// The active-radar seeker bit of a station's flags (`loading.rs`: an
 /// active-radar missile such as the Kh-15, `AS16.JT`, needs it).
 pub const ACTIVE_RADAR_BIT: i32 = 0x20;
+/// The Tu-160's two bay rows (`TU160.PT` rows 4 and 5, flags `0x1184`, six
+/// `AS16.JT` each, weight class 180): [`adjust_defaults`] clears the pair flag
+/// `0x4` (T160-5), so a row is one bay, not a pair that mirrors onto the other
+/// (both rows sit on one point at x 0). The designator bit was never set.
+pub const TU160_BAY_ROWS: std::ops::Range<usize> = 4..6;
+/// The stores the Tu-160's two bay rows refuse though the retail mask admits
+/// them (the mask itself refuses air-to-air missiles, `AS15.JT` the Kh-55 and
+/// every radar-guided store but the default): the five that do not fit a 7.6 ft
+/// wide, 6 ft deep bay on the shared grid with the doors open at the row's full
+/// count, under the 0.05 ft rule of the B-52's bays on the walls, door leaves,
+/// ends, roof, floor and rail (store to store is not a test here: the default
+/// Kh-15's 3 ft fins cross their neighbours' on the grid's 1.59 ft pitch, as the
+/// B-2's Paveway III do). `AT12.JT` hangs 0.41 ft below the belly plane (out of
+/// the shut skin); the GBU-27 class (`GBU29.JT`, `GBU29P.JT`, `GBU30.JT` and
+/// `PAVEWA3.JT`) has 5.4 ft fins and stands 0.85 ft through the side walls.
+/// Measured with the bay clearance sweep, T160-5, 2026-11-16 (fitted); see
+/// docs/formats/aircraft-variety.md "Tu-160 stations, bays and pylons".
+pub const TU160_BAY_REFUSED: [&str; 5] =
+    ["AT12.JT", "GBU29.JT", "GBU29P.JT", "GBU30.JT", "PAVEWA3.JT"];
 /// The Tu-26's bay row (`TU26.PT` row 5, flags `0x1500`; BMB-C2):
 /// [`adjust_defaults`] clears the designator bit and sets the active-radar bit
 /// so the bay carries the Kh-15.
@@ -369,6 +388,9 @@ pub fn weapon_allowed(id: AircraftId, row: usize, source: &str) -> bool {
         },
         AircraftId::F117 => !(F117_BAY_ROWS.contains(&row) && F117_BAY_REFUSED.contains(&source)),
         AircraftId::B2 => !(B2_MK82_ROWS.contains(&row) && B2_MK82_REFUSED.contains(&source)),
+        AircraftId::Tu160 => {
+            !(TU160_BAY_ROWS.contains(&row) && TU160_BAY_REFUSED.contains(&source))
+        }
         AircraftId::B52 => {
             let refused = if row == B52_PYLONS {
                 &B52_PYLON_REFUSED[..]
@@ -797,7 +819,15 @@ fn default_signature(id: AircraftId) -> &'static [Signature] {
             (3, 0x1100, [10, -22, -2], "PAVEWA3.JT", 1, 20),
         ],
         // The bomber batch B rows (BMB-B2). The Tu-160's two bay rows carry no
-        // designator bit (0x1184), so it has no entry.
+        // designator bit (0x1184); T160-5 adds its entry for the pair flag.
+        AircraftId::Tu160 => &[
+            (1, 0x1008, [0, 0, 0], "VIS300.SEE", 1, 0),
+            (1, 0x1008, [0, 0, 0], "TU160R.SEE", 1, 0),
+            (1, 0x1008, [0, 0, -50], "TU160.ECM", 1, 0),
+            (1, 0x1008, [0, 0, 0], "SU37L.SEE", 1, 0),
+            (3, 0x1184, [0, -50, 91], "AS16.JT", 6, 180),
+            (3, 0x1184, [0, -50, 91], "AS16.JT", 6, 180),
+        ],
         AircraftId::B1b => &[
             (1, 0x1008, [0, 0, 0], "VIS340.SEE", 1, 0),
             (1, 0x1008, [0, 0, 0], "F18R.SEE", 1, 0),
@@ -937,6 +967,14 @@ fn default_signature(id: AircraftId) -> &'static [Signature] {
 ///   Wikipedia "General Dynamics F-111 Aardvark": "each pylon had a capacity
 ///   of 5,000 lb"; the record's 70 and 60 are 7,000 and 6,000 lb). **Fitted**
 ///   (agent decision). Defaults, counts, masks and positions stay.
+/// - **Tu-160** (`TU160.PT` rows 4 and 5, the two bay rows; T160-5, 2026-11-16,
+///   the coordinator's first pass): the pair flag `0x4` is cleared (`0x1184` to
+///   `0x1180`), so a row is one bay of six `AS16.JT` (the record's 12 in all,
+///   the retail default) and not a pair that mirrors onto the other bay. The
+///   designator bit was never set and the active-radar bit stays clear: the
+///   Kh-55 (`AS15.JT`) stays refused. Counts, classes, masks and the
+///   record's point stay (the placement code puts the stores,
+///   `tore_sim::combat::bays`). **Fitted** (agent decision).
 /// - **Tu-26** (`TU26.PT` row 5, the bay row; BMB-C2, coordinator first pass
 ///   2026-11-15): the designator bit `0x400` is cleared and the active-radar
 ///   bit `0x20` set (`0x1500` to `0x1120`): no pod on a bomb bay (B7), and the
@@ -1013,6 +1051,11 @@ pub fn adjust_defaults(id: AircraftId, rows: &mut Vec<Hardpoint>) {
         AircraftId::B1b => {
             for row in &mut rows[B1B_BAY_ROWS] {
                 row.flags &= !DESIGNATOR_BIT;
+            }
+        }
+        AircraftId::Tu160 => {
+            for row in &mut rows[TU160_BAY_ROWS] {
+                row.flags &= !PAIRED_BIT;
             }
         }
         AircraftId::F111 => {
@@ -2113,6 +2156,53 @@ mod tests {
         adjust_defaults(AircraftId::F111, &mut other);
         adjust_defaults(AircraftId::B1b, &mut other);
         assert_eq!(key(&other), before);
+    }
+    /// T160-5 (2026-11-16): the Tu-160's two bay rows lose only the pair flag
+    /// (`0x1184` to `0x1180`), so a row is one bay; counts, classes, masks and
+    /// positions stay; the Kh-55 stays refused by the mask (no active-radar
+    /// bit); an edited record or another identity is left alone.
+    #[test]
+    fn the_tu160_bay_rows_lose_only_the_pair_flag() {
+        let retail = default_rows(AircraftId::Tu160);
+        assert_eq!(retail.len(), 6);
+        assert!(retail[TU160_BAY_ROWS].iter().all(|h| h.flags == 0x1184));
+        let mut rows = retail.clone();
+        adjust_defaults(AircraftId::Tu160, &mut rows);
+        let mut expected = key(&retail);
+        for row in &mut expected[4..6] {
+            row.1 = 0x1180;
+        }
+        assert_eq!(key(&rows), expected);
+        assert!(
+            rows[TU160_BAY_ROWS]
+                .iter()
+                .all(|h| h.flags & PAIRED_BIT == 0
+                    && h.flags & DESIGNATOR_BIT == 0
+                    && h.flags & ACTIVE_RADAR_BIT == 0
+                    && h.count == 6
+                    && h.weight_class == 180
+                    && h.store.as_deref() == Some("AS16.JT"))
+        );
+        assert!(rows[..4].iter().all(|h| h.flags == 0x1008));
+        adjust_defaults(AircraftId::Tu160, &mut rows);
+        assert_eq!(key(&rows), expected);
+        let mut edited = default_rows(AircraftId::Tu160);
+        edited[0].count += 1;
+        let before = key(&edited);
+        adjust_defaults(AircraftId::Tu160, &mut edited);
+        assert_eq!(key(&edited), before);
+        let mut other = default_rows(AircraftId::B1b);
+        let before = key(&other);
+        adjust_defaults(AircraftId::Tu160, &mut other);
+        assert_eq!(key(&other), before);
+        // The refusal list: nothing outside the table is refused by name, and
+        // only the two bay rows read it.
+        for source in TU160_BAY_REFUSED {
+            assert!(!weapon_allowed(AircraftId::Tu160, 4, source));
+            assert!(!weapon_allowed(AircraftId::Tu160, 5, source));
+            assert!(weapon_allowed(AircraftId::Tu160, 3, source));
+        }
+        assert!(weapon_allowed(AircraftId::Tu160, 4, "AS16.JT"));
     }
     /// BMB-C2 (2026-11-15): the Tu-26's bay row loses the designator bit and
     /// gains the active-radar bit, its glove rows hold two AS-16 each; the Tu-95 keeps only its tail turret and

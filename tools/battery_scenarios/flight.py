@@ -123,6 +123,9 @@ STATIONS["faxx"] = STATIONS["f22n"]
 # six a wing); its three bay rows (3, 5 and 6, nine Mk 82 each) start empty and keep an
 # empty Mk 82 selection, so three never-loaded slots follow.
 STATIONS["b52"] = [1242, 12, 0, 0, 0]
+# The Tu-160 (T160-5, 2026-11-16): no gun; its two weapon rows are the bays', rows 4 (forward) and 5
+# (aft), six AS-16 (Kh-15) each, the record's 12.
+STATIONS["tu160"] = [6, 6]
 
 
 def _numbers(output: str, prefix: str) -> dict:
@@ -1387,6 +1390,19 @@ def slot_scenarios() -> list[Scenario]:
             timeout=300,
             notes="B-52 bay release: the doors open before the Mk 82 leaves and close after it, as the F-22's and F-117's do.",
         ))
+    # T160-5 (2026-11-16): the Tu-160's two tandem bays through the same actual one-press release
+    # (rows 4 and 5, six AS-16 each; the doors open to 0.95 before the missile leaves, then close).
+    for row in (4, 5):
+        out.append(Scenario(
+            name=f"flight-bay-fire-tu160-row{row}", lane="flight",
+            args=["--stores-preview", "{work}/frames"], window=True,
+            env={"TORE_STORES_PREVIEW_AIRCRAFT": "tu160",
+                 "TORE_STORES_PREVIEW_FIRE": str(row)},
+            expect=[f"Stores firing: tu160 row={row} PASS"],
+            outputs=[f"frames/tu160-fire-row{row}-t000.png", f"frames/tu160-fire-row{row}-t400.png"],
+            timeout=300,
+            notes="Tu-160 bay release: the doors open before the AS-16 leaves and close after it, as the F-22's and B-2's do (T160-5).",
+        ))
     out.append(Scenario(
         name="flight-bay-fire-b52-pylon-row7", lane="flight",
         args=["--stores-preview", "{work}/frames"], window=True,
@@ -2155,7 +2171,7 @@ def capture_scenarios() -> list[Scenario]:
     # AL1 and refuses a ground start ("an enemy airfield").
     for ac in AIRCRAFT:
         add(f"groundstart-{ac}", ["--free-flight", "--aircraft", ac, "--theater", "UKR", "--ground-start", "9", "--flight-view", "1", "--flight-look", "150,-15", "--flight-zoom", "1.5"])
-    for ac in ("f22", "f22n", "b52", "f117", "b2"):
+    for ac in ("f22", "f22n", "b52", "f117", "b2", "tu160"):
         for bay in ("0", "0.5", "1"):
             add(f"bay-{ac}-{bay}", ["--free-flight", "--aircraft", ac, "--flight-view", "1", "--flight-look", "150,-30", "--flight-bay", bay])
     return out

@@ -155,6 +155,12 @@ class TakeoffAndLandingTests(unittest.TestCase):
             self.assertIn("f117", getattr(flight, key))
         self.assertNotIn("f117", flight.TAKEOFF_TICKS_MAX)
         self.assertEqual(flight.approach_fuel("f117"), round(0.65 * 18500))
+        # The Tu-160 (T160-5, 2026-11-16): two bay weapon rows of six AS-16, no gun; their
+        # live-fire slots and the one-press bay release scenarios exist.
+        self.assertEqual(flight.STATIONS["tu160"], [6, 6])
+        names = {s.name for s in flight.slot_scenarios() + flight.capture_scenarios()}
+        for name in ("flight-bay-fire-tu160-row4", "flight-bay-fire-tu160-row5", "flight-bay-tu160-0.5"):
+            self.assertIn(name, names)
 
     def test_overweight_and_stuck(self):
         text = TAKEOFF.replace("gross_lb=41838", "gross_lb=50000")

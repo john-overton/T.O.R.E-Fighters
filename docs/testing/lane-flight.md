@@ -1039,3 +1039,16 @@ at least 0.05 ft with the doors open, and no two touch).
 Update (B2-5, 2026-11-15): the B-2's default load is the two Mk 82 bays alone (64 bombs, 32,000 lb), so
 `flight-liftoff-b2` records 155.2 kt after 7,232 ft (was 158.1 kt) and `flight-approach-b2` 167.5 kt (was 166.2 kt);
 the windows (140 to 165 kt and 140 to 170 kt) are unchanged.
+
+Update (T160-5, 2026-11-16): the Tu-160's two fitted bays join the bay scenarios. New:
+`flight-bay-fire-tu160-row4` and `-row5` (the one-press release of an AS-16 through each bay: the doors
+open before the missile leaves and close after it), `flight-bay-tu160-0`, `-0.5` and `-1` (the
+`--flight-bay` frames, from `bay-{ac}-{bay}`), `render-tu160-clearance` (headless: the default 12 AS-16
+clear the open bays' walls, door leaves, ends, roof, floor and rail by at least 0.05 ft; the nearest-store
+figure is informational), `flight-livefire-tu160-slot1` and `-slot2` and `flight-jettison-tu160-slot2`
+(`STATIONS["tu160"] = [6, 6]`; the AS-16 fires at the practice aircraft as the Su-25's does, so neither
+slot is a refused one, and the bay stations cannot be jettisoned: the scenario still fires them). The probe's `bay` control is `Required` for the Tu-160
+(`flight-animation-tu160`: no lining and nothing hanging below a bay's belly plane at 0; 20 lining faces,
+a vertex on each hinge line and the free edge `3.8 ft * sin(90 degrees * value)` below the plane from a
+sixth of the travel on, every leaf vertex on a hinge line at 1). The glove plates change the
+`render-tu160-skin` top view only at the swept root.

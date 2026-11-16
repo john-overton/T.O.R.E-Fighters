@@ -152,7 +152,14 @@ const TANK_RECORDS: usize = 9;
 /// AS-16 alone, one placement. Measured with the batch's own station
 /// corrections only (the retail rows were not measured separately: the bay
 /// row cannot take its default selection before the active-radar bit).
-const WEAPON_PLACEMENTS: usize = 5395;
+/// 5,385 from 5,395 (T160-5, 2026-11-16, measured by `--validate-ordnance`): the
+/// Tu-160's two bay rows refuse five stores that do not fit the fitted bays
+/// (`AT12.JT` and the GBU-27 class: `GBU29.JT`, `GBU29P.JT`, `GBU30.JT`,
+/// `PAVEWA3.JT`, `aircraft_stations::TU160_BAY_REFUSED`), so `TU160.PT` goes from 70 to
+/// 60 placements (minus 10). The bays' grid caps no count: the retail six a row
+/// stays under the roof (`grid_capacity` 12 for the Kh-15). The pylon and
+/// aircraft counts do not move (the Tu-160 has no pylon row).
+const WEAPON_PLACEMENTS: usize = 5385;
 /// 188 from 182: the F-16A's centreline tank row (F150.GAS or F250.GAS) plus
 /// the tank selection its two 0x07e5 wing rows accept, 6 tank placements.
 /// 192 from 188: the MiG-31 (M31-1). 201 from 192: the Mirage 2000 (M2K-1).

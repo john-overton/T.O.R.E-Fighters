@@ -250,3 +250,86 @@ fn streamer_points_sit_on_the_drawn_wing_tips() {
         );
     }
 }
+
+/// T160-5: what the fitted bays and the glove plates are built from. The belly
+/// skin under the two bay openings (x +/-1.425 units, y 5.25 to 21 and -14 to
+/// 1.75) is eleven whole faces in the band z -1 to 0, and between them they cover
+/// the plan of both openings; the lining takes the look of the flat-coloured
+/// nacelle wall `207d`; the glove plates take theirs from the glove top
+/// triangles `2322` (right) and `36cb` (left, z 1, one unit further out in the
+/// source) and fill the gap the swept panel's root leaves (the root vertices
+/// the plate outlines are fitted to).
+#[test]
+fn the_bay_skin_and_the_glove_plates_have_their_sources() {
+    let Some(bytes) = read("TU160.SH") else {
+        return;
+    };
+    let shape = Shape::parse(&bytes).unwrap();
+    let face = |address: usize| {
+        shape
+            .faces
+            .iter()
+            .find(|f| f.address == address)
+            .unwrap_or_else(|| panic!("face {address:x}"))
+    };
+    let plan = |f: &Face| {
+        let n = f.positions.len();
+        (0..n)
+            .map(|i| {
+                let (a, b) = (f.positions[i], f.positions[(i + 1) % n]);
+                f64::from(a[0] * b[1] - b[0] * a[1])
+            })
+            .sum::<f64>()
+            .abs()
+            / 2.
+    };
+    // The openings (x +/-3.8 ft, 1.425 units; y 5.25 to 21 and -14 to 1.75 units),
+    // restated from the fitted bays.
+    let half = 3.8f32 / (8. / 3.);
+    let bays = [(5.25f32, 21f32), (-14f32, 1.75f32)];
+    let skin: Vec<usize> = shape
+        .faces
+        .iter()
+        .filter(|f| {
+            let (xs, ys) = (
+                f.positions.iter().map(|p| p[0]),
+                f.positions.iter().map(|p| p[1]),
+            );
+            f.positions.iter().all(|p| (-1. ..=0.).contains(&p[2]))
+                && plan(f) > 0.5
+                && bays.iter().any(|&(aft, fore)| {
+                    xs.clone().fold(f32::MIN, f32::max) > -half
+                        && xs.clone().fold(f32::MAX, f32::min) < half
+                        && ys.clone().fold(f32::MIN, f32::max) > aft
+                        && ys.clone().fold(f32::MAX, f32::min) < fore
+                })
+        })
+        .map(|f| f.address)
+        .collect();
+    let mut want = vec![
+        0x1ff7, 0x2019, 0x203c, 0x24d7, 0x27e2, 0x27f7, 0x2ab5, 0x2acd, 0x2ed1, 0x2f05, 0x2f1f,
+    ];
+    let mut got = skin.clone();
+    got.sort_unstable();
+    want.sort_unstable();
+    assert_eq!(got, want);
+    // The look faces: the nacelle wall is colour only, the glove tops are the
+    // z 1 triangles with texture coordinates.
+    assert!(face(0x207d).uv.is_empty());
+    for look in [0x2322, 0x36cb] {
+        let f = face(look);
+        assert!(f.positions.len() == 3 && f.positions.iter().all(|p| p[2] == 1.));
+        assert!(!f.uv.is_empty() && f.normal.is_some());
+    }
+    // The wing panels' root vertices the plate outlines are fitted to: the
+    // right root front vertex is (8, 2), the left (-8, 1).
+    for (look, root) in [(0x4a22usize, [8., 2.]), (0x4f60, [-8., 1.])] {
+        assert!(
+            face(look)
+                .positions
+                .iter()
+                .any(|p| p[0] == root[0] && p[1] == root[1]),
+            "{look:x}"
+        );
+    }
+}
