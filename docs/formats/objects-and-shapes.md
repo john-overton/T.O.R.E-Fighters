@@ -2141,3 +2141,11 @@ frames show no underside through the top, no z-fighting and no blank or skin-fil
 scale; no whole-body damage variant is registered. The `render-f117-skin`
 scenario pins the look. Details and the list of what follows the scale:
 [F-117 shape and real size](aircraft-variety.md#f-117-shape-and-real-size-f117-2-2026-11-15).
+
+Update (F111-2, 2026-11-15): `F111.SH` draws at its header scale (2/3 ft a unit) times the per-axis
+scale `[0.859, 1.0, 0.827]` (BMB-B1), 63.0 by 73.3 by 17.1 ft with the gear down, from 62.99, 73.33
+and 17.09 ft measured on the drawn shape. It has 254 runtime faces (258 with the rig's four fixed glove
+plates) with one texture `_F111.PIC`, 19 exact-vertex twin groups (all pairs, all with opposite windings)
+and no `E0` decal faces, so nothing is omitted. `F111_A.SH` to `F111_D.SH` load at the same scale; no
+whole-body damage variant is registered. The `render-f111-skin` scenario pins the look. Details:
+[F-111F shape and rig](aircraft-variety.md#f-111f-shape-and-rig-f111-23-2026-11-15).

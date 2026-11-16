@@ -327,7 +327,7 @@ pub(super) fn check(
     }
 }
 
-fn triangle_distance(p: [f32; 3], a: [f32; 3], b: [f32; 3], c: [f32; 3]) -> f32 {
+pub(super) fn triangle_distance(p: [f32; 3], a: [f32; 3], b: [f32; 3], c: [f32; 3]) -> f32 {
     let sub = |u: [f32; 3], v: [f32; 3]| [u[0] - v[0], u[1] - v[1], u[2] - v[2]];
     let dot = |u: [f32; 3], v: [f32; 3]| u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
     let at = |o: [f32; 3], d: [f32; 3], t: f32| [o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t];

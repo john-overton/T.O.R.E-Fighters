@@ -324,12 +324,13 @@ pub fn run() -> AppResult<()> {
         let sweep = std::env::var("TORE_STORES_PREVIEW_SWEEP")
             .ok()
             .and_then(|v| v.parse::<f64>().ok());
-        let turn = sweep.map_or(0., |degrees| {
-            tore_sim::combat::swing::wing_turn(
-                tore_sim::combat::swing::speed_for_sweep(degrees),
-                0.,
-            )
-        });
+        // Update (F111-3, 2026-11-15): the swing wing is the aircraft's own
+        // (`swing::spec`), so the F-111F is posed 16 to 72.5 degrees.
+        let turn = sweep
+            .zip(tore_sim::combat::swing::spec(id))
+            .map_or(0., |(degrees, spec)| {
+                spec.turn(spec.speed_for_sweep(degrees), 0., 0.)
+            });
         config.set_wing_turn(turn);
         // `TORE_STORES_PREVIEW_COUNTS=f18d:2=8,a10:1=6` loads those
         // stations with that many stores (a rack close-up); the output
@@ -462,8 +463,8 @@ pub fn run() -> AppResult<()> {
         state.position[1] = ground.max(0.) + HEIGHT_FT;
         state.gear = 0.;
         state.flaps = 0.;
-        if let Some(degrees) = sweep {
-            state.speed = tore_sim::combat::swing::speed_for_sweep(degrees);
+        if let Some((degrees, spec)) = sweep.zip(tore_sim::combat::swing::spec(id)) {
+            state.speed = spec.speed_for_sweep(degrees);
         }
         state.yaw = 0.;
         state.pitch = 0.;

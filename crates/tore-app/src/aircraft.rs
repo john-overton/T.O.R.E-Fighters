@@ -357,6 +357,23 @@ impl Airframe {
                 })
             }));
         }
+        if self.profile.id == tore_formats::aircraft::AircraftId::F111 {
+            // The F-111F's swing wing carries its vapor point with the tip
+            // (F111-3), as the Tornado's.
+            let turn = crate::f111_animation::sweep_turn(s);
+            let basis = tore_sim::attitude::Basis::new(s.yaw, s.pitch, s.bank);
+            let mut points = [[0.; 3]; 2];
+            for (side, out) in points.iter_mut().enumerate() {
+                let p = crate::f111_animation::streamer_point(side, turn);
+                *out = std::array::from_fn(|i| {
+                    s.position[i]
+                        + basis.right[i] * p[0]
+                        + basis.up[i] * p[1]
+                        + basis.forward[i] * p[2]
+                });
+            }
+            return Some(points);
+        }
         if self.profile.id.source() == tore_formats::aircraft::AircraftId::Tornado {
             // The swing wing carries its vapor point with the tip (TOR-3).
             let turn = crate::tornado_animation::sweep_turn(s);
@@ -488,15 +505,25 @@ impl Airframe {
         turn: f64,
     ) -> Option<std::sync::Arc<tore_sim::combat::hardpoints::Underside>> {
         let quarters = (turn.to_degrees() * 4.).round() as i64;
-        if quarters == 0 || self.profile.id.source() != tore_formats::aircraft::AircraftId::Tornado
+        let id = self.profile.id.source();
+        if quarters == 0
+            || !matches!(
+                id,
+                tore_formats::aircraft::AircraftId::Tornado
+                    | tore_formats::aircraft::AircraftId::F111
+            )
         {
             return None;
         }
         let base = self.poses.first()?;
         let scale = f64::from(self.animation_scale());
         Some(self.mounts.swept(quarters, || {
-            let shape =
-                crate::tornado_animation::swept_shape(base, (quarters as f64 / 4.).to_radians());
+            let angle = (quarters as f64 / 4.).to_radians();
+            let shape = if id == tore_formats::aircraft::AircraftId::F111 {
+                crate::f111_animation::swept_shape(base, angle)
+            } else {
+                crate::tornado_animation::swept_shape(base, angle)
+            };
             tore_sim::combat::hardpoints::Underside::of(&shape, scale)
         }))
     }

@@ -1091,3 +1091,30 @@ elevator, rudder, gear and bay `required moved`, aileron, flaps, brake, hook and
 exhaust `not-applicable`, a 25-pose pitch/yaw grid, a 202-value dense gear sweep
 (grounded at 6.21 ft at gear 1, stow overshoot at most 0.24 ft) and an 8-value bay
 sweep, every row passing. Not a claim of original control travel or retraction timing.
+
+## F-111F rig fit
+
+Agent-authored whole-piece motion, 2026-11-15 (slice F111-3), over `F111.SH` drawn at its
+real size per axis (x 0.859, y 1.0, z 0.827). Faces, hinges, the fold table, the measured
+seam, span and taileron clearance and provenance: [F-111F shape and
+rig](../formats/aircraft-variety.md#f-111f-shape-and-rig-f111-23-2026-11-15). The real
+control travels and the real gear retraction were not found; every number below is fitted
+except the sweep range (16 to 72.5 degrees, cited from `F111.INF`).
+
+| Control | Fitted motion |
+| --- | --- |
+| Wing sweep | both wing panels (13 and 14 faces, the flap strips included) turn whole about the vertical axis through the shape point (13, 2.5): the sweep is 16 degrees up to 250 knots and 72.5 at 650, linear between, held spread by the flaps ([`swing::F111F`](../formats/aircraft-variety.md#update-swing-1-2026-11-15-the-shared-swing-wing-spec)). Four fixed glove plates (fitted geometry) fill the wedge the root edge opens |
+| Elevator, aileron | both tailerons (six faces a side) turn whole about a lateral spindle through their root chord midpoint (10, -26): a pull raises both trailing edges (0.20 rad), roll differs (0.10 rad), the sum clamped to 0.25 rad |
+| Flaps | each trailing flap strip droops about its front edge, 0.40 rad at full flaps, and rides with the wing's sweep |
+| Rudder | the rudder panel turns about its leading edge, 0.50 rad at full pedal, trailing edge to the pedal's side |
+| Brake | the four dorsal plates turn about their front edge (y 0, z 4): brake 1 is the source's raised pose, smaller values lie them down, flat at the hinge height, 0 hides them |
+| Gear | the main assembly (16 faces, both legs and the six wheel plates) folds 150 degrees forward and up about a lateral line at its rear top edge; the nose leg folds 90 degrees forward about a lateral line at the belly and steers about the vertical line through its wheel plates. Hidden at 0, the source pose at 1, grounded at 6.07 ft. No door (the source has none) |
+| Afterburner | each nozzle's crossed plate pair (eight faces in all) scales along Y from the exit plane (y -36) by the afterburner fraction, hidden at 0; two nozzle glows from the engine count of 2 |
+
+Acceptance: `--animation-probe` reports `reviewed-controls-and-attachments`; elevator,
+rudder, aileron, flaps, gear, brake, wing sweep and exhaust `required moved`; the hook
+`not-applicable` (the record has no hook); two 25-pose pitch/roll grids (spread and fully
+swept), a 40-pose sweep against speed and flaps (measured turn equals the schedule to
+0.01 degree), the root seam, swept span and taileron clearance at nine sweep angles, a
+202-value dense gear sweep (stow overshoot at most 0.65 ft) and dense brake and plume
+sweeps, every row passing. Not a claim of original control travel or retraction timing.

@@ -680,21 +680,26 @@ impl Configuration {
         }
         let turn = turn as f32;
         let id = self.aircraft;
+        // The swing wing the racks turn about, F111-3: None for the Tornado.
+        let swing = super::swing::rack_spec(id);
         let slots = &self.hardpoint_slots;
         for (index, station) in self.stations.iter_mut().enumerate() {
             let row = slots.iter().position(|slot| *slot == Some(index));
             if row.is_some_and(|row| super::swing::swivels(id, row)) {
                 station.rack.turn = turn;
+                station.rack.swing = swing;
             }
         }
         for tank in &mut self.tanks {
             if super::swing::swivels(id, tank.hardpoint) {
                 tank.rack.turn = turn;
+                tank.rack.swing = swing;
             }
         }
         for pod in &mut self.fixed_pods {
             if super::swing::swivels(id, pod.hardpoint) {
                 pod.rack.turn = turn;
+                pod.rack.swing = swing;
             }
         }
     }

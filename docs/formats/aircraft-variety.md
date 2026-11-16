@@ -10475,3 +10475,177 @@ The four specs are constants (`B1B`, `TU160`, `F111F`, `TU26`) with no identity 
 match arm there, written and commented out for each, once the aircraft has an `AircraftId`.
 `sweep_rate_dps` is `None` for all five: no source gives a rate and the drawn sweep is a pure
 function of speed. Nothing is drawn differently; the new aircraft's rigs are their own slices.
+
+## F-111F shape and rig (F111-2/3, 2026-11-15)
+
+Implementation, slices F111-2 and F111-3 of bomber batch B, run together (worktree `m3-f111`, plan
+`.local/m3-aircraft/PLAN-F111.md`), Claude Sonnet. They apply the coordinator's first-pass decisions
+(`BOMBERS-DECISIONS-B.md`, F-111F and SWING-1; John's to review): per-axis real size (BMB-B1 wrote the
+factors, this slice checks them everywhere), a whole-panel sweep about the fitted pivot with the speed
+schedule, a glove plate if the root seam shows, the inner pylons swivelling about the F-111F's own pivot,
+tailerons, rudder, dorsal plates, gear and plumes. The behaviour is in [variety
+animation](../spec/variety-animation.md#f-111f-rig-fit); the stations in [stores on
+pylons](../spec/stores-on-pylons.md#update-f111-3-2026-11-15-the-f-111fs-inner-pylons-swivel-about-its-own-pivot).
+The rig is `crates/tore-app/src/f111_animation.rs`, its witnesses
+`crates/tore-app/src/aircraft_animation_probe/f111.rs`.
+
+### Size and scale (F111-2)
+
+`F111_SHAPE_SCALE` (x 0.859, y 1.0, z 0.827 on the header's 2/3 ft a unit) was already a row of
+`shape_axis_scale` (BMB-B1). It applies everywhere the Mirage 2000 and F-117 slices listed, by the same
+mechanism ([Aircraft shape scale](objects-and-shapes.md#aircraft-shape-scale-2026-11-09)), and nothing
+needed a new arm: every shape reader parses with `Shape::scaled(shape_axis_scale_f32(id))` (the drawn shape,
+the stores preview, the damage looks A to D through `DamageArt::load`); `debris::attachment` scales the
+debris offset per axis; `streamer_world_points` takes `right_up_forward(id)` (but see the vapor point
+below); `placed_on` and `placed_scaled` scale every station row (rows 5 to 8 at 9.67, 13.67, 18.0 and 21.67
+ft record units become 8.30, 11.74, 15.5 and 18.6 ft out); `variety.rs` puts the gear low point at 11 units
+times 2/3 times 0.827 = **6.07 ft**, which the probe measures on the drawn gear (lowest vertex z -6.06 ft at
+gear 1). The new rig takes every hinge through `scale_point`, so a panel turned about it stays rigid in feet.
+
+Re-measured with the probe's OBJ of the drawn (scaled) shape, 2026-11-15:
+
+| Quantity | Measured | Real | Note |
+| --- | ---: | ---: | --- |
+| Span, spread (wingtips) | **62.99 ft** | 63 ft | x 0.859 on 110 units at 2/3 ft |
+| Length (nose probe to tail) | **73.33 ft** | 73.5 ft | y 1.0, -0.2 percent |
+| Height, gear down | **17.09 ft** | 17.1 ft | z 0.827; gear up the shape is 14.33 ft |
+| Leading-edge sweep, spread | **16.2 degrees** | 16 | the identity shape measured 14.0; the x factor alone corrects it |
+| Span, fully swept | **40.3 ft** (the right wing's tip 20.13 ft out, the left's 19.81) | 32 ft | +26 percent: the outer panel is 17 percent too long (not cut, coordinator decision; see below) |
+
+**Damage looks and decals.** The four damage shapes (`F111_A.SH` to `F111_D.SH`) load through the same
+scaled path; the frames at damage 0.6 (left wing) and 1.0 (core and tail) draw the dark patch, smoke and the
+regional cut on the scaled skin with no loading error. No whole-body damage variant is registered for the
+F-111F (`debris::damage_variant` returns none), as for the Mirage 2000, Tornado, Gripen, F-117 and others;
+whether to register A and C is John's call. `F111.SH` has **no E0 decal faces** (the subtypes are `ee` 118,
+`ed` 61, `63` 31, `6c` 25, `64` 10, `61` 7, `41` and `44`), one texture (`_F111.PIC`) and **19 exact-vertex
+twin groups, all pairs with opposite windings**, so there is nothing to omit or fill and no MiG-21-style
+exception. The new `render-f111-skin` scenario ([lane-flight](../testing/lane-flight.md)) draws the top and
+under frames, which show no underside through the top, no z-fighting and no clipped marking. Not changed (as in
+M2K-2 and F117-2): the fixed 28 ft hit sphere (the real span is 63 ft, so it is generous) and the fixed pilot
+eye (F111-7).
+
+### The swing wing (F111-3)
+
+**Wiring and schedule.** `swing::spec` returns `F111F` for `AircraftId::F111` (SWING-1 had the arm commented
+out under the name `F111F`); its test now includes the aircraft. The sweep is 16 degrees up to 250 knots and
+72.5 at 650 knots (linear, fitted; the range is cited from `F111.INF`), held spread by the flaps, as the spec
+says. The drawn sweep is `F111F.turn(speed, flaps, gear)`; `--animation-probe` measures it back from the tip
+vertex and finds it equal to the schedule within 0.01 degree over 40 poses (eight speeds, five flap
+settings), 7.06 degrees at 300 knots. The pylons' limit of 26 degrees while the outer rows carry stores is in
+the spec (`max_sweep_with_fixed_stores`) and not applied yet: nothing in the drawn rig or the host knows what
+the outer rows carry (F111-5).
+
+**Pivot and the faces that turn.** Each wing panel is turned whole about the vertical axis through the shape
+point (13, 2.5) (the F111-0 smallest circle round the root corners), through `scale_point`: right 13
+faces (`3fbc` to `4246`, the two flap strip faces among them), left 14 (`44e5` to `4767`; the left has one
+more winding at the glove front and its root is one unit inboard, the source's own asymmetry). The small
+triangle `2e12` beside the glove stays fixed. Rule 11: every vertex of a panel turns, so no face folds; the
+probe's rigidity is 3e-6 ft at the worst pose and the fixed airframe never moves with the sweep.
+
+**The root seam, measured and shown.** The five root corners lie on the line x 13, so no pivot is on all of
+them; the leading root corner (13, 10) travels **4.73 ft** at full sweep (the review's 4.7). The probe measures
+the distance from that vertex to the nearest fixed face (`root_lead_gap_ft`): **4.17 ft right and 4.36 ft
+left at 72.5 degrees** (2.32 and 2.47 at 45, 1.17 at 30), before any fix. The frames (`seam-top-*-3x`) and a
+plan-view raster of the probe's poses show it: at 16 degrees the panel is flush with the glove, and by 72.5 the
+root edge stands out beside the fuselage as 5.4 ft of free edge with open sky ahead of it, the wing's forward
+corner a step away from the glove. It shows, so (the coordinator's rule, the Tornado TOR-5b precedent) the rig
+adds **four fitted glove plates** (a plate a side in both windings, addresses `7e00` to `7e03` past the
+module's 25,206 code bytes, so 258 runtime faces), drawn flat at z 2.6 units on the polygon (13, 2.5),
+(20.26, 6.64), (22.76, 7.02), (14, 12), (13, 10): the pivot on the glove side, the two points the swept
+leading corners reach at 72.5 degrees and the glove's front corner. The outer edge is the new leading edge
+from the glove to the swept panel. Spread, the plate lies wholly inside the wing (between its z 2 and z 3
+skins) and shows nothing; swept, it fills the wedge. The plates are fixed and never move; they take colours,
+texture and flags from the fillet's top triangle (`40e6` right, `4460` left) with the first texel on every
+vertex, so they are one flat colour (a camouflage patch, tan on one side and grey-green on the other in the
+frames; fitted, John's call whether to paint them). After the plates the same distance is **0.33 ft** at every
+sweep (the plate's drop under the wing skin), and the trailing root corner is buried in the fuselage at 0.8 ft
+(0.9 ft left). A root shift inboard (TOR-12's) was not needed.
+
+**Swept span (reported, not changed).** **40.3 ft against the real 32 ft (+26 percent)**; the review expected
+38 to 45 ft from the 17 percent too long outer panel, and the x factor's 0.859 brings the identity shape's
+45.5 ft to 40.3. The coordinator decision is not to cut the panel, so it stays; the option remains to cut the
+outer panel (new geometry, fitted) to 32 ft.
+
+**The swept corner and the tailerons.** The review expected the swept trailing corner to cross the tailerons
+(it did on the unscaled shape: corner at x 28.8 units against a taileron to x 24). With the x factor the swept
+panel does **not** enter them: at 72.5 degrees the corner lands at 16.5 ft out and 21.2 ft aft, outboard of
+the taileron's outer edge (13.7 ft out). The probe measures, at nine sweep angles on both sides with the
+tailerons neutral and at both pitch limits, the closest approach (vertex to triangle, both ways) and counts
+vertices of either inside the plan of the other: **0 inside at every angle, closest 8.2 ft spread falling to 3.6
+ft at 72.5 degrees** (3.9 ft with the tailerons deflected; the elevator moves only z), and gates it (closest
+above 0.5 ft). No geometry was cut.
+
+**Flap strips.** The two trailing strips (`421f` and `4246` right, `4740` and `4767` left; the words
+`725e` and `7258`, three states each: neutral, drooped with -1, removed with anything else) droop about their
+front edge (13, 1) to (53, -2) at mid height z 2.5 by up to **0.40 rad** (the source's drooped strip is 27
+degrees at the root and 18 at the tip) and then ride with the wing's sweep, in the panel's own frame first.
+The rig never sets the words, so no strip vanishes. The strip's outer pair midpoint and root pair midpoint
+stay on the hinge (0 ft).
+
+### Surfaces, gear and plumes (F111-3)
+
+| Surface | Rig | Fitted limits | Seams (probe) |
+| --- | --- | --- | --- |
+| Tailerons (all moving; no word; six faces a side: outer quad, root quad, root triangle, two windings) | whole plate about a lateral spindle through the root chord midpoint (10, -26, 2): pitch plus differential roll, a positive aileron raises the right | pitch 0.20 rad, roll 0.10, clamp 0.25 (14 degrees); real limits not found | the plates share two corners, (10, -17) and (8, -30), with the fixed root plates `212c` and `21cb`; at the limit the forward root corner swings **1.20 ft**, the trailing root corner 0.53 ft and the trailing tip 1.73 ft (pitch up and roll right on one panel, 2.16 ft at the tip) |
+| Rudder (word `7264`, three states) | the panel `491c` and `4943` about its leading edge (0, -31, 4) to (0, -37, 18), trailing edge to the pedal's side | 0.50 rad (the source's own skewed pose is 34 degrees at the base, 0.59 rad) | the two hinge vertices stay; the trailing top corner (0, -40, 18), shared with the fixed cap, opens by the swing at full lock |
+| Dorsal plates (word `7246`) | four plates at the wing root top, x 2 to 8 either side, hinged on their front edge (y 0, z 4) and raised aft to z 9, **driven as one speed brake by `state.brake`**: brake 1 is the source's raised pose (30.6 degrees), smaller values lie them down, hidden at 0 | closed angle 0.534 rad worked out from the scaled plate | rigid, hinge at 0 ft; shut they lie flat at the hinge height (z 4); the spine skin under them is 3 to 4.5 units (the plates are not measured against it) |
+| Gear (word `724c`, 22 faces) | see below | 150 degree and 90 degree folds | see below |
+| Plumes (word `7240`, 8 faces) | each nozzle's crossed plate pair scales along Y from the exit plane (y -36), 25 units (16.7 ft) at full; the two nozzle discs get the engine material and a glow (`engine_material::nozzle`, two outlets) | none | rigid growth, x and z never change |
+
+**What the dorsal plates are.** The four plates sit on the fuselage top just behind the wing root, hinged
+forward and rising aft (both sides on one word), which reads as a pop-up speed brake or inboard spoiler pair.
+The real F-111's airbrake is the belly door, and its roll spoilers are on the outer upper wing; the plates do
+not match either, so the real name stays **unknown** (F111-0). They are rigged as one speed brake (the
+recommended option of F111-0's surfaces item), fitted.
+
+**The belly speed brake and the gear door** are not in the source and stay **unrigged** (decision: the record's
+`airBrakesDrag` stays). The gear word adds plates only, no door. There are no slats.
+
+**Gear.** The shape's main gear is **one rigid assembly** of 16 faces spanning both legs (the cross plate at y
+-1 and the six wheel plates join them), x -8 to +6 (one unit off symmetry), so it cannot fold sideways. It folds
+forward and up about a lateral line at its rear top edge (shape (x, -4, -4); the two leg tops on that line stay)
+through 150 degrees, so no corner dips under the gear-down contact while it closes (probe gate). The best fold of
+any hinge still leaves **0.65 ft** of the assembly outside the skin near full stow (the hull is 8 to 9 units high
+at the gear, the assembly 10 long and 7 high; a quarter turn leaves 2.7 ft), gated at 0.7 ft; the nose leg
+folds forward 90 degrees about a line at its belly (36, -7) with no overshoot, steering first about the
+vertical line through its wheel cross (y 41). Hidden at gear 0, the source pose at 1 (lowest point 6.07 ft under
+the reference point, the flight model's contact). Retraction directions and timing are fitted; Jane's says the
+real mains "are almost horizontal when extended", which the shape does not show.
+
+### Probe, checks and frames
+
+`--animation-probe` for `f111` (scope `reviewed-controls-and-attachments`): **258 neutral faces, 0
+required/check failures**. Elevator, rudder, aileron, flaps, gear, brake, wing sweep and exhaust `required
+moved`; the hook `not-applicable` (the record has none, so there is no hook geometry to rig), the bay
+`unreviewed` (F111-5). Combination files (`checks/F111-2/probe`): two 25-pose pitch/roll grids, the 40-pose
+sweep against speed and flaps, `sweep-seam-span-taileron.csv`, `taileron-corner-swing.csv`, the 202-value dense
+gear sweep, an 8-value dorsal brake sweep and a 7-value plume sweep, all passing. Frames
+(`.local/m3-aircraft/frames/F111-2/`, png; `capture.sh`, `batch-pylons.sh`, `batch2.sh`, `batch3.sh` and
+`batch-damage.sh` are the recorded commands; the free-flight views are view 1 with look yaw,pitch, so nose up,
+and a 960 by 720 window with the instrument windows): top at 16, 45 and 72.5 degrees (`top-*`) and the stores
+preview's top, below, ahead and side-front with the inner pylons only and with the whole default load
+(`pylons-inner-*` and `pylons-full-*`, the outer rows removed by `TORE_STORES_PREVIEW_COUNTS`); the root seam close-ups
+(`seam-top-*-3x`) and plan-view rasters of the seam before and after the plate at 16, 47.6 and 72.5 degrees (`seam-plan-before.png`,
+`seam-plan-after.png`); the taileron and trailing-corner check at 72.5 degrees with the elevator down, neutral
+and up (`taileron-corner-72-*`); side, front, three-quarter and under views at the three sweeps; surfaces at
+their limits (`surf-*-rear`, `flaps-*`, `brake-*`); gear down, half and nearly up in flight and on the ground
+(`gear-*`, `ground-gear*`); the afterburner (`burner-*`); damage looks (`damage-*`).
+
+**Vapor point.** The shape's streamer record puts the tips 82 units out (27.3 ft), inside the 55 unit (31.5
+ft) wing, and the per-axis x factor would scale that to 23.5 ft, so the rig puts the vapor point on the drawn
+tip (55, 0, 2) and carries it with the sweep (`f111_animation::streamer_point`), as the Tornado's (TOR-12).
+
+**Findings that are not this slice's.** (1) **Free flight and ground start refuse the default load**: the
+record's full tank (32,663 lb) plus the default stores is over the 100,000 lb maximum take-off weight, and
+`State::set_payload` refuses ("payload outside aircraft mass limits") before the fuel is capped, so
+`--free-flight --aircraft f111` and `--ground-start` need `--loadout none` (the headless air start has no
+payload and flies). The B-1B (265,274 lb of fuel and 42,000 lb of stores) is in the same position (F111-6,
+F111-8 and the coordinator's call). (2) The outer rows 7 and 8 (fixed) hang beside the swept wing, in the open,
+at any sweep above the spread, until F111-5 applies the 26 degree limit or hides them; row 5 sits 0.86 ft
+outboard of the pivot (8.30 ft against 7.44 ft), so it barely moves.
+
+**Provenance.** The sweep range is cited (`F111.INF`); the pivot (13, 2.5), the schedule, the glove plate
+outline and height, every control limit, the gear hinges and folds, the dorsal brake reading, the vapor point and
+the 0.7 ft stow gate are fitted (agent decisions 2026-11-15); the real-size factors are the coordinator's
+first pass (opinionated, for John to review); the per-axis choice and not cutting the outer panel are the
+coordinator's decisions. Nothing attributed to John. No retail bytes committed.

@@ -3592,3 +3592,20 @@ leaves `Rack` and its checkpoint layout alone.
 Tests: `swing.rs` (`the_tornados_spec_is_the_modules_constants_and_resolves_for_both_versions`,
 `every_spec_is_consistent_and_its_schedule_runs_from_spread_to_swept`, and one schedule test
 each for the B-1B, Tu-160, Tu-26 and F-111F).
+
+## Update (F111-3, 2026-11-15): the F-111F's inner pylons swivel about its own pivot
+
+The wiring SWING-1 left to the F-111F slice is done ([the SWING-1 section above](#update-swing-1-2026-11-15-the-swing-wing-is-a-per-aircraft-spec);
+F-111F shape and rig in [aircraft variety](../formats/aircraft-variety.md#f-111f-shape-and-rig-f111-23-2026-11-15)).
+`swing::spec` returns `F111F` for the F-111F, so rows 5 and 6 (the inner wing pair) swivel
+and rows 7 and 8 stay fixed. `Rack` gained one field, `swing: Option<&'static SwingSpec>`,
+which `Rack::position` reads to carry a swivelling station about that aircraft's pivot;
+`None` is the Tornado's spec, so every Tornado rack, test and pin is unchanged (the field is
+not in a checkpoint or a recording: the host sets it with `turn` every tick,
+`swing::rack_spec`). `station_move` moves rows 5 and 6 to the record's span (29 and 41 raw
+units, a third of a foot each, times the size fit's x factor: 8.30 and 11.74 ft out) and
+the panel's mid-chord there (TOR-14's rule, `F111F.mid_chord`). Only the pivot and the
+centring are this slice's: the AIM-9 shoulder rails, the outer rows' real places, the 26
+degree sweep limit while the outer rows carry stores (the spec carries it, nothing applies
+it yet) and the bay are F111-5's. Test:
+`hardpoints.rs` `the_f111_inner_pylons_swivel_about_the_f111_pivot_and_the_tornados_stay_put`.
