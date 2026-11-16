@@ -838,6 +838,7 @@ fn strike_inputs() -> crate::ai::strike::Inputs {
             frag_radius_ft: 300.,
             falls_free: false,
             flight: None,
+            bay: false,
         }],
         designator: false,
         mission_height_ft: None,

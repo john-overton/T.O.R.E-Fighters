@@ -264,6 +264,12 @@ pub struct LandingOrder {
 pub const GATE_RECHECK_S: f64 = 5.0;
 /// Spec-derived (airport taxi speed +0xf9): 50 ft/s, 30 kt.
 pub const TAXI_SPEED_FPS: f64 = 50.0;
+/// Fitted taxi throttle limit. Since BMB-AI (2026-11-16) an aircraft whose
+/// wheels resist more than 0.2 throttle can overcome (the B-52's rolling
+/// deceleration is 4.8 ft/s squared, 0.53 throttle of its eight engines at
+/// 488,000 lb; 0.4 sat at its spot for 15 minutes) adds that throttle to the
+/// taxi law and may use all of it: [`Situation::taxi_throttle_floor`].
+pub const TAXI_THROTTLE_MAX: f64 = 0.4;
 /// Spec-derived: a quarter of the taxi speed when 5 to 45 degrees off the
 /// line-up aim. Retail stops and pivots at 45 degrees or more; the hybrid
 /// ground model cannot turn a stopped aircraft, so it creeps round at this
@@ -483,6 +489,29 @@ pub const AIM_POINT_FRACTION: f64 = 0.25;
 /// Fitted: flaps come down below 200 kt on the approach (the manual's
 /// p.64 takeoff flap speed).
 pub const FLAPS_SPEED_FPS: f64 = 200.0 * KNOT;
+/// Fitted (BMB-AI, 2026-11-16): the flaps also come down below this multiple
+/// of the slowest speed the aircraft plans with them up. The 200 kt rule
+/// alone left an aircraft whose clean minimum is above 200 kt (a B-2, B-52 or
+/// F-117 near its takeoff weight, 204 to 229 kt) with its flaps up for the
+/// whole approach: it never flew slower than the clean minimum, so it never
+/// reached the speed that lowers the flaps, and the clean minimum was the
+/// speed it landed at. An aircraft whose clean minimum is under
+/// 200 / this (190 kt) keeps the 200 kt rule exactly.
+pub const FLAPS_CLEAN_MARGIN: f64 = 1.05;
+/// Fitted (BMB-AI, 2026-11-16): after liftoff the gear stays down, the flaps
+/// stay down and the climb-out goes on until the aircraft is this much faster
+/// than its clean minimum, because raising the flaps below it stalls it: the
+/// AI B-2 at Athens raised them at 154 kt (its clean minimum 213 kt) and flew
+/// into the ground 10 s later.
+pub const CLIMB_FLAPS_UP_MARGIN: f64 = 1.05;
+/// Fitted (BMB-AI): while it is slower than that, the climb-out flight path.
+pub const SLOW_CLIMB_OUT_PITCH_DEG: f64 = 1.5;
+/// Fitted (BMB-AI): while it is slower than that, the gear comes up above
+/// this height (the gear's drag is what keeps a heavy from accelerating).
+pub const SLOW_CLIMB_GEAR_UP_FT: f64 = 100.0;
+/// Fitted (BMB-AI): the climb-out of an aircraft still below its clean
+/// minimum ends this long after liftoff in any case.
+pub const SLOW_CLIMB_OUT_TIMEOUT_S: f64 = 400.0;
 /// Fitted: the speedbrake opens when this much faster than requested
 /// during the marshal, approach and final.
 pub const SPEEDBRAKE_MARGIN_FPS: f64 = 50.0;
@@ -617,6 +646,17 @@ pub struct Situation {
     /// Slowest speed with the fitted approach G margin in hand (0 when the
     /// model has no low-speed lift ramp).
     pub approach_minimum_fps: f64,
+    /// The same limit with the flaps up (BMB-AI, 2026-11-16): the slowest
+    /// the aircraft plans to fly clean. Equal to `minimum_speed_fps` while
+    /// the flaps are up.
+    pub clean_minimum_fps: f64,
+    /// The most throttle the taxi laws ask for ([`TAXI_THROTTLE_MAX`] unless
+    /// the wheels' resistance calls for more, BMB-AI).
+    pub taxi_throttle_max: f64,
+    /// The throttle the taxi laws add to hold an aircraft's wheels moving:
+    /// 0 for every aircraft but one whose rolling resistance needs more than
+    /// 0.2 throttle (BMB-AI, the B-52).
+    pub taxi_throttle_floor: f64,
     pub maximum_speed_fps: f64,
     pub corner_speed_fps: f64,
     /// B48 cruise speed.
@@ -1319,9 +1359,17 @@ impl Sequence {
                 let short_done = self.lift == Lift::ShortJet
                     && s.agl_ft >= SHORT_CLIMB_AGL_FT
                     && s.speed_fps >= s.minimum_speed_fps + TRANSITION_MARGIN_FPS;
+                // BMB-AI: not while the flaps cannot come up yet (a heavy
+                // below its clean minimum); a safety timeout still ends it.
+                let slow = too_slow_for_flaps_up(s);
+                let timeout = if slow {
+                    SLOW_CLIMB_OUT_TIMEOUT_S
+                } else {
+                    CLIMB_OUT_TIMEOUT_S
+                };
                 if short_done
-                    || s.agl_ft >= CLIMB_OUT_COMPLETE_AGL_FT
-                    || since >= CLIMB_OUT_TIMEOUT_S
+                    || (s.agl_ft >= CLIMB_OUT_COMPLETE_AGL_FT && !slow)
+                    || since >= timeout
                 {
                     complete = true;
                     self.flaps_up = true;
@@ -1611,7 +1659,7 @@ impl Sequence {
                                 .max(SLOW_TAXI_FPS),
                         );
                     }
-                    let (throttle, brakes) = taxi_throttle(horizontal(s.velocity), speed);
+                    let (throttle, brakes) = taxi_throttle(horizontal(s.velocity), speed, s);
                     command.control = ground(throttle, 0.0, self.steer(s, heading));
                     command.brakes = brakes;
                 }
@@ -1654,7 +1702,7 @@ impl Sequence {
                 if self.stopping {
                     command.control = ground(0.0, 0.0, self.steer(s, heading));
                 } else {
-                    let (throttle, brakes) = taxi_throttle(horizontal(s.velocity), speed);
+                    let (throttle, brakes) = taxi_throttle(horizontal(s.velocity), speed, s);
                     command.control = ground(throttle, 0.0, self.steer(s, heading));
                     command.brakes = brakes;
                 }
@@ -1708,10 +1756,15 @@ impl Sequence {
                 // Retail short takeoff: 10 degrees with the nozzles at 40
                 // up to 250 ft, then at 20 while it gathers speed.
                 let low = short && s.agl_ft < SHORT_CLIMB_AGL_FT;
+                // BMB-AI: a heavy below its clean minimum climbs shallow with
+                // its gear up until it has the speed to raise the flaps.
+                let slow = !short && too_slow_for_flaps_up(s);
                 command.control = Control::Air(AirGuidance {
                     heading_deg: course,
                     flight_path_pitch_deg: if low {
                         SHORT_CLIMB_DEG
+                    } else if slow {
+                        SLOW_CLIMB_OUT_PITCH_DEG
                     } else {
                         CLIMB_OUT_PITCH_DEG
                     },
@@ -1721,7 +1774,7 @@ impl Sequence {
                     full_power: true,
                 });
                 command.brakes = false;
-                command.gear_down = !complete;
+                command.gear_down = !(complete || slow && height >= SLOW_CLIMB_GEAR_UP_FT);
                 command.flaps_down = !complete;
                 command.afterburner = s.has_afterburner && s.speed_fps < s.minimum_speed_fps;
                 if short {
@@ -1760,7 +1813,7 @@ impl Sequence {
                     full_power: true,
                 });
                 command.gear_down = height < GO_AROUND_GEAR_UP_FT;
-                command.flaps_down = s.speed_fps < FLAPS_SPEED_FPS;
+                command.flaps_down = s.speed_fps < flaps_speed(s);
                 command.brakes = false;
             }
             Phase::Marshal => {
@@ -1782,7 +1835,7 @@ impl Sequence {
                     _ => self.marshal_speed(s).min(GATE_SPEED_LIMIT_FPS),
                 };
                 command.control = Control::Air(fly_to(s, self.gate(self.leg), speed));
-                self.flaps_up = self.flaps_up && s.speed_fps >= FLAPS_SPEED_FPS;
+                self.flaps_up = self.flaps_up && s.speed_fps >= flaps_speed(s);
                 command.flaps_down = !self.flaps_up;
             }
             Phase::Final => {
@@ -1823,7 +1876,7 @@ impl Sequence {
                         .to_degrees()
                         .clamp(-FINAL_INTERCEPT_LIMIT_DEG, FINAL_INTERCEPT_LIMIT_DEG)
                     + correction.to_degrees();
-                self.flaps_up = self.flaps_up && s.speed_fps >= FLAPS_SPEED_FPS;
+                self.flaps_up = self.flaps_up && s.speed_fps >= flaps_speed(s);
                 command.control = Control::Air(AirGuidance {
                     heading_deg: heading,
                     flight_path_pitch_deg: pitch,
@@ -1988,6 +2041,25 @@ impl Sequence {
     }
 }
 
+/// The speed below which the flaps come down on the approach and in a
+/// go-around: the retail 200 kt, or [`FLAPS_CLEAN_MARGIN`] times the clean
+/// minimum when that is higher (BMB-AI).
+fn flaps_speed(s: &Situation) -> f64 {
+    FLAPS_SPEED_FPS.max(FLAPS_CLEAN_MARGIN * s.clean_minimum_fps)
+}
+
+/// Whether the aircraft is too slow after liftoff to raise its flaps: below
+/// [`CLIMB_FLAPS_UP_MARGIN`] times its clean minimum, for an aircraft whose
+/// clean minimum is high enough that [`flaps_speed`] is not the retail 200 kt
+/// (BMB-AI).
+fn too_slow_for_flaps_up(s: &Situation) -> bool {
+    // Only an aircraft the flaps law also holds (its flaps-up minimum is above
+    // 190 kt): the transports, whose clean minimum is 100 to 180 kt, finish
+    // their climb-out at 650 ft exactly as before.
+    FLAPS_CLEAN_MARGIN * s.clean_minimum_fps > FLAPS_SPEED_FPS
+        && s.speed_fps < CLIMB_FLAPS_UP_MARGIN * s.clean_minimum_fps
+}
+
 /// Final speed: the fitted multiple of minimum speed under the retail cap.
 fn final_speed(s: &Situation) -> f64 {
     (APPROACH_SPEED_FACTOR * s.minimum_speed_fps)
@@ -2080,11 +2152,15 @@ fn taxi_speed(heading_error_deg: f64) -> f64 {
 
 /// Fitted taxi speed control: gentle power below the target, brakes well
 /// above it.
-fn taxi_throttle(speed: f64, target: f64) -> (f64, bool) {
+fn taxi_throttle(speed: f64, target: f64, s: &Situation) -> (f64, bool) {
     if speed > target + 8.0 {
         (0.0, true)
     } else {
-        ((0.05 + (target - speed) * 0.02).clamp(0.0, 0.4), false)
+        (
+            (s.taxi_throttle_floor + 0.05 + (target - speed) * 0.02)
+                .clamp(0.0, s.taxi_throttle_max),
+            false,
+        )
     }
 }
 
@@ -2213,6 +2289,9 @@ mod tests {
             minimum_speed_fps: 150.,
             terrain_to_gate_ft: f64::MIN,
             approach_minimum_fps: 230.,
+            clean_minimum_fps: 170.,
+            taxi_throttle_max: TAXI_THROTTLE_MAX,
+            taxi_throttle_floor: 0.,
             maximum_speed_fps: 1500.,
             corner_speed_fps: 400.,
             cruise_speed_fps: 440.,
@@ -2492,6 +2571,9 @@ mod tests {
             minimum_speed_fps: 170.,
             terrain_to_gate_ft: f64::MIN,
             approach_minimum_fps: 0.,
+            clean_minimum_fps: 170.,
+            taxi_throttle_max: TAXI_THROTTLE_MAX,
+            taxi_throttle_floor: 0.,
             maximum_speed_fps: 1500.,
             corner_speed_fps: 400.,
             cruise_speed_fps: 440.,
@@ -2814,6 +2896,105 @@ mod tests {
         s.speed_fps = s.minimum_speed_fps + TRANSITION_MARGIN_FPS;
         let step = seq.step(&s);
         assert!(step.complete && step.command.lift.nozzle_deg == Some(0.0));
+    }
+
+    /// BMB-AI (2026-11-16): the flaps come down at 200 kt for every aircraft
+    /// that can fly slower than that clean, exactly as before; an aircraft
+    /// whose clean minimum is above 190 kt (a B-2, B-52 or F-117 near its
+    /// takeoff weight, 204 to 229 kt) lowers them 5 percent above that
+    /// minimum, which it could never reach below 200 kt: with the flaps
+    /// stuck up it landed at its clean minimum, 224 kt for the F-117.
+    #[test]
+    fn the_flaps_come_down_at_200_kt_unless_the_clean_minimum_is_higher() {
+        let down = |clean_minimum_fps: f64, speed_fps: f64| {
+            let mut seq = landing();
+            seq.phase = Phase::Approach;
+            seq.leg = 2;
+            let mut s = on_final(&seq, 20_000., 2_000., speed_fps);
+            s.clean_minimum_fps = clean_minimum_fps;
+            seq.step(&s).command.flaps_down
+        };
+        let kt = |knots: f64| knots * KNOT;
+        // A fighter (135 kt clean): the 200 kt rule, whatever its weight.
+        assert!(!down(kt(135.), kt(201.)));
+        assert!(down(kt(135.), kt(199.)));
+        // A heavy at 224 kt clean: the flaps come down below 235 kt, not 200.
+        assert!(!down(kt(224.), kt(236.)));
+        assert!(down(kt(224.), kt(234.)));
+        // The threshold is the retail 200 kt up to a 190 kt clean minimum.
+        let seq_s = |clean: f64| {
+            let mut s = on_final(&landing(), 20_000., 2_000., 300.);
+            s.clean_minimum_fps = clean;
+            flaps_speed(&s)
+        };
+        assert_eq!(seq_s(kt(190.)), FLAPS_SPEED_FPS);
+        assert!(seq_s(kt(229.)) > kt(240.));
+    }
+
+    /// BMB-AI: after liftoff a heavy that is slower than its clean minimum
+    /// keeps its flaps and its climb-out going (the AI B-2 raised them at
+    /// 154 kt, its clean minimum 213 kt, and flew into the ground 10 s
+    /// later), climbs shallow and raises its gear above 100 ft; an aircraft
+    /// that is fast enough finishes at 650 ft as before.
+    #[test]
+    fn a_climb_out_below_the_clean_minimum_keeps_the_flaps_and_waits_for_speed() {
+        let step = |speed_kt: f64, agl_ft: f64, clean_kt: f64, since_s: f64| {
+            let mut seq = departure(Lift::Conventional, [40., 0., -3500.]);
+            seq.phase = Phase::ClimbOut;
+            seq.liftoff_tick = Some(0);
+            let mut s = on_ground(seq.spot, 0., speed_kt * KNOT);
+            s.on_ground = false;
+            s.agl_ft = agl_ft;
+            s.position[1] = agl_ft + s.ground_clearance_ft;
+            s.clean_minimum_fps = clean_kt * KNOT;
+            s.tick = (since_s * 120.) as u64;
+            let step = seq.step(&s);
+            let guidance = match step.command.control {
+                Control::Air(g) => g,
+                other => panic!("{other:?}"),
+            };
+            (step, guidance)
+        };
+        // Fast enough (a fighter at 160 kt, clean minimum 135): the old rule.
+        let (done, g) = step(160., 700., 135., 20.);
+        assert!(done.complete);
+        assert_eq!(g.flight_path_pitch_deg, CLIMB_OUT_PITCH_DEG);
+        // A transport slower than its clean minimum (100 kt against 110) is not held: its clean
+        // minimum is under 190 kt, so it finishes at 650 ft as before.
+        assert!(step(100., 700., 110., 20.).0.complete);
+        let (early, _) = step(160., 300., 135., 20.);
+        assert!(!early.complete && early.command.gear_down && early.command.flaps_down);
+        // The B-2: 154 kt against a 213 kt clean minimum, 700 ft up.
+        let (heavy, g) = step(154., 700., 213., 50.);
+        assert!(!heavy.complete, "it must not raise its flaps yet");
+        assert!(heavy.command.flaps_down);
+        assert_eq!(g.flight_path_pitch_deg, SLOW_CLIMB_OUT_PITCH_DEG);
+        // Its gear stays down to 100 ft and comes up above.
+        assert!(step(154., 60., 213., 10.).0.command.gear_down);
+        assert!(!step(154., 150., 213., 20.).0.command.gear_down);
+        // Once 5 percent above the clean minimum and past 650 ft it finishes.
+        assert!(step(224., 700., 213., 150.).0.complete);
+        // The safety timeout ends a climb-out that never gets there.
+        assert!(!step(154., 700., 213., 399.).0.complete);
+        assert!(step(154., 700., 213., 401.).0.complete);
+    }
+
+    /// BMB-AI: the taxi law is the shared one (0.05 plus 0.02 a ft/s below
+    /// the target, 0.4 at most) unless the aircraft's wheels resist more than
+    /// 0.2 throttle can overcome, which adds that throttle (the B-52).
+    #[test]
+    fn the_taxi_throttle_adds_the_floor_a_heavy_needs_and_nothing_to_a_fighter() {
+        let mut s = on_ground([0.; 3], 0., 0.);
+        assert_eq!(taxi_throttle(0., 50., &s), (0.4, false));
+        assert_eq!(taxi_throttle(48., 50., &s), (0.05 + 2. * 0.02, false));
+        assert_eq!(taxi_throttle(60., 50., &s), (0., true));
+        // The B-52: 0.58 floor, all the throttle there is.
+        s.taxi_throttle_floor = 0.58;
+        s.taxi_throttle_max = 1.0;
+        assert_eq!(taxi_throttle(0., 50., &s), (1.0, false));
+        let (throttle, _) = taxi_throttle(48., 50., &s);
+        assert!((throttle - (0.58 + 0.05 + 0.04)).abs() < 1e-12);
+        assert_eq!(taxi_throttle(60., 50., &s), (0., true));
     }
 
     fn vertical_landing(lift: Lift) -> Sequence {

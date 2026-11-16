@@ -113,6 +113,7 @@ impl PointMass {
             alive: true,
             fuel_endurance_s: endurance_s,
             time_home_s: Some(self.position[0].hypot(self.position[2]) / 700.),
+            bay_doors: 1.0,
             rotorcraft: false,
             internal_fuel_lbs: endurance_s * 2.,
             radar_emitting: radar,
@@ -151,6 +152,7 @@ fn station_view(
 ) -> StationView {
     StationView {
         slew: Default::default(),
+        bay: false,
         station: StationId(station),
         guided: true,
         capability: StoreCapability::AIR_TO_AIR_MISSILE,

@@ -133,7 +133,8 @@ This section is the AI's use of such a gun. Every forward gun keeps the rules ab
   slewed gun is no strafing gun: it is left out of an AI striker's stores.
 - **The barrel swings, the aircraft does not turn.** Where a forward gun is laid by flying the
   nose at the lead point, the AI's tail gun swings its barrel to the lead point inside
-  the arcs, instantly (fitted: no slew rate, the gunner's mount is not modelled). So the controller does not hold the gun-tracking
+  the arcs (until BMB-AI instantly and exactly; now with a swing rate, a lag and an aim error,
+[below](#tail-gun-aim-error-and-swing-rate-bmb-ai-2026-11-16)). So the controller does not hold the gun-tracking
   motion for it, and its flight is not changed by firing. Every round of a burst leaves along the swung barrel
   (one direction, as a fixed barrel's rounds do, then the quarter-degree dispersion):
   no round is turned toward the target after leaving. This is the one place the AI's barrel is
@@ -147,3 +148,27 @@ This section is the AI's use of such a gun. Every forward gun keeps the rules ab
 Tests: `tore-world` `ai_wings::tail_gun_tests` (a fighter astern is engaged, ahead or
 40 degrees off is not, a forward gun with a fighter behind is not; the controller path; the retail record).
 
+
+## Tail-gun aim error and swing rate (BMB-AI, 2026-11-16)
+
+**Fitted**, an agent decision (the coordinator's first pass of 2026-11-15: "AI tail gun is too lethal"). With
+the instant, exact swing above, an AI B-52 hit a closing F-22 with 89 of 128 rounds
+(`flight-b52-tail-gun`). A slewed mount's barrel is now laid by a gunner who lags the lead, misses a
+little and has a limit on how fast the barrel swings. Forward guns are untouched: they are laid by
+flying the nose and fire as before.
+
+| Rule | Value (fitted) |
+| --- | --- |
+| Swing rate: the lead point may sweep the mount no faster than this, or the gun holds fire (`aligned` is false) | 30 degrees a second (`BARREL_SLEW_DEG_PER_S`) |
+| Tracking lag: the barrel trails the lead by this much of the lead's angular rate | 0.2 s (`BARREL_LAG_S`) |
+| Aim error, one standard deviation on each of two axes, redrawn every half second (the burst length) | 1.0 degree (`AIM_ERROR_DEG`) |
+| Extra scatter of each round | 0.35 degree (`ROUND_SCATTER_DEG`) |
+
+The draws are a pure function of the actor, the station, the half second and the round (a sum of four
+uniforms from splitmix64, no transcendental call), so a run repeats exactly and the host is
+the only place it matters. A fighter in the rear arc then takes hits on 10 to 25 percent of the rounds
+at 2,000 to 3,000 ft (the M61's range is 7,500 ft), over 90 percent at 500 ft and under 6 percent at
+5,000 ft (`a_tail_gunner_is_dangerous_up_close_and_not_a_laser`, `combat::slew`). The lag alone leaves a
+fighter that sweeps the mount at 20 degrees a second untouched at 2,500 ft.
+
+Evidence and the scenario: see [aircraft variety](../formats/aircraft-variety.md#ai-fixes-for-the-bombers-bmb-ai-2026-11-16).

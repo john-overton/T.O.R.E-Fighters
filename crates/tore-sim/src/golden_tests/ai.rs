@@ -730,6 +730,7 @@ fn own_state(position: [f64; 3], heading: f64, pitch: f64, bank: f64, speed: f64
         alive: true,
         fuel_endurance_s: 3_000.,
         time_home_s: Some(600.),
+        bay_doors: 1.0,
         rotorcraft: false,
         internal_fuel_lbs: 6_000.,
         radar_emitting: true,
@@ -786,6 +787,7 @@ fn station_view(
 ) -> StationView {
     StationView {
         slew: Default::default(),
+        bay: false,
         station: StationId(station),
         guided: true,
         capability: StoreCapability::AIR_TO_AIR_MISSILE,
@@ -1575,6 +1577,7 @@ fn store(station: u8, kind: SeekerClass, gun: bool, rounds: u32, radar: bool) ->
     if gun {
         return StationSpec {
             slew: Default::default(),
+            bay: false,
             station: StationId(station),
             guided: false,
             capability: StoreCapability::GUN,
@@ -1603,6 +1606,7 @@ fn store(station: u8, kind: SeekerClass, gun: bool, rounds: u32, radar: bool) ->
     let infrared = kind == SeekerClass::Infrared;
     StationSpec {
         slew: Default::default(),
+        bay: false,
         station: StationId(station),
         guided: true,
         capability: StoreCapability::AIR_TO_AIR_MISSILE,

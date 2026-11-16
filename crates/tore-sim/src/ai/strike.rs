@@ -192,6 +192,10 @@ pub const HEAVY_MIN_FT: f64 = 5_000.;
 pub const HEAVY_RAISE_GUNS_FT: f64 = 5_000.;
 pub const HEAVY_RAISE_MISSILES_FT: f64 = 10_000.;
 pub const HEAVY_CEILING_SHARE: f64 = 0.9;
+/// Fitted (BMB-AI, 2026-11-16): the strike asks for its bay doors this many
+/// seconds before its computed release point: the doors take a second to open
+/// and the human's release waits for them.
+pub const BAY_LEAD_S: f64 = 1.5;
 /// John's release circle (2026-10-11): 90% of passes inside it.
 pub const IN_CIRCLE_SHARE: f64 = 0.9;
 /// The AI releases once the cue is within this share of its circle of the
@@ -495,6 +499,10 @@ pub struct Store {
     /// estimate (a helicopter's stand-off advance, John 2026-10-29); `None`
     /// when the host gave none.
     pub flight: Option<FlightTimes>,
+    /// The store hangs in a weapon bay behind doors: it is released only with
+    /// them open ([`crate::combat::bays::DOORS_READY`]), and the strike asks
+    /// for them early (BMB-AI, 2026-11-16).
+    pub bay: bool,
 }
 
 impl Store {
@@ -873,6 +881,10 @@ pub struct Strike {
     plan_dropped: bool,
     /// The tick its last stand-off round is taken to land by.
     standoff_until: Option<u64>,
+    /// The strike wants the bay doors open this step (BMB-AI, 2026-11-16):
+    /// the store it is about to release hangs in a bay. Worked out again
+    /// every step, so a checkpoint leaves it out.
+    bay_demand: bool,
     /// The host's inputs for this step, consumed by it.
     inputs: Option<Inputs>,
 }
@@ -925,6 +937,7 @@ impl Strike {
             release_plan: None,
             plan_dropped: false,
             standoff_until: None,
+            bay_demand: false,
             inputs: None,
         }
     }
@@ -1021,6 +1034,12 @@ impl Strike {
     }
     /// Seconds to the release point at the last attack step, negative once
     /// past it (the driver's trace).
+    /// Whether the strike wants its bay doors open this step (BMB-AI): the
+    /// store it releases hangs in a bay and the release is near.
+    pub fn bay_demand(&self) -> bool {
+        self.bay_demand
+    }
+
     pub fn release_in_s(&self) -> Option<f64> {
         self.release_in_s
     }
@@ -1104,6 +1123,7 @@ impl Strike {
     /// One mission step (see the module notes).
     pub fn step(&mut self, cx: &Context<'_>) -> Order {
         let own = cx.own;
+        self.bay_demand = false;
         let mut order = Order {
             steer: None,
             release: None,
@@ -2371,7 +2391,18 @@ impl Strike {
                     k if k.unguided() => (first && due) || in_stick,
                     _ => first && (s.due || planned),
                 };
-            if fire && floor_ok && !s.warning && self.rounds_left(cx) > 0 {
+            let may_fire = fire && floor_ok && !s.warning && self.rounds_left(cx) > 0;
+            // A store in a bay leaves only with the doors open (BMB-AI,
+            // 2026-11-16): the AI asks for them as the release nears, and a
+            // release that comes due with them shut waits for them.
+            let in_bay = self.store(cx).is_some_and(|st| st.bay);
+            let doors_open = !in_bay || own.bay_doors >= crate::combat::bays::DOORS_READY;
+            if in_bay {
+                self.bay_demand = may_fire
+                    || self.released > 0
+                    || self.release_in_s.is_some_and(|t| t <= BAY_LEAD_S);
+            }
+            if may_fire && doors_open {
                 order.release = Some(Release {
                     station: s.station,
                     target: s.target,

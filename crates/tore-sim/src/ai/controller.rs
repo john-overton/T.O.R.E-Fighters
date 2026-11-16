@@ -179,6 +179,10 @@ pub struct OwnState {
     pub time_home_s: Option<f64>,
     pub internal_fuel_lbs: f64,
     pub radar_emitting: bool,
+    /// How far open its bay doors are, 0 shut to 1 open (BMB-AI,
+    /// 2026-11-16); 1 for an aircraft with no bay, so a store there never
+    /// waits for doors.
+    pub bay_doors: f64,
     /// The aircraft is a helicopter or the V-22 flown through the rotor
     /// adapter (slice H3): its flight home is planned and flown at
     /// [`route::rotorcraft_cruise_speed`], and its fuel states use
@@ -308,6 +312,11 @@ pub struct LeaderView {
     pub on_ground: bool,
 }
 
+/// Fitted (BMB-AI, 2026-11-16): the AI starts opening its bay doors this many
+/// quarter seconds before a missile or store in the bay is due to leave:
+/// 6, a second and a half, for the doors' second of travel and a margin.
+pub const BAY_LEAD_QUARTERS: u64 = 6;
+
 /// One carried store, as the weapon service sees it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StationView {
@@ -335,6 +344,8 @@ pub struct StationView {
     /// The mount's rest direction and arcs ([`crate::combat::slew`]): the
     /// nose line unless this is a slewed gun (the B-52's tail gun).
     pub slew: crate::combat::slew::Slew,
+    /// The store hangs in a weapon bay behind doors ([`super::mission::StationSpec::bay`]).
+    pub bay: bool,
     pub damage_vs_category: f64,
     /// Nominal store speed, for the fitted lead prediction.
     pub store_speed: ScalarSpeed,
@@ -802,6 +813,10 @@ pub struct Controller {
     gun_views: Vec<super::gunnery::View>,
     gun_cycles: std::collections::BTreeMap<u8, super::gunnery::Cycle>,
     gun_phase: Option<weapon_service::Phase>,
+    /// The chosen store hangs in a bay and its launch is near: the AI wants
+    /// its doors open (BMB-AI, 2026-11-16). Worked out again every step, so a
+    /// checkpoint leaves it out.
+    bay_demand: bool,
     damage_recovery: bool,
     /// Opinionated (requested by John, 2026-09-29): the mission is over for
     /// this aircraft and it has no runway to land on, so it flies the B48
@@ -1033,6 +1048,7 @@ impl Controller {
             gun_views: Vec::new(),
             gun_cycles: Default::default(),
             gun_phase: None,
+            bay_demand: false,
             damage_recovery: false,
             mission_complete: false,
             gun_tracking: None,
@@ -1194,6 +1210,13 @@ impl Controller {
     /// The weapon service's current phase (B42).
     pub fn weapon_phase(&self) -> weapon_service::Phase {
         self.gun_phase.unwrap_or(self.service.phase())
+    }
+
+    /// Whether a missile or store in a bay is about to leave and the doors
+    /// should be open (BMB-AI): the weapon service is firing, or fires within
+    /// [`BAY_LEAD_QUARTERS`] quarter seconds, from a bay station.
+    pub fn bay_demand(&self) -> bool {
+        self.bay_demand
     }
 
     pub fn set_damage_recovery(&mut self, recovery: bool) {
@@ -2045,6 +2068,7 @@ impl Controller {
             Some(_) => weapon_service::TargetClass::Surface,
             None => weapon_service::TargetClass::Air,
         };
+        self.bay_demand = false;
         let mut stations = Vec::new();
         let station = self.choose_station(frame, class, target, batch, &mut stations);
         let chosen_gun = station
@@ -2225,7 +2249,12 @@ impl Controller {
             } else {
                 LockStatus::Failed
             },
-            path_blocked: target.is_some_and(|t| t.terrain_blocked),
+            // The bay doors in the way count as a blocked path (BMB-AI): the
+            // service holds the shot a tick at a time until they are open.
+            path_blocked: target.is_some_and(|t| t.terrain_blocked)
+                || station.is_some_and(|i| {
+                    frame.stations[i].bay && frame.own.bay_doors < crate::combat::bays::DOORS_READY
+                }),
             pacing: station
                 .map(|s| frame.stations[s].pacing)
                 .unwrap_or(ProjectilePacing {
@@ -2266,6 +2295,19 @@ impl Controller {
             Err(other) => return Err(other),
         };
 
+        // The doors open for a launch that is close (BMB-AI): while the
+        // service fires, or within a second of it.
+        if station.is_some_and(|i| frame.stations[i].bay) {
+            let now = weapon_service::quarter_clock(frame.tick);
+            self.bay_demand = match self.service.phase() {
+                weapon_service::Phase::Fire => true,
+                weapon_service::Phase::Tracking => self
+                    .service
+                    .deadline()
+                    .is_some_and(|due| due <= now + BAY_LEAD_QUARTERS),
+                _ => false,
+            };
+        }
         let mut recorded = outcome;
         if let ServiceOutcome::Fire(mut request) = outcome {
             request.request_id = weapon_service::RequestId(self.next_request_id);
@@ -3800,6 +3842,7 @@ mod tests {
             alive: true,
             fuel_endurance_s: 3600.0,
             time_home_s: Some(600.0),
+            bay_doors: 1.0,
             rotorcraft: false,
             internal_fuel_lbs: 8000.0,
             radar_emitting: true,
@@ -3858,6 +3901,7 @@ mod tests {
                 events: Vec::new(),
                 stations: vec![StationView {
                     slew: Default::default(),
+                    bay: false,
                     station: StationId(0),
                     guided: true,
                     capability: StoreCapability::AIR_TO_AIR_MISSILE,
@@ -4232,6 +4276,42 @@ mod tests {
                     .is_empty()
             );
         }
+    }
+
+    /// BMB-AI (2026-11-16): a missile in a bay (the F-22's) leaves only with
+    /// the doors open. The controller asks for them within a second and a half
+    /// of the launch and holds the shot, tick by tick, until they are open; a
+    /// missile on a pylon, and a bay aircraft whose doors are open, fire as
+    /// before.
+    #[test]
+    fn a_missile_in_a_bay_waits_for_the_doors_and_the_controller_asks_for_them() {
+        // The tick of each run's first launch, and whether the doors were
+        // ever asked for before it.
+        let run = |bay: bool, doors: f64| {
+            let mut scene = Scene::new();
+            scene.stations[0].bay = bay;
+            let mut c = controller(Experience::Ace);
+            let mut asked = false;
+            for tick in 0..2400 {
+                let mut state = own();
+                state.bay_doors = doors;
+                let batch = c.step(&scene.frame(tick, state)).unwrap();
+                asked |= c.bay_demand();
+                if !batch.weapons.is_empty() {
+                    return (Some(tick), asked);
+                }
+            }
+            (None, asked)
+        };
+        let (open, open_asked) = run(false, 1.);
+        let (open_bay, open_bay_asked) = run(true, 1.);
+        let (shut_bay, shut_asked) = run(true, 0.);
+        assert!(open.is_some(), "the missile fires with no bay");
+        assert!(!open_asked, "a pylon store never asks for doors");
+        assert_eq!(open_bay, open, "doors already open change nothing");
+        assert!(open_bay_asked, "the doors are asked for as the shot nears");
+        assert_eq!(shut_bay, None, "shut doors hold the shot for good");
+        assert!(shut_asked, "and they are asked for while it waits");
     }
 
     #[test]

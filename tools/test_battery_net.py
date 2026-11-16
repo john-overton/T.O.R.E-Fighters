@@ -952,6 +952,28 @@ class StoresTests(unittest.TestCase):
         self.assertIn("damage=invulnerable", net_a2g.STORES_MISSION)
 
 
+class BayDoorsTests(unittest.TestCase):
+    """BMB-AI (2026-11-16): the client's `bay doors [ID=W ...]` line for the F-117 net scenarios."""
+
+    LINES = "Watch: bay doors [0=1.00 2=0.30]\nStay: bay doors []\n"
+
+    def test_the_widest_opening_is_read_by_callsign_and_plane(self):
+        self.assertEqual(net_a2g.last_doors(self.LINES), {"Watch": {0: 1.0, 2: 0.3}, "Stay": {}})
+        self.assertEqual(net_a2g.doors_problems(self.LINES, "Watch", 0, "the Bomber"), [])
+
+    def test_doors_not_opened_wide_or_not_reported_fail(self):
+        self.assertTrue(any("0.30" in p for p in net_a2g.doors_problems(self.LINES, "Watch", 2, "x")))
+        self.assertTrue(any("at most 0.00" in p for p in net_a2g.doors_problems(self.LINES, "Stay", 0, "x")))
+        self.assertTrue(any("no bay doors line" in p for p in net_a2g.doors_problems("", "Watch", 0, "x")))
+
+    def test_the_bomber_scenarios_are_listed_in_the_net_lane(self):
+        names = {sc.name: sc for sc in net_a2g.scenarios()}
+        for name in ("net-a2g-stores-f117", "net-ai-strike-handback-b2"):
+            self.assertEqual((names[name].lane, names[name].window), ("net", False))
+        self.assertIn("F117.PT", net_a2g.F117_STORES_MISSION)
+        self.assertIn("B2.PT", net_a2g.B2_STRIKE_MISSION)
+
+
 class ReservationReplyTests(unittest.TestCase):
     def test_live_probe_reads_the_rust_wire_golden_and_rejects_unrelated_replies(self):
         golden = (battery.ROOT / "crates/tore-session/wire-golden.txt").read_text()

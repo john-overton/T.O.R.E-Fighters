@@ -51,6 +51,7 @@ fn pacing() -> ProjectilePacing {
 fn station_view(station: u8) -> StationView {
     StationView {
         slew: Default::default(),
+        bay: false,
         station: StationId(station),
         guided: true,
         capability: StoreCapability::AIR_TO_AIR_MISSILE,

@@ -128,6 +128,10 @@ pub struct StationSpec {
     /// every store and forward gun, the record's aft heading for a tail gun
     /// (B52-6; [`crate::combat::slew`]).
     pub slew: crate::combat::slew::Slew,
+    /// The store hangs in a weapon bay behind doors (BMB-AI, 2026-11-16): the
+    /// AI opens them before it releases or launches it, as a human's release
+    /// does ([`crate::combat::bays::DOORS_READY`]).
+    pub bay: bool,
 }
 
 impl StationSpec {
@@ -434,6 +438,14 @@ pub struct AiActor {
     /// The AV-8's and Yak-141's jetborne memory (slice H1), for the hovers
     /// the airfield sequences ask for. Default on other aircraft.
     jet_lift: super::jet_lift::JetLift,
+    /// The bay doors stay open until this tick (BMB-AI, 2026-11-16): one
+    /// second after the last release or launch from a bay station, as a
+    /// human's do ([`crate::combat::bays::DOORS_HOLD_TICKS`]).
+    bay_hold_until: u64,
+    /// The AI wants its bay doors open this step: the hold, the strike's
+    /// request or the weapon service's. Worked out again every step before
+    /// the flight steps, so a checkpoint leaves it out.
+    bay_wanted: bool,
     /// Write-only record of the latest mission step. No decision reads it.
     trace: ActorTrace,
     /// Write-only memory of what the journal already said about this actor.
@@ -536,6 +548,8 @@ impl AiActor {
             lase: None,
             rotor: super::rotor_adapter::RotorAdapter::new(),
             jet_lift: super::jet_lift::JetLift::new(),
+            bay_hold_until: 0,
+            bay_wanted: false,
             trace: ActorTrace::default(),
             journal_memory: JournalMemory::default(),
             last_visual: Vec::new(),
@@ -1413,6 +1427,9 @@ impl AiActor {
             },
             minimum_speed_fps: own.limits.minimum.0,
             approach_minimum_fps: self.approach_minimum_fps(),
+            clean_minimum_fps: speed_limits_with_flaps(&self.flight, 0.0).minimum.0,
+            taxi_throttle_floor: taxi_throttle_of(&self.flight).0,
+            taxi_throttle_max: taxi_throttle_of(&self.flight).1,
             maximum_speed_fps: own.limits.maximum.0,
             corner_speed_fps: own.limits.corner.0,
             // A rotorcraft's own cruise (slice H3) on its way home.
@@ -3974,6 +3991,15 @@ impl AiMission {
         // 4. Weapons: debit this actor's own store, then emit the event.
         for intent in &batch.weapons {
             if let Some(event) = actor.release(intent, &batch) {
+                // A store that left a bay keeps the doors open a second
+                // (BMB-AI, 2026-11-16), as a human's release does.
+                if actor
+                    .stations
+                    .iter()
+                    .any(|s| s.station == event.station && s.bay)
+                {
+                    actor.bay_hold_until = tick + crate::combat::bays::DOORS_HOLD_TICKS;
+                }
                 output.launches.push(event);
             }
         }
@@ -4055,6 +4081,11 @@ impl AiMission {
             }
         }
 
+        // The bay doors (BMB-AI): open for a release or launch that is near
+        // and for a second after one; the doors travel at the human's pace.
+        actor.bay_wanted = tick < actor.bay_hold_until
+            || actor.controller.bay_demand()
+            || actor.strike.as_ref().is_some_and(|s| s.bay_demand());
         // 6. Motion through the adapter and this actor's own flight model.
         actor.adapter.set_gun_aim(batch.gun_aim);
         actor.adapter.set_strike_handling(handling);
@@ -5108,6 +5139,11 @@ impl AiActor {
             time_home_s: self.time_home_s(),
             internal_fuel_lbs: self.flight.fuel,
             radar_emitting: self.flight.radar,
+            bay_doors: if self.flight.bay_available() {
+                self.flight.bay
+            } else {
+                1.0
+            },
             rotorcraft: super::rotor_adapter::flies(&self.flight),
         }
     }
@@ -5156,46 +5192,7 @@ impl AiActor {
     /// so a final can arrest a sink and follow its path. Zero for an
     /// aircraft without the hybrid model's low-speed ramp.
     fn approach_minimum_fps(&self) -> f64 {
-        if self.flight.research.is_none() {
-            return 0.0;
-        }
-        let config = self.flight.model().configuration();
-        let altitude = self.flight.position[1];
-        let Some((clean_stall, maximum)) = config
-            .aerodynamics
-            .envelopes
-            .iter()
-            .find(|e| e.g == 1)
-            .and_then(|e| e.speeds(altitude))
-        else {
-            return 0.0;
-        };
-        let stall = clean_stall * 0.75;
-        let loading = 1.0
-            + (self.flight.fuel + self.flight.carried_lbs()) / config.mass.empty_lbs
-                * config.aerodynamics.loaded_elevator_percent
-                / 100.0;
-        // Where the ramp ends does not depend on the speed: found once.
-        let next = crate::flight::low_speed_ramp_end(
-            config
-                .aerodynamics
-                .envelopes
-                .iter()
-                .filter(|envelope| envelope.g > 1)
-                .map(|envelope| (envelope.g, envelope.speeds(altitude))),
-            stall,
-        );
-        let mut speed = stall;
-        while speed < maximum {
-            match next
-                .and_then(|next| crate::flight::low_speed_ceiling_on(next, speed, stall, false))
-                .map(|ceiling| ceiling.limit_g)
-            {
-                Some(g) if g / loading < APPROACH_G_MARGIN => speed += 5.0,
-                _ => return speed,
-            }
-        }
-        maximum
+        approach_minimum_of(&self.flight)
     }
 
     /// The loaded G limits, already carrying the AI-only experience
@@ -5390,6 +5387,7 @@ impl AiActor {
                     employment_zone: s.employment_zone,
                     mount: s.mount,
                     slew: s.slew,
+                    bay: s.bay,
                     damage_vs_category: s.damage_vs_category,
                     store_speed: s.store_speed,
                     tracking_delay: s.tracking_delay,
@@ -5686,6 +5684,16 @@ impl AiActor {
                         | super::airfield::Phase::AirTaxi
                 )
             );
+        // The bay doors (BMB-AI, 2026-11-16): the switch every aircraft with
+        // a bay follows, so the doors of an AI F-22, F-117, B-2 or B-52 are
+        // open for its release, held a second after and then closed, and
+        // drawn, sent and recorded as a human's are.
+        if self.flight.bay_available() {
+            input.commands.push(tore_input::PilotCommand::Set(
+                tore_input::Switch::Bay,
+                self.bay_wanted,
+            ));
+        }
         // The engine-protection throttle cut is a jet's: on a helicopter the
         // throttle is the collective, and a quarter of it is a fall (a hit
         // AH-64 dived into the ground on it, slice ST-H). Opinionated (agent).
@@ -5977,6 +5985,7 @@ pub fn simple_stations(
             employment_zone: None,
             mount: [0.0; 3],
             slew: Default::default(),
+            bay: false,
             maximum_range_ft: Some(40000.0),
             energy_target: None,
         });
@@ -6010,6 +6019,7 @@ pub fn simple_stations(
             employment_zone: None,
             mount: [0.0; 3],
             slew: Default::default(),
+            bay: false,
             maximum_range_ft: Some(6000.0),
             energy_target: None,
         });
@@ -7965,6 +7975,7 @@ mod tests {
             alive: true,
             fuel_endurance_s: 3600.0,
             time_home_s: None,
+            bay_doors: 1.0,
             rotorcraft: false,
             internal_fuel_lbs: 8000.0,
             radar_emitting: true,
@@ -8454,11 +8465,88 @@ mod thought_tests;
 #[path = "mission_checkpoint.rs"]
 mod checkpoint;
 
+/// The taxi throttle the AI adds and may use (BMB-AI, 2026-11-16), as
+/// `(floor, maximum)`: the shared `(0, 0.4)`
+/// ([`super::airfield::TAXI_THROTTLE_MAX`]), unless the throttle that just
+/// balances the wheels' rolling deceleration against the military thrust at
+/// this weight is over 0.2, in which case the floor is 1.1 times that and the
+/// maximum is full. A fighter needs a twentieth of a throttle and keeps the
+/// shared law exactly; the B-52 (rolling deceleration 4.8 ft/s squared,
+/// 488,000 lb, 136,000 lbf) needs 0.53 and sat at its spot for 15 minutes
+/// with 0.4.
+pub fn taxi_throttle_of(flight: &crate::flight::State) -> (f64, f64) {
+    let config = flight.model().configuration();
+    let thrust = config.propulsion.military_thrust_lbf;
+    let base = super::airfield::TAXI_THROTTLE_MAX;
+    if thrust.is_nan() || thrust <= 0.0 {
+        return (0.0, base);
+    }
+    let weight = config.mass.empty_lbs + flight.fuel + flight.carried_lbs();
+    let balance = config.tuning.rolling_deceleration * weight / (thrust * 32.174);
+    if balance > 0.5 * base {
+        (1.1 * balance, 1.0)
+    } else {
+        (0.0, base)
+    }
+}
+
+/// [`AiActor::approach_minimum_fps`] of any flight state, ft/s.
+pub fn approach_minimum_of(flight: &crate::flight::State) -> f64 {
+    if flight.research.is_none() {
+        return 0.0;
+    }
+    let config = flight.model().configuration();
+    let altitude = flight.position[1];
+    let Some((clean_stall, maximum)) = config
+        .aerodynamics
+        .envelopes
+        .iter()
+        .find(|e| e.g == 1)
+        .and_then(|e| e.speeds(altitude))
+    else {
+        return 0.0;
+    };
+    let stall = clean_stall * 0.75;
+    let loading = 1.0
+        + (flight.fuel + flight.carried_lbs()) / config.mass.empty_lbs
+            * config.aerodynamics.loaded_elevator_percent
+            / 100.0;
+    // Where the ramp ends does not depend on the speed: found once.
+    let next = crate::flight::low_speed_ramp_end(
+        config
+            .aerodynamics
+            .envelopes
+            .iter()
+            .filter(|envelope| envelope.g > 1)
+            .map(|envelope| (envelope.g, envelope.speeds(altitude))),
+        stall,
+    );
+    let mut speed = stall;
+    while speed < maximum {
+        match next
+            .and_then(|next| crate::flight::low_speed_ceiling_on(next, speed, stall, false))
+            .map(|ceiling| ceiling.limit_g)
+        {
+            Some(g) if g / loading < APPROACH_G_MARGIN => speed += 5.0,
+            _ => return speed,
+        }
+    }
+    maximum
+}
+
 /// [`AiActor::speed_limits`] of any flight state: the minimum, maximum and
 /// corner speed the AI reads from the loaded envelopes at the aircraft's
 /// altitude. The AC-130's orbit hold plans with the same numbers as the AI
 /// gunship (docs/spec/ac130-linked-guns.md, "The orbit").
 pub fn speed_limits_of(flight: &crate::flight::State) -> SpeedLimits {
+    speed_limits_with_flaps(flight, flight.flaps)
+}
+
+/// [`speed_limits_of`] with the flaps at `flaps` (0 up, 1 full) instead of
+/// where they are: what the AI's limits would be once they moved there.
+/// The airfield sequence reads it with the flaps up (BMB-AI, 2026-11-16) to
+/// know whether the aircraft may raise them yet.
+pub fn speed_limits_with_flaps(flight: &crate::flight::State, flaps: f64) -> SpeedLimits {
     // Every row's band once: the passes below all read them.
     let rows = crate::flight::RowSpeeds::of(flight);
     let mut minimum = f64::INFINITY;
@@ -8492,7 +8580,7 @@ pub fn speed_limits_of(flight: &crate::flight::State) -> SpeedLimits {
     // current flap setting (`flight::State::minimum_level_speed`); on the
     // F/A-18D the rows alone gave 114 kt against the 140 kt it needs, and
     // finals built on it sank into the ground.
-    let level = flight.minimum_level_speed_with(&rows, flight.flaps);
+    let level = flight.minimum_level_speed_with(&rows, flaps);
     if level < maximum {
         minimum = minimum.max(level);
     }
