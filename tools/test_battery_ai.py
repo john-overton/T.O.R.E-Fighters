@@ -322,5 +322,34 @@ class F117UnarmedTests(unittest.TestCase):
             self.assertIn(name, names)
 
 
+HEAVY_LANDED = """\
+t=70289 (585.7s) Friendly 1-2 B2: phase=Rollout activity="Landing" alive=true agl=11 kt=160 x=268127 z=1423486 hdg=2 terrain_agl=11
+AI probe phases: Friendly 1-2: Waiting@0.0s Taxi@60.0s LineUp@73.3s TakeoffRoll@83.7s ClimbOut@139.9s Airborne@205.2s Marshal@250.0s Approach@250.0s Final@555.9s Rollout@585.7s TaxiClear@600.9s Parked@900.0s
+AI probe pavement: ground_samples=66500 off_pavement=0
+"""
+
+
+class HeavyBomberTests(unittest.TestCase):
+    """BMB-AI: the touchdown speed and the heavy scenarios' own checks."""
+
+    def test_the_touchdown_speed_is_read_from_the_rollout_line(self):
+        self.assertEqual(ai.touchdown_problems(HEAVY_LANDED, 175), [])
+        self.assertTrue(any("160 kt" in p for p in ai.touchdown_problems(HEAVY_LANDED, 150)))
+        self.assertTrue(any("never touched down" in p for p in ai.touchdown_problems("", 175)))
+
+    def test_a_takeoff_that_never_finished_its_climb_out_fails(self):
+        text = HEAVY_LANDED.replace("Airborne@205.2s ", "")
+        self.assertTrue(any("Airborne" in p for p in ai.heavy_takeoff(text)))
+
+    def test_the_heavy_scenarios_exist(self):
+        names = {s.name for s in ai.scenarios()}
+        for name in (
+            "ai-merged-airfield-b2-wing2", "ai-merged-airfield-b52-wing2",
+            "ai-heavy-takeoff-b2-gre-a1", "ai-heavy-takeoff-b52-gre-a1", "ai-heavy-takeoff-f117-gre-a2",
+            "ai-heavy-land-b2-ukr-a2", "ai-heavy-land-b52-ukr-a2", "ai-heavy-land-f117-ukr-a2",
+        ):
+            self.assertIn(name, names)
+
+
 if __name__ == "__main__":
     unittest.main()

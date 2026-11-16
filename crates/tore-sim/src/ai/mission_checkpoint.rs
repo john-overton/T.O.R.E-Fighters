@@ -84,6 +84,7 @@ crate::checkpoint_struct!(StationSpec {
     infrared_envelope,
     mount,
     slew,
+    bay,
 });
 
 crate::checkpoint_struct!(ObservedAttack {
@@ -253,6 +254,8 @@ impl Checkpoint for AiActor {
             lase,
             rotor,
             jet_lift,
+            bay_hold_until,
+            bay_wanted: _,
             trace: _,
             journal_memory: _,
             last_visual: _,
@@ -320,7 +323,11 @@ impl Checkpoint for AiActor {
         // The rotorcraft and jet-lift laws' memory (slice H1): integrators
         // and regime the next tick flies on.
         rotor.save(s, None)?;
-        jet_lift.save(s, None)
+        jet_lift.save(s, None)?;
+        // The doors' hold after a bay release (BMB-AI, 2026-11-16): the
+        // next step opens or closes them by it. `bay_wanted` is worked
+        // out from it and the strike and weapon service each step.
+        bay_hold_until.save(s, None)
     }
 
     fn load(l: &mut Loader<'_>, _: Option<&Self>) -> Result<Self, CheckpointError> {
@@ -386,6 +393,8 @@ impl Checkpoint for AiActor {
             lase: Checkpoint::load(l, None)?,
             rotor: Checkpoint::load(l, None)?,
             jet_lift: Checkpoint::load(l, None)?,
+            bay_hold_until: Checkpoint::load(l, None)?,
+            bay_wanted: false,
             trace: ActorTrace::default(),
             journal_memory: JournalMemory::default(),
             last_visual: Vec::new(),

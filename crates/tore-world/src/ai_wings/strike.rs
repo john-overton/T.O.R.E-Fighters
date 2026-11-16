@@ -522,6 +522,7 @@ pub(super) fn describe(
                 frag_radius_ft: f64::from(w.damage.collateral_radius.max(0)),
                 falls_free: kind == StoreKind::Laser && guided::is_glide_bomb(w),
                 flight: None,
+                bay: spec.bay,
             })
         })
         .collect()

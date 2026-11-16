@@ -401,6 +401,15 @@ pub fn station(id: AircraftId, row: usize) -> Option<[f64; 3]> {
         .map(|s| s.mount)
 }
 
+/// How far open the doors must be before a store leaves the bay: the human's
+/// release waits for it ([`crate::flight::State::bay`] at 0.95 or more), and
+/// since BMB-AI (2026-11-16) the AI's does too.
+pub const DOORS_READY: f64 = 0.95;
+/// How long the doors stay open after a bay release, 120 Hz ticks: 1 second,
+/// the human's hold (`combat::live`), so the store clears them. The doors
+/// then take a second to close.
+pub const DOORS_HOLD_TICKS: u64 = 120;
+
 /// Whether `id` has reviewed internal bays: doors that open for a release.
 pub fn reviewed(id: AircraftId) -> bool {
     let id = id.source();

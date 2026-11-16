@@ -203,5 +203,6 @@ crate::checkpoint_struct!(Strike {
     plan_dropped,
     standoff_until,
 } skip {
+    bay_demand = false,
     inputs = None,
 });

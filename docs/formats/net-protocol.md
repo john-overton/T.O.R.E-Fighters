@@ -3330,6 +3330,14 @@ again with an observer; the capture format did not change for it.
   the record cadence, a Heavy slower than its minimum level speed flies at 1.3
   times it) change simulation behaviour in the same unreleased cycle, so 84 and
   simulation version 12 cover them (v0.2.2 shipped protocol 82).
+  Still inside 84 (BMB-AI, 2026-11-16, agent decision): the AI's shared fixes for the
+  bombers change simulation behaviour without new bytes, so 84 and simulation version
+  12 cover them too: the AI lowers its flaps and keeps them down on takeoff until it is
+  fast enough to raise them, an AI aircraft with a bay opens its doors before a bay
+  release and closes them after (the door fraction was already one of the animated
+  devices every snapshot carries, so a client sees it as it sees a human's), and an AI
+  tail gunner lays its barrel with a fitted error, lag and swing rate. The AI actor
+  checkpoint gains the bay hold tick and the station records a bay flag.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

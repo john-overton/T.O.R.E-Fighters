@@ -928,6 +928,72 @@ def f117_unarmed_problems(output: str, *, shots: int | None = None) -> list[str]
     return problems
 
 
+# BMB-AI (2026-11-16): the heavy bombers and the F-117 fly the airfield sequences. The probe prints
+# each phase change with the aircraft's speed: the Rollout line is the touchdown.
+ROLLOUT_KT = re.compile(r"^t=\d+ \([\d.]+s\) \S+ \d-\d \S+: phase=Rollout activity=\"[^\"]*\" alive=true agl=-?\d+ kt=(\d+) ", re.M)
+
+
+def touchdown_problems(output: str, max_kt: int) -> list[str]:
+    """The AI touched down at `max_kt` or slower. Before BMB-AI the F-117 and the B-2 held their clean
+    minimum, 224 kt, all the way down because the flaps never came down (docs/spec/ai-airfield.md)."""
+    m = ROLLOUT_KT.search(output)
+    if not m:
+        return ["no Rollout line: the aircraft never touched down"]
+    if int(m.group(1)) > max_kt:
+        return [f"touched down at {m.group(1)} kt, want {max_kt} kt or slower"]
+    return []
+
+
+def heavy_cycle(max_touchdown_kt: int, *, taxi_in: bool = True) -> Callable[[str], list[str]]:
+    """A full cycle at a 12,000 ft field (takeoff, climb-out, land order, approach, final, rollout,
+    taxi, park), all on the pavement, touching down no faster than `max_touchdown_kt`. Without
+    `taxi_in` (the B-52, whose taxi-in leaves the pavement and has not parked by the end: known,
+    open) it ends at the rollout."""
+
+    def check(output: str) -> list[str]:
+        problems = checker(
+            ground=True, need_takeoff=True, need_landing=True,
+            allow_anomalies=() if taxi_in else ("off the pavement",),
+        )(output)
+        if taxi_in:
+            m = re.search(r"^AI probe pavement: ground_samples=(\d+) off_pavement=(\d+)$", output, re.M)
+            if not m:
+                problems.append("no 'AI probe pavement' line")
+            elif int(m.group(1)) == 0 or int(m.group(2)) > 0:
+                problems.append(f"pavement: {m.group(0)}")
+            if "Parked@" not in output:
+                problems.append("never parked")
+        return problems + touchdown_problems(output, max_touchdown_kt)
+
+    return check
+
+
+def heavy_takeoff(output: str) -> list[str]:
+    """A takeoff and climb-out that the aircraft survives: it leaves the ground, goes through its
+    climb-out into free flight and is still flying at the end (an undamaged aircraft that flew
+    into the ground is a problem the probe checks itself)."""
+    problems = checker(ground=True, need_takeoff=True, player_flies=True)(output)
+    if not re.search(r"^AI probe phases: \S+ \d-\d: .*Airborne@", output, re.M):
+        problems.append("never completed its climb-out (no Airborne phase)")
+    return problems
+
+
+def heavy_landing(max_touchdown_kt: int, *, pavement: bool = True) -> Callable[[str], list[str]]:
+    """An airborne aircraft sent home lands, rolls out, clears the runway and parks, touching down
+    no faster than `max_touchdown_kt`; with `pavement` it stays on the pavement all the way."""
+
+    def check(output: str) -> list[str]:
+        problems = checker(allow_anomalies=() if pavement else ("off the pavement",))(output)
+        if "Parked@" not in output:
+            problems.append("never parked")
+        m = re.search(r"^AI probe pavement: ground_samples=(\d+) off_pavement=(\d+)$", output, re.M)
+        if pavement and (not m or int(m.group(2)) > 0):
+            problems.append(f"pavement: {m.group(0) if m else 'no line'}")
+        return problems + touchdown_problems(output, max_touchdown_kt)
+
+    return check
+
+
 def probe(name: str, args: list[str], *, ticks: int = 7200, timeout: float = 900, check=None, expect=None, outputs=None, notes: str = "") -> Scenario:
     return Scenario(
         name=f"ai-{name}",
@@ -1613,9 +1679,47 @@ def scenarios() -> list[Scenario]:
         "--probe-wing-size", "2", "--maneuver", "takeoff",
         "--probe-wing-order", "12000:land-selected", "--separation", "200",
         "--probe-wing-only", "--probe-pavement"],
-        ticks=108000, timeout=1800, check=on_pavement(1),
+        ticks=108000, timeout=1800, check=heavy_cycle(205),
         notes="An AI F-117A at Southampton: takeoff, climb-out, land order, approach, final, rollout, "
-              "taxi clear and park, all on the pavement."))
+              "taxi clear and park, all on the pavement, touching down at 205 kt or slower (BMB-AI: 196 kt "
+              "at full fuel, 223 before; the flaps now come down)."))
+    # BMB-AI (2026-11-16): the B-2 and the B-52 fly the same full cycle at a 12,000 ft field at their
+    # full takeoff weights, and every one of the three flies the pieces at the field lengths of the
+    # retail missions (docs/spec/ai-airfield.md, "Heavy bombers"). The land order comes after the
+    # climb-out (a B-2 is airborne at 205 s, a B-52 at 200 s).
+    for aircraft, order, ticks, kt, pavement in (("b2", 30000, 150000, 175, True), ("b52", 36000, 150000, 175, False)):
+        out.append(probe(f"merged-airfield-{aircraft}-wing2", [
+            "--theater", "FRA", "--ground-start", "14",
+            "--aircraft", aircraft, "--probe-friendly-aircraft", aircraft,
+            "--probe-wing-size", "2", "--maneuver", "takeoff",
+            "--probe-wing-order", f"{order}:land-selected", "--separation", "200",
+            "--probe-wing-only", "--probe-pavement"],
+            ticks=ticks, timeout=3000,
+            check=heavy_cycle(kt, taxi_in=pavement),
+            notes=f"An AI {aircraft.upper()} at Southampton at its full weight: it taxis, takes off, climbs out with its "
+                  "flaps down until it can raise them, lands on the order at 175 kt or slower and parks. The B-52's "
+                  "taxi-in leaves the pavement for a few seconds (known, open)."))
+    # Takeoff alone: the B-2 and B-52 from Athens (GRE 1, 12,000 ft; at their full weights they need about
+    # 7,200 ft and the scripted player's own B-2 runs off the end of Mikonos' 7,246 ft), the F-117 from
+    # Mikonos (GRE 2, 7,246 ft). Each leaves the ground, climbs out and flies on.
+    for aircraft, field in (("b2", 1), ("b52", 1), ("f117", 2)):
+        out.append(probe(f"heavy-takeoff-{aircraft}-gre-a{field}", [
+            "--theater", "GRE", "--ground-start", str(field),
+            "--aircraft", aircraft, "--probe-friendly-aircraft", aircraft,
+            "--probe-wing-size", "2", "--maneuver", "takeoff", "--separation", "200", "--probe-wing-only"],
+            ticks=42000, timeout=1800, check=heavy_takeoff,
+            notes="BMB-AI: the heavy takeoff (flaps and gear kept until the speed is there) at its full weight."))
+    # Landing at Simferopol (UKR 2, 5,532 ft, the Ukraine's default field), sent home from the air, at a
+    # landing weight: B-2 60,000 lb of fuel, B-52 80,000 lb, F-117 7,000 lb.
+    for aircraft, fuel, kt in (("b2", 60000, 150), ("b52", 80000, 145), ("f117", 7000, 190)):
+        out.append(probe(f"heavy-land-{aircraft}-ukr-a2", [
+            "--theater", "UKR", "--aircraft", aircraft, "--probe-friendly-aircraft", aircraft,
+            "--probe-wing-size", "2", "--probe-wing-order", "600:bug-out", "--probe-fuel", str(fuel),
+            "--separation", "200", "--probe-wing-only", "--probe-pavement"],
+            ticks=72000, timeout=2400,
+            check=heavy_landing(kt, pavement=aircraft != "b52"),
+            notes=f"BMB-AI: an airborne {aircraft.upper()} sent home lands at Simferopol (5,532 ft) at {kt} kt or slower "
+                  f"with {fuel} lb of fuel, rolls out, clears and parks."))
     # An enemy ground start in single player (slice CL-R): Enemy Wing 1 parks
     # at Kharkiv (UKR 6, a Redfor field) while the player's wing leaves Odesa;
     # the AI pair must start on the ground and be flying at the end.

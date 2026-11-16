@@ -3485,10 +3485,11 @@ ceiling. Drawn only while the doors are off their seat.
 the doors, the weapon leaves once they are at 0.95 (116 ticks, 0.958 in the actual one-press
 probe `flight-bay-fire-f117-row4` and `-row5`), the doors stay open 1 s after the release and
 close 1 s later; a pilot-opened bay releases at once. Weapons leave from the bay's mount,
-the same point they hang from. **The AI** releases through the shared strike release, which
-does not wait for doors (`strike_readiness` reads no bay state, as for the F-22): an AI
-F-117's bay doors stay drawn shut while its bombs leave the bay, as an AI F-22's do. A fix
-(the AI holding its doors open for a release) is listed for John.
+the same point they hang from. **The AI** (since BMB-AI, 2026-11-16) opens its doors for a bay release as a human does:
+the strike asks for them 1.5 s before its computed release, holds a due release until
+`State::bay` is at 0.95, and the doors stay open 1 s after the last store and close 1 s later
+([AI strike](ai-strike.md#bay-doors-bmb-ai-2026-11-16)). Before that an AI F-117's doors stayed
+drawn shut while its bombs left the bay.
 
 **What each bay admits.** One store a bay. Retail mask `0x1100` and weight class 20: 19
 stores (`PAVEWA3`, the row's default, and `GBU29`, `GBU29P`, `GBU30`, `GBU38`, `MK82`,
@@ -3572,8 +3573,8 @@ out of it (`bay_doors::belly_hole`) while the doors are off their seat; the two 
 hinges (`belly_doors`, the F-117's helper). `Opening` gained `centre` (the bays mirror about the
 mesh axis x -0.333 ft, not 0) and `inner_depth` (a roof that rises from 4.6 ft over the outer wall to
 9.6 ft over the inner, under the top skin); an equal rail end means no rail. The lining takes the
-shape's own bay-plate grey. Timing, hold and closing are the F-22's, and the AI's doors stay shut
-while its bombs leave, as for the F-22 and F-117.
+shape's own bay-plate grey. Timing, hold and closing are the F-22's, and since BMB-AI (2026-11-16)
+the AI's doors follow them too.
 
 **Clearances, feet, doors open** (`TORE_STORES_PREVIEW_BAYCLEAR=1`, scenario
 `render-b2-bay-clearance`; positive is clear, negative is how far the drawn store reaches into the
@@ -3705,9 +3706,9 @@ and under 3 ft up.
 (tick 116, 0.958, in `flight-bay-fire-b52-row3`, `-row5` and `-row6`), the doors stay 1 s and close
 1 s later. A pilot-opened bay releases at once. Pylon: from the beam with the doors shut
 (`flight-bay-fire-b52-pylon-row7`, an 18 Mk 82 load). Live fire: `flight-livefire-b52-slot1` to
-`-slot5` (the gun 1,242 rounds, the 12 Harpoons, three never-loaded bay rows). **AI:** the AI's
-release does not wait for doors and its bay doors stay drawn shut (the F-22's and the F-117's
-precedent; `an_ai_bomb_leaves_a_b52_bay_grid_inside_the_centred_opening`).
+`-slot5` (the gun 1,242 rounds, the 12 Harpoons, three never-loaded bay rows). **AI:** since BMB-AI (2026-11-16)
+the AI opens the doors for its release and closes them after, as a human does; the shared
+release itself is unchanged (`an_ai_bomb_leaves_a_b52_bay_grid_inside_the_centred_opening`).
 
 **Signature.** `State::bay_available()` is true for the B-52 (rows in `bays::STATIONS`), and the
 open-bay term (1.5 times at full travel) applies by itself; it reaches the RCS page only (as for
