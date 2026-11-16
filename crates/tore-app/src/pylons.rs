@@ -192,7 +192,11 @@ pub fn swung<'a>(
     // F111-5 (2026-11-16): a store on a fixed wing pylon holds the wing to its
     // sweep limit; the flight's display flag says so, and so do the stores.
     let held = state.wing_hold || wing_held(stores, id);
-    let turn = swing::wing_turn_carrying(id, state.speed, state.flaps, state.gear, held) as f32;
+    // F111-8 (2026-11-16): the wing's present turn when it moves at a sweep
+    // rate and the frame carries it, else the schedule's.
+    let turn = state.wing_turn.unwrap_or_else(|| {
+        swing::wing_turn_carrying(id, state.speed, state.flaps, state.gear, held)
+    }) as f32;
     let mut posed = stores.to_vec();
     for store in &mut posed {
         // The wing carries a fixed pylon too (it does not swivel it back).

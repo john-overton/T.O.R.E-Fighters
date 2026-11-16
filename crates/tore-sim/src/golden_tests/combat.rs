@@ -650,6 +650,7 @@ fn configuration(stations: Vec<(Weapon, u16, bool)>) -> Configuration {
         sight: None,
         designator_pods: vec![],
         fixed_pods: vec![],
+        wing_sweep: None,
     }
 }
 

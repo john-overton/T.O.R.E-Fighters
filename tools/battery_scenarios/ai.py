@@ -1702,7 +1702,9 @@ def scenarios() -> list[Scenario]:
     # Takeoff alone: the B-2 and B-52 from Athens (GRE 1, 12,000 ft; at their full weights they need about
     # 7,200 ft and the scripted player's own B-2 runs off the end of Mikonos' 7,246 ft), the F-117 from
     # Mikonos (GRE 2, 7,246 ft). Each leaves the ground, climbs out and flies on.
-    for aircraft, field in (("b2", 1), ("b52", 1), ("f117", 2)):
+    # The F-111F (F111-8, 2026-11-16) joins them at its 99,999 lb default load: its flaps-up minimum there
+    # is about 234 kt, above the 190.5 kt line, so the flaps-down climb-out wait applies to it as well.
+    for aircraft, field in (("b2", 1), ("b52", 1), ("f117", 2), ("f111", 1)):
         out.append(probe(f"heavy-takeoff-{aircraft}-gre-a{field}", [
             "--theater", "GRE", "--ground-start", str(field),
             "--aircraft", aircraft, "--probe-friendly-aircraft", aircraft,
@@ -1711,7 +1713,8 @@ def scenarios() -> list[Scenario]:
             notes="BMB-AI: the heavy takeoff (flaps and gear kept until the speed is there) at its full weight."))
     # Landing at Simferopol (UKR 2, 5,532 ft, the Ukraine's default field), sent home from the air, at a
     # landing weight: B-2 60,000 lb of fuel, B-52 80,000 lb, F-117 7,000 lb.
-    for aircraft, fuel, kt in (("b2", 60000, 150), ("b52", 80000, 145), ("f117", 7000, 190)):
+    # The F-111F lands with 16,000 lb of fuel and its default stores (about 87,600 lb gross, F111-8).
+    for aircraft, fuel, kt in (("b2", 60000, 150), ("b52", 80000, 145), ("f117", 7000, 190), ("f111", 16000, 175)):
         out.append(probe(f"heavy-land-{aircraft}-ukr-a2", [
             "--theater", "UKR", "--aircraft", aircraft, "--probe-friendly-aircraft", aircraft,
             "--probe-wing-size", "2", "--probe-wing-order", "600:bug-out", "--probe-fuel", str(fuel),

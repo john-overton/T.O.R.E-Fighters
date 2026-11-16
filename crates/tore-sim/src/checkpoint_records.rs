@@ -185,6 +185,10 @@ crate::checkpoint_struct!(FixedPod {
     rack
 });
 
+// `wing_sweep` (F111-8, 2026-11-16) is coded: a swing wing with a sweep rate
+// moves its racks, and so every swivelling store's release point, by it, so a
+// checkpoint taken mid-sweep must restore it to step on identically. SIMULATION_VERSION
+// 12 is unreleased, so the field was added with no bump.
 crate::checkpoint_struct!(Configuration {
     ecm,
     system_damage,
@@ -212,6 +216,7 @@ crate::checkpoint_struct!(Configuration {
     sight,
     designator_pods,
     fixed_pods,
+    wing_sweep,
 } shared { sensors });
 
 #[cfg(test)]
@@ -448,6 +453,7 @@ mod tests {
             sensors: profiles(),
             sight: None,
             designator_pods: vec![],
+            wing_sweep: None,
             fixed_pods: vec![FixedPod {
                 hardpoint: 3,
                 record: "PAVESPK.SEE".into(),

@@ -686,6 +686,14 @@ pub struct Configuration {
     /// Fixed external pod equipment on hardpoints (EQ-2): drawn, never
     /// loaded or jettisoned.
     pub fixed_pods: Vec<FixedPod>,
+    /// A swing wing with a sweep rate ([`super::swing::SwingSpec::sweep_rate_dps`],
+    /// the F-111F's) keeps its present turn here, radians from the drawn
+    /// pose, once the host has set it ([`Self::set_wing_flight`]). `None`
+    /// before the first tick and always for an aircraft with no rate. It moves
+    /// the swivelling and carried racks, so it is checkpointed (F111-8,
+    /// 2026-11-16: SIMULATION_VERSION 12 is unreleased, no bump) and a restore
+    /// mid-sweep steps on identically; it is not on the wire.
+    pub wing_sweep: Option<f64>,
 }
 impl Configuration {
     /// [`Self::set_wing_turn`] with the turn this aircraft's own swing spec
@@ -696,9 +704,26 @@ impl Configuration {
     /// `fixed_stores` says a store hangs on one of the aircraft's fixed wing
     /// pylons ([`Self::fixed_stores_carried`]): the F-111F's wing is held to 26
     /// degrees or less then (F111-5, 2026-11-16).
+    ///
+    /// An aircraft whose spec has a sweep rate (the F-111F's, F111-8) moves
+    /// its wing toward that turn by one tick's worth of the rate
+    /// ([`super::swing::SwingSpec::step_turn`]); the first tick sets it there
+    /// at once. The host calls this once a
+    /// tick. Every other aircraft takes the schedule's turn the same tick, as
+    /// before.
     pub fn set_wing_flight(&mut self, speed_fps: f64, flaps: f64, gear: f64, fixed_stores: bool) {
         if let Some(spec) = super::swing::spec(self.aircraft) {
-            self.set_wing_turn(spec.turn_carrying(speed_fps, flaps, gear, fixed_stores));
+            let target = spec.turn_carrying(speed_fps, flaps, gear, fixed_stores);
+            let turn = if spec.sweep_rate_dps.is_some() {
+                let turn = self.wing_sweep.map_or(target, |present| {
+                    spec.step_turn(present, target, crate::flight::DT)
+                });
+                self.wing_sweep = Some(turn);
+                turn
+            } else {
+                target
+            };
+            self.set_wing_turn(turn);
         }
     }
     /// Whether a store hangs on a fixed wing pylon that holds the sweep to its
@@ -1462,6 +1487,7 @@ impl Configuration {
             sight,
             designator_pods: vec![],
             fixed_pods,
+            wing_sweep: None,
             fixed_external_equipment_lbs,
             tanks,
             gun_pods,
@@ -2685,6 +2711,14 @@ impl Ownship {
     pub fn set_wing_flight(&mut self, speed_fps: f64, flaps: f64, gear: f64) {
         let held = self.wing_held();
         self.config.set_wing_flight(speed_fps, flaps, gear, held);
+    }
+    /// The wing's present turn from the drawn pose, radians, for an aircraft
+    /// whose swing spec has a sweep rate and whose host has set it
+    /// ([`Configuration::wing_sweep`]); `None` otherwise, when the drawing
+    /// takes the schedule's turn. The presentation reads it
+    /// ([`crate::flight::State::wing_turn`]).
+    pub fn wing_turn(&self) -> Option<f64> {
+        self.config.wing_sweep
     }
     /// Whether this aircraft's swing wing is held to its fixed-store sweep
     /// limit now: a store hangs on a fixed wing pylon
@@ -8149,7 +8183,19 @@ mod tests {
         assert_eq!(config.stations[0].rack.turn, free as f32);
         assert_eq!(config.stations[1].rack.turn, free as f32);
         assert!((F111F.sweep_degrees(free) - 72.5).abs() < 1e-9);
+        // F111-8: the wing goes to the hold at its sweep rate, 3 degrees a
+        // second, not in one tick: 46.5 degrees from the schedule's 72.5.
         config.set_wing_flight(fps, 0., 0., true);
+        let one_tick = free - 3_f64.to_radians() * crate::flight::DT;
+        assert_eq!(config.stations[0].rack.turn, one_tick as f32);
+        let mut ticks = 1;
+        while config.wing_sweep != Some((26_f64 - 16.).to_radians()) {
+            config.set_wing_flight(fps, 0., 0., true);
+            ticks += 1;
+            assert!(ticks < 2_000, "the wing never reached the hold");
+        }
+        // 46.5 degrees at 3 degrees a second: 15.5 s of 120 ticks.
+        assert!((1_858..=1_862).contains(&ticks), "{ticks} ticks");
         let held = (26_f64 - 16.).to_radians();
         for station in &config.stations {
             assert_eq!(station.rack.turn, held as f32);
@@ -8170,6 +8216,77 @@ mod tests {
                 "{now:?} against {expected:?}"
             );
         }
+    }
+
+    /// F111-8: the wing's sweep rate belongs to the F-111F alone. The Tornado
+    /// takes the schedule's turn the very tick it changes (a 700 knot jump from
+    /// a parked wing, flaps coming out, the lot) and keeps no sweep state; the
+    /// F-111F's first tick sets the wing at the schedule, and it then moves 3
+    /// degrees a second, in either direction, with the aircraft's flaps.
+    #[test]
+    fn the_sweep_rate_is_the_f111fs_and_the_tornado_follows_its_schedule_the_same_tick() {
+        use crate::combat::{
+            hardpoints::Rack,
+            swing::{self, F111F, FPS_PER_KNOT, TORNADO},
+        };
+        let mut config = fixture(false).own().configuration().clone();
+        let mut wing = config.stations[0].clone();
+        wing.weapon.source = "MK82.JT".into();
+        wing.count = 2;
+        wing.internal = false;
+        wing.mount = [8.0, -8.3, 3.0];
+        wing.rack = Rack {
+            location: 4,
+            paired: true,
+            ..Rack::default()
+        };
+        config.stations = vec![wing];
+        config.tanks.clear();
+        config.hardpoint_slots = vec![None, None, None, None, None, None, None, Some(0)];
+        config.aircraft = tore_formats::aircraft::AircraftId::Tornado;
+        let mut last = f64::NAN;
+        for (kt, flaps) in [
+            (0., 0.),
+            (700., 0.),
+            (100., 0.),
+            (452., 0.3),
+            (452., 1.),
+            (800., 0.),
+        ] {
+            let fps = kt * FPS_PER_KNOT;
+            config.set_wing_flight(fps, flaps, 0., false);
+            let target = TORNADO.turn(fps, flaps, 0.);
+            assert_eq!(config.stations[0].rack.turn, target as f32);
+            assert_eq!(swing::wing_turn(fps, flaps), target);
+            assert_eq!(config.wing_sweep, None, "the Tornado keeps no sweep state");
+            last = target;
+        }
+        assert!(last > 0.);
+        // The F-111F, here with its only station on a swivelling row (row 5).
+        config.aircraft = tore_formats::aircraft::AircraftId::F111;
+        config.hardpoint_slots = vec![None, None, None, None, None, Some(0), None, None];
+        let fast = 650. * FPS_PER_KNOT;
+        assert_eq!(config.wing_sweep, None);
+        config.set_wing_flight(fast, 0., 0., false);
+        let swept = F111F.turn(fast, 0., 0.);
+        assert_eq!(config.wing_sweep, Some(swept), "the first tick sets it");
+        assert_eq!(config.stations[0].rack.turn, swept as f32);
+        // Flaps out: the target is spread, the wing starts back at 3 degrees
+        // a second (0.025 degrees a tick).
+        config.set_wing_flight(fast, 1., 0., false);
+        let tick = 3_f64.to_radians() * crate::flight::DT;
+        assert_eq!(config.wing_sweep, Some(swept - tick));
+        assert_eq!(config.stations[0].rack.turn, (swept - tick) as f32);
+        // A second of it: 3 degrees back.
+        for _ in 1..120 {
+            config.set_wing_flight(fast, 1., 0., false);
+        }
+        let back = config.wing_sweep.unwrap();
+        assert!((swept - back - 3_f64.to_radians()).abs() < 1e-9);
+        // With no state (the first tick) the next tick is the schedule.
+        config.wing_sweep = None;
+        config.set_wing_flight(fast, 1., 0., false);
+        assert_eq!(config.wing_sweep, Some(F111F.min_turn()));
     }
 
     /// TOR-5: a store on the Tornado's swivelling inner wing row rides the
@@ -8752,6 +8869,7 @@ mod tests {
                 sight: None,
                 designator_pods: vec![],
                 fixed_pods: vec![],
+                wing_sweep: None,
             },
             true,
         )

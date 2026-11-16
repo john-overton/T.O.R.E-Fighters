@@ -867,6 +867,87 @@ mod tests {
         assert_eq!(text(&copy), text(&state));
     }
 
+    /// F111-8 (2026-11-16): the F-111F's wing sweeps at 3 degrees a second, and
+    /// the sweep state moves its swivelling and carried racks, so it is coded
+    /// in the configuration's checkpoint record. An F-111F held to 26 degrees
+    /// by an outer store at 650 knots drops the store, is checkpointed 100
+    /// ticks into the sweep to 72.5 degrees, and the restored copy and the
+    /// uninterrupted run have the same sweep state and the same rack turns on
+    /// every tick until the sweep ends.
+    #[test]
+    fn a_mid_sweep_checkpoint_restores_the_f111_wing_and_its_racks_identically() {
+        use crate::combat::{
+            hardpoints::Rack,
+            swing::{F111F, FPS_PER_KNOT},
+        };
+        let mut state = super::super::tests::fixture(false);
+        {
+            let own = state.own_mut();
+            let mut outer = own.config.stations[0].clone();
+            outer.weapon.source = "MK82.JT".into();
+            outer.count = 2;
+            outer.internal = false;
+            outer.mount = [15.46, -3.31, 0.5];
+            outer.rack = Rack {
+                location: 4,
+                paired: true,
+                ..Rack::default()
+            };
+            let mut inner = outer.clone();
+            inner.mount = [8.3, -3.31, 1.54];
+            own.config.stations = vec![outer, inner];
+            own.config.tanks.clear();
+            own.config.aircraft = AircraftId::F111;
+            // Station 0 is hardpoint row 7 (fixed, holds the sweep), station 1
+            // row 5 (swivels).
+            own.config.hardpoint_slots =
+                vec![None, None, None, None, None, Some(1), None, Some(0), None];
+            own.ammo = vec![2, 2];
+            own.ever_loaded = vec![true, true];
+        }
+        let fps = 650. * FPS_PER_KNOT;
+        let held = (26_f64 - 16.).to_radians();
+        state.own_mut().set_wing_flight(fps, 0., 0.);
+        assert_eq!(state.own().config.wing_sweep, Some(held));
+        // The last outer store leaves: the wing starts for 72.5 degrees.
+        state.own_mut().ammo[0] = 0;
+        for _ in 0..100 {
+            state.own_mut().set_wing_flight(fps, 0., 0.);
+        }
+        let mid = state.own().config.wing_sweep.unwrap();
+        assert!(mid > held && mid < F111F.max_turn(), "mid-sweep: {mid}");
+        let mut copy: State = round_trip(&state, &Models::default()).unwrap();
+        assert_eq!(
+            copy.own().config.wing_sweep.map(f64::to_bits),
+            Some(mid.to_bits()),
+            "the sweep state is coded"
+        );
+        let turns = |s: &State| -> Vec<u32> {
+            s.own()
+                .config
+                .stations
+                .iter()
+                .map(|station| station.rack.turn.to_bits())
+                .collect()
+        };
+        let mut ticks = 0;
+        while state.own().config.wing_sweep != Some(F111F.max_turn()) {
+            state.own_mut().set_wing_flight(fps, 0., 0.);
+            copy.own_mut().set_wing_flight(fps, 0., 0.);
+            ticks += 1;
+            assert!(ticks < 2_000, "the sweep never ended");
+            assert_eq!(
+                copy.own().config.wing_sweep.map(f64::to_bits),
+                state.own().config.wing_sweep.map(f64::to_bits),
+                "sweep state at tick {ticks}"
+            );
+            assert_eq!(turns(&copy), turns(&state), "rack turns at tick {ticks}");
+        }
+        assert_eq!(copy.own().config.wing_sweep, Some(F111F.max_turn()));
+        // 46.5 degrees from the hold at 3 degrees a second is 1,860 ticks; 100 are behind.
+        assert!((1_755..=1_765).contains(&ticks), "{ticks} ticks");
+    }
+
     fn shooter() -> Launcher {
         Launcher {
             position: [0., 1000., 0.],

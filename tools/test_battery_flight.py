@@ -80,7 +80,7 @@ class TakeoffAndLandingTests(unittest.TestCase):
         # MiG-31's and Mirage 2000's liftoff and approach figures (M25-8, M31-8,
         # M2K-8). The F-16A has no per-aircraft speed target: its record equals
         # the F-16C's (F16A-6).
-        self.assertEqual(set(flight.APPROACH_TARGET) | {"x31"}, set(flight.AIRCRAFT) | {"mig25", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc", "b52", "b2", "f117"})
+        self.assertEqual(set(flight.APPROACH_TARGET) | {"x31"}, set(flight.AIRCRAFT) | {"mig25", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc", "b52", "b2", "f117", "f111"})
         self.assertIn("mig25", flight.VARIETY_AIRCRAFT)
         self.assertIn("mig25", flight.LIFTOFF_AIRCRAFT)
         self.assertIn("mig25", flight.LIFTOFF_TARGET)
@@ -155,6 +155,15 @@ class TakeoffAndLandingTests(unittest.TestCase):
             self.assertIn("f117", getattr(flight, key))
         self.assertNotIn("f117", flight.TAKEOFF_TICKS_MAX)
         self.assertEqual(flight.approach_fuel("f117"), round(0.65 * 18500))
+        # The F-111F (F111-8, 2026-11-16): the ordinary takeoff allowance and its own windows.
+        for key in ("VARIETY_AIRCRAFT", "LIFTOFF_AIRCRAFT"):
+            self.assertIn("f111", getattr(flight, key))
+        for key in ("LIFTOFF_TARGET", "APPROACH_TARGET", "INTERNAL_FUEL_LB", "KNOWN_LIFTOFF", "KNOWN_APPROACH", "STATIONS"):
+            self.assertIn("f111", getattr(flight, key))
+        self.assertNotIn("f111", flight.TAKEOFF_TICKS_MAX)
+        self.assertEqual(flight.KNOWN_LIFTOFF["f111"], 171.8)
+        self.assertEqual(flight.KNOWN_APPROACH["f111"], 166.2)
+        self.assertEqual(flight.approach_fuel("f111"), round(0.65 * 32663))
 
     def test_overweight_and_stuck(self):
         text = TAKEOFF.replace("gross_lb=41838", "gross_lb=50000")

@@ -15798,6 +15798,9 @@ is drawn with (`pylons::wing_held`). `f111_animation::sweep_turn` and `pylons::s
 wing and the stations on it. When the last store leaves rows 7 and 8 the wing goes on to the
 schedule's sweep **at once** (the sweep has no rate, SWING-1: it is a pure function of speed), a
 jump of up to 46 degrees in one tick at 650 knots. Stated in the open items.
+Update (F111-8, 2026-11-16): the F-111F's wing now has a sweep rate, 3 degrees a second
+([F-111F flight review](#f-111f-flight-review-f111-8-2026-11-16)), so that release takes up to 15.5
+seconds, not one tick; item (3) below is closed for the player's own aircraft.
 
 **The bay (decision 5).** The shape has no bay (F111-0), so it is cut and lined as the B-52's
 is, from the forward belly plate `3132` (x +/-3 units, y 13 to 34, z -6 rising to -5: a 3.44 ft
@@ -16059,3 +16062,237 @@ Cheat-only, before and after (F111-5's values). The relabel and the sensor revie
 
 Provenance: sensor rows, HUD module, art and the template records retail; the radar and jammer assignments, the label text, the glass test, the eye entry
 and the scenarios fitted (agent decisions, 2026-11-16); strike class and HUD binding the coordinator's first pass. No retail bytes committed.
+
+## F-111F flight review (F111-8, 2026-11-16)
+
+Validation, fitting and the sweep rate, slice F111-8 (bomber batch B), Claude Sonnet (sonnet-high).
+The F-111F flies the hybrid adapter's `variety` configuration built from `F111.PT` and
+`F111.SH` with BMB-B2's corrections (29,120 / 50,200 lbf, tank 32,663 lb, flows 5 and 35
+lb/s) and the record's own envelopes (1 G row 788 kt at sea level, 1,434 kt at 36,000 ft),
+G rows (-2 to +5), maximum takeoff 100,000 lb and the A-6's loaded-control block
+(`loadedDrag` 60, `loadedElevator` 41). Raw probe output is local:
+`.local/m3-aircraft/checks/F111-8/` (`before/`, `after/`, `run_perf.sh`, `run_probes.sh`,
+`battery.txt`). "Before" is the repository at 34848491 (F111-6/7), "after" is with the
+sweep rate below. This is implementation mode.
+
+### What changed, and what did not
+
+**One change: the wing's sweep rate** (fitted, agent decision; the brief asked for it).
+SWING-1 gave every spec `sweep_rate_dps: None`, so the F-111F's wing was a pure function of
+speed, flaps and the 26 degree store hold, and when the last fixed-pylon store left at 650
+kt it went from 26 to 72.5 degrees in one tick (46.5 degrees). The F-111F's spec now has
+**3 degrees a second**, so the full 16 to 72.5 degrees takes 18.8 seconds and the release
+from the hold takes 15.5. **No published sweep time was found** (the Wikipedia article, the
+game's own Jane's text `F111.INF`, aerocorner, migflug, pilotinstitute, the MIT 16.885 course
+report and the NASA reports that came up give a range only; searched 2026-11-16): the figure
+is the brief's "about 15 to 20 seconds", an unsourced estimate, so the rate is a one-line
+constant (`swing::F111F.sweep_rate_dps`).
+
+- **Where the state lives.** `Configuration::wing_sweep: Option<f64>` (new, radians from the
+  drawn pose). `Configuration::set_wing_flight`, the one call the host makes each tick for
+  a human's ownship and for every AI actor, takes the schedule's turn as the target and
+  moves the state toward it by `SwingSpec::step_turn` (the rate times the 1/120 s tick,
+  landing exactly on the target). The swivelling and carried racks take the state's turn,
+  so a store leaves from where the moving wing has put it. With no rate (`None`) the
+  function is the old one: `step_turn` returns the target, no state is kept, the Tornado
+  and every other spec are bit for bit what they were (test
+  `only_the_f111f_has_a_sweep_rate_and_the_tornado_takes_its_turn_at_once`,
+  `the_sweep_rate_is_the_f111fs_and_the_tornado_follows_its_schedule_the_same_tick`).
+- **Checkpoints: carried, so a restore mid-sweep is exact (no version bump).** The sweep
+  state moves the swivelling and carried racks, so it changes where a store leaves: it is
+  coded in `Configuration`'s checkpoint record (`wing_sweep`, an `Option<f64>`, in the field
+  list of `checkpoint_records.rs`; the racks' own `turn` stays skipped, it is rewritten from
+  the state every tick). A restored configuration has the sweep it was saved with, so the
+  restored copy and the uninterrupted run have the same sweep and the same rack turns on
+  every tick (test `a_mid_sweep_checkpoint_restores_the_f111_wing_and_its_racks_identically`:
+  held at 26 degrees at 650 kt, the outer store leaves, checkpoint 100 ticks into the sweep,
+  both copies stepped to 72.5 degrees, bit-identical each tick). This covers the human's
+  ownship and the AI's configurations (`ai_wings_checkpoint.rs` codes them as shared
+  records, by content: a changing turn is a new record, only while a sweep runs) and the
+  handoff copies (the whole configuration is cloned). SIMULATION_VERSION 12 and
+  PROTOCOL_VERSION 84 are unreleased and already cover this cycle, so the field was added
+  with no bump (a checkpoint from before this slice, which has no field, is not read: the
+  format has no defaults, and none exist outside this unreleased cycle).
+- **The wire: not needed.** The host is authoritative for combat (a client holds the
+  session's copy of the mission and draws what the host sends), so the sweep is host state
+  and the clients draw it from their own simulation; host migration and standby hosts get
+  it through the checkpoint above. No wire field was added; a peer's drawing of another
+  aircraft's wing takes the schedule's turn (below).
+- **Presentation.** `flight::State::wing_turn: Option<f64>` (new, display-only like
+  `wing_hold`, never coded: `write_exact` ignores it): the world sets it on the frame's
+  presented clone from the ownship's state (`frame.rs`), and `f111_animation::sweep_turn`
+  and `pylons::swung` read it, falling back to the schedule when absent. So the drawn
+  wing and the drawn stores of **the aircraft the player flies** follow the moving turn.
+  **An AI F-111F, another peer's, or a replay's rebuilt state is drawn at the schedule's
+  turn** (their poses carry no turn): the AI actor's own racks do move at the rate, so a
+  store leaves from the moving wing while the drawing shows the schedule; a transient of
+  a few seconds after a release from the hold. Carrying the turn on the pose
+  (`AircraftPose`, 62 constructors, and the replay conversion) is the follow-up.
+
+### What is wrong, what was fitted
+
+**Nothing in the flight model was clearly wrong and citable, so no flight term was
+fitted** (the B2-8 and F117-8 bar): every figure with a source is inside it or the source
+is weak, and the one real gap (sea-level speed) is a trade between two published figures
+that the A-6 template's `loadedDrag` splits. Before and after probes are identical
+(`cmp` on all 13 performance logs and all 20 headless probe logs). The reasoning:
+
+- **Top speed at height.** The model settles at Mach 2.10 (1,206 kt) at 36,000 ft clean at
+  80,144 lb, Mach 2.28 at 63,481 lb, and Mach 1.94 at the 99,999 lb default load, thrust
+  limited (the corrected 50,200 lbf is the real total). The game's own Jane's text
+  (`F111.INF`, F-111A) says Mach 2.2 at height; Wikipedia's F-111F infobox says 1,434 kn
+  (Mach 2.5), which is the record's 1 G edge and a design figure. No fit.
+- **Top speed at sea level.** 663 kt (Mach 1.00) clean at 80,144 lb, 718 kt (Mach 1.09) at
+  63,481 lb, 611 kt (0.92) at the default load, against Mach 1.2 (795 kn) in Wikipedia and
+  `F111.INF`. The record's own 1 G edge (788 kt) is the published figure, so the shortfall
+  is the drag law: the shared drag is the thrust at the edge speed times the square of
+  speed over the edge, times `1 + loading x loadedDrag / 100`, and `loading` counts fuel
+  (0.69 at a full tank), so the A-6's `loadedDrag` 60 adds 41 percent to the drag at a
+  full tank. Setting it to 0 would put the sea-level speed on the edge (788 kt) and also
+  put the speed at height on the 1,434 kt edge (Mach 2.5), above the game's own Mach 2.2
+  and the real operational Mach 2.2 to 2.3. **Not fitted**: it trades one published figure
+  for another; the question is for John (Open item 1).
+- **Climb.** The 400 KEAS then Mach 0.90 schedule at full thrust, clean 80,144 lb: 5,000 ft
+  in 32 s, 10,000 ft in 53 s, 20,000 ft in 93 s, 36,000 ft in 150 s, 50,000 ft in 200 s;
+  the best sustained climb on the fighter schedule is 25,776 ft/min (Mach 0.8) to 30,945
+  ft/min (Mach 0.9) at 55,000 ft; peak specific excess power at sea level 283 ft/s (17,000
+  ft/min) at 80,144 lb and 391 ft/s (23,460 ft/min) at 63,481 lb. The published rate of
+  climb is 25,890 ft/min (Wikipedia, F-111F), unstated weight: the light figure is 9
+  percent under it. No fit.
+- **Takeoff and landing.** At the default load (99,999 lb, 100,000 maximum) the ground
+  start rotates at 141.4 kt and lifts off at 171.9 kt after 2,812 ft (GRE 1; 171.8 kt after
+  2,944 ft on UKR 1, the battery's field), 120.6 kt after 1,301 ft with
+  `--retail-stall-speeds`; the scripted landing at 87,586 lb (16,000 lb of fuel and the
+  stores) approaches at 161.9 kt, touches down at 155.3 kt and stops 2,348 ft later, and
+  the battery's approach (21,231 lb of fuel, 92,817 lb) flies the model's cap, 166.2 kt
+  (0.85 times the record's 195.5 kt landing limit), touching down at 164.8 kt with a 2,612
+  ft rollout on the 5,532 ft Simferopol runway. Real: "T-O and landing run under 915 m (3,000 ft)" (`F111.INF`, F-111A);
+  3,300 ft takeoff and 3,950 ft landing distances (Aerocorner, unstated weight and a
+  distance not a run); 115 kt approach with the wings spread, light (MIT 16.885 report on
+  the F-111, which calls its own figures estimates). The runs are under 3,000 ft and the
+  speeds are the shared weight-scaled stall rule (the model's 118.5 kt flapped 1 G stall
+  at the empty weight times the square root of 2.1 gross over empty), the same rule that
+  gives 140 to 167 kt for the other bombers: no fit, the windows are loose.
+- **Range and fuel flow.** Cruise at 470 kt and 36,000 ft burns 1.33 lb/s: 3,205 nautical
+  miles from the 32,663 lb tank (trimmed, throttle 0.31). `F111.INF` says "over 2,750
+  nautical miles with maximum internal fuel" (F-111A), Wikipedia 3,210 nmi ferry range
+  with drop tanks: the model is above the Jane's figure by 17 percent, in the band an
+  unreviewed cruise drag would give. The flows themselves (5 lb/s dry, 35 lb/s with the
+  afterburner, 0.62 and 2.51 lb per lbf per hour) **could not be checked against the
+  TF30-P-100**: no specific fuel consumption was found (Wikipedia "Pratt & Whitney TF30",
+  all-aero and the museum pages list thrust only; searched 2026-11-16), so BMB-B2's
+  fitted values stand, their stated analog the Turbo-Union RB.199 (0.598 dry, 2.5 reheat).
+- **Turns and roll.** Sustained level turn with the speed held, clean 80,144 lb: 3.5 to
+  3.6 G (74 degrees of bank, the model's cap) from 300 to 500 kt at 1,000 ft (12.8 to 7.7
+  degrees a second), 2.9 to 3.6 G at 15,000 ft (8.5 to 7.0), 2.3 to 2.9 G at 30,000 ft
+  (5.7 to 5.0). The roll probe reaches the shared 180 degrees a second cap. No real roll rate
+  was found (the F-111 rolls with spoilers and differential tailerons; sources that came
+  up say only that the spoilers are locked out at full sweep). No fit.
+- **Speed brake.** `airBrakesDrag` 256 gives 0.35 G of extra deceleration at 403 kt, 0.54
+  G at 564 kt and 0.69 G at 725 kt at 1,000 ft (a fighter's brake on an 80,000 lb jet; the
+  rig draws the dorsal plates as the brake, F111-3). No published figure; not changed.
+- **The 26 degree hold.** The default load has the AGM-65G on the outer pylon (row 7) and
+  the Mk 82 six-pack on row 8, so the wing is held at 26 degrees at any speed. The flight
+  model does not read it (no sweep term exists for any aircraft): the default load
+  takeoff (above), approach and top speed are the figures above, which include the
+  default load's 24,105 lb of stores. The real jet with a 26 degree wing is limited far
+  below the 1,111 kt (Mach 1.94 at 36,000 ft, afterburner, the default load) the model
+  allows. A flight limit while the stores are on (a thrust or speed cap from the
+  hold) would need the stores in the flight state (a shared change, wire and checkpoint);
+  Open item 3.
+
+### Before, after and real
+
+Probe: `performance_probe` on the corrected record and `--headless-flight`. Weights: "full"
+80,144 lb (clean, 32,663 lb tank), "default" 99,999 lb (the Load Ordnance default,
+24,105 lb of stores, 28,413 lb tank), "light" 63,481 lb (16,000 lb of fuel, clean). "Before" and
+"after" agree on every row (the flight model did not change); the second column is the
+change that did.
+
+| Quantity | Model (before = after) | Real (source) |
+| --- | --- | --- |
+| Wing sweep, release from the 26 degree hold at 650 kt | before: 26 to 72.5 degrees in one tick; after: 15.5 s | 16 to 72.5 degrees (Wikipedia, `F111.INF`); sweep time not found; 18.8 s for the full range is the brief's estimate |
+| Level top speed, sea level, afterburner (full / default / light) | 663 kt (M1.00) / 611 kt (M0.92) / 718 kt (M1.09) | Mach 1.2, 795 kn (Wikipedia; `F111.INF`) |
+| Level top speed, 36,000 ft, afterburner (full / default / light) | 1,206 kt (M2.10) / 1,111 kt (M1.94) / 1,307 kt (M2.28) | Mach 2.2 (`F111.INF`); 1,434 kn, Mach 2.5 (Wikipedia, the record's edge) |
+| Military power, 36,000 ft (full) | 918 kt (M1.60) | none found |
+| Time to 5,000 / 10,000 / 20,000 / 36,000 ft, 400 KEAS to M0.90 (full / default / light) | 32 / 53 / 93 / 150 s; 41 / 69 / 126 / 202 s; 26 / 42 / 71 / 112 s | none found |
+| Best sustained climb, fighter schedule, full | 25,776 ft/min (Mach 0.8) to 30,945 ft/min (Mach 0.9), at 55,000 ft | 25,890 ft/min (Wikipedia, unstated weight) |
+| Peak specific excess power, sea level, afterburner (full / light) | 283 / 391 ft/s (17,000 / 23,460 ft/min) | 25,890 ft/min as above |
+| Takeoff, default load, GRE 1 (UKR 1) | rotation 141.4 kt, liftoff 171.9 kt, 2,812 ft (171.8 kt, 2,944 ft); retail stall 120.6 kt, 1,301 ft | under 3,000 ft (`F111.INF`); 3,300 ft (Aerocorner) |
+| Approach, landing, 87,586 lb (battery, 92,817 lb) | approach 161.9 kt, touchdown 155.3 kt, roll 2,348 ft (166.2 kt, 164.8 kt, 2,612 ft) | under 3,000 ft (`F111.INF`); 3,950 ft landing distance (Aerocorner); 115 kt, light (MIT report, estimate) |
+| Cruise 470 kt, 36,000 ft, trimmed | 1.33 lb/s, 3,205 nmi from the tank | over 2,750 nmi with max internal fuel (`F111.INF`, F-111A) |
+| Fuel at full thrust | 5 lb/s dry (108.9 min), 35 lb/s afterburner (15.6 min) | TF30-P-100 specific fuel consumption not found |
+| Sustained turn, 15,000 ft, 450 kt, speed held (full) | 3.64 G, 8.5 deg/s | none found |
+| Speed brake, extra deceleration, 1,000 ft, 564 kt | 0.54 G | none found |
+| Thrust to weight at 80,144 lb / 99,999 lb | 0.63 / 0.50 | 0.61 (Wikipedia) |
+| G limit | -2 to +5 (retail, kept) | +7.33 (Wikipedia) |
+
+Sources read 2026-11-16: Wikipedia "General Dynamics F-111 Aardvark" (specifications,
+F-111F; the fixed pylons "could not be used with the wings fully swept"), Wikipedia "Pratt &
+Whitney TF30", all-aero.com, Aerocorner "General Dynamics F-111 Aardvark", Skybrary
+"F111", the MIT OCW 16.885J F-111 report, and the game's own Jane's text `F111.INF`
+(retail media, not committed). Real figures are for comparison only.
+
+### The AI heavy-class laws
+
+BMB-AI's laws key on the aircraft's flaps-up minimum level speed, not its class (the F-111F is
+Attack by BMB-B1's override). The F-111F's flaps-up minimum at the default load is about 234
+kt (the flaps-down 175.8 kt from `--headless-flight` over the 0.75 flap factor), above the 190.5
+kt line, at 87,586 lb about 219 kt, and about 187 kt at 63,481 lb: so the flaps-down climb-out
+wait and the final-approach flaps rule apply to it at its heavy weights and not at a landing
+weight. The two new scenarios pass cleanly (below); the AI laws were not changed.
+
+- `ai-heavy-takeoff-f111-gre-a1`: AI wing of two from Athens (12,000 ft) at the default load:
+  taxi 20.0 s, line up 30.1 s, takeoff roll 39.2 s, climb-out 77.2 s, **airborne 114.9 s**,
+  flies on; the probe checksum `6fdb08303d2a0f50` is the same before and after the sweep rate.
+- `ai-heavy-land-f111-ukr-a2`: sent home from the air at Simferopol (5,532 ft) with 16,000
+  lb of fuel and the stores, **touchdown 162 kt**, rolls out, clears, parks at 508.4 s,
+  0 ticks off the pavement.
+
+### Scenarios
+
+`flight-liftoff-f111`, `flight-liftoff-retail-f111`, `flight-approach-f111` join
+`flight.py` (`LIFTOFF_AIRCRAFT`, `LIFTOFF_TARGET` 150 to 190 kt, `APPROACH_TARGET` 140 to 175 kt,
+`INTERNAL_FUEL_LB` 32,663, `KNOWN_LIFTOFF` 171.8, `KNOWN_APPROACH` 166.2, the ordinary
+takeoff allowance); `flight-variety-f111` already existed. The windows are fitted, agent
+decisions, around the recorded figures and the weak published ones above, and
+`tools/test_battery_flight.py` pins the new entries. `tools/battery_scenarios/ai.py` adds
+the two AI scenarios above (`tools/test_battery_ai.py` lists them).
+
+### Checks
+
+`cargo fmt --all -- --check` clean; `cargo clippy --workspace --all-targets --locked -- -D
+warnings` clean; `cargo test --locked --workspace --no-fail-fast` 7,886 passed, 0 failed,
+108 ignored (7,882 before: four new tests, the checkpoint one among them, and the AI F-111F
+hold test now follows the rate); `--headless-flight 1200 --aircraft f111` 551.4 kt level at 5,006 ft, no crash, 0
+non-finite; the ground-start takeoff (UKR 1, default load) liftoff 171.8 kt after 2,944 ft;
+battery (`--jobs 2 --windows 1`) every `*f111*` scenario 28 of 28 (rerun after the checkpoint field), every `flight-approach-*`,
+`flight-liftoff-*` and `ai-heavy-*` 92 of 92; `python3 -B -m unittest discover -s tools` 587
+tests OK (skipped 5); `tools/check_docs.py` passed (382 files). Logs:
+`.local/m3-aircraft/checks/F111-8/`. Not run: the other battery lanes, `check_assets`, a
+windowed look at the moving wing (frames), mission and net batteries.
+
+Provenance: the sweep rate and the battery windows are fitted (agent decisions
+2026-11-16); the real figures are public pages and the game's own Jane's text, for
+comparison only; no retail bytes committed. The schedule (250 to 650 kt, flaps hold, 26
+degree hold) is unchanged.
+
+### Open for John
+
+1. **Sea-level speed against Mach at height.** The A-6 template's `loadedDrag` 60 puts
+   the F-111F at Mach 1.0 to 1.1 at sea level (published 1.2) and Mach 2.1 to 2.3 at height
+   (published 2.2, Wikipedia 2.5). Fit `loadedDrag` down (sea level to the edge, height
+   to Mach 2.5) or keep the split?
+2. **The sweep time.** 3 degrees a second (18.8 s) is the brief's estimate; no source.
+   A cited figure replaces the constant.
+3. **A flight limit under the 26 degree hold.** The wing is held at 26 degrees by the
+   default load's outer stores but the model still flies Mach 1.9 at height; a cap needs
+   the stores in the flight state (shared change). Or drop the hold from the default load.
+4. **Other aircraft's wing drawing.** An AI F-111F's, a peer's and a replay's drawn wing
+   take the schedule's turn, not the moving one (a carry on the pose and in the replay
+   conversion is the follow-up).
+5. **The roll rate (shared 180 degrees a second), the fuel flows (no TF30 figure), the G
+   limit (+5 against the real +7.33) and the roll of the real jet.**
+6. **The default load starts at 99,999 lb and approaches at 162 to 166 kt**, against 115 to
+   150 kt in the weak real figures (landing weights 40,000 to 55,000 lb): a landing at
+   the Load Ordnance default is a heavy landing, as the B-2's and B-52's are.

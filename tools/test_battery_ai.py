@@ -347,6 +347,7 @@ class HeavyBomberTests(unittest.TestCase):
             "ai-merged-airfield-b2-wing2", "ai-merged-airfield-b52-wing2",
             "ai-heavy-takeoff-b2-gre-a1", "ai-heavy-takeoff-b52-gre-a1", "ai-heavy-takeoff-f117-gre-a2",
             "ai-heavy-land-b2-ukr-a2", "ai-heavy-land-b52-ukr-a2", "ai-heavy-land-f117-ukr-a2",
+            "ai-heavy-takeoff-f111-gre-a1", "ai-heavy-land-f111-ukr-a2",
         ):
             self.assertIn(name, names)
 

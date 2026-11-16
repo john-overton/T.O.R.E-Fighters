@@ -34,6 +34,10 @@
 //! identity too. A swivelling station carries its own aircraft's spec
 //! ([`rack_spec`]), so the F-111F's rows 5 and 6 swivel about the F-111F's
 //! pivot and the Tornado's stay on the Tornado's.
+//! Update (F111-8, 2026-11-16): the F-111F's spec has a sweep rate (3 degrees a
+//! second, fitted): its wing's turn is a state that follows the schedule at
+//! that rate ([`SwingSpec::step_turn`]) and the Tornado's, with none, still
+//! follows it the same tick.
 use tore_formats::aircraft::AircraftId;
 
 /// Shape units to feet at the Tornado's header scale 2 (2/3 ft a unit).
@@ -155,9 +159,12 @@ pub struct SwingSpec {
     /// Whether the landing gear, as well as the flaps, holds the wing spread
     /// (the Tu-26: "spread to 300 kt and whenever flaps or gear are out").
     pub gear_holds_spread: bool,
-    /// How fast the real wing sweeps, degrees a second, when a source gives
-    /// it. None has: the drawn sweep is a pure function of speed, not a state
-    /// that moves at a rate.
+    /// How fast the wing sweeps, degrees a second, when the aircraft has a
+    /// rate. `None` (the Tornado's, and every other spec's but the F-111F's):
+    /// the sweep is a pure function of speed, flaps and gear and follows it
+    /// the same tick. `Some`: the wing's turn is a state that moves toward
+    /// that function at this rate ([`SwingSpec::step_turn`]); the host keeps
+    /// it ([`super::live::Configuration::set_wing_flight`]).
     pub sweep_rate_dps: Option<f64>,
     /// Where the wing panel is placed against the retail shape.
     pub placement: Placement,
@@ -233,6 +240,24 @@ impl SwingSpec {
         match self.max_sweep_with_fixed_stores {
             Some(limit) if fixed_stores => turn.min((limit - self.rest_sweep).to_radians()),
             _ => turn,
+        }
+    }
+    /// The wing's turn one tick (`dt` seconds) on: `current`, moved toward
+    /// `target` by at most [`Self::sweep_rate_dps`] degrees a second. With no
+    /// rate the wing is there at once and this is `target`, exactly
+    /// (bit for bit: the Tornado's path), whatever `current` was.
+    pub fn step_turn(&self, current: f64, target: f64, dt: f64) -> f64 {
+        match self.sweep_rate_dps {
+            None => target,
+            Some(rate) => {
+                let step = rate.to_radians() * dt;
+                let gap = target - current;
+                if gap.abs() <= step {
+                    target
+                } else {
+                    current + step * gap.signum()
+                }
+            }
         }
     }
     /// The speed in feet per second at which the schedule has swept the wing
@@ -572,7 +597,12 @@ pub const F111F: SwingSpec = SwingSpec {
         to_knots: 650.,
     },
     gear_holds_spread: false,
-    sweep_rate_dps: None,
+    // F111-8 (2026-11-16, fitted): 3 degrees a second, so the full 56.5 degree
+    // sweep takes 18.8 s (the brief's "about 15 to 20 s"; no published rate or
+    // sweep time was found, docs/formats/aircraft-variety.md, "F-111F flight
+    // review"). It matters when the last fixed-pylon store leaves and the wing
+    // goes from its 26 degree hold to the schedule (up to 46.5 degrees at 650 kt).
+    sweep_rate_dps: Some(3.),
     placement: Placement::NONE,
     swivel_rows: &[5, 6, 10, 11],
     fixed_store_rows: &[7, 8],
@@ -1252,5 +1282,55 @@ mod tests {
         let tornado =
             |held| wing_turn_carrying(AircraftId::Tornado, 600. * FPS_PER_KNOT, 0., 0., held);
         assert_eq!(tornado(true), tornado(false));
+    }
+
+    /// F111-8: the F-111F's wing has a rate, 3 degrees a second (18.8 s for
+    /// the full 56.5 degrees); every other spec, the Tornado's included, has
+    /// none, and `step_turn` then returns the target itself, bit for bit,
+    /// whatever the wing was.
+    #[test]
+    fn only_the_f111f_has_a_sweep_rate_and_the_tornado_takes_its_turn_at_once() {
+        use crate::flight::DT;
+        for spec in ALL {
+            assert_eq!(
+                spec.sweep_rate_dps.is_some(),
+                spec.name == "F-111F",
+                "{}",
+                spec.name
+            );
+        }
+        for (present, target) in [(0., 0.9), (0.9, 0.), (0.3, 0.3), (-0.1, 1.2345678901234567)] {
+            assert_eq!(
+                TORNADO.step_turn(present, target, DT).to_bits(),
+                target.to_bits()
+            );
+        }
+        // The Tornado's turn is the same function of speed and flaps it was.
+        for kt in [0., 250., 304., 452., 600., 900.] {
+            for flaps in [0., 0.3, 1.] {
+                let target = TORNADO.turn_carrying(knots(kt), flaps, 0., false);
+                assert_eq!(
+                    TORNADO.step_turn(7., target, DT).to_bits(),
+                    wing_turn(knots(kt), flaps).to_bits()
+                );
+            }
+        }
+        // The F-111F moves 3 degrees a second toward the target, either way,
+        // and lands exactly on it.
+        let step = 3_f64.to_radians() * DT;
+        let spread = F111F.min_turn();
+        let swept = F111F.max_turn();
+        assert_eq!(F111F.step_turn(spread, swept, DT), spread + step);
+        assert_eq!(F111F.step_turn(swept, spread, DT), swept - step);
+        assert_eq!(F111F.step_turn(swept, swept, DT), swept);
+        assert_eq!(F111F.step_turn(swept - step / 2., swept, DT), swept);
+        let mut turn = spread;
+        let mut ticks = 0;
+        while turn != swept {
+            turn = F111F.step_turn(turn, swept, DT);
+            ticks += 1;
+        }
+        // 56.5 degrees at 3 degrees a second is 18.83 s of 120 ticks.
+        assert!((2_258..=2_262).contains(&ticks), "{ticks} ticks");
     }
 }

@@ -2420,3 +2420,37 @@ before and after table with its sources is in
   125.4 kt. Landing (`--maneuver land`, GRE 1): 270,000 lb approach 140.3 kt, touchdown
   131.6 kt, rollout 4,131 ft; 404,000 lb approach 166.2 kt (the cap), touchdown 153.7 kt,
   rollout 5,056 ft.
+
+## F-111F validation, 2026-11-16
+
+F111-8. Measured with `crates/tore-sim/examples/performance_probe.rs` (`PROBE_CLIMB=KEAS,MACH`,
+`PROBE_SPEEDS_KT`, `PROBE_HOLD_SPEED`, `PROBE_CRUISE=ALT:KT`, `PROBE_ONLY=brake`) on the
+corrected record at 80,144 lb (clean, 32,663 lb tank), 99,999 lb (the default load) and
+63,481 lb (16,000 lb of fuel), and with `tore-app --headless-flight`. The scripts are
+`.local/m3-aircraft/checks/F111-8/run_perf.sh` and `run_probes.sh` (`before` and `after`);
+the numbers, their sources and the real figures are in the
+[F-111F flight review](../formats/aircraft-variety.md#f-111f-flight-review-f111-8-2026-11-16).
+
+- The flight model is unchanged: 13 performance logs and 20 headless probe logs are
+  byte-for-byte the same before and after the sweep rate.
+- Level top speed, afterburner, clean 80,144 lb: 663 kt (Mach 1.00) at sea level, 1,115 kt
+  (1.89) at 30,000 ft, 1,206 kt (2.10) at 36,000 ft, 1,152 kt (2.01) at 40,000 ft; military
+  power 505 kt at sea level, 918 kt (1.60) at 36,000 ft. At 63,481 lb: 718 kt (1.09), 1,307
+  kt (2.28). At 99,999 lb: 611 kt (0.92), 1,111 kt (1.94).
+- Climb, full thrust, 400 KEAS to Mach 0.90, 80,144 lb: 5,000 ft in 32 s, 10,000 in 53, 20,000 in
+  93, 36,000 in 150, 50,000 in 200 (53,854 ft highest); 99,999 lb 41 / 69 / 126 / 202 s (49,077
+  ft highest); 63,481 lb 26 / 42 / 71 / 112 s. Fighter schedule, afterburner, 80,144 lb: best
+  sustained 25,776 ft/min (Mach 0.8) and 30,945 ft/min (Mach 0.9) at about 55,000 ft.
+- Takeoff (`--maneuver takeoff`, ground start, GRE airport 1, the 99,999 lb default load):
+  rotation 141.4 kt, liftoff 171.9 kt after 2,812 ft; `--retail-stall-speeds` 120.6 kt after
+  1,301 ft. Landing (`--maneuver land --flight-fuel 16000`, 87,586 lb): approach 161.9 kt,
+  touchdown 155.3 kt, stop 2,348 ft past touchdown.
+- Cruise at 470 kt and 36,000 ft: 1.33 lb/s, 3,205 nautical miles from the tank. Full
+  thrust: 5 lb/s (108.9 min) dry, 35 lb/s (15.6 min) afterburning.
+- Sustained level turn, speed held, 80,144 lb: 3.5 to 3.6 G, 74 degrees of bank, 12.8 to
+  7.7 degrees a second at 1,000 ft from 300 to 500 kt; 2.9 to 3.6 G at 15,000 ft; 2.3 to
+  2.9 G at 30,000 ft.
+- The wing sweep: release from the 26 degree hold at 650 kt takes 15.5 s (1,860 ticks); the
+  full 16 to 72.5 degrees 18.8 s (test results: `the_sweep_rate_is_the_f111fs_...` in
+  `combat/live.rs`, `only_the_f111f_has_a_sweep_rate_...` in `combat/swing.rs`,
+  `an_ai_f111_holds_its_wing_...` in `tore-world`).

@@ -7774,11 +7774,21 @@ mod tests {
                 }
             }
         }
-        let free = step(&mut wings, &mut combat);
-        assert!(
-            (free - (56.5_f64).to_radians() as f32).abs() < 2e-3,
-            "{free}"
-        );
+        // F111-8 (2026-11-16): it leaves the hold at the sweep rate, 3 degrees a
+        // second (0.025 degrees a tick), not in one tick.
+        let first = step(&mut wings, &mut combat);
+        let tick = (3_f64.to_radians() * flight::DT) as f32;
+        assert!((first - held - tick).abs() < 1e-6, "{first} after {held}");
+        // ... and gets to the schedule's full 72.5 degrees (56.5 degrees of
+        // turn) in about 15.5 s more.
+        let mut free = first;
+        let mut ticks = 1;
+        while free < (56.5_f64).to_radians() as f32 - 2e-3 {
+            free = step(&mut wings, &mut combat);
+            ticks += 1;
+            assert!(ticks < 2_000, "the wing never left the hold: {free}");
+        }
+        assert!((1_850..=1_870).contains(&ticks), "{ticks} ticks");
     }
 
     #[test]

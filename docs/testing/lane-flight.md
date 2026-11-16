@@ -183,6 +183,19 @@ load, an internal fuel of 18,500 lb (the approach flies 65 percent, 12,025 lb) a
 ordinary takeoff allowance. Evidence: the
 [F-117 flight review](../formats/aircraft-variety.md#f-117-flight-review-f117-8-2026-11-15).
 
+Update (F111-8, 2026-11-16): the F-111F (`f111`) joins the liftoff, retail-stall and approach
+scenarios of `flight.py` (it was already in `VARIETY_AIRCRAFT`): fitted windows 150 to 190 kt
+liftoff and 140 to 175 kt approach, recorded 171.8 kt after 2,944 ft at the 99,999 lb default
+load and 166.2 kt (the model's cap) for the approach at 65 percent fuel (21,231 lb), an internal fuel of 32,663 lb and the
+ordinary takeoff allowance. Two AI scenarios join the BMB-AI set, `ai-heavy-takeoff-f111-gre-a1`
+(a wing of two at Athens at the default load: taxi, takeoff, climb-out to `Airborne`, flying on) and
+`ai-heavy-land-f111-ukr-a2` (sent home with 16,000 lb of fuel and the stores: lands at 175 kt or
+slower at Simferopol, rolls out, parks on the pavement); the F-111F's flaps-up minimum is above
+190.5 kt at those weights, so the BMB-AI flaps law and climb-out wait apply and pass unchanged.
+The wing's sweep rate (3 degrees a second) is covered by Rust tests (`swing`, `live`,
+`ai_wings`, `f111_animation`, and `live_checkpoint` for a restore mid-sweep stepping on identically), not by a scenario: no check line shows the sweep. Evidence: the
+[F-111F flight review](../formats/aircraft-variety.md#f-111f-flight-review-f111-8-2026-11-16).
+
 `flight-variety-gcurve-*` sweeps the full-stick G limit of the seven transports
 and airliners from 100 to 750 kt at 5,000 ft (`--maneuver gcurve`). Once the
 limit has passed 1.4 G it must not fall below 1.3 G, through the top speed and

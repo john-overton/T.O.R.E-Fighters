@@ -211,9 +211,16 @@ pub(crate) fn rudder(address: usize) -> bool {
 /// degrees), radians: the speed schedule of [`F111F`] (spread to 250 knots,
 /// fully swept at 650), held spread by the flaps, and held to 26 degrees or
 /// less while a store hangs on a fixed outer pylon (`state.wing_hold`, F111-5).
-/// This does not invent a flight law; it only draws the wing.
+/// This does not invent a flight law; it only draws the wing. Update (F111-8,
+/// 2026-11-16): the wing moves at the spec's sweep rate (3 degrees a second),
+/// so a frame whose flight carries the wing's present turn
+/// (`state.wing_turn`, set by the world for the aircraft it flies) draws that;
+/// a state without one (a replay, another aircraft's pose) draws the
+/// schedule's turn.
 pub(crate) fn sweep_turn(state: &State) -> f64 {
-    F111F.turn_carrying(state.speed, state.flaps, state.gear, state.wing_hold)
+    state.wing_turn.unwrap_or_else(|| {
+        F111F.turn_carrying(state.speed, state.flaps, state.gear, state.wing_hold)
+    })
 }
 
 /// One taileron angle in radians, positive lowering the trailing edge: pitch
@@ -745,6 +752,21 @@ mod tests {
     }
     fn knots(s: &mut State, kt: f64) {
         s.speed = kt * 1.68781;
+    }
+
+    /// F111-8 (2026-11-16): a frame whose flight carries the wing's present turn
+    /// (the world sets it for the aircraft combat moves at the sweep rate) is
+    /// drawn at that turn; without one the drawing takes the schedule's.
+    #[test]
+    fn the_wing_is_drawn_at_the_present_turn_when_the_frame_carries_one() {
+        let mut s = state();
+        knots(&mut s, 650.);
+        let schedule = sweep_turn(&s);
+        assert!((F111F.sweep_degrees(schedule) - 72.5).abs() < 1e-9);
+        s.wing_turn = Some(F111F.max_turn() * 0.5);
+        assert_eq!(sweep_turn(&s), F111F.max_turn() * 0.5);
+        s.wing_turn = None;
+        assert_eq!(sweep_turn(&s), schedule);
     }
 
     #[test]

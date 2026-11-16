@@ -273,6 +273,16 @@ impl World {
         {
             presented.to_mut().wing_hold = true;
         }
+        // F111-8 (2026-11-16): a swing wing with a sweep rate is drawn where
+        // combat has moved it to, not at the schedule's turn.
+        if let Some(turn) = self
+            .combat
+            .state
+            .ownship(cockpit.plane.0)
+            .and_then(|own| own.wing_turn())
+        {
+            presented.to_mut().wing_turn = Some(turn);
+        }
         if config.aircraft == tore_formats::aircraft::AircraftId::Ac130
             && let Some(devices) = picture.player.devices.as_ref()
         {

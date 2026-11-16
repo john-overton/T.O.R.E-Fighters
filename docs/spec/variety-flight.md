@@ -933,6 +933,36 @@ Not changed: the top-speed edges (515 kt at 36,000 ft against a published 560 to
 the 55,000 ft ceiling (published 50,000), the G rows and the roll limit. Engines stay
 clamped to four in the live configuration (see the review).
 
+## F-111F (F111-8, 2026-11-16)
+
+The F-111F flies the `variety` configuration built from `F111.PT` with the BMB-B2 values
+(29,120 / 50,200 lbf, tank 32,663 lb, 5 / 35 lb/s) and the record's own envelopes, G rows
+and A-6 loaded-control block. **No flight term was fitted**: the model's figures are inside
+the game's own Jane's text and the public figures where those exist (takeoff and landing
+runs under 3,000 ft, Mach 2.2 at height, range over 2,750 nautical miles; sea-level speed
+is the one figure 10 to 17 percent low, and it is reported, not changed). The review and
+the before and after table are in the
+[F-111F flight review](../formats/aircraft-variety.md#f-111f-flight-review-f111-8-2026-11-16).
+
+The one new rule is the wing's **sweep rate**, which is presentation and carry only (no
+force reads the sweep, as for the Tornado):
+
+- **3 degrees a second** (fitted, agent decision; no published sweep time was found), so
+  the full 16 to 72.5 degrees takes 18.8 seconds. The commanded sweep is still the speed
+  schedule (spread to 250 kt, fully swept at 650 kt, flaps hold the wing out, a store on
+  a fixed outer pylon holds it to 26 degrees), but the wing's turn is now a state that
+  moves toward it at that rate each tick, so a wing released from the 26 degree hold at
+  650 kt goes to 72.5 degrees in 15.5 seconds, not in one tick. The stores on the
+  swivelling inner pylons and the drawn wing follow it.
+- The first tick of a mission sets the wing at the schedule's turn. The sweep state is part
+  of the configuration's checkpoint record (a restore mid-sweep steps on identically: same
+  sweep and same release points every tick; SIMULATION_VERSION 12 is unreleased, no bump)
+  and is not on the wire: the host simulates it and clients draw. The drawn wing of the
+  aircraft the player flies, and its stores, show the moving turn; an aircraft drawn from
+  a replay's rebuilt state or from another peer's pose is drawn at the schedule's turn.
+- Every other swing-wing aircraft (the Tornado, the B-1B, the Tu-160, the Tu-26) has no
+  rate, and its wing takes the schedule's turn the same tick, bit for bit.
+
 ## Unknown evidence
 
 Retail hover power, altitude ceiling, nozzle travel/rate, rotor torque, lift
