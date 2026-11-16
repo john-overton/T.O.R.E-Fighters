@@ -271,8 +271,9 @@ impl Control {
             Self::Brake => Expectation::Unknown,
             // B52-3: the interim open-bay plates (word 7a20) are drawn at the bay
             // fraction (B52-5 replaces them with the fitted bay and doors).
-            // B2-3: the same for the B-2's interim bay plates (word 6486; B2-5
-            // replaces them with real bay doors).
+            // B2-3: the same for the B-2's interim bay plates (word 6486).
+            // Update (B2-5, 2026-11-15): the B-2's are real bay doors, cut from
+            // its belly polygon and door panels, with a lined recess.
             Self::Bay
                 if matches!(
                     id,

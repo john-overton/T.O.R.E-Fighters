@@ -390,8 +390,12 @@ KNOWN_APPROACH.update({"f15e": 156.1})
 KNOWN_LIFTOFF["mf1"] = 121.0
 KNOWN_APPROACH["mf1"] = 127.6
 # The B-2's measured liftoff and approach at its default load (B2-8, 2026-11-15).
-KNOWN_LIFTOFF["b2"] = 158.1
-KNOWN_APPROACH["b2"] = 166.2
+KNOWN_LIFTOFF["b2"] = 155.2
+KNOWN_APPROACH["b2"] = 167.5
+# Update (B2-5, 2026-11-15, agent decision): the default load is now the two Mk 82 bays alone, 64 bombs
+# (32,000 lb; a bay holds the Mk 82 or the Paveway III, not both), not 48,000 lb of bay bombs: liftoff is
+# 155.2 kt after 7,232 ft (was 158.1 kt after 7,987 ft) and the scripted approach 167.5 kt (was 166.2).
+# The windows (140 to 165 kt and 140 to 170 kt) hold; the recorded values follow the new ones.
 # The F-117A's measured liftoff and approach at its default load (F117-8, 2026-11-15).
 KNOWN_LIFTOFF["f117"] = 177.2
 KNOWN_APPROACH["f117"] = 166.2
@@ -1324,7 +1328,53 @@ def slot_scenarios() -> list[Scenario]:
             timeout=300,
             notes="F-117 bay release: the doors open before the GBU-27 leaves and close after it, as the F-22's do.",
         ))
+    # B2-5 (2026-11-15): the B-2's two fitted Mk 82 bays through the same actual one-press release
+    # (rows 5 and 6; the doors open to 0.95 before the bomb leaves, then close), and a 16-press
+    # ripple: the bays alternate, each empties its bottom tier first, front to back.
+    for row in (5, 6):
+        out.append(Scenario(
+            name=f"flight-bay-fire-b2-row{row}", lane="flight",
+            args=["--stores-preview", "{work}/frames"], window=True,
+            env={"TORE_STORES_PREVIEW_AIRCRAFT": "b2",
+                 "TORE_STORES_PREVIEW_FIRE": str(row)},
+            expect=[f"Stores firing: b2 row={row} PASS"],
+            outputs=[f"frames/b2-fire-row{row}-t000.png", f"frames/b2-fire-row{row}-t400.png"],
+            timeout=300,
+            notes="B-2 bay release: the doors open before the Mk 82 leaves and close after it, as the F-22's do.",
+        ))
+    out.append(Scenario(
+        name="flight-bay-ripple-b2", lane="flight",
+        args=["--stores-preview", "{work}/frames"], window=True,
+        env={"TORE_STORES_PREVIEW_AIRCRAFT": "b2",
+             "TORE_STORES_PREVIEW_FIRE": "5",
+             "TORE_STORES_PREVIEW_PRESSES": "16"},
+        expect=["Stores firing: b2 row=5 PASS", "Stores ripple: b2"],
+        check=b2_ripple_problems,
+        timeout=300,
+        notes="16 presses through both B-2 bays: one bomb a press, the bays alternate, the bottom tier goes first, front to back.",
+    ))
     return out
+
+
+def b2_ripple_problems(output: str) -> list[str]:
+    """The B-2 ripple alternates its bays and takes each bay's bottom tier first, front to back (B2-5)."""
+    rows = [(int(m.group(1)), tuple(float(v) for v in m.group(2).split()))
+            for m in re.finditer(r"Stores ripple: b2 tick=\d+ station=(\d+) at \[([-\d. ]+)\]", output)]
+    problems = []
+    if len(rows) != 16:
+        return [f"{len(rows)} releases, expected 16"]
+    stations = [row[0] for row in rows]
+    if stations != [0, 1] * 8:
+        problems.append(f"the bays did not alternate: {stations}")
+    for bay in (0, 1):
+        points = [p for station, p in rows if station == bay]
+        if len({round(p[1], 3) for p in points}) != 1:
+            problems.append(f"bay {bay}: the first eight were not one tier")
+        if not points[0][2] > points[-1][2]:
+            problems.append(f"bay {bay}: the ripple did not run front to back")
+    if rows[0][1][0] >= 0 or rows[1][1][0] <= 0:
+        problems.append("the first release was not the left bay, the second the right")
+    return problems
 
 
 def check_jettison(ac: str, slot: int):
@@ -2054,7 +2104,7 @@ def capture_scenarios() -> list[Scenario]:
     # AL1 and refuses a ground start ("an enemy airfield").
     for ac in AIRCRAFT:
         add(f"groundstart-{ac}", ["--free-flight", "--aircraft", ac, "--theater", "UKR", "--ground-start", "9", "--flight-view", "1", "--flight-look", "150,-15", "--flight-zoom", "1.5"])
-    for ac in ("f22", "f22n", "f117"):
+    for ac in ("f22", "f22n", "f117", "b2"):
         for bay in ("0", "0.5", "1"):
             add(f"bay-{ac}-{bay}", ["--free-flight", "--aircraft", ac, "--flight-view", "1", "--flight-look", "150,-30", "--flight-bay", bay])
     return out

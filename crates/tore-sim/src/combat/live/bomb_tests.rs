@@ -133,6 +133,74 @@ fn horizontal(a: Vector, b: Vector) -> f64 {
     (a[0] - b[0]).hypot(a[2] - b[2])
 }
 
+/// B2-5: the B-2's two Mk 82 bays through the shared release. One press is
+/// one bomb; the bays alternate, each bay's bottom tier goes before the next
+/// tier up, and each bomb leaves from the place it hung at.
+#[test]
+fn a_b2_ripple_alternates_its_bays_and_empties_each_from_the_bottom_tier_up() {
+    use tore_formats::aircraft::{AircraftId, Hardpoint};
+    let row = Hardpoint {
+        location: 3,
+        flags: 0x1100,
+        position: [0; 3],
+        store: None,
+        count: 32,
+        weight_class: 160,
+    };
+    let mut config = fixture(false).own().configuration().clone();
+    config.stations = [5, 6]
+        .map(|hardpoint| {
+            let (mount, rack) =
+                crate::combat::hardpoints::placed_on(AircraftId::B2, hardpoint, &row, None);
+            // The drawn Mk 82's real size (7.3 ft, 1.27 ft fins) sets the grid.
+            let mut weapon = mk82();
+            weapon.shape = Some("MK82.SH".into());
+            Station {
+                weapon,
+                mount,
+                count: 32,
+                internal: false,
+                rack,
+            }
+        })
+        .to_vec();
+    let mut s = State::new(config, true).unwrap();
+    let launcher = pass(5_000., 450., 0.);
+    let mut bays = Vec::new();
+    for press in 0..20 {
+        let station = press % 2;
+        let before = u32::from(s.own().rounds(station));
+        let want = s.own().configuration().stations[station].next_release_point(before);
+        step(&mut s, true, launcher);
+        step(&mut s, false, launcher);
+        assert_eq!(s.own().selected, 1 - station, "press {press}");
+        assert_eq!(u32::from(s.own().rounds(station)), before - 1);
+        let bomb = s.projectiles.last().expect("a bomb left");
+        // It left the place it hung at (it has flown a tick since).
+        // Where it left, before its first step (scatter bends the path after).
+        let at = [0, 1].map(|k| bomb.previous[k] - launcher.position[k]);
+        assert!(
+            (at[0] - want[0]).abs() < 0.4,
+            "press {press}: {at:?} want {want:?}"
+        );
+        assert!(
+            (at[1] - want[1]).abs() < 0.4,
+            "press {press}: {at:?} want {want:?}"
+        );
+        bays.push(want);
+    }
+    // 20 presses: ten a bay, the bay's first eight the bottom tier.
+    for bay in 0..2 {
+        let own: Vec<_> = bays.iter().skip(bay).step_by(2).collect();
+        assert_eq!(own.len(), 10);
+        assert!(own[..8].iter().all(|p| (p[1] - own[0][1]).abs() < 1e-9));
+        assert!(own[8][1] > own[0][1] + 1.2 && (own[8][1] - own[9][1]).abs() < 1e-9);
+        // Front to back within the tier.
+        assert!(own[0][2] > own[7][2]);
+    }
+    assert!(bays[0][0] < 0. && bays[1][0] > 0.);
+}
+
 #[test]
 fn a_released_bomb_follows_the_shared_flight_model() {
     let mut s = carrying(mk82(), 4, [0.; 3]);

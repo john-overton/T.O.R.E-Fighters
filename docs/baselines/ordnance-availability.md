@@ -919,3 +919,26 @@ ordnance audit: 2 novelty records, 240 Cheat-only placements, refused without Ch
 The `menus-ordnance-availability` expected line reads 4,784. Earlier sections stay as
 written for their own states.
 
+
+## B-2 weapon bays: grid, alternatives and four refusals (B2-5, 2026-11-15)
+
+Opinionated (John, 2026-11-15, decision 21). The B-2's four bay rows (`B2.PT` rows 5 to 8) are
+fitted magazine stations with a grid
+([B-2 weapon bays](../spec/stores-on-pylons.md#b-2-weapon-bays-b2-5-2026-11-15)); the pair flag is
+cleared (flags `0x1104` to `0x1100`), a bay's Mk 82 row and Paveway III row are alternatives, and
+the Paveway rows start empty. Every bay's capacity is capped to what fits under its roof (GBU-38 24, CBU-87 18,
+Mk 84 8, GBU-27 4; the default Mk 82 32). The two Mk 82 rows refuse four stores that reach more than 0.3 ft
+through the roof (`GBU29`, `GBU29P`, `GBU30`, `MK20`). One pin moved on purpose:
+
+| Pin | From | To | Why |
+| --- | ---: | ---: | --- |
+| Weapon placements | 4,784 | 4,776 | `B2.PT` 86 to 78 (four stores refused on each of two rows) |
+| Aircraft, recovered stations, tank placements, pods, Cheat-only, records | 48, 20, 233, 80, 240, 82 / 9 | unchanged | |
+
+```text
+ordnance B2.PT: 4 source rows, 0 optional weapon rows, 78 compatible weapon placements, 0 tank placements; defaults and restart passed; catalog 22 normal, 83 Cheat
+ordnance audit: 48 aircraft, 20 recovered weapon stations, 4776 weapon placements, 233 tank placements, 82 weapon and 9 tank records; passed
+```
+
+The `menus-ordnance-availability` expected line reads 4,776. Earlier sections quoting 4,784 stay as
+written for their own states. Load Ordnance on the B-2: loading a row empties the other row of its bay.

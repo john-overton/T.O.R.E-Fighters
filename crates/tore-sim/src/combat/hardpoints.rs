@@ -313,7 +313,10 @@ pub struct Rack {
     /// outermost edge beside the record is, the height of that edge's
     /// middle]. The store's centre line sits on it (John 2026-10-13: no
     /// rail below the tip). `None` for other stations, or when the model was
-    /// not read.
+    /// not read. On a [`Location::Magazine`] the same field carries the
+    /// bay's grid floor instead, [usable width, usable length] feet ([`Self::grid`]);
+    /// a magazine has no tip, and the field is already carried by checkpoints,
+    /// recordings and the session.
     pub tip: Option<[f32; 2]>,
     /// How far the swinging wing has turned from spread, radians, on a
     /// swivelling wing station ([`super::swing::swivels`]); zero on every
@@ -357,6 +360,19 @@ impl Rack {
     }
     pub fn location(self) -> Location {
         Location::from_byte(self.location)
+    }
+    /// A magazine's grid floor, [usable width, usable length] feet, when its
+    /// stores hang in a grid ([`super::bays::GRIDS`]); `None` is the single
+    /// lane.
+    pub fn grid(self) -> Option<[f64; 2]> {
+        let [width, length] = self.tip.filter(|_| self.location() == Location::Magazine)?;
+        (width > 0. && length > 0.).then_some([f64::from(width), f64::from(length)])
+    }
+    /// The ceiling over a gridded magazine's stores, feet up of the reference
+    /// point (the field the model's underside over a pylon uses elsewhere).
+    pub fn grid_ceiling(self) -> Option<f64> {
+        self.grid()?;
+        self.over[sample::RECORD].map(f64::from)
     }
     /// A paired record whose position is off the centreline: one that has
     /// two sides to alternate between.
@@ -576,6 +592,9 @@ impl Rack {
             1.
         };
         if self.location() == Location::Magazine {
+            if let Some(grid) = self.grid() {
+                return grid_point(mount, per_side, slot, size, grid);
+            }
             // Fitted tandem rails inside the Raptor's narrow model bays.
             // Highest slot empties first, so the forward store leaves first.
             let offset = (f64::from(slot) - f64::from(per_side - 1) / 2.) * (size.length + 0.25);
@@ -671,6 +690,82 @@ impl Rack {
             [items, 0]
         }
     }
+}
+
+/// The widest pitch a store gets abreast or tier on tier in a bay's grid,
+/// feet (B2-5, fitted): a store stands its fin span apart, but no more than
+/// this, and never nearer than its body and 0.1 ft, so four Mk 82 (1.27 ft
+/// fins) abreast take 5.2 ft of the B-2's 8.0 ft bay, and four of a bigger
+/// store (a GBU-27's 5.4 ft fins) stand a body and 0.1 ft apart with their
+/// fins overlapping rather than crossing the doors.
+pub const GRID_PITCH_MAX: f64 = 1.3;
+/// The clear gap between stores one behind another in a bay, feet (the
+/// lane's 0.25 ft).
+pub const GRID_GAP: f64 = 0.25;
+/// The gap between the fin tips of two stores abreast or one above another,
+/// feet, when a store has its fin span's pitch.
+pub const GRID_FIN_GAP: f64 = 0.03;
+
+/// The place of a bay grid's `n`th store to leave, its column among `abreast`,
+/// outermost first on alternate sides: 0, last, 1, last but one, and so on.
+fn ripple_column(n: u16, abreast: u16) -> u16 {
+    if n.is_multiple_of(2) {
+        n / 2
+    } else {
+        abreast - 1 - n / 2
+    }
+}
+
+/// How many stores of `size` a bay grid of `floor` (usable width and length,
+/// feet) holds abreast and along, and the pitch abreast and tier on tier.
+pub fn grid_cells(size: StoreSize, [width, length]: [f64; 2]) -> ([usize; 2], f64) {
+    let pitch = (size.width + GRID_FIN_GAP)
+        .min(GRID_PITCH_MAX)
+        .max(2. * size.top + 0.1);
+    let abreast = ((width / pitch + 1e-3).floor() as usize).max(1);
+    let along = ((length / (size.length + GRID_GAP) + 1e-3).floor() as usize).max(1);
+    ([abreast, along], pitch)
+}
+
+/// The most stores of `size` a bay grid of `floor` holds under a ceiling
+/// `room` feet over its mount: abreast times along times the tiers whose top
+/// fin tips stay under it ([`grid_cells`], [`grid_point`]).
+pub fn grid_capacity(size: StoreSize, floor: [f64; 2], room: f64) -> u16 {
+    let ([abreast, along], pitch) = grid_cells(size, floor);
+    // The top tier's highest fin tip stands `0.08 + width` over the mount
+    // plus a pitch for each tier under it.
+    let tall = 0.08 + size.width.max(2. * size.top);
+    let tiers = (((room - tall) / pitch + 1e-3).floor().max(0.) as usize + 1).min(64);
+    u16::try_from(abreast * along * tiers).unwrap_or(u16::MAX)
+}
+
+/// Where store `slot` of a bay grid of `loaded` stores hangs, feet right, up
+/// and forward of the aircraft (B2-5, fitted, John's decision 21). The grid
+/// fills in the order it releases, so a store's place does not move as the
+/// others leave: the highest slot leaves first and release number `r` is slot
+/// `loaded - 1 - r`. Release order is the bottom tier first, front to back
+/// (the stores of one row abreast outermost first, alternating sides), then
+/// the next tier up; a load that is not whole tiers fills the bottom tier
+/// first. `mount` is the bay's centre on its floor (the height of the lowest
+/// fin tip); how many stand abreast and along is what the store's size fits
+/// on the bay's `floor` ([`grid_cells`]).
+pub fn grid_point(
+    mount: Vector,
+    loaded: u16,
+    slot: u16,
+    size: StoreSize,
+    floor: [f64; 2],
+) -> Vector {
+    let release = usize::from(loaded.saturating_sub(1).saturating_sub(slot));
+    let ([abreast, long], pitch) = grid_cells(size, floor);
+    let tier = release / (abreast * long);
+    let along = release % (abreast * long) / abreast;
+    let column = ripple_column((release % abreast) as u16, abreast as u16);
+    [
+        mount[0] + (f64::from(column) - (abreast as f64 - 1.) / 2.) * pitch,
+        mount[1] + size.width.max(2. * size.top) / 2. + 0.08 + tier as f64 * pitch,
+        mount[2] + ((long as f64 - 1.) / 2. - along as f64) * (size.length + GRID_GAP),
+    ]
 }
 
 /// How many stores one rack group holds on a pylon carrying `on`: four hang
@@ -1321,6 +1416,18 @@ pub fn placed_on(
             mount,
             Rack {
                 location: MAGAZINE_BYTE,
+                // A bay that hangs its stores in a grid carries it
+                // ([`Rack::grid`], B2-5).
+                tip: super::bays::grid(id, hardpoint).map(|[w, l, _]| [w as f32, l as f32]),
+                // The ceiling over the stores, where the model's underside is
+                // read for a pylon ([`Rack::grid_ceiling`]).
+                over: [
+                    super::bays::grid(id, hardpoint).map(|[_, _, c]| c as f32),
+                    None,
+                    None,
+                    None,
+                    None,
+                ],
                 ..Rack::from_source(h)
             },
         );
@@ -1847,6 +1954,99 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_b2_bays_hang_their_stores_in_a_grid_and_ripple_bottom_tier_first() {
+        let o = super::super::bays::opening(AircraftId::B2).unwrap();
+        let mk82 = StoreSize::of_shape(Some("MK82.SH"));
+        let mut h = hardpoint(3, 0x1100);
+        h.count = 32;
+        let (mount, rack) = placed_on(AircraftId::B2, 5, &h, None);
+        assert_eq!(rack.location(), Location::Magazine);
+        assert_eq!(grid_cells(mk82, rack.grid().unwrap()).0, [4, 2]);
+        assert!(!rack.two_sided(mount), "a row is one bay, not a pair");
+        // The 32 stores of a full bay, in the order they leave.
+        let gbu = grid_cells(StoreSize::of_shape(Some("GB27.SH")), rack.grid().unwrap());
+        assert_eq!(gbu.0, [4, 1]);
+        let order: Vec<Vector> = (0..32u16)
+            .rev()
+            .map(|after| rack.release_point(mount, 32, u32::from(after), after, mk82))
+            .collect();
+        let distinct = |k: usize| {
+            let mut v: Vec<i64> = order
+                .iter()
+                .map(|p| (p[k] * 1000.).round() as i64)
+                .collect();
+            v.sort_unstable();
+            v.dedup();
+            v.len()
+        };
+        // 4 abreast, 4 tiers, 2 long: 32 places, none twice.
+        assert_eq!((distinct(0), distinct(1), distinct(2)), (4, 4, 2));
+        let mut places: Vec<_> = order
+            .iter()
+            .map(|p| p.map(|v| (v * 1000.).round() as i64))
+            .collect();
+        places.sort_unstable();
+        places.dedup();
+        assert_eq!(places.len(), 32);
+        // The bottom tier leaves first (eight, then the next tier up), the
+        // front store of a tier before the one behind it.
+        for tier in 0..4 {
+            let ys: Vec<f64> = order[tier * 8..tier * 8 + 8].iter().map(|p| p[1]).collect();
+            assert!(ys.iter().all(|y| (y - ys[0]).abs() < 1e-9), "tier {tier}");
+            if tier > 0 {
+                assert!(ys[0] > order[tier * 8 - 1][1] + 1.2);
+            }
+            let front: Vec<f64> = order[tier * 8..tier * 8 + 4].iter().map(|p| p[2]).collect();
+            let back: Vec<f64> = order[tier * 8 + 4..tier * 8 + 8]
+                .iter()
+                .map(|p| p[2])
+                .collect();
+            assert!(front.iter().all(|f| back.iter().all(|b| f > b)));
+        }
+        // A row abreast goes outermost first, alternating sides.
+        let xs: Vec<f64> = order[..4].iter().map(|p| p[0] - mount[0]).collect();
+        assert!(xs[0] < xs[2] && xs[2] < 0. && xs[1] > xs[3] && xs[3] > 0.);
+        assert!((xs[0] + xs[1]).abs() < 1e-9 && (xs[2] + xs[3]).abs() < 1e-9);
+        // Every store sits inside its opening, between the floor and the roof.
+        let half = mk82.width / 2.;
+        for p in &order {
+            assert!(p[0] - half > o.centre - o.outer && p[0] + half < o.centre - o.inner);
+            assert!(p[2] - 3.65 > o.aft && p[2] + 3.65 < o.fore);
+            assert!(p[1] - half >= mount[1] - 1e-9 && p[1] + half < o.belly + o.inner_depth);
+        }
+        // A part load fills the bottom tier first and its places do not move
+        // as the others leave.
+        let first: Vec<Vector> = (0..8u16)
+            .rev()
+            .map(|after| rack.release_point(mount, 10, u32::from(after) + 2, after + 2, mk82))
+            .collect();
+        assert!(first.iter().all(|p| (p[1] - order[0][1]).abs() < 1e-9));
+        // What fits under the roof: 32 Mk 82 (four tiers, not the real 80's
+        // five), and one tier of four Paveway III on their lower trapeze.
+        let ceiling = rack.grid_ceiling().unwrap();
+        assert_eq!(
+            grid_capacity(mk82, rack.grid().unwrap(), ceiling - mount[1]),
+            32
+        );
+        let (low, paveway) = placed_on(AircraftId::B2, 7, &h, None);
+        let gb27 = StoreSize::of_shape(Some("GB27.SH"));
+        assert_eq!(
+            grid_capacity(
+                gb27,
+                paveway.grid().unwrap(),
+                paveway.grid_ceiling().unwrap() - low[1]
+            ),
+            4
+        );
+        // A lane with no grid is the F-22's, unchanged.
+        let lane = Rack {
+            location: MAGAZINE_BYTE,
+            ..Rack::default()
+        };
+        assert_eq!(lane.grid(), None);
     }
 
     #[test]

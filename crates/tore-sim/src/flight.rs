@@ -3587,10 +3587,11 @@ mod tests {
         };
         let factor = crate::sensors::SignatureProfile::default().configuration_factor(open);
         assert!((factor - 1.5).abs() < 1e-9);
-        // An exact identity with no bay rows has none.
-        a.id = AircraftId::B2;
-        a.name = "B-2".into();
-        a.shape = "B2.SH".into();
+        // An exact identity with no bay rows has none (the B-2 has had rows
+        // since B2-5).
+        a.id = AircraftId::Tornado;
+        a.name = "Tornado".into();
+        a.shape = "TOR.SH".into();
         let s = State::new(&a, [0., 15000., 0.]).unwrap();
         assert!(!s.bay_available());
     }

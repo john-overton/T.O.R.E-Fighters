@@ -449,6 +449,21 @@ pub(crate) fn cut_doors(
     fore: f32,
     height: f32,
 ) -> Vec<Face> {
+    let (mut result, remaining) = cut_door_parts(f, fraction, doors, aft, fore, height);
+    result.extend(remaining);
+    result
+}
+
+/// [`cut_doors`] in two parts: the door leaves, turned, and the rest of the
+/// face, whole (a belly skin with the openings cut out of it, B2-5).
+pub(crate) fn cut_door_parts(
+    f: &Face,
+    fraction: f64,
+    doors: impl IntoIterator<Item = (f32, f32, f32, f64)>,
+    aft: f32,
+    fore: f32,
+    height: f32,
+) -> (Vec<Face>, Vec<Face>) {
     let mut remaining = vec![f.clone()];
     let mut result = Vec::new();
     for (left, right, hinge, angle) in doors {
@@ -490,8 +505,7 @@ pub(crate) fn cut_doors(
         }
         remaining = next;
     }
-    result.extend(remaining);
-    result
+    (result, remaining)
 }
 
 /// Own-model sloping intake skins that cover the fitted side magazines.

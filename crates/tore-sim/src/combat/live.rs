@@ -2649,6 +2649,23 @@ impl Ownship {
             None => self.armed = false,
         }
     }
+    /// The bay station the ripple goes to after a release from station
+    /// `index`: another gridded bay station ([`super::hardpoints::Rack::grid`])
+    /// carrying the same weapon on the other side of the aircraft, with
+    /// stores left (the B-2's two bays alternate; every other aircraft has
+    /// none, so nothing else changes).
+    pub fn sister_bay(&self, index: usize) -> Option<usize> {
+        let stations = &self.config.stations;
+        let here = stations.get(index)?;
+        here.rack.grid()?;
+        (0..stations.len()).find(|&other| {
+            other != index
+                && stations[other].rack.grid().is_some()
+                && stations[other].weapon.source == here.weapon.source
+                && stations[other].mount[0] * here.mount[0] < 0.
+                && self.rounds(other) > 0
+        })
+    }
     pub fn select_next(&mut self) {
         if self.ammo.is_empty() {
             self.armed = false;
@@ -5196,6 +5213,10 @@ impl State {
             {
                 passes.push((index, true, true));
             }
+            // A bay release from a gridded bay (the B-2's) hands the selection
+            // to the other bay, so a ripple alternates bays: the station and
+            // whether the trigger is held.
+            let mut next_bay: Option<(usize, bool)> = None;
             for (index, held, key_pass) in passes {
                 own.selected = index;
                 let selected_readiness = own.release_readiness;
@@ -5531,6 +5552,9 @@ impl State {
                 if fired {
                     if station.rack.location().bay() && !gun {
                         own.bay_hold_until = self.tick + BAY_HOLD_TICKS;
+                        if !key_pass && index == selected {
+                            next_bay = own.sister_bay(index).map(|bay| (bay, held));
+                        }
                     }
                     self.effect(launcher.position, EffectKind::Launch);
                     if !key_pass {
@@ -5544,6 +5568,13 @@ impl State {
                 }
             }
             own.selected = selected;
+            if let Some((bay, held)) = next_bay {
+                own.set_selection(bay + 1);
+                // The press that fired still holds the trigger: the other
+                // bay's is held too, so one press is one store.
+                own.triggers[bay].was_held = held;
+                self.choose_delivery(own, launcher);
+            }
             if grouped {
                 own.release_readiness = view(self, own).readiness(launcher);
             }

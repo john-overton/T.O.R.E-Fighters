@@ -872,13 +872,53 @@ fn firing_frames(
         crate::combat::launcher(&state),
     );
     let mut fired = None;
-    for tick in 0..=400 {
+    // `TORE_STORES_PREVIEW_PRESSES=N` presses the trigger N times, one press a
+    // bomb, 12 ticks apart once the first has left (a ripple through a bay
+    // grid, B2-5): every release prints its station and where it left.
+    let presses = std::env::var("TORE_STORES_PREVIEW_PRESSES")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(1);
+    let mut pressed = 0;
+    let mut last_release = 0;
+    for tick in 0..=400 + 12 * u64::from(presses) {
         if tick > 0 {
-            combat.own_trigger().input.space(tick == 1, false, false);
+            let press =
+                pressed < presses && (tick == 1 || fired.is_some() && tick >= last_release + 12);
+            if press {
+                pressed += 1;
+            }
+            combat.own_trigger().input.space(press, false, false);
+            // The point the next store leaves, read before the release.
+            let before: Vec<_> = combat
+                .state
+                .own()
+                .configuration()
+                .stations
+                .iter()
+                .enumerate()
+                .map(|(i, s)| s.next_release_point(u32::from(combat.state.own().rounds(i))))
+                .collect();
             state.step(&crate::flight::PilotInput::default(), |x, z| {
                 f64::from(world.height(x as f32, z as f32))
             });
             let events = combat.step(&mut state, world)?;
+            if presses > 1 {
+                for event in &events {
+                    if let live::Event::Fired { station, .. } = event {
+                        last_release = tick;
+                        fired.get_or_insert(tick);
+                        println!(
+                            "Stores ripple: {short} tick={tick} station={station} at [{:.2} {:.2} {:.2}] bay={:.3} remaining={}",
+                            before[*station][0],
+                            before[*station][1],
+                            before[*station][2],
+                            state.bay,
+                            combat.state.own().rounds(*station)
+                        );
+                    }
+                }
+            }
             if events
                 .iter()
                 .any(|e| matches!(e, live::Event::Fired { station, .. } if *station == slot))
@@ -898,7 +938,8 @@ fn firing_frames(
         // and forward of the aircraft) draws the release from that camera
         // every 12 ticks through the doors' opening, the release and the
         // doors' closing (F117-5); without it the frames are the fixed few.
-        let sequence = fire_camera.is_some() && tick % 12 == 0 && tick <= 300;
+        let sequence =
+            fire_camera.is_some() && tick % 12 == 0 && tick <= 300 + 12 * u64::from(presses);
         if tick == 0
             || tick == 60
             || tick == 400
@@ -1429,20 +1470,33 @@ fn bay_clearance(
         best
     };
     let roof = o.belly + o.depth;
+    // The recess roof over a point: level, or a plane rising from the outer
+    // wall to the inner one (the B-2's, B2-5).
+    let roof_at = |x: f64| {
+        let t = (o.outer - (x - o.centre).abs()) / (o.outer - o.inner);
+        o.belly + o.depth + (o.inner_depth - o.depth) * t.clamp(0., 1.)
+    };
     let leaf = (o.outer - o.inner) / 2.;
     println!(
-        "Bay clearance: {short} opening x {:.2} to {:.2} ft each side, {:.2} to {:.2} ft forward, belly {:.3} ft, roof {:.3} ft (depth {:.2}), leaf {:.2} ft, hangs to {:.2} ft with the doors open",
+        "Bay clearance: {short} opening x {:.2} to {:.2} ft each side of {:.2}, {:.2} to {:.2} ft forward, belly {:.3} ft, roof {:.3} ft (depth {:.2} outer, {:.2} inner), leaf {:.2} ft, hangs to {:.2} ft with the doors open",
         o.inner,
         o.outer,
+        o.centre,
         o.aft,
         o.fore,
         o.belly,
         roof,
         o.depth,
+        o.inner_depth,
         leaf,
         o.belly - leaf
     );
     let mut placed: Vec<(String, Vec<[f64; 3]>)> = Vec::new();
+    // One line a bay: its name, the worst of the seven figures (the door
+    // planes, the ends, the roof, the lowest hang, the rail) and the worst
+    // reach into the top skin.
+    type BayRow = (String, [f64; 7], (f64, [f64; 3]));
+    let mut rows: Vec<BayRow> = Vec::new();
     for store in stores.iter().filter(|s| s.rack.location().bay()) {
         let points = store_points(store, art);
         for place in crate::pylons::hung(store).iter().filter(|p| p.held) {
@@ -1453,7 +1507,7 @@ fn bay_clearance(
                 .iter()
                 .map(|q| std::array::from_fn(|i| place.centre[i] + q[i]))
                 .collect();
-            let sign = if place.centre[0] < 0. { -1. } else { 1. };
+            let sign = if place.centre[0] < o.centre { -1. } else { 1. };
             let name = format!(
                 "row{} {} {}",
                 store.hardpoint,
@@ -1463,11 +1517,11 @@ fn bay_clearance(
             let fold = |f: fn(f64, f64) -> f64, start: f64, k: &dyn Fn(&[f64; 3]) -> f64| {
                 moved.iter().map(k).fold(start, f)
             };
-            let inner = fold(f64::min, f64::MAX, &|p| sign * p[0] - o.inner);
-            let outer = fold(f64::min, f64::MAX, &|p| o.outer - sign * p[0]);
+            let inner = fold(f64::min, f64::MAX, &|p| sign * (p[0] - o.centre) - o.inner);
+            let outer = fold(f64::min, f64::MAX, &|p| o.outer - sign * (p[0] - o.centre));
             let aft = fold(f64::min, f64::MAX, &|p| p[2] - o.aft);
             let fore = fold(f64::min, f64::MAX, &|p| o.fore - p[2]);
-            let ceiling = fold(f64::min, f64::MAX, &|p| roof - p[1]);
+            let ceiling = fold(f64::min, f64::MAX, &|p| roof_at(p[0]) - p[1]);
             let below = fold(f64::max, f64::MIN, &|p| o.belly - p[1]);
             let mut skin = (f64::MIN, [0.; 3]);
             for p in &moved {
@@ -1479,7 +1533,10 @@ fn bay_clearance(
             }
             // The rail box and the store's nearest vertex to it.
             let rail = |p: &[f64; 3]| {
-                let centre = sign * (o.inner + o.outer) / 2.;
+                if o.rail[0] == o.rail[1] {
+                    return f64::MAX;
+                }
+                let centre = o.centre + sign * (o.inner + o.outer) / 2.;
                 let d = [
                     (p[0] - centre).abs() - RAIL_HALF,
                     p[1] - roof,
@@ -1501,15 +1558,61 @@ fn bay_clearance(
                     .sqrt()
             };
             let rail_gap = fold(f64::min, f64::MAX, &rail);
-            println!(
-                "Bay clearance: {name}: inner door {inner:.2}, outer door {outer:.2}, aft end {aft:.2}, fore end {fore:.2}, roof {ceiling:.2}, hangs {below:.2} below the belly plane, top skin {:.2} at [{:.2} {:.2} {:.2}], rail {rail_gap:.2}",
-                -skin.0, skin.1[0], skin.1[1], skin.1[2]
-            );
+            // An opening with no rail reports a gap no store can lack.
+            let rail_gap = if o.rail[0] == o.rail[1] {
+                99.
+            } else {
+                rail_gap
+            };
+            // The stores of one bay report as one line: the worst of each
+            // figure (the B-2's grid holds up to 40 a bay).
+            let figures = [inner, outer, aft, fore, ceiling, below, rail_gap];
+            match rows.iter_mut().find(|r| r.0 == name) {
+                Some(row) => {
+                    for (k, f) in figures.iter().enumerate() {
+                        row.1[k] = if k == 5 {
+                            row.1[k].max(*f)
+                        } else {
+                            row.1[k].min(*f)
+                        };
+                    }
+                    if skin.0 > row.2.0 {
+                        row.2 = skin;
+                    }
+                }
+                None => rows.push((name.clone(), figures, skin)),
+            }
             placed.push((name, moved));
         }
     }
+    for (name, f, skin) in &rows {
+        println!(
+            "Bay clearance: {name}: inner door {:.2}, outer door {:.2}, aft end {:.2}, fore end {:.2}, roof {:.2}, hangs {:.2} below the belly plane, top skin {:.2} at [{:.2} {:.2} {:.2}], rail {:.2}",
+            f[0], f[1], f[2], f[3], f[4], f[5], -skin.0, skin.1[0], skin.1[1], skin.1[2], f[6]
+        );
+    }
+    // Every pair of stores for a few; the closest pair and how many touch for a
+    // full grid.
+    let mut closest: Option<(f64, usize, usize)> = None;
+    let mut touching = 0;
+    let boxes: Vec<([f64; 3], [f64; 3])> = placed
+        .iter()
+        .map(|(_, v)| {
+            (
+                std::array::from_fn(|i| v.iter().map(|p| p[i]).fold(f64::MAX, f64::min)),
+                std::array::from_fn(|i| v.iter().map(|p| p[i]).fold(f64::MIN, f64::max)),
+            )
+        })
+        .collect();
     for (a, one) in placed.iter().enumerate() {
-        for two in &placed[a + 1..] {
+        for (b, two) in placed.iter().enumerate().skip(a + 1) {
+            // Boxes more than a foot apart cannot hold the closest pair.
+            let apart = (0..3)
+                .map(|i| (boxes[a].0[i] - boxes[b].1[i]).max(boxes[b].0[i] - boxes[a].1[i]))
+                .fold(f64::MIN, f64::max);
+            if placed.len() > 4 && apart > 1.0 {
+                continue;
+            }
             let gap = one
                 .1
                 .iter()
@@ -1519,11 +1622,27 @@ fn bay_clearance(
                         .map(move |q| (0..3).map(|i| (p[i] - q[i]).powi(2)).sum::<f64>().sqrt())
                 })
                 .fold(f64::MAX, f64::min);
-            println!(
-                "Bay clearance: {short} {} / {}: nearest vertices {gap:.2} ft apart",
-                one.0, two.0
-            );
+            if placed.len() <= 4 {
+                println!(
+                    "Bay clearance: {short} {} / {}: nearest vertices {gap:.2} ft apart",
+                    one.0, two.0
+                );
+            }
+            touching += usize::from(gap < 0.02);
+            if closest.is_none_or(|c| gap < c.0) {
+                closest = Some((gap, a, b));
+            }
         }
+    }
+    if placed.len() > 4
+        && let Some((gap, a, b)) = closest
+    {
+        println!(
+            "Bay clearance: {short} {} stores, closest pair {} / {}: nearest vertices {gap:.3} ft apart, {touching} pairs under 0.02 ft",
+            placed.len(),
+            placed[a].0,
+            placed[b].0
+        );
     }
 }
 

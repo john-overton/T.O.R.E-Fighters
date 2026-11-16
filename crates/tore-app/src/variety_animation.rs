@@ -337,7 +337,7 @@ fn specification(id: Id) -> Option<Spec> {
             // with the reader's signed jl/jg state guards (BMB-A1). Update
             // (B2-3 and B2-4, 2026-11-15): the B-2 loads through its own
             // `b2_animation` rig (elevons, drag rudders and speed brake, gear,
-            // interim bay plates); this row pins the layout, the scale and
+            // bay doors, B2-5); this row pins the layout, the scale and
             // `supported`.
             Id::B2 => (
                 21668,
@@ -446,7 +446,7 @@ enum SpecificRig {
     /// B52-3 and B52-4: the stabilizer, flaps, rudder, gear and the interim bay.
     B52(crate::b52_animation::Rig),
     /// B2-3 and B2-4: the elevons, the drag rudders and speed brake, the gear
-    /// and the interim bay plates.
+    /// and the fitted bays (B2-5).
     B2(crate::b2_animation::Rig),
     /// F117-3 and F117-4: the ruddervators, the gear and the interim bay pose.
     F117(crate::f117_animation::Rig),
@@ -951,6 +951,7 @@ impl Rig {
         match &self.specific {
             Some(SpecificRig::F22(rig)) => rig.faces(source, state),
             Some(SpecificRig::F14(rig)) => rig.faces(source, state),
+            Some(SpecificRig::B2(rig)) => rig.faces(source, state),
             Some(SpecificRig::F117(rig)) => rig.faces(source, state),
             _ => vec![source.clone()],
         }

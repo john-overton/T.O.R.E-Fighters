@@ -1,6 +1,8 @@
 //! Independent B-2 whole-panel witnesses: the two elevon wedges (one angle per
 //! side, pitch plus differential roll), the four drag-rudder plates (yaw side
-//! and speed brake), the seven rigid gear plates and the interim bay plates.
+//! and speed brake), the seven rigid gear plates and the fitted weapon bays
+//! (B2-5: the belly polygon cut open, the two door panels of a bay cut into two
+//! doors, a lined recess).
 //! Measures the shared Airframe output and never repeats the rig's algorithm.
 //! Witness points are named in shape units and scaled with the aircraft's own
 //! per-axis scale (the probe geometry is the scaled shape).
@@ -29,9 +31,13 @@ const GEAR: [usize; 14] = [
     0x4153, 0x416a, 0x41ae, 0x41c5, 0x4597, 0x45b6, 0x438d, 0x43a4, 0x449e, 0x44b5, 0x441b, 0x443a,
     0x452c, 0x454b,
 ];
-const BAY: [usize; 8] = [
-    0x4209, 0x4220, 0x4264, 0x427b, 0x431a, 0x4331, 0x42bf, 0x42d6,
-];
+/// The belly polygon, the two door panels (left, right) and where the fitted
+/// lining's addresses start; the lining is ten faces (a ceiling and four walls
+/// a bay).
+const BELLY: usize = 0x396d;
+const PANELS: [usize; 2] = [0x3c84, 0x3c65];
+const LINING_BASE: usize = 0x7000;
+const LINING: usize = 10;
 
 fn sp(p: [f32; 3]) -> [f32; 3] {
     scale_point(ID, p)
@@ -116,19 +122,6 @@ fn rigidity(reference: &[Face], pose: &[Face], ids: &[usize], scale: f32) -> f32
         }
     }
     error
-}
-
-fn pinned(reference: &[Face], pose: &[Face], ids: &[usize], point: [f32; 3], scale: f32) -> f32 {
-    let old = group(reference, ids);
-    let moved = f4::witness_positions(&old, &keyed(pose), point);
-    if moved.is_empty() {
-        f32::INFINITY
-    } else {
-        moved
-            .iter()
-            .map(|q| distance(point, *q) * scale)
-            .fold(0f32, f32::max)
-    }
 }
 
 fn pin(m: &mut Metrics, gap: f32) {
@@ -300,24 +293,57 @@ fn gear(value: f64, reference: &[Face], pose: &[Face], scale: f32, m: &mut Metri
     }
 }
 
-/// Interim bay plates: drawn only while the bay is open, their top edge stays
-/// on the belly (z -12), and the lowest point is the scaled -12 - 13 * value.
-fn bay(value: f64, reference: &[Face], pose: &[Face], scale: f32, m: &mut Metrics) {
+/// The fitted bays: shut (0) the belly polygon and the two panels are whole,
+/// nothing hangs below the panels' plane and no lining draws; open (above 0)
+/// the lining draws, the belly polygon has no vertex over either opening, and
+/// the four doors hang on their hinge lines (the inner and outer edges of each
+/// bay at the panels' plane) with their free edges `leaf * sin(90 degrees *
+/// value)` below it.
+fn bay(value: f64, _reference: &[Face], pose: &[Face], scale: f32, m: &mut Metrics) {
+    let o = tore_sim::combat::bays::opening(ID).expect("B-2 opening");
+    let plane = sp([0., 0., -12.])[2];
+    let lining = pose.iter().filter(|f| f.address >= LINING_BASE).count();
+    let belly: Vec<&Face> = pose.iter().filter(|f| f.address == BELLY).collect();
+    let doors: Vec<&Face> = pose
+        .iter()
+        .filter(|f| PANELS.contains(&f.address))
+        .collect();
+    let lowest = doors
+        .iter()
+        .flat_map(|f| f.positions.iter())
+        .map(|p| p[2])
+        .fold(f32::MAX, f32::min);
     if value == 0. {
-        m.reviewed_direction_failures += usize::from(present(pose, &BAY) != 0);
+        m.reviewed_direction_failures += usize::from(
+            lining != 0 || belly.len() != 1 || doors.len() != PANELS.len() || lowest < plane - 1e-4,
+        );
         return;
     }
-    m.reviewed_direction_failures += usize::from(present(pose, &BAY) != 8);
-    for point in [
-        sp([-27., -10., -12.]),
-        sp([-3., 48., -12.]),
-        sp([1., -10., -12.]),
-        sp([26., 48., -12.]),
-    ] {
-        pin(m, pinned(reference, pose, &BAY, point, scale));
+    m.reviewed_direction_failures += usize::from(lining != LINING);
+    let centre = o.centre as f32 / scale;
+    // A vertex stays on each hinge line at the panels' plane.
+    for feet in [o.inner, o.outer, -o.inner, -o.outer] {
+        let hinge = centre + feet as f32 / scale;
+        let held = doors
+            .iter()
+            .flat_map(|f| f.positions.iter())
+            .any(|p| (p[0] - hinge).abs() < 1e-3 && (p[2] - plane).abs() < 1e-3);
+        m.reviewed_anchor_missing |= !held;
     }
-    let want = sp([0., 0., -12. - 13. * value as f32])[2];
-    m.reviewed_direction_failures += usize::from((lowest(pose, &BAY) - want).abs() > 1e-3);
+    // The belly polygon is cut out of both openings.
+    let (aft, fore) = (o.aft as f32 / scale, o.fore as f32 / scale);
+    let inside = |p: &[f32; 3]| {
+        let x = (p[0] - centre).abs() * scale;
+        x > o.inner as f32 + 1e-3
+            && x < o.outer as f32 - 1e-3
+            && p[1] > aft + 1e-3
+            && p[1] < fore - 1e-3
+    };
+    m.reviewed_direction_failures +=
+        usize::from(belly.iter().any(|f| f.positions.iter().any(inside)));
+    let leaf = ((o.outer - o.inner) / 2.) as f32 / scale;
+    let hang = leaf * (value as f32 * std::f32::consts::FRAC_PI_2).sin();
+    m.reviewed_direction_failures += usize::from((plane - lowest - hang).abs() > 2e-3);
 }
 
 pub(super) fn check(
@@ -530,6 +556,47 @@ pub(super) fn combinations(
     fs::write(out.join("yaw-brake-combinations.csv"), rows)?;
     contact_sheet(&out.join("yaw-brake-combinations.ppm"), &original, &poses)?;
     failures.extend(dense_gear(airframe, neutral, out, &original, scale)?);
+    failures.extend(dense_bay(airframe, neutral, out, scale)?);
+    Ok(failures)
+}
+
+/// Bay sweep (B2-5): the doors swing between shut (a near-zero sample) and
+/// hanging, on their hinges and at the sine of the travel at every value, with
+/// the belly polygon open over both bays whenever the doors are off their seat.
+fn dense_bay(
+    airframe: &Airframe,
+    neutral: &State,
+    out: &Path,
+    scale: f32,
+) -> AppResult<Vec<String>> {
+    let mut failures = Vec::new();
+    let mut open = neutral.clone();
+    Control::Bay.apply(&mut open, 1.);
+    let reference = airframe.animation_faces(&open);
+    let mut csv = String::from("value,anchor_gap_ft,rigidity_ft,direction_failures,passed\n");
+    for value in [0., 1e-6, 0.1, 0.25, 0.5, 0.75, 0.9, 1.] {
+        let mut state = neutral.clone();
+        state.bay = value;
+        let pose = airframe.animation_faces(&state);
+        let mut m = measure(&reference, &pose, scale);
+        bay(value, &reference, &pose, scale, &mut m);
+        let passed = m.finite
+            && !m.reviewed_anchor_missing
+            && m.max_reviewed_anchor_gap <= EPSILON
+            && m.reviewed_rigid_panel_error <= EPSILON
+            && m.reviewed_direction_failures == 0;
+        writeln!(
+            csv,
+            "{value},{},{},{},{passed}",
+            m.max_reviewed_anchor_gap, m.reviewed_rigid_panel_error, m.reviewed_direction_failures
+        )?;
+        if !passed {
+            failures.push(format!(
+                "B-2 bay value{value}: rigid, hinge or direction gate"
+            ));
+        }
+    }
+    fs::write(out.join("bay-sweep.csv"), csv)?;
     Ok(failures)
 }
 
