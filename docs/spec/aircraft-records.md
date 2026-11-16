@@ -565,9 +565,9 @@ refused too. `Loadout::new` now starts the tank at what the maximum allows when 
 tank would put the default load over it (whole pounds): 303,000 lb for the B-52H
 (488,000 less 185,000 and no external stores). The editor can still raise the fuel to
 312,197 lb, and the takeoff check then refuses it. No other aircraft's default load is
-over its maximum, so none changes. The flight model itself flies at any weight (the free
-flight and `--headless-flight` starts use the full 312,197 lb tank and no limit applies);
-the loadout total counts external stores only, so a bay load (the B-52's twelve Harpoons,
+over its maximum, so none changes. The flight model itself flies at any weight (before 2026-11-16 the headless
+free-flight and ground starts used the full 312,197 lb tank and no loadout limit applied; see "Start fuel
+reaches the flight" under the batch B corrections); the loadout total counts external stores only, so a bay load (the B-52's twelve Harpoons,
 16,560 lb) does not count against the maximum.
 
 **What a player notices (`performance_probe`, clean, local records, full fuel;
@@ -658,8 +658,38 @@ the variety document lists what the cited TSFC would give.
 take-off weight (457,274 / 477,000; 568,785 / 606,260; 80,144 / 100,000), so the
 record-level check is not involved. Their default loads add stores, and the loadout's
 starting-tank cap (78086f7e) then lowers the fuel: the B-1B to 243,000 lb (of 265,274) and the
-F-111F to 28,838 lb (of 32,663); the Tu-160 starts full (600,532 lb). Free flight and
-`--headless-flight` use the model's full tank.
+F-111F to 28,838 lb (of 32,663); the Tu-160 starts full (600,532 lb). The flight started
+with the model's full tank all the same, which refused the B-1B and F-111F default loads;
+see "Start fuel reaches the flight" below.
 
 Logs are local: `.local/m3-aircraft/checks/BMB-B2/`.
+
+**Start fuel reaches the flight (fix, agent decision 2026-11-16).** The loadout capped
+its own tank, but the flight state kept the model's full tank, so the B-1B and F-111F
+default loads were refused at the start ("payload outside aircraft mass limits"): empty
+weight plus the full tank plus the load is over the maximum, and `set_payload` refuses
+that. The B-52H was the only one that started, through the flight-level cap added in
+78086f7e, which only covers a record that is over its maximum with empty weight and a
+full tank alone. Now the start fuel of the load is handed to the flight wherever a load
+is applied, so the aircraft start with the tank the loadout shows:
+
+- The player: `Combat` remembers its start load's internal fuel (the loadout's, or the
+  default load's when there is no loadout page), and `Combat::reset` lowers the flight's
+  tank to it before the payload is set. The headless ground start that sets the payload
+  without a reset does the same. A mission, free flight, a ground start and a net client
+  all start through `reset`; a mission and a hosted game also start the tank from the
+  loadout's fuel already.
+- The AI: an aircraft with a default load, and a revived aircraft, has its full tank fitted
+  to what the maximum leaves room for with its stores aboard (`State::fit_fuel_to_payload`),
+  to the same whole pound the loadout caps at. A validated lobby loadout already fits and
+  is untouched.
+
+The rule never raises a tank and never loosens the takeoff check: a payload over the
+maximum is still refused, and an aircraft whose full tank fits keeps it. The
+78086f7e cap in `set_payload` is now redundant for every start the game makes (the B-52H
+starts through the same loadout fuel with it switched off) and is kept only as a backstop
+for a bare `set_payload` caller. Measured on the retail records (local profile, UKR and GRE
+ground starts, default load): B-1B 243,000 lb of 265,274 (gross 477,000 of 477,000), F-111F
+28,838 of 32,663 (99,999 of 100,000), B-52H 286,412 of 312,197 (488,000 of 488,000);
+the F-16C, Tornado and the other ordinary aircraft are unchanged (full tank).
 

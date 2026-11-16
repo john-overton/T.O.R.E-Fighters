@@ -303,6 +303,12 @@ pub struct Combat {
     /// tape, the command notes and [`Self::contrail_offsets`] follow it.
     open: bool,
     initial_ammo: Option<Vec<u16>>,
+    /// The internal fuel the host's start load begins with: the loadout's own
+    /// (capped to the maximum takeoff weight, `Loadout::cap_default_fuel`), or
+    /// the aircraft's default load's. [`Self::reset`] lowers the flight's tank
+    /// to it, so a load the full tank would put over the maximum can start.
+    /// `None` leaves the flight's tank alone.
+    initial_fuel_lbs: Option<f64>,
     render: RenderHistory,
     dummies: Vec<(usize, Vector)>,
     mission_spawns: Option<Vec<crate::ai_wings::MissionSpawn>>,
@@ -809,7 +815,17 @@ impl Combat {
                 .cloned()
                 .ok_or_else(|| std::io::Error::other(format!("missing live-fire resource {name}")))
         })?;
-        Self::configured(h, range, config, None)
+        // The default load's tank, which that load's weight can cap below the
+        // full tank (the B-1B, F-111F and B-52H). A record the loadout cannot
+        // read keeps the flight's own tank.
+        let fuel = tore_sim::combat::loadout::Loadout::new(&h.profile, |name| {
+            data.get(name)
+                .cloned()
+                .ok_or_else(|| std::io::Error::other(format!("missing loadout resource {name}")))
+        })
+        .ok()
+        .map(|load| load.fuel_lbs);
+        Self::configured(h, range, config, None, fuel)
     }
     pub fn with_loadout(
         h: &AircraftType,
@@ -821,7 +837,16 @@ impl Combat {
             false,
             load.configuration.clone(),
             Some(load.ammunition()?),
+            Some(load.fuel_lbs),
         )
+    }
+    /// Lowers `s`'s internal tank to the start load's fuel when the tank holds
+    /// more, so the start load's payload and a full tank are not checked
+    /// against the maximum takeoff weight together. Never raises the tank.
+    pub fn apply_start_fuel(&self, s: &mut flight::State) {
+        if let Some(fuel) = self.initial_fuel_lbs {
+            s.fuel = s.fuel.min(fuel);
+        }
     }
     /// Combat for an open mission: no ownship and no host's aircraft. The
     /// mission's aircraft, plane 0 first, join as rows with
@@ -830,7 +855,7 @@ impl Combat {
     pub fn open() -> Self {
         Self {
             open: true,
-            ..Self::with_state(live::State::open_mission(), Vec::new(), false, None)
+            ..Self::with_state(live::State::open_mission(), Vec::new(), false, None, None)
         }
     }
     fn configured(
@@ -838,12 +863,14 @@ impl Combat {
         range: bool,
         config: live::Configuration,
         initial_ammo: Option<Vec<u16>>,
+        initial_fuel_lbs: Option<f64>,
     ) -> WorldResult<Self> {
         Ok(Self::with_state(
             live::State::new(config, true)?,
             h.contrail_offsets.clone(),
             range,
             initial_ammo,
+            initial_fuel_lbs,
         ))
     }
     fn with_state(
@@ -851,6 +878,7 @@ impl Combat {
         contrail_offsets: Vec<Vector>,
         range: bool,
         initial_ammo: Option<Vec<u16>>,
+        initial_fuel_lbs: Option<f64>,
     ) -> Self {
         // New worlds select the approved energy rules. The lower-level State
         // constructor remains Spec for historical tools and unmarked tapes.
@@ -882,6 +910,7 @@ impl Combat {
             clean_recording: false,
             open: false,
             initial_ammo,
+            initial_fuel_lbs,
             render: RenderHistory::default(),
             tape: None,
             last_launcher: None,
@@ -1898,6 +1927,9 @@ impl Combat {
             .state
             .ownship(aircraft)
             .ok_or("the host's plane has an ownship")?;
+        // The tank the start load carries (the model's full tank can put the
+        // load over the maximum takeoff weight), before the payload is checked.
+        self.apply_start_fuel(s);
         s.set_payload(own.payload_lbs())?;
         s.systems = tore_sim::aircraft_systems::Systems::new(
             own.configuration().engines,
@@ -2704,6 +2736,7 @@ pub mod fixtures {
             clean_recording: false,
             open: false,
             initial_ammo: None,
+            initial_fuel_lbs: None,
             render: RenderHistory::default(),
             dummies,
             mission_spawns: None,
