@@ -13,7 +13,7 @@ from battery import Scenario
 REVIEWED_AIRCRAFT = ("a7", "f4b", "f4j", "f4e", "f4g", "f15", "mig17", "f16c", "f104", "a310", "c130", "ac130", "e3", "a10", "av8", "ah64", "mi24", "ch47",
                      "yak141", "v22", "il76", "e2", "b747",
                      "f18", "rafale", "mig29", "su27", "su35", "mig21", "su25", "f22", "f22n", "faxx", "x31", "mig23", "f14", "a4e", "mig25",
-                     "f16a", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc", "b52", "b2", "f117")
+                     "f16a", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc", "b52", "b2", "f117", "tu160")
 
 
 def check_report(work: Path, _output: str) -> list[str]:
@@ -82,6 +82,12 @@ def check_report(work: Path, _output: str) -> list[str]:
         # The B-52 (B52-3, B52-4): the pitch against yaw grid (25 poses) and the dense gear sweep
         # (202 values); no roll surface, brake or plume.
         "B52.PT": {"dense-gear.csv": 203, "pitch-yaw-combinations.csv": 26},
+        # The Tu-160 (T160-3): the pitch/roll grid at the spread and the fully swept wing (25 poses
+        # each), the sweep against the speed schedule and the flaps (12 speeds by 3 flap values),
+        # the dense gear sweep (202 values); the keel plates and the four plumes are single-sample.
+        "TU160.PT": {"dense-gear.csv": 203, "pitch-roll-combinations-20deg.csv": 26,
+                     "pitch-roll-combinations-65deg.csv": 26, "sweep-flap-combinations.csv": 37,
+                     "sweep-span.csv": 4, "sweep-seam.csv": 21},
         # The F-117 (F117-3 and F117-4): the ruddervator pitch/yaw grid (25 poses), the dense gear
         # sweep (202 values) and the interim bay sweep (8 values); no elevon, flap, brake or plume.
         "F117.PT": {"dense-gear.csv": 203, "pitch-yaw-combinations.csv": 26, "bay-sweep.csv": 9},

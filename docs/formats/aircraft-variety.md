@@ -10556,3 +10556,175 @@ The four specs are constants (`B1B`, `TU160`, `F111F`, `TU26`) with no identity 
 match arm there, written and commented out for each, once the aircraft has an `AircraftId`.
 `sweep_rate_dps` is `None` for all five: no source gives a rate and the drawn sweep is a pure
 function of speed. Nothing is drawn differently; the new aircraft's rigs are their own slices.
+
+## Tu-160 shape and rig (T160-2/3, 2026-11-15)
+
+Implementation mode, slices T160-2 (shape, scale, looks) and T160-3 (rig), Claude Sonnet,
+run together in `T.O.R.E-Fighters-m3-tu160` on `m3-tu160` from 13bef2cb. The coordinator's
+decisions (`BOMBERS-DECISIONS-B.md`, Tu-160 items 2, 3, 4 and 9, 2026-11-15) are applied. The
+evidence for the shape is the "Tu-160 source review (2026-11-15)" above; this section is the
+measurement of the drawn aircraft and the rig. The base `FA_2.LIB` shape is used, as for the
+Tornado (the higher-resolution `TU160.SH` in `swpatch.lib` is not read). Frames:
+`.local/m3-aircraft/frames/T160-2/` (local only). Code: `tu160_animation.rs` (the rig),
+`aircraft_animation_probe/tu160.rs` (the witnesses), `tools/battery_scenarios/` (`render-tu160-skin`,
+`flight-animation-tu160`), `crates/tore-import/tests/tu160_shape.rs` (retail-reading, skips without
+media).
+
+### Size and scale (T160-2)
+
+`TU160.SH` (CODE 28,716 bytes) has header exponent 11, object scale 8, so a shape unit is 8/3 ft.
+`combat::debris::scale` has the `Tu160 => 8/3` arm (BMB-B1); this slice confirmed that every
+consumer reads it and pinned the rig's scale to it (`generic_rig_scales_match_the_simulation_scale`
+now also asserts 8/3 for the Tu-160). Measured on the neutral state and the gear word (retail test):
+
+| Axis | Units | Feet at 8/3 | Real | Difference |
+| --- | ---: | ---: | ---: | ---: |
+| Span, spread (x -34 to 34) | 68 | 181.3 | 182.75 ft (55.7 m, 20 degrees) | -0.8% |
+| Length (y -29 to 38) | 67 | 178.7 | 177.5 ft (54.1 m) | +0.7% |
+| Height, gear up (z -3 to 14) | 17 | 45.3 | 43 ft | +5.4% |
+| Height, gear down (z -5 to 14) | 19 | 50.7 | 43 ft | +17.8% |
+| Tailplane span (x -8 to 8) | 16 | 42.7 | 43.5 ft | -1.9% |
+
+**Swept span, measured after the rig** (the three detents, `sweep-span.csv`, right and left
+panels' outermost vertices):
+
+| Sweep | Measured span | Fitted target (`TU160.INF`) | Difference |
+| --- | ---: | ---: | ---: |
+| 20 degrees (spread) | 55.27 m | 55.7 m | -0.8% |
+| 35 degrees | 50.71 m | 50.7 m | 0.0% |
+| 65 degrees | 35.62 m | 35.6 m | +0.1% |
+
+The probe gates the span at 2 percent at each detent. The pivot (4.8, 0) of `swing::TU160` is
+the fit that gives this; nothing was refitted.
+
+**Where the scale is consumed (all at 8/3 ft).** The drawn shape and every rig face (the generic
+rig scale is `debris::scale`); the breakup pieces and damage bodies (`debris::attachment` reads
+the shapes at their header scale); the damage sections' extents; the stores preview and the
+station underside (`stores_preview` takes `debris::scale`, and the probe reports
+`source_units_to_feet` 2.6666667); the gear low point (`models/variety.rs`: 5 units, 13.33 ft,
+pinned by `the_bomber_batch_b_gear_low_points_follow_their_source_reviews`); the animation probe;
+and the wingtip vapour (below). No consumer is left at the 1/3 ft default.
+
+**Gear, decided: as drawn.** The plates are 5 units (13.3 ft) long, the height with the gear down
+is 18 percent over the real 43 ft (the +5 percent gear up is the body). In the ground frames
+(`ground-side`, `ground-front`, `ground-3q`, `ground-main-*`) the aircraft stands level on the nose
+leg and the two main legs with the belly and the nacelles clear of the pavement; nothing reads as
+sunk or too high. The main legs are wheel bogies drawn on plates, visible from below
+(`gear-down-under`) and mostly hidden behind the nacelles in a side view at ground level. No
+published belly clearance was found, so the plates are not shortened (the coordinator's
+question 3 recommendation, kept).
+
+**Vapour points follow the sweep.** The shape's streamer record is the Tu-26's copy (pivot 20, 0,
+10; points 50, -2, -22 in CE units) and, resolved, puts the vapour 93.3 ft out, 2.7 ft down and 16 ft
+aft: one unit (2.7 ft) outside the drawn tip vertex (34, -7, -1, 90.7 ft out) and on the tip chord
+(retail test `streamer_points_sit_on_the_drawn_wing_tips`). It is taken as the spread tip and carried by the
+wing's own rigid turn about the pivot (`tu160_animation::streamer_point`, used by
+`Airframe::streamer_points` for the Tu-160 as for the Tornado): 58.4 ft out and 68.2 ft aft at 65
+degrees, mirrored on the left (asserted in the rig test).
+
+**Eye point (finding, nothing changed).** The seat is still the shared fixed 10 ft ahead and 7 ft
+up of the origin (shape y 3.75, z 2.6), inside the fuselage (the roof is flat at z 4, 10.7 ft, from
+y -14 to 27 and the nose falls to z 0 at y 38). The drawn windscreen is near y 28 to 30 (a
+reading of the top frames), so the seat is about 65 ft behind it. The cockpit view draws the 2D B-2
+panels and takes no per-aircraft eye, so this does not show; T160-7 fits it.
+
+**Hit volume (finding, nothing changed).** The sim's one 28 ft sphere is the shared rule (see "B-2
+shape, size and looks"). The Tu-160 is 90.7 ft to a spread tip (58.4 ft swept), 101 ft to the nose and
+75 ft to the tailplane tips, so gun and fragment contact covers the inner 28 percent of each
+spread wing (44 percent swept) and neither the nose beyond 26 ft nor the tail beyond about 26 ft.
+Per-aircraft volumes are John's decision (they change the simulation).
+
+**Damage looks.** `TU160_A.SH` 313, `_B` 54, `_C` 315 and `_D` 38 faces load at the intact header
+scale (retail test). A is the body with the left wing cut at x -24 (x -24 to 34, y -28 to 39, so its nose
+is one unit, 2.7 ft, longer than the intact one); B the cut-off section authored about its own origin (x
+-12 to 11); C the body with the fin cut to z 9; D the fin top and tail piece (x -8 to 8, z -5 to 8). No
+whole-body variant is registered in `debris::damage_variant` for the Tu-160, so a destroyed aircraft
+draws the intact skin with the regional cuts, as the B-52, B-2 and Tornado (open decision for John:
+LeftWing to variant 0 and Tail to variant 1 would use the reviewed pairs, as the F-5E does). Frames
+`damage-1.0-left-wing`, `-right-wing`, `-tail`, `-nose`, `-core`, `damage-0.6-left-wing` (view 2, 120
+ticks) draw whole at the right size with the wing cut following the shape.
+
+**Skin and decals.** 12 exact-vertex twin groups, all with opposite stored normals (retail test), so the
+smooth path pairs them and no underside shows through the top; the keel plates, the flap strips and the
+tailplane are double-sided. The export path finds two `E0` runtime decal slots (318 against 316 faces):
+`2363` (right) and `3765` (left), 2 by 2 unit plates (x 4 to 6, y 5 to 7, z 1 to 2) on the **fixed**
+glove top, not on the swinging panel. The runtime projector omits them, as for the B-52, Tornado and
+B-2; no blank or skin-filled patch shows in the top frames and the sweep never meets them (the panel
+root is at x 8 and out). The new `render-tu160-skin` scenario (top and under, gear down, zoom 0.5, as the
+B-52's) draws both views.
+
+### The wing sweep (T160-3, coordinator decision 3, fitted)
+
+The 16 whole faces a side (the right `4952` to `4bba`, the left `4e8e` to `50db`, strip included) turn
+as **one rigid panel** about a vertical axis through `swing::TU160.pivot_right` (4.8, 0) and the left
+mirror, tip aft, by `swing::TU160.turn(speed, flaps, gear)`:
+
+- 20 degrees (turn 0) up to 250 kt;
+- 35 degrees (turn 15) from 320 to 520 kt;
+- 65 degrees (turn 45) from 600 kt;
+- smoothstep between the detents (270 kt 23.0, 285 kt 27.5, 300 kt 32.0 degrees; 560 kt 50.0);
+- flaps hold the wing at 20 degrees (a lever of 0.5 holds half the command).
+
+The probe measures the tip turn of each panel against this law restated independently (36
+speed and flap rows, `sweep-flap-combinations.csv`, within 0.01 degrees, each panel rigid to
+1e-5 ft). **Fold check (rule 11):** the panel shares no vertex with any other face (the loader
+refuses a shape where one does), so nothing is held while another part turns; 0 fixed faces move.
+
+**The root seam, as measured** (`sweep-seam.csv`, `sweep-seam-vertices.csv`: the five root vertices
+of a panel, both heights, against the fixed airframe seen from above; plan gap is the distance to the
+nearest fixed skin, 0 where it is covered, and no covered vertex is outside the skin vertically):
+
+| Sweep | Front root (8,2) | Front corner (9,4) | Rear (10,-2) | Rear (11,-2) | Rear corner (11,-5) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 20 degrees | covered | covered | 6.5 ft | 9.1 ft | 10.8 ft |
+| 35 degrees | 0.6 ft | 2.4 ft | 5.4 ft | 8.1 ft | 7.7 ft |
+| 65 degrees | 1.9 ft | 7.0 ft | 0.6 ft | 2.8 ft | covered |
+
+The shape's panel root hangs off the glove in the source (the spread rear corners are 6.5 to 10.8
+ft from the nearest fixed surface and the front root is under the glove top), so the spread pose
+already shows a sliver (`seam-20`). The turn carries the rear corners into the nacelle region and
+brings the leading root corner out: at 65 degrees it stands 7 ft off the glove edge (`seam-65`: a
+visible triangular gap between the glove and the panel root, the ground showing through). Accepted
+as the coordinator decided (decision 3, "the panel root seam is accepted"); **no fence and no glove
+plate was added** (the shape has no geometry above the wing). A glove plate (the Tornado precedent) is
+the follow-up if John wants the 65 degree root closed.
+
+**The outer flap strip is the whole outer trailing edge and sweeps with the panel:** it droops first
+about its own hinge, then the whole panel (strip included) turns.
+
+### Surfaces and the other words (T160-3)
+
+| Part | Source | Rig (fitted unless said) |
+| --- | --- | --- |
+| Tailplane | one quad a side at z 7, two windings (`1daf`/`3e5d` right, `1dce`/`3e7c` left), no word | Whole quad about the lateral spindle through the root chord midpoint (0, -22, 7), pitch 0.25 rad plus differential roll 0.12 rad (a positive aileron raises the right trailing edge and lowers the left), the sum clamped at 0.30 rad (17 degrees; the fleet clamp is 0.40). The real tail is an all-moving stabilator pair; no limit is cited. Root corners are 4 units (10.7 ft) from the spindle, so 0.30 rad moves them 3.2 ft in z: a pitch moves both roots together, a roll splits them at the centre line (the source review's strain, not a failure). |
+| Upper fin and rudder | the six-face upper fin is fixed; the word `801a` swaps the aft 2-unit strip (`52e0`/`5307`) for a copy skewed 45 degrees, signed | **Only the source strip is rigged** (decision 4): the strip turns rigidly about its leading edge (0, -24, 7) to (0, -25, 14), positive pedal to +X, at **30 degrees (pi/6 rad), smaller than the source 45 degree pose** (the retail pose also stretches the chord from 2 to 2.8 units at the base; a rigid turn keeps 2). The real one-piece all-moving fin is not drawn. The word is never set. |
+| Flaps | one strip a side (`4b93`/`4bba`, `50b4`/`50db`) with signed words (-1 drooped, 1 deletes) | Droop the strip about its leading-edge line at mid thickness (z -0.5, root (11, -2) to tip (32, -6)) by 0.60 rad (34 degrees) at lever 1 (the source's drooped copy measures 0.73 rad at the root and is not an exact rotation). Plus end caps: the strip's own end triangles (both windings, four a side on synthetic addresses `8110` to `8117`), drawn only while the strip is down, so the droop does not open the ends. **The words are never set, and +1 is never driven.** Flaps also hold the wing spread. |
+| Keel plates (word `7ffc`) | two vertical plates at x +-1, y 6 to 16 (26.7 ft long), z 0 to -2, under the belly | **Not an airbrake** (the real Tu-160 has none, `TU160.INF`; the record's `airBrakesDrag` 192 stays). Rigged only as the word encodes: plates that exist when the brake lever is applied. The two plates drop out of the belly with the lever (z scaled from the belly line, fitted), nothing else moves. They are drawn plates under the aircraft, no more. |
+| Gear (word `8002`, +12) | nose: two plates and a cap at y 20 to 22; each main: a long plate at x +-1 (y -4 to 2) and a cross plate at y -1; all z 0 to -5 | Three rigid legs (the shape has no hinge): the nose leg steers about a vertical line through (0, 21) and folds aft a quarter turn about the lateral line (y 22, z 1); each main folds **outward** a quarter turn about a line along Y at its long plate (x +-1, z 1), into the glove and nacelle region (`TU160.INF`: "between fuselage and inboard engine"). Timing: the nose leg uses gear 0 to 0.8, the mains 0.2 to 1. Nothing is drawn at gear 0. Gear down is the source pose and the ground contact (-5 units); stowing the legs 202 steps (`dense-gear.csv`) never lowers a plate by more than 0.1 unit (0.27 ft: a main's cross plate hinges on the long plate and swings a corner that far over the last fifth of the arrival), and **the near-stow legs lie 0 ft outside the neutral skin** (`dense-gear-hull.txt`). |
+| Flames (word `7ff0`, +16) | four prisms, 11 units (29 ft) long behind the nozzle plane y -11 | Each plate scales from the nozzle plane with the exhaust fraction (the Tornado law); nothing at 0. |
+
+**Not in the shape, not invented:** ailerons, spoilers, slats, fences, elevons, refuelling probe, hook,
+reversers, bay doors (T160-5). Roll comes from the tailplane.
+
+### Probe and checks
+
+`--animation-probe` for `tu160` (profile `.local/m3-aircraft/profile-tu160`, refreshed first):
+**316 neutral faces, 0 required/check failures.** Elevator, rudder, aileron, gear, flaps, brake and
+exhaust and the wing sweep are `required` and move; hook is not applicable (the record has none); the
+bay is `unreviewed` (T160-5's). There are no explicit acceptances beyond those: the aileron is the
+differential tailplane, so it is required and moves. Outputs written beside the report: the
+25-pose pitch and roll grids at 20 and 65 degrees, the sweep against speed and flaps (36 poses), the
+span, the root seam (by sweep and by vertex), the seam openings (rudder strip 2.7 ft, flap strip
+4.7 ft), the 202-value gear sweep. `flight-animation-tu160` is registered in the animation battery.
+`--headless-flight 600 tu160`: no crash, 0 non-finite samples (level at 5,000 ft, 779 kt after 600
+ticks, fuel 326,285 to 326,194 lb). The unit test is one rig test (`the_tu160_rig_holds_its_detents_and_turns_whole_panels_about_their_hinges`,
+the detents included, plus the vapour point); the retail-reading tests are `tu160_shape.rs`.
+
+### Open for John
+
+1. **Root seam at 65 degrees.** The leading root corner stands 7 ft off the glove (above). Accept, or a glove plate (the Tornado precedent).
+2. **Fence.** None (the shape has none). An authored inboard fence or the whole strip turned up are the other options (T160-0).
+3. **Rudder.** The source strip at 30 degrees. The real one-piece upper fin is not drawn.
+4. **Keel plates.** They drop with the brake lever. The alternative is leaving the word unrigged.
+5. **Damage variants.** `LeftWing` to variant 0 and `Tail` to variant 1 would use the reviewed A to D pairs.
+6. **Hit volume and eye.** Per-aircraft values are not set (shared).

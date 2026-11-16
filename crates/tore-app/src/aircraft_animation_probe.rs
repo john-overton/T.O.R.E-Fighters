@@ -42,6 +42,7 @@ mod su25;
 mod su27;
 mod su35;
 mod tornado;
+mod tu160;
 mod v22;
 mod x31;
 mod yak141;
@@ -264,6 +265,9 @@ impl Control {
                         | Id::Tornado
                         | Id::TornadoClean
                         | Id::B2
+                        // T160-3: the Tu-160's keel plates (word 7ffc) are drawn
+                        // plates the brake lever drops, not an airbrake.
+                        | Id::Tu160
                 ) =>
             {
                 Expectation::Required
@@ -300,7 +304,12 @@ impl Control {
                 Expectation::Required
             }
             Self::Rotor => Expectation::Unknown,
-            Self::Sweep if matches!(id, Id::F14 | Id::Mig23 | Id::Tornado | Id::TornadoClean) => {
+            Self::Sweep
+                if matches!(
+                    id,
+                    Id::F14 | Id::Mig23 | Id::Tornado | Id::TornadoClean | Id::Tu160
+                ) =>
+            {
                 Expectation::Required
             }
             Self::Sweep => Expectation::Unknown,
@@ -328,6 +337,7 @@ impl Control {
                         | Id::Mf1
                         | Id::Tornado
                         | Id::TornadoClean
+                        | Id::Tu160
                 ) =>
             {
                 Expectation::Required
@@ -492,6 +502,11 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     // below the 250 knot sweep threshold; the sweep schedule and the coupled
     // sweep/flap grid cover that interaction explicitly.
     if id.source() == AircraftId::Tornado {
+        neutral.speed = 200. * 1.68781;
+    }
+    // The Tu-160's wing sweeps with speed too (T160-3): its controls are
+    // isolated below the 250 knot detent, and the sweep grids cover the rest.
+    if id == AircraftId::Tu160 {
         neutral.speed = 200. * 1.68781;
     }
     neutral.engine = false;
@@ -684,6 +699,7 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
             | AircraftId::B52
             | AircraftId::B2
             | AircraftId::F117
+            | AircraftId::Tu160
     ) {
         "reviewed-controls-and-attachments"
     } else {
@@ -1220,6 +1236,17 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
                 );
             }
         }
+        if id == AircraftId::Tu160 {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                tu160::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
         if id == AircraftId::Mig31 {
             for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
                 mig31::check(
@@ -1405,6 +1432,9 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     }
     if id == AircraftId::B2 {
         failures.extend(b2::combinations(&airframe, &neutral, out)?);
+    }
+    if id == AircraftId::Tu160 {
+        failures.extend(tu160::combinations(&airframe, &neutral, out)?);
     }
     failures.extend(rotorcraft::combinations(&airframe, &neutral, out)?);
     moving_parts(&airframe, &neutral, out)?;
