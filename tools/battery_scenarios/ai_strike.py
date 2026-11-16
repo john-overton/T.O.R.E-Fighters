@@ -1301,6 +1301,156 @@ def b2_paveway_problems(output: str) -> list[str]:
     return problems
 
 
+# The B-52's bay and pylon places (B52-5 and B52-9; `combat::bays::GRIDS`, `Location::Beam`). Bay row 3 is
+# station 2 of the run, at 13.87 ft forward: a 4 abreast row (outermost first, alternating sides), three
+# tiers (up -5.29 ft for the bottom one, 1.31 ft between tiers). Pylon row 7 is station 1: a beam three
+# abreast on each wing (17.33 ft out, 1.37 ft between stores), 10.33 ft forward, 2.43 ft up for a Mk 82,
+# the left and the right wing alternating; a Harpoon hangs 2.32 ft up.
+B52_COLUMNS = (-1.95, 1.95, -0.65, 0.65)
+B52_ROW3_FORWARD = 13.87
+B52_ROW3_BOTTOM_UP = -5.29
+B52_TIER_UP_FT = 1.31
+B52_BEAM_OUT_FT = (15.96, 18.70, 17.33)
+B52_PYLON_FORWARD = 10.33
+
+
+def b52_row3_cells(count: int) -> list[tuple[float, float, float]]:
+    """The first `count` Mk 82 places of the B-52's forward bay row: (right, up, forward) feet."""
+    cells = [(column, B52_ROW3_BOTTOM_UP + B52_TIER_UP_FT * tier, B52_ROW3_FORWARD)
+             for tier in range(3) for column in B52_COLUMNS]
+    return cells[:count]
+
+
+def b52_origins(output: str) -> list[tuple[float, float, float]]:
+    return [(float(m[3]), float(m[4]), float(m[5])) for m in ORIGIN_LINE.findall(output)]
+
+
+def b52_bay_stick_problems(run: Run, output: str, label: str) -> list[str]:
+    """A B-52 bay stick: eight Mk 82 from the forward row's first eight places, 0.25 s apart, the doors
+    open before the first and shut after the last, impacts, egress, not lost."""
+    problems = consistency_problems(run, label)
+    problems += bay_door_problems(run, label)
+    releases = run.of("RELEASE")
+    if len(releases) != 8:
+        problems.append(f"{label}: {len(releases)} releases, want a stick of 8")
+    times = run.times("RELEASE")
+    if any(abs((b - a) - 0.25) > 0.02 for a, b in zip(times, times[1:])):
+        problems.append(f"{label}: the stick is not 0.25 s apart: {times}")
+    origins = b52_origins(output)
+    if len(origins) != len(releases):
+        problems.append(f"{label}: {len(origins)} origin lines for {len(releases)} releases")
+    for n, (origin, want) in enumerate(zip(origins, b52_row3_cells(8))):
+        if abs(origin[0] - want[0]) > 0.1 or abs(origin[1] - want[1]) > 0.1 or abs(origin[2] - want[2]) > 0.5:
+            problems.append(f"{label}: bomb {n + 1} left from {origin}, the row's place is {want}")
+    if len(set(origins)) != len(origins):
+        problems.append(f"{label}: two bombs left from one place")
+    if any(r.get("station") != "2" for r in releases):
+        problems.append(f"{label}: released from stations {sorted({r.get('station') for r in releases})}, want the forward bay row (2)")
+    if not run.of("IMPACT"):
+        problems.append(f"{label}: no bomb landed")
+    if not run.of("EGRESS"):
+        problems.append(f"{label}: no EGRESS after the stick")
+    if run.of("LOST"):
+        problems.append(f"{label}: the B-52 was lost")
+    if run.setup.get("aircraft") != "B52":
+        problems.append(f"{label}: flew {run.setup.get('aircraft')}, want B52")
+    return problems
+
+
+def b52_stick_problems(output: str) -> list[str]:
+    """`ai-strike-b52-stick`: an AI B-52 at 20,000 ft drops a stick of eight Mk 82 from its forward bay
+    row's grid (B52-9): the doors open for it (BMB-AI), one bomb every 0.25 s from the first eight
+    places, egress after the last."""
+    runs = parse_runs(output)
+    if len(runs) != 1:
+        return [f"expected one strike run, got {len(runs)}"]
+    problems = b52_bay_stick_problems(runs[0], output, "B-52 stick")
+    if any(number(r.get("alt_ft")) < 15000 for r in runs[0].of("RELEASE")):
+        problems.append("released below the 15,000 ft this run's threat floor")
+    return problems
+
+
+def b52_quick_wing_problems(output: str) -> list[str]:
+    """`ai-strike-b52-quick-wing`: a Quick Mission with the Ukraine factory as the ground target: the B-52
+    wing takes the Strike role (the mission's bomber-class default) and flies the same stick from its bay."""
+    runs = parse_runs(output)
+    if len(runs) != 1:
+        return [f"expected one strike run, got {len(runs)}"]
+    problems = b52_bay_stick_problems(runs[0], output, "B-52 quick wing")
+    role = (runs[0].first("ROLE") or {}).get("role")
+    if role != "strike":
+        problems.append(f"B-52 quick wing: the wing was given role {role}, want strike")
+    return problems
+
+
+def b52_pylon_problems(output: str) -> list[str]:
+    """`ai-strike-b52-pylon`: six Mk 82 from the wing pylons (row 7, station 1) leave one every 0.25 s from
+    the beams, left and right alternating, three abreast a wing, with the bay doors untouched."""
+    runs = parse_runs(output)
+    if len(runs) != 1:
+        return ["expected one strike run, got %d" % len(runs)]
+    run, label = runs[0], "B-52 pylon"
+    problems = consistency_problems(run, label)
+    releases = run.of("RELEASE")
+    if len(releases) != 6:
+        problems.append(f"{label}: {len(releases)} releases, want a stick of 6")
+    times = run.times("RELEASE")
+    if any(abs((b - a) - 0.25) > 0.02 for a, b in zip(times, times[1:])):
+        problems.append(f"{label}: the stick is not 0.25 s apart: {times}")
+    origins = b52_origins(output)
+    if len(origins) != len(releases):
+        problems.append(f"{label}: {len(origins)} origin lines for {len(releases)} releases")
+    for n, origin in enumerate(origins):
+        side = -1.0 if n % 2 == 0 else 1.0
+        want = (side * B52_BEAM_OUT_FT[n // 2 % 3], None, B52_PYLON_FORWARD)
+        if abs(origin[0] - want[0]) > 0.1 or abs(origin[2] - want[2]) > 0.5 or not 2.0 <= origin[1] <= 3.0:
+            problems.append(f"{label}: bomb {n + 1} left from {origin}, the beam's place is right {want[0]} forward {want[2]}")
+    if any(r.get("station") != "1" for r in releases):
+        problems.append(f"{label}: released from stations {sorted({r.get('station') for r in releases})}, want the pylon row (1)")
+    if any(number(r.get("bay")) > 0.05 for r in releases) or run.of("BAY"):
+        problems.append(f"{label}: the bay doors moved for a pylon release")
+    if not run.of("IMPACT"):
+        problems.append(f"{label}: no bomb landed")
+    if not run.of("EGRESS"):
+        problems.append(f"{label}: no EGRESS")
+    if run.of("LOST"):
+        problems.append(f"{label}: the B-52 was lost")
+    return problems
+
+
+KRIVAK_ID = "0x50000003"
+
+
+def b52_antiship_problems(output: str) -> list[str]:
+    """`ai-strike-b52-antiship`: an AI B-52 with two AGM-84E on its pylons sinks the Krivak of the Ukraine
+    surface fleet: both Harpoons leave the wing pylons (one a wing), the doors stay shut, both hit and the
+    ship is destroyed. The run stops at 60 s: after the kill the AI goes on searching and is lost within
+    8,000 ft of the fleet (about 137 s), a known limit (docs/formats/aircraft-variety.md, B52-9)."""
+    runs = parse_runs(output)
+    if len(runs) != 1:
+        return [f"expected one strike run, got {len(runs)}"]
+    run, label = runs[0], "B-52 Harpoon"
+    problems = consistency_problems(run, label)
+    releases = run.of("RELEASE")
+    if len(releases) != 2 or any(r.get("weapon") != "AGM84E.JT" or r.get("station") != "1" for r in releases):
+        problems.append(f"{label}: releases {[(r.get('weapon'), r.get('station')) for r in releases]}, want two AGM84E.JT from station 1")
+    origins = b52_origins(output)
+    if sorted(round(o[0], 1) for o in origins) != [-17.3, 17.3] or any(abs(o[2] - B52_PYLON_FORWARD) > 0.5 for o in origins):
+        problems.append(f"{label}: the Harpoons left from {origins}, want one a wing at 17.33 ft out, 10.33 ft forward")
+    if any(number(r.get("bay")) > 0.05 for r in releases) or run.of("BAY"):
+        problems.append(f"{label}: the bay doors moved for a pylon release")
+    if len(run.of("IMPACT")) != 2:
+        problems.append(f"{label}: {len(run.of('IMPACT'))} impacts, want 2")
+    if not any(k.get("victim") == KRIVAK_ID for k in run.of("KILL")):
+        problems.append(f"{label}: the Krivak ({KRIVAK_ID}) was not destroyed")
+    if run.of("LOST"):
+        problems.append(f"{label}: the B-52 was lost")
+    if run.setup.get("target") != KRIVAK_ID:
+        problems.append(f"{label}: aimed at {run.setup.get('target')}, want the Krivak")
+    return problems
+
+
+
 def _runs(skills_and_profiles, miss=True, **extra) -> list[dict]:
     wanted = []
     for skill, profile in skills_and_profiles:
@@ -1645,6 +1795,42 @@ def scenarios() -> list[Scenario]:
         timeout=600, expect=[r"RELEASE", r"ORIGIN", r"KILL", r"EGRESS"], check=b2_paveway_problems,
         notes="An AI B-2's Paveway III (GBU-27) leaves the first place of its left bay's 4 abreast grid and kills "
               "the tank on its own laser spot.",
+    ))
+    # B52-9: the B-52 flies the heavy stick from its bay rows and its pylon row, and the Harpoons go against a
+    # ship (docs/formats/aircraft-variety.md, "B-52 AI, missions, multiplayer and replay").
+    extra.append(Scenario(
+        name="ai-strike-b52-stick", lane="flight",
+        args=pilot_run("UKR", "QUCOL", "--aircraft", "b52", "--load", "MK82", "--station", "2", "--count", "9",
+                       "--altitude", "20000", "--from", "12", "--seconds", "200", "--follow-egress"),
+        timeout=600, expect=[r"RELEASE", r"ORIGIN", r"IMPACT", r"EGRESS"], check=b52_stick_problems,
+        notes="An AI B-52 (a Heavy) on the column at 20,000 ft, 12 nm out, nine Mk 82 in its forward bay row: the "
+              "doors open before the first bomb, a stick of eight leaves 0.25 s apart from the row's first eight "
+              "places (bottom tier first, outermost first), the doors shut after the last, then egress.",
+    ))
+    extra.append(Scenario(
+        name="ai-strike-b52-pylon", lane="flight",
+        args=pilot_run("UKR", "QUCOL", "--aircraft", "b52", "--load", "MK82", "--station", "1", "--count", "6",
+                       "--altitude", "20000", "--from", "12", "--seconds", "200", "--follow-egress"),
+        timeout=600, expect=[r"RELEASE", r"ORIGIN", r"IMPACT", r"EGRESS"], check=b52_pylon_problems,
+        notes="An AI B-52 with six Mk 82 on its wing pylons (row 7): a stick of six leaves 0.25 s apart from the "
+              "two beams, left and right alternating, with the bay doors shut throughout.",
+    ))
+    extra.append(Scenario(
+        name="ai-strike-b52-quick-wing", lane="flight",
+        args=pilot_run("UKR", "QUFACT", "--aircraft", "b52", "--load", "MK82", "--station", "2", "--count", "9",
+                       "--quick-wing", "--seconds", "400", "--follow-egress"),
+        timeout=900, expect=[r"ROLE", r"RELEASE", r"IMPACT", r"EGRESS"], check=b52_quick_wing_problems,
+        notes="A Quick Mission with the Ukraine factory as the ground target: a B-52 wing gets the Strike role from "
+              "the mission's bomber-class default, opens its doors and drops the stick of eight from its forward "
+              "bay row at the 5,000 ft heavy floor, then egresses.",
+    ))
+    extra.append(Scenario(
+        name="ai-strike-b52-antiship", lane="flight",
+        args=pilot_run("UKR", "QUSFLT", "--unit", KRIVAK_ID, "--aircraft", "b52", "--load", "AGM84E",
+                       "--station", "1", "--count", "2", "--altitude", "20000", "--from", "15", "--seconds", "60"),
+        timeout=600, expect=[r"RELEASE", r"ORIGIN", r"IMPACT", r"KILL"], check=b52_antiship_problems,
+        notes="An AI B-52 with two AGM-84E on its pylons, 15 nm from the Ukraine surface fleet at 20,000 ft: one "
+              "Harpoon leaves each wing, the doors stay shut, both hit the Krivak and it is destroyed.",
     ))
     return extra + [
         Scenario(
