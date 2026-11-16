@@ -369,6 +369,10 @@ fn specification(id: Id) -> Option<Spec> {
             // B1.SH: seven words (flames 0x7b10, bay walls 0x7b16, spoilers
             // 0x7b1c, gear 0x7b22, flaps 0x7b2e and 0x7b34, rudder 0x7b3a),
             // gear adds 12 faces; header exponent 10, so 4/3 ft a unit.
+            // Update (B1B-3, 2026-11-15): the B-1B loads through its own
+            // `b1b_animation` rig (swing wing, tailerons, rudder, spoilers,
+            // gear, interim bay walls, plumes); this row pins the layout, the
+            // scale and `supported`.
             Id::B1b => (
                 27468,
                 314,
@@ -487,6 +491,9 @@ enum SpecificRig {
     /// B2-3 and B2-4: the elevons, the drag rudders and speed brake, the gear
     /// and the interim bay plates.
     B2(crate::b2_animation::Rig),
+    /// B1B-3: the swing wing, tailerons, rudder, spoilers, gear, interim bay
+    /// walls and plumes.
+    B1b(crate::b1b_animation::Rig),
     /// F117-3 and F117-4: the ruddervators, the gear and the interim bay pose.
     F117(crate::f117_animation::Rig),
 }
@@ -829,6 +836,15 @@ impl Rig {
                     shape,
                 ));
             }
+            Id::B1b => {
+                let (rig, shape) = crate::b1b_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::B1b(rig),
+                    shape,
+                ));
+            }
             Id::B2 => {
                 let (rig, shape) = crate::b2_animation::Rig::load(bytes, shape)?;
                 return Ok(Self::with_specific(
@@ -979,6 +995,7 @@ impl Rig {
                 SpecificRig::Tornado(_) => crate::tornado_animation::flame(address),
                 SpecificRig::B52(_) => crate::b52_animation::flame(address),
                 SpecificRig::B2(_) => crate::b2_animation::flame(address),
+                SpecificRig::B1b(_) => crate::b1b_animation::flame(address),
                 SpecificRig::F117(_) => crate::f117_animation::flame(address),
             };
         }
@@ -1048,6 +1065,7 @@ impl Rig {
                 SpecificRig::Tornado(rig) => rig.animate(source, state),
                 SpecificRig::B52(rig) => rig.animate(source, state),
                 SpecificRig::B2(rig) => rig.animate(source, state),
+                SpecificRig::B1b(rig) => rig.animate(source, state),
                 SpecificRig::F117(rig) => rig.animate(source, state),
             };
         }
@@ -1178,6 +1196,8 @@ mod tests {
         assert_eq!(specification(Id::Tornado).unwrap().scale, 2. / 3.);
         // B52-2: the B-52 draws at its header scale too (true size).
         assert_eq!(specification(Id::B52).unwrap().scale, 2. / 3.);
+        // B1B-2: the B-1B draws at its header scale too (true size).
+        assert_eq!(specification(Id::B1b).unwrap().scale, 4. / 3.);
     }
     fn spread(a: &[[f32; 3]], b: &[[f32; 3]]) -> f32 {
         let d =

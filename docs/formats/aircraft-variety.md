@@ -10398,3 +10398,168 @@ The four specs are constants (`B1B`, `TU160`, `F111F`, `TU26`) with no identity 
 match arm there, written and commented out for each, once the aircraft has an `AircraftId`.
 `sweep_rate_dps` is `None` for all five: no source gives a rate and the drawn sweep is a pure
 function of speed. Nothing is drawn differently; the new aircraft's rigs are their own slices.
+
+## B-1B shape and rig (B1B-2/3, 2026-11-15)
+
+Implementation mode, slices B1B-2 and B1B-3 run together (bomber batch B), Claude Sonnet.
+Decisions applied: the coordinator's first pass (`BOMBERS-DECISIONS-B.md`, B-1B items 2, 6, 9 and
+SWING-1). Evidence for the shape is in "B-1B source review (2026-11-15)" above and in the
+retail-reading test `crates/tore-import/tests/b1b_shape.rs` (skips without media, no retail bytes
+committed); the rig is `crates/tore-app/src/b1b_animation.rs`, its probe
+`crates/tore-app/src/aircraft_animation_probe/b1b.rs`. Everything the rig moves is **fitted**
+(agent decisions 2026-11-15) unless a source is named; the shape's own faces and words are
+spec-derived and the rig refuses a shape that differs from the reviewed one.
+
+### B1B-2: shape, size, looks
+
+| Item | Result |
+| --- | --- |
+| Header and scale | `B1.SH` CODE 27,468, header scale 4, 314 runtime faces (326 gear down); drawn at 4/3 ft a unit. `debris::scale`, the rig spec, the gear clearance (32/3 ft) and the probe's `source_units_to_feet` (1.3333334) all agree; no per-axis factor. |
+| Span (spread) | x -51 to 51, 102 units, **136.0 ft** against 136 ft 8.5 in (`B1.INF`), -0.5% |
+| Span (swept) | Measured by the probe at the rig's full turn: **74.2 ft** (leading-edge sweep 67.5, tip x 27.8 units) against the real 78 ft 2.5 in, -5% (accepted, decision 2) |
+| Length | y -42 to 65, 107 units, **142.7 ft** against 147 ft (`B1.INF`), -2.9% |
+| Height | z -5 (nacelle bottoms) to 20: **33.3 ft** gear up against 34 ft (-2.0%); gear down z -8: **37.3 ft** (+9.8%). Gear kept as drawn (decision 9). |
+| Gear low point | -8 units, 10.67 ft; the sim stands the aircraft on it (`ground_clearance_ft` 32/3, test `the_bomber_batch_b_gear_low_points_follow_their_source_reviews`). Wheelbase about 63 ft, track about 5 ft (the mesh mains are two plates 4 units apart, much narrower than the real jet). |
+| Eye point | Not shape-derived: the fixed seat (10 ft ahead, 7 ft up of the reference point, `mirrors::pilot_eye`) is shared. The flight deck is drawn at y 48 to 54, 64 to 72 ft ahead of the origin, so the seat is 54 to 62 ft behind the windscreen and the rear view looks from inside the fuselage. **B1B-7 owns the cockpit**; unchanged here. |
+| Hit volume | One 28 ft sphere for every aircraft (`AIRCRAFT_RADIUS_FT`); the gun and fuze boxes are 0.92 of it, 25.8 ft: 38% of the spread half-span (68 ft), 70% of the swept one (37 ft), against a nose 87 ft out and a tail 56 ft aft. Unchanged; a per-aircraft radius is John's call, as for the B-52 and B-2. |
+| Damage looks and shapes | `B1_A` 346, `B1_B` 74, `B1_C` 283 and `B1_D` 114 faces, all at header scale 4 (test); the section thresholds are in feet and take the drawn scale. The bodies are drawn in the spread pose (a damaged body is a different shape, not the rigged one; the Tornado's are the same), so a body shown at speed does not sweep. |
+| Decal clipping | The export path of the reader finds **two** runtime `E0` slots the runtime path omits: `2249` (x -7 to -4) and `2a36` (x 4 to 7), each a plate 3 units wide and 5 long on the forward glove side (y 4 to 9, z 1 to 5), the left and right wing-marking slots. Both stay omitted rather than filled with skin: the frames show plain camouflage there and no blank patch. |
+| Skin | 12 exact-vertex twin groups, all with opposite stored normals (test), so smooth mode pairs them and hides the rear member. |
+| Wingtip vapour | **The record is valid, and better than the review said**: pivot (10240, 0, 11264) in 24.8 fixed point is (40, 0, 44) CE (third-of-a-foot) units = 13.33 ft right, 14.67 ft forward, exactly the (10, 11) unit sweep pivot at 4/3 ft; each tip point plus the pivot is (+-204, 0, -12) CE = (+-68, 0, -4) ft = the drawn trailing tip (51, -3, 0). The B1B-0 reading "multiples of 1,024, tip not on the wing" mixed the pivot into the tip. The record's own hinge angle (40 degrees full scale) is not used, the rig turns the point by the spec's turn: `streamer_point` carries the spread tip with `swing::B1B.swept`, so the vapour leaves the swept tip on both sides (`Airframe::streamer_points`, unit-tested; swept to 67.5 it is at (+-31.8 ft, -40.0 ft)). |
+| Render scenario | `render-b1b-skin` (flight view 2, gear down, look `0,60` and `0,-60`, zoom 0.5): no show-through, no z-fighting spread; lane-flight row added. |
+
+### B1B-3: the rig
+
+`B1.SH` has seven words (`7b10` plumes, `7b16` bay walls, `7b1c` spoilers, `7b22` gear, `7b2e`
+and `7b34` flaps, `7b3a` rudder) and **no sweep word**. The rig sets no word for a piece that
+exists in the neutral shape (the flap strips, the rudder quad, the wing): it keeps them drawn
+and turns them. It adds the spoiler, gear, bay, plume and flap-cap faces from their words at
+load and hides or poses them in `animate`.
+
+**Swing wing (SWING-1 `swing::B1B`).** Each wing panel is 17 whole faces (right `4558`..`4590`,
+left `4a37`..`4982`, the flap strips included); `load` checks that the only vertices a panel
+shares with any fixed face are on the line (+-10, 11, z). The whole panel turns as one piece
+about a vertical axis through (10, 11) by `swing::B1B.turn(speed, flaps, gear)`: 0 to 52.5
+degrees, that is a leading-edge sweep of 15 to 67.5 (the drawn 12.7 degrees is the rest pose),
+linear from 280 kt (spread) to 520 kt (fully swept), flaps hold it spread (gear does not). Only
+the drawing reads it; no flight law, no swivelling pylons (no wing stations).
+
+| Sweep (deg) | Turn | Span (ft) | Tip (right), ft | Pivot-line seam | Mirror error |
+| ---: | ---: | ---: | --- | --- | --- |
+| 15 | 0 | 136.0 | (68.0, +2.7) | 0 | 0 |
+| 30 | 15 | 126.1 | (63.0, -11.1) | 0 | 0 |
+| 45 | 30 | 109.4 | (54.7, -23.1) | 0 | 0 |
+| 60 | 45 | 87.0 | (43.5, -32.5) | 0 | 0 |
+| 67.5 | 52.5 | 74.2 | (37.1, -36.0) | 0 | 0 |
+
+(`sweep-seam.csv`, probe, tip = the (51, 2) vertex; feet from the pivot's frame origin.) The
+rule 11 fold check: all 34 wing faces move, none keeps a vertex off the axis; the three
+vertices on the pivot line (z -1, 0, 1) do not move (gap 0 ft at every angle), so the one seam
+the shape has never opens. The panel stays rigid in plan to 6e-6 ft. The swept root's trailing
+corner (9, 1) swings to about (1.5, 5.7) units, inside the glove and fuselage volume; its
+nearest vertex reaches 0.96 ft from the centre line at full sweep and the wings never meet.
+**The z-fight fix**: the swept root's bottom faces (z -1) are coplanar with the belly polygon
+`3617` and its top faces (z 1) with the glove's flat step (`2a0c`, `236c`), so the panel slab is
+made **0.03 units (0.04 ft) thinner on each side**, eased in over the first 0.1 rad of turn
+(vertices on the pivot line exempt, so the seam stays closed). This is the one deliberate
+non-rigid step: the plan view stays rigid and the height changes by at most 0.04 ft, so it is an
+affine thinning with no fold; the spread pose is exactly the retail one. The frames show no
+flicker at 15, 40 or 67.5 degrees, from above or below. The swept root top does show through the
+glove's sloped skin between x 8 and 10 (0.5 units), as the retail root does spread; accepted.
+Flap strips and caps ride the panel (below).
+
+**Tailerons.** One whole quad per side in two windings (`30a0`/`30ec` right, `2f7c`/`2ff0`
+left; the left tip is one unit shorter, x -14 against 15), no word. They turn about the lateral
+line through the middle of the root chord, (0, -28.5, 10): pitch together, roll differentially
+(positive aileron raises the right trailing edge, the fleet's sense). Law: 0.16 rad pitch plus
+0.09 rad roll, clamped at 0.22 rad (12.6 degrees), smaller than the fleet's 0.40 and the
+Tornado's 0.25: fitted, no cited limit. Root edge ends move at most 1.4 units inside the
+fin's own plane, so no root gap shows; the trailing tip travels 2.45 ft at the clamp. The
+wing and spoilers do not move with pitch or roll (probe, 25 poses at spread and at 67 degrees).
+
+**Rudder (`7b3a`, signed).** The rig never sets the word: the closed quad (`4c6b`/`4c8a`) turns
+about its leading edge (0, -30, 10) to (0, -34, 18). The endpoint is the word's own pose,
+measured at load: the turn that carries the free edge's midpoint to the +1 pose's is **0.75 rad
+(43 degrees)**; proportional in between, signed (right pedal swings the trailing edge to +x).
+The retail pose is not an exact rotation (bottom 42, top 48 degrees), so the trailing corners
+land within 0.2 units of the word's. As the B1B-0 review predicted, the quad's bottom trailing
+vertex (0, -35, 10) is shared with both taileron roots and **opens 4.4 ft** at full pedal (the
+retail word does the same); reported, not closed.
+
+**Flaps (`7b2e`, `7b34`).** The strip (`4667`/`4686`, `4ad6`/`4af5`) is a wedge on the panel's
+trailing edge. It turns rigidly about the mid-line of its leading edge ((13, 1, 0) to (42, 0, 0),
+the left mirrored) by 0.50 rad times the flap fraction: the retail drooped poses are 0.54 rad down
+at the inboard end and 0.46 at the outboard, so 0.50 is the mean. The outboard end gets the
+drooped pose's own cap triangle (`470e`, `4b7d`), rebuilt on the neutral strip's end profile so
+it turns with the strip, drawn only while the flaps are out. The trailing corner moves 2.6 ft at
+full flaps, and the leading edge opens a 0.66 ft slot against the fixed root triangle and outer
+panel (as a slotted flap); the strip sits in the panel's frame, so it follows the sweep, and the
+flaps hold the wing spread anyway.
+
+**Spoilers (`7b1c`): both roll spoilers and speed brake.** The word draws two plates a side
+(the open pose of each side, two windings) on the **fixed glove**, inboard of the pivot (x 4 to
+9, y -4 to 0). They stay on the glove: the real roll spoilers are on the moving outer wing, but
+the shape's plates are inboard of the pivot, and a plate carried by the sweep would be pushed into
+the fuselage (the swept root passes under them at z -1 to 1, they stand at z 1 to 7). Each plate
+turns rigidly about its hinge edge (4, 0, 4) to (6, 0, 1), which sits 0.5 units under the glove
+skin, from lying aft along the skin (hidden) to the retail open pose, **43 degrees**. Open fraction
+a side: the speed brake lever opens both, a roll command opens the side going down (positive
+aileron, right wing down) by 0.6 at full stick (fitted share), the two add and are capped at 1.
+Hidden at 0, the source pose at 1.
+
+**SMCS vanes** (four fixed triangles at the nose, no word): fixed. **Slats**: none exist.
+
+**Gear (`7b22`).** Twelve plates in three rigid pieces: per main leg a side plate (x +-2, y -5
+to 3) and a cross plate (y -1, x 1 to 3), the nose leg a fore-and-aft plate (x 0, y 44 to 49) and
+a cross plate (y 45). The shape has no hinge, wheel or door; the hinges are fitted: a main leg turns
+inward through 90 degrees about the longitudinal line through its cross plate's outboard edge
+(x +-3, z 0, one unit above the belly polygon), so no corner ever dips below the gear-down
+contact while it folds (the first try, a hinge at the plate centre, dipped 0.06 units for
+gear 0.85 to 1.0 and failed the dense sweep) and the stowed plates lie flat at z 0 to 2 inside the
+belly; the nose leg turns aft about the lateral line through its forward top corner (0, 49, 0),
+stowing between y 41 and 48 and at most z 5, inside the nose. The nose plates steer about a
+vertical axis through the plate's centre (0, 46.5). Timing: linear in the simulation's gear
+fraction, all legs together (no doors to sequence); hidden at 0, the source pose at 1, lowest
+point -8 units at 1. The 202-value dense sweep passes rigid, never below gear down, stowed inside
+(z -1 to 6, nose within x 2).
+
+**Bay walls (`7b16`), interim.** The four walls (x +-3, y 10 to 21 and 22 to 32, z -1 to -4, two
+windings) drop from the belly polygon line as `State::bay` opens (hidden at 0); the closed belly
+stays drawn over the opening. B1B-5 replaces them with doors and the bay machinery.
+(`State::bay_available` is F-22 only, so nothing raises the B-1B bay in play yet.)
+
+**Plumes (`7b10`).** Sixteen plates, a vertical and a flat pair per engine, y -17 to -28; they
+scale from the nozzle plane y -17 with `State::exhaust` (hidden at 0), so the plates sharing the
+exit-disc edge stay together; `flame()` marks them for the flame colouring. **Nozzle mapping
+is not supported for four engines**: `engine_material` holds two outlets (an `[_; 2]` bounds table,
+`outlet_group` splits by the sign of x), so the four exit discs (`3a1f`, `3a40`, `40cb`, `40f2`,
+subtype 0x64, y -17) keep the retail nozzle look. What the four-engine count did break is the
+contrail origin: with no mapped nozzles `contrail_offsets` fell back to four outlets spread over
+0.15 of the span (up to 30 ft out), so a new `b1b_contrail_offsets` (the B-52's precedent)
+places them at the four disc centres (x +-5 and +-8 units, z -2.5, 2 ft aft of the exit plane).
+
+**Probe (`--aircraft b1b --animation-probe OUT`).** 314 neutral faces, **0 required/check
+failures**: elevator, rudder, aileron, gear, flaps, brake, bay, wing-sweep and exhaust all
+`required` and `moved`; hook, vectoring, conversion and the rest `not-applicable`; rotor
+`unreviewed` (not relevant). Largest rigid-panel error 6e-6 ft, largest hinge gap 6e-8 ft.
+Grids written: `pitch-roll-combinations-15deg.csv` and `-67deg.csv` (25 poses each),
+`sweep-flap-combinations.csv` (7 speeds by 5 flap values, the measured tip turn equal to the
+law to 0.01 degree, plan rigidity at most 6e-6 ft), `sweep-seam.csv`, `roll-brake-combinations.csv`
+(25 poses: spoiler fractions as the mapping says, the free edge rising), `seam-opening.csv`,
+`dense-gear.csv` (202 values). Battery: `flight-animation-b1b` (new, registered in
+`tools/battery_scenarios/animation.py` with these row counts).
+
+**Probe defaults.** The probe isolates the controls below the sweep threshold (neutral speed 200 kt),
+as the Tornado's does.
+
+**Open items for John.** (1) The rudder travel is the retail word's 43 degrees and opens a 4.4 ft
+gap at the taileron roots at full pedal; a smaller fitted limit (0.45 rad, 2.6 ft) is a one-line
+change. (2) The swept span is 74.2 ft against the real 78 (decision 2, accepted). (3) The flap
+slot (0.66 ft) and the spoilers staying on the glove are visible simplifications. (4) The default
+loadout of the B-1B is refused at start with `payload outside aircraft mass limits` (free flight
+and ground start, at the base commit 7bd8048e, before this slice); `--loadout none` and
+`--loadout guns` start (empty 192,000 lb plus the full 265,274 lb of fuel is 457,274 lb, 19,726 lb
+under the 477,000 lb maximum), and `--headless-flight` without a ground start sets no payload and
+flies. The default stores' weight was not traced; it belongs to B1B-6 (default load) and B1B-8, and
+`Loadout::cap_default_fuel` caps only the loadout's own fuel. The frames were taken with
+`--loadout none`.
