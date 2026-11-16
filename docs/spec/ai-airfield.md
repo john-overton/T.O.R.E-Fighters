@@ -525,3 +525,16 @@ touches down at 131 kt. The F-117's minimum is its lowest envelope row (the 0 G 
 not lower, so it lands at 170 to 190 kt, not the 155 to 165 of the real aircraft (open).
 Numbers and scenarios: the [aircraft variety](../formats/aircraft-variety.md#ai-fixes-for-the-bombers-bmb-ai-2026-11-16)
 BMB-AI section.
+
+**Update (B52-9, 2026-11-16): the B-52's final and taxi-in.** **Fitted**, agent decisions. Both rules apply
+only where `Situation::taxi_throttle_floor` is above zero (the wheels need over 0.2 throttle to taxi: the
+B-52 at every weight, nobody else in the roster), so every other aircraft's law is as it was, bit for bit.
+
+| Rule | Value | Why |
+| --- | --- | --- |
+| The final's lateral lookahead is at least `HEAVY_FINAL_LOOKAHEAD_MIN_FT` | 3,000 ft (1,500 ft for everyone else) | The B-52 at 80,000 lb of fuel snaked down the final (190 ft right of the line at 252 s, 150 ft left of it at the touchdown) and touched down 140 ft left of the centre line, on the grass beside the runway edge, for 10 s. At 3,000 ft it touches down within 5 ft of the centre line |
+| `taxi_throttle`: over the wanted taxi speed the throttle is shut and the brakes stay off (they come on 8 ft/s over, as before) | coast | The floor kept the throttle at 0.58 or more even above the target, so the B-52 ran past the anchor it stops at (3 ft at 15 ft/s), turned back for it, swung 116 degrees right and 140 degrees left at a few feet a second and ran 30 ft off the taxiway corner for 6 s. Its rolling deceleration (4.8 ft/s squared) does the slowing |
+
+Evidence is in the [aircraft variety](../formats/aircraft-variety.md#b-52-ai-missions-multiplayer-and-replay-b52-9-2026-11-16)
+B52-9 section: the full Southampton cycle is on the pavement from takeoff to parking (743 ticks off before, none
+after), the 80,000 lb landing at Simferopol is on it from the touchdown (1,201 ticks off before, none after).

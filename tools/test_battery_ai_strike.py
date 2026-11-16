@@ -1363,6 +1363,82 @@ class BayDoorTests(unittest.TestCase):
         self.assertTrue(any("shut 0.2 s" in p for p in s.bay_door_problems(self.run_of(shut=1.2), "x")))
 
 
+class B52Tests(unittest.TestCase):
+    """The B-52 strike checks (slice B52-9)."""
+
+    def stick(self, cells=None, **kwargs):
+        cells = s.b52_row3_cells(8) if cells is None else cells
+        out = b2_run(cells, station=2, **kwargs).replace("aircraft=B2", "aircraft=B52")
+        return out
+
+    def pylon(self, count=6, bay=False, **kwargs):
+        cells = []
+        for n in range(count):
+            out_ft = s.B52_BEAM_OUT_FT[n // 2 % 3]
+            cells.append(((-1.0 if n % 2 == 0 else 1.0) * out_ft, 2.43, s.B52_PYLON_FORWARD))
+        out = b2_run(cells, station=1, **kwargs).replace("aircraft=B2", "aircraft=B52")
+        if not bay:
+            out = "\n".join(line for line in out.splitlines() if "BAY t=" not in line).replace("bay=1.00", "bay=0.00")
+        return out
+
+    def test_the_rows_first_places_are_the_right_ones(self):
+        cells = s.b52_row3_cells(9)
+        self.assertEqual([c[0] for c in cells[:4]], [-1.95, 1.95, -0.65, 0.65])
+        self.assertEqual({c[2] for c in cells}, {13.87})
+        self.assertEqual([round(c[1], 2) for c in cells[::4]], [-5.29, -3.98, -2.67])
+
+    def test_a_full_stick_from_the_forward_row_passes(self):
+        self.assertEqual(s.b52_stick_problems(self.stick()), [])
+        quick = self.stick().replace("PROFILE t=0.000 name=none", "ROLE t=0.000 plane=1 role=strike\nai-strike: PROFILE t=0.000 name=none")
+        self.assertEqual(s.b52_quick_wing_problems(quick), [])
+        self.assertTrue(any("role" in p for p in s.b52_quick_wing_problems(self.stick())))
+
+    def test_a_short_stick_a_wrong_cell_a_shut_door_or_the_wrong_row_fails(self):
+        cells = s.b52_row3_cells(8)
+        self.assertTrue(any("stick of 8" in p for p in s.b52_stick_problems(self.stick(cells[:2]))))
+        self.assertTrue(any("one place" in p for p in s.b52_stick_problems(self.stick([cells[0]] * 8))))
+        wrong = [(c[0] + 3.0, c[1], c[2]) for c in cells]
+        self.assertTrue(any("row's place" in p for p in s.b52_stick_problems(self.stick(wrong))))
+        shut = self.stick().replace("bay=1.00", "bay=0.00")
+        self.assertTrue(any("doors at 0.00" in p for p in s.b52_stick_problems(shut)))
+        other_row = b2_run(cells, station=3).replace("aircraft=B2", "aircraft=B52")
+        self.assertTrue(any("forward bay row" in p for p in s.b52_stick_problems(other_row)))
+        self.assertTrue(any("B52" in p for p in s.b52_stick_problems(b2_run(cells, station=2))))
+
+    def test_the_pylon_stick_alternates_the_beams_with_the_doors_shut(self):
+        self.assertEqual(s.b52_pylon_problems(self.pylon()), [])
+        self.assertTrue(any("doors moved" in p for p in s.b52_pylon_problems(self.pylon(bay=True))))
+        self.assertTrue(any("stick of 6" in p for p in s.b52_pylon_problems(self.pylon(count=2))))
+        swapped = self.pylon().replace("right=-15.96", "right=15.96", 1)
+        self.assertTrue(any("beam's place" in p or "one place" in p for p in s.b52_pylon_problems(swapped)))
+
+    def test_the_harpoon_run_wants_one_a_wing_and_the_ship_destroyed(self):
+        def harpoon(kill=True, rights=(-17.33, 17.33), bay=False):
+            lines = [
+                "ai-strike: setup aircraft=B52 load=AGM84E.JT station=1 count=2 rounds=2 target=0x50000003 name=Krivak "
+                "target_at=1,2,3 hp=500 skill=1 profile=none handback=none order=none mode=none",
+                "ai-strike: PROFILE t=0.000 name=none requested=none note=chosen",
+                "ai-strike: start t=0.000 plane=0 range_ft=91140 alt_ft=20000 speed_kt=450",
+            ]
+            for n, right in enumerate(rights, 1):
+                lines.append(f"ai-strike: ORIGIN t=0.017 n={n} station=1 right={right} up=2.32 forward=10.33")
+                lines.append(f"ai-strike: RELEASE t=0.017 n={n} weapon=AGM84E.JT station=1 alt_ft=20000 speed_kt=449 "
+                             f"range_ft=91127 pass={n} aim_ft=0 inside=yes lead_ft=0 dive_deg=0 bay={'1.00' if bay else '0.00'}")
+            for n in range(1, len(rights) + 1):
+                lines.append(f"ai-strike: IMPACT t=29.333 n={n} miss_ft=96.3 at=1,2,3")
+            if kill:
+                lines.append("ai-strike: KILL t=29.333 victim=0x50000003 category=0x2000 target=yes")
+            lines.append("ai-strike: summary t=60.000 ran_s=60.0 profile=level releases=2 impacts=2 kills=1 egress=no "
+                         "lost=no activity=Attacking target_hp=0/500 closest_ft=1889 store_rounds_left=0")
+            lines.append("ai-strike: done")
+            return "\n".join(lines)
+
+        self.assertEqual(s.b52_antiship_problems(harpoon()), [])
+        self.assertTrue(any("not destroyed" in p for p in s.b52_antiship_problems(harpoon(kill=False))))
+        self.assertTrue(any("one a wing" in p for p in s.b52_antiship_problems(harpoon(rights=(-17.33, -17.33)))))
+        self.assertTrue(any("doors moved" in p for p in s.b52_antiship_problems(harpoon(bay=True))))
+
+
 if __name__ == "__main__":
     unittest.main()
 
