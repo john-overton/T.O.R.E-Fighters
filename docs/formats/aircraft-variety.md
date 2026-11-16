@@ -10744,3 +10744,190 @@ edge and 1.6 degree rest sweep (T26-3); the Su-34's G limit (+9, the page lists 
 +7), ceiling (55,000 ft, the usual figure is 48,000) and retail designator-pod flag on rows 6
 and 7 (two pod placements); the Tu-26's glove-row bomb capacity (cut with the AS-16 count);
 the Tu-26 bay's admission of the Harpoon and AM-39 with the AS-16 bit.
+
+## Tu-26 shape and rig (T26-2/3, 2026-11-15)
+
+Implementation, slices T26-2 and T26-3 of bomber batch C, run together (Claude Sonnet).
+Worktree `m3-tu26` on `90c5643a`. Plan `.local/m3-aircraft/PLAN-T26.md`; decisions
+`.local/m3-aircraft/BOMBERS-DECISIONS-C.md` (Tu-26 items 2 to 5 and 11). One own-source rig file,
+`crates/tore-app/src/tu26_animation.rs`, with its probe witnesses in
+`crates/tore-app/src/aircraft_animation_probe/tu26.rs`, loaded through
+`variety_animation.rs` (`SpecificRig::Tu26`) on the existing `TU26.SH` row (CODE 26,812, 310
+faces, six state words). Frames: `.local/m3-aircraft/frames/T26-2/` (local only). The numbers
+below are measured on the loaded shape and the rig's own output unless they are marked fitted.
+
+### Size and scale (T26-2)
+
+The decision stands: draw at the header scale, **4/3 ft a unit**, with no per-axis fit (the mesh is 4
+to 10 percent under real, accepted). Every consumer already read 4/3 (BMB-C1): `debris::scale`
+(`Tu26 => 4/3`, pinned beside the B-1B's), the variety rig spec (`4. / 3.`, which the generic
+rig and the new rig take as `Rig::scale()`), the gear low point (`models::variety`: 11 units,
+14.67 ft), the swing spec (`feet_per_unit` 4/3), the damage looks and their extents, the stores
+preview and the drawn vapor point. None is still at 1/3; the T26-0 note that the default would draw
+the aircraft four times small does not apply.
+
+| Axis | Units | Feet at 4/3 | Real Tu-22M3 | Difference |
+| --- | ---: | ---: | ---: | ---: |
+| Span, mesh pose (18.4 degrees) | 76 | 101.3 | 112.8 ft (112.5 in `TU26.INF`) | -10.2% |
+| Span, drawn spread (20 degrees, after the 1.6 degree rest turn) | 75.5 | 100.7 | 112.8 | -10.7% |
+| Length (y -36 to 62) | 98 | 130.7 | 139.4 ft (139.3) | -6.2% |
+| Height, gear up (z -4 to 22) | 26 | 34.7 | 36.3 ft | -4.4% |
+| Height, gear down (z -11 to 22) | 33 | 44.0 | 36.3 ft | +21% |
+| **Swept span, 65 degrees, after the rig** | 49.3 | **65.8** | 76.4 ft | **-13.9%** (ratio 0.653 against 0.680) |
+
+The swept span is the tip vertex (38, -5) carried to x 24.66, y -19.94 (32.9 ft out, 26.6 ft aft
+of the reference point); the tip of the other panel vertex (38, -9) is 21.8 units out. A per-axis
+fit (x 1.11, y 1.066, z 1.04 would bring the spread span to 111.8 ft and the swept to 73 ft) is **not
+applied**; on the frames the spread and the swept planforms read as the Backfire and nothing looks
+undersized beside its own gloves, tailplane or gear, so the coordinator's choice holds. The gear
+length (+21%) is likewise kept (decision 3); see Gear below for what it does to the stow.
+
+A retail-reading test, `crates/tore-import/tests/tu26_shape.rs` (skips without media), pins the
+header scale, the face count, the extents (x -38 to 38, y -36 to 62, z -4 to 22, gear low point -11),
+the size ratios above, the damage looks and the twin check below.
+
+### Skin, decals, damage looks, hit volume and eye (T26-2)
+
+- **Twin panels.** 29 exact-vertex twin groups, all double-sided panels with opposite stored
+  normals: no same-side sliver (no MiG-21 exception, no Tornado centreline sliver), so the smooth path
+  pairs them and the top and under frames show no show-through or z-fighting. Where the swept
+  panel's root overlaps the glove at z -1 (the flat outer glove, x 12 to 14) the frames at 40 and 65
+  degrees (seam close-ups) show no flicker or crack.
+- **Decals.** None: the export path and the runtime path give the same 310 faces, so `TU26.SH` has
+  no `E0` decal slot (the B-52 has two, the B-2 one) and nothing is left blank or skin-filled. The
+  textured nose, fuselage and fin art draw whole.
+- **Damage looks.** `TU26_A.SH` 322 faces (the body with the wing cut at x 23; x -39 to 23, y -37 to
+  60, z -5 to 21), `TU26_B.SH` 41 (the cut section, authored about its own origin: x -10 to 19, y -6 to
+  5, z 0), `TU26_C.SH` 335 (the body with the fin cut to z 13; x -39 to 39, y -37 to 60) and
+  `TU26_D.SH` 44 (the fin plate, x 0, y -11 to 15, z -10 to 10). All four load at the intact shape's
+  header scale (exponent 10, so 4/3 ft a unit) and the bodies lie within a unit of the intact extents
+  (x -38 to 38, y -36 to 62, z -4 to 22). No whole-body variant is registered for the Tu-26
+  (`debris::damage_variant`), as for the B-52, Tornado and Mirage 2000: a destroyed Tu-26 draws the
+  intact skin with regional cuts. Registering the wing cut as variant 0 and the fin cut as variant 1 is
+  a one-line decision for John (the pair `A`/`B`, `C`/`D` is reviewed above); not done here.
+- **Hit volume (shared, not changed).** One 28 ft sphere for every aircraft
+  (`AIRCRAFT_RADIUS_FT`). Against the Tu-26's 50 ft half-span (33 ft swept), 83 ft nose and 48 ft tail,
+  gunfire and fuzed weapons touch only the middle of the aircraft, as for the B-52 and the
+  transports. A per-aircraft radius changes every aircraft, so it stays John's call.
+- **Eye (shared, not changed; T26-7 owns it).** `mirrors::pilot_eye` is 7 ft up and 10 ft ahead of the
+  origin. The drawn flight deck is the glass at y 44 to 49 (59 to 65 ft ahead of the origin), z 1 to 4
+  (1.3 to 5.3 ft up) under a spine at z 4: the shared eye is about 50 ft behind it. A fitted eye of
+  about 6.5 ft up and 56 ft ahead would sit at the windscreen; measured only, nothing applied.
+
+### Swing wing (T26-3)
+
+**Rig.** The panel is **13 whole faces a side** (right `4b4c 4b73 498f 49b2 49db 49fe 4a21 4a44
+4a67 4a8a 4ab3 4ad6 4af9`; left `4f8d 4fb4 4dd0 4df9 4e1c 4e3f 4e62 4e85 4ea8 4ecb 4ef4 4f17
+4f40`), 9 vertices, all at z -1, with the two flap-strip faces among them, so the strip sweeps with
+the panel. `Rig::load` refuses a shape whose panel shares any vertex with a fixed face other than the
+glove corner **(14, 3, -1)** (left (-14, 3, -1)), the **measured pivot**, which is also the point the
+simulation's spec carries (`swing::TU26.pivot_right/left`; the load checks they agree). The panel
+turns whole about that vertical axis by `swing::TU26.turn(speed, flaps, gear)`:
+
+| Sweep | Speed | Right tip (feet out, aft) | Span | Reading |
+| ---: | --- | --- | ---: | --- |
+| 20 degrees (the rest, a 1.6 degree turn from the mesh) | to 300 kt, and with flaps or gear out at any speed | 50.4, 7.6 | 100.7 ft | spread |
+| 40 degrees | about 416 kt | 44.5, 17.7 | 89.0 ft | linear |
+| 65 degrees (a 46.6 degree turn from the mesh) | 560 kt and over | 32.9, 26.6 | 65.8 ft | fully swept |
+
+The speed schedule, the range and the rest offset are SWING-1's (fitted, decision 4: the real
+selection is the crew's); the rig takes them from the spec and invents none. The sweep is a pure
+function of speed, flaps and gear, not stored in checkpoints. No fence and no glove plate are
+drawn, as decided; no sweep word exists.
+
+**Rule 11 fold check (confirmed on the shape and on frames).** Per side: moved 9 vertices, 1 on the
+pivot, 0 fixed off the axis; a fold-free rigid panel. At the full 46.6 degree turn:
+
+- The second leading root vertex (14, 2) moves 0.79 units, **1.05 ft** (to (13.27, 2.31)); 0.5 ft
+  at 40 degrees. The review's "under 1 ft" is 1.05 ft at the very end of the range. The vertex lies
+  0.2 units inside the glove's outer edge (the line (14, 4) to (12, -2)), so no gap opens.
+- The trailing root corners (11, -3) and (10, -7) go to **(7.58, 1.06) and (3.99, -0.96)**. Both are
+  inside the glove slab (x 5 to 14, z -2 below, the top sloping from 0 at x 5 to -1 at x 12), under
+  its top skin and over its bottom skin; the review's "x less than 5, the intake side" holds only for
+  the second corner. Hidden either way.
+- Frames: `seam-200/416/560-top.png` and `-rear.png` (zoom 3 to 4, the glove roots at the
+  frame's edges), `top-20/40/65.png`. No hole, no crack, no panel through the fuselage skin and no
+  z-fight is visible at any sweep. One feature to know: at 40 degrees the flap strip's inboard end
+  (a grey wedge in `seam-416-top.png`) shows a little aft of the glove, where the strip root
+  (10, -7) ends in the open; it is the source's strip, not a defect of the turn.
+
+**Vapor.** The shape's streamer record (hinge scale 0, its pivot added: 52 ft out, 1.3 ft down,
+10.7 ft aft) is the drawn wing's tip plane, one unit outboard of the tip edge, so it needs no fix at
+the spread pose. It has no hinge, so `aircraft.rs` carries it by the wing's own turn about the pivot
+(`tu26_animation::streamer_point`, the Tornado's method): 51.6 ft out and 11.6 ft aft at rest,
+30.9 ft out and 30.3 ft aft fully swept, the left side the mirror (unit-tested).
+
+### Surfaces, gear, plume and the bay plates (T26-3)
+
+| Control | Tu-26 | How |
+| --- | --- | --- |
+| Elevator | rigged | both tailplane quads, trailing edges up for a pull |
+| Aileron | rigged (**differential tailplane**) | the shape has no aileron, spoiler or slat: roll is the tailplane, decision 11 |
+| Rudder | rigged | the aft strip only (`517d 51a4`), on the signed command |
+| Flaps | rigged | the outer trailing strip a side (`4b4c 4b73`, `4f8d 4fb4`), droop about its leading edge |
+| Gear | rigged | word `7892`, 12 faces, fitted hinges and timing below |
+| Exhaust | rigged | word `7880`, two plumes (a cross of plates per engine) grown from the nozzle plane y -29 |
+| Bay | rigged, **interim** | word `788c`: the plates draw as the bay-door open pose; **T26-5 cuts the real bay** |
+| Brake | none | the `788c` plates are the bay doors, not an airbrake (decision 5); the lever moves nothing, probe `not-applicable` |
+| Sweep | rigged | above |
+
+The rig never sets a flap or rudder word: it keeps the strips and the strip of the fin drawn and
+turns them, so nothing vanishes in flight. Fitted values (agent decisions 2026-11-15, no real Tu-22M
+limit found):
+
+- **Tailplane.** Right 5 faces, left 6 (`4085 40bd 40eb 4118 413c`; `45a7 45dd 4605 462c 464d 4670`),
+  no vertex shared with any other face (checked at load), roots on x +-5 and z -2, tips on x +-13 and z 0.
+  Each side turns whole about the lateral axis through its root chord midpoint (+-5, -21.5, -2), so no
+  vertex is held while another turns. Angle (positive lowers the trailing edge): `-0.14 x elevator -+
+  0.08 x aileron`, held to **0.20 rad (11.5 degrees)**; the aft tip corner, 14.5 units (19.3 ft) behind
+  the spindle, travels 2.7 ft for a full pull and 3.8 ft at the limit. Tornado precedent for the sign
+  (a positive aileron raises the right and lowers the left); the fleet's clamp is 0.40, the Tornado's
+  0.25.
+- **Flap.** The word's drooped copy is a 45 degree droop (it also pulls the chord in); the rig droops
+  the strip rigidly by **0.40 rad (23 degrees)**, the fleet's flap travel, so the seam at the
+  strip's outer edge is 0.8 units (1.1 ft). The hinge is the strip's leading edge, from (11, -3, -1) to
+  (36, -7, -1), the left side mirrored; flaps also hold the wing spread.
+- **Rudder.** The word is a rigid turn about the strip's leading edge (0, -24, 9) to (0, -31, 21) of
+  **0.858 rad (49 degrees)**, to +X for 1 and -X for -1 (checked at load; the T26-0 review's "about
+  14 degrees" was a misreading). That is more than any real rudder; the rig takes **0.50 rad (29
+  degrees)**, which puts the aft base vertex 1.7 units (2.3 ft) off the fin.
+- **Gear.** Plates only (no wheels), the mesh's low point -11. Retracting, the nose leg folds first
+  (gear 1 to 0.3) and then the mains (0.7 to 0); extending, the mains come down first. Mains: a line
+  along Y at x +-5, z -1 (the fuselage side wall), the legs swinging **inward**, the real direction,
+  through a quarter turn to lie flat at z 1 inside the 10 by 8 unit fuselage section at y -8 to 2
+  (x +-5, z -3 to 3, top 4); a search over longitudinal hinges found this one, and a lateral-axis fold
+  (the Tornado's) would stand the 10 unit plate up to z 8 against a roof at 4. Nose: a lateral axis at the plate's forward edge (y 38, z -4),
+  folding aft along the belly inside the 4 unit wide nose section, steering about its vertical axis
+  (y 36) first. The probe's dense sweep (202 values) is rigid per leg at every value, the source pose at 1,
+  and every leg vertex inside the section at 0.05 and below. The wheels sit on the ground in
+  `ground-under.png`, the nose and both mains planted on the runway; the +21% length shows as long
+  legs, not as sunk or floating wheels.
+- **Plume.** Two engines, a cross of one vertical and one horizontal plate each (x +-2), 24 units
+  (32 ft) from the nozzle exit plane, scaled from that plane by the exhaust fraction and hidden at 0
+  (the Tornado method). `afterburner-rear.png` and `-side.png` show two flames.
+- **Bay plates (interim).** `788c`: a plate pair a side at x +-2, y 11 to 23, hanging 3 to 4
+  units under the belly, the same place and width as the real 23 by 5.9 ft bay. Drawn at the bay
+  fraction (hung from the belly line z -2, hidden shut); they are **not** an airbrake. There is no
+  frame: `--flight-bay` refuses an aircraft with no reviewed bay (`bay_available`), which T26-5
+  adds.
+
+### Probe, tests and checks
+
+- `--animation-probe` for `tu26`: **0 required/check failures** (310 neutral faces). Required
+  controls moved with 5 poses or more: elevator, rudder, aileron, flaps, gear (22), bay, exhaust, sweep
+  (3 distinct: spread, partial, full); brake `not-applicable`. No acceptances were needed.
+  The neutral state is isolated at 200 kt (the wing sweeps from 300), as for the Tornado.
+  Combination sweeps in `probe/`: `sweep-grid.csv` (the wing at 200, 450 and 700 kt, and flaps and
+  gear holding it spread at 700 kt), `pitch-roll-combinations.csv` (25 poses) and `dense-gear.csv`.
+- One rig test, `tu26_animation::tests::the_tu26_rig_turns_whole_panels_about_their_hinges` (synthetic
+  faces, shape units): the 1.6 degree rest offset, the 300 and 560 kt ends and linear middle, the flaps
+  and gear holding the wing, the 65.8 ft swept span, the pivot staying, the 1.05 ft root seam and
+  the corners inside the glove, the left mirror, the flap droop, the tailplane pitch, differential roll
+  and limit, the rudder, the gear folds and stow, the interim plates, the plume and the vapor point.
+- Battery: `flight-animation-tu26` (the probe, the three CSVs) and `render-tu26-skin` (top and
+  under, the new skin scenario, `tools/battery_scenarios/render.py`, listed in
+  `docs/testing/lane-flight.md`).
+
+**Not decided here, left for John.** Whether to register the wing cut and fin cut as the Tu-26's
+damage variants; the per-aircraft hit radius; the eye (T26-7); the 1.05 ft seam at the very end of the
+range (not visible); the fitted limits above.

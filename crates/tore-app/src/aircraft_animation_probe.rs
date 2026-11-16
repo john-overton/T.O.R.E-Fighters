@@ -42,6 +42,7 @@ mod su25;
 mod su27;
 mod su35;
 mod tornado;
+mod tu26;
 mod v22;
 mod x31;
 mod yak141;
@@ -220,6 +221,11 @@ impl Control {
             // flame word, so brake and exhaust move nothing and must stay so.
             Self::Brake | Self::Exhaust if id == Id::B52 => Expectation::Unsupported,
             Self::Brake | Self::Exhaust if id == Id::F117 => Expectation::Unsupported,
+            // T26-3 (decision 5): the Tu-26's two belly plates are the bay
+            // doors, not an airbrake, so the brake moves nothing; its plumes
+            // (word 7880) are the exhaust below.
+            Self::Brake if id == Id::Tu26 => Expectation::Unsupported,
+            Self::Exhaust if id == Id::Tu26 => Expectation::Required,
             Self::Brake | Self::Exhaust
                 if matches!(
                     id,
@@ -276,7 +282,7 @@ impl Control {
             Self::Bay
                 if matches!(
                     id,
-                    Id::F22 | Id::F22n | Id::Faxx | Id::F117 | Id::B2 | Id::B52
+                    Id::F22 | Id::F22n | Id::Faxx | Id::F117 | Id::B2 | Id::B52 | Id::Tu26
                 ) =>
             {
                 Expectation::Required
@@ -300,7 +306,12 @@ impl Control {
                 Expectation::Required
             }
             Self::Rotor => Expectation::Unknown,
-            Self::Sweep if matches!(id, Id::F14 | Id::Mig23 | Id::Tornado | Id::TornadoClean) => {
+            Self::Sweep
+                if matches!(
+                    id,
+                    Id::F14 | Id::Mig23 | Id::Tornado | Id::TornadoClean | Id::Tu26
+                ) =>
+            {
                 Expectation::Required
             }
             Self::Sweep => Expectation::Unknown,
@@ -491,7 +502,9 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     // The Tornado's wing sweeps with speed (TOR-3), so its controls are isolated
     // below the 250 knot sweep threshold; the sweep schedule and the coupled
     // sweep/flap grid cover that interaction explicitly.
-    if id.source() == AircraftId::Tornado {
+    // The Tu-26's wing sweeps from 300 knots (T26-3), so its controls are
+    // isolated at 200 knots too.
+    if id.source() == AircraftId::Tornado || id == AircraftId::Tu26 {
         neutral.speed = 200. * 1.68781;
     }
     neutral.engine = false;
@@ -684,6 +697,7 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
             | AircraftId::B52
             | AircraftId::B2
             | AircraftId::F117
+            | AircraftId::Tu26
     ) {
         "reviewed-controls-and-attachments"
     } else {
@@ -1220,6 +1234,17 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
                 );
             }
         }
+        if id == AircraftId::Tu26 {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                tu26::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
         if id == AircraftId::Mig31 {
             for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
                 mig31::check(
@@ -1405,6 +1430,9 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     }
     if id == AircraftId::B2 {
         failures.extend(b2::combinations(&airframe, &neutral, out)?);
+    }
+    if id == AircraftId::Tu26 {
+        failures.extend(tu26::combinations(&airframe, &neutral, out)?);
     }
     failures.extend(rotorcraft::combinations(&airframe, &neutral, out)?);
     moving_parts(&airframe, &neutral, out)?;

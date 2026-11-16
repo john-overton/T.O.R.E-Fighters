@@ -520,6 +520,9 @@ enum SpecificRig {
     B2(crate::b2_animation::Rig),
     /// F117-3 and F117-4: the ruddervators, the gear and the interim bay pose.
     F117(crate::f117_animation::Rig),
+    /// T26-3: the swing wing, tailplane, rudder, flaps, gear, plume and the
+    /// interim bay-door plates.
+    Tu26(crate::tu26_animation::Rig),
 }
 pub struct Rig {
     id: Id,
@@ -878,6 +881,15 @@ impl Rig {
                     shape,
                 ));
             }
+            Id::Tu26 => {
+                let (rig, shape) = crate::tu26_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::Tu26(rig),
+                    shape,
+                ));
+            }
             _ => {}
         }
         if tore_formats::module::code(bytes)?.0.len() != spec.code
@@ -1011,6 +1023,7 @@ impl Rig {
                 SpecificRig::B52(_) => crate::b52_animation::flame(address),
                 SpecificRig::B2(_) => crate::b2_animation::flame(address),
                 SpecificRig::F117(_) => crate::f117_animation::flame(address),
+                SpecificRig::Tu26(_) => crate::tu26_animation::flame(address),
             };
         }
         self.groups
@@ -1080,6 +1093,7 @@ impl Rig {
                 SpecificRig::B52(rig) => rig.animate(source, state),
                 SpecificRig::B2(rig) => rig.animate(source, state),
                 SpecificRig::F117(rig) => rig.animate(source, state),
+                SpecificRig::Tu26(rig) => rig.animate(source, state),
             };
         }
         let mut face = source.clone();
