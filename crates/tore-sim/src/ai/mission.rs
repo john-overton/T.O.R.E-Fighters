@@ -1413,6 +1413,9 @@ impl AiActor {
             },
             minimum_speed_fps: own.limits.minimum.0,
             approach_minimum_fps: self.approach_minimum_fps(),
+            clean_minimum_fps: speed_limits_with_flaps(&self.flight, 0.0).minimum.0,
+            taxi_throttle_floor: taxi_throttle_of(&self.flight).0,
+            taxi_throttle_max: taxi_throttle_of(&self.flight).1,
             maximum_speed_fps: own.limits.maximum.0,
             corner_speed_fps: own.limits.corner.0,
             // A rotorcraft's own cruise (slice H3) on its way home.
@@ -5156,46 +5159,7 @@ impl AiActor {
     /// so a final can arrest a sink and follow its path. Zero for an
     /// aircraft without the hybrid model's low-speed ramp.
     fn approach_minimum_fps(&self) -> f64 {
-        if self.flight.research.is_none() {
-            return 0.0;
-        }
-        let config = self.flight.model().configuration();
-        let altitude = self.flight.position[1];
-        let Some((clean_stall, maximum)) = config
-            .aerodynamics
-            .envelopes
-            .iter()
-            .find(|e| e.g == 1)
-            .and_then(|e| e.speeds(altitude))
-        else {
-            return 0.0;
-        };
-        let stall = clean_stall * 0.75;
-        let loading = 1.0
-            + (self.flight.fuel + self.flight.carried_lbs()) / config.mass.empty_lbs
-                * config.aerodynamics.loaded_elevator_percent
-                / 100.0;
-        // Where the ramp ends does not depend on the speed: found once.
-        let next = crate::flight::low_speed_ramp_end(
-            config
-                .aerodynamics
-                .envelopes
-                .iter()
-                .filter(|envelope| envelope.g > 1)
-                .map(|envelope| (envelope.g, envelope.speeds(altitude))),
-            stall,
-        );
-        let mut speed = stall;
-        while speed < maximum {
-            match next
-                .and_then(|next| crate::flight::low_speed_ceiling_on(next, speed, stall, false))
-                .map(|ceiling| ceiling.limit_g)
-            {
-                Some(g) if g / loading < APPROACH_G_MARGIN => speed += 5.0,
-                _ => return speed,
-            }
-        }
-        maximum
+        approach_minimum_of(&self.flight)
     }
 
     /// The loaded G limits, already carrying the AI-only experience
@@ -8454,11 +8418,88 @@ mod thought_tests;
 #[path = "mission_checkpoint.rs"]
 mod checkpoint;
 
+/// The taxi throttle the AI adds and may use (BMB-AI, 2026-11-16), as
+/// `(floor, maximum)`: the shared `(0, 0.4)`
+/// ([`super::airfield::TAXI_THROTTLE_MAX`]), unless the throttle that just
+/// balances the wheels' rolling deceleration against the military thrust at
+/// this weight is over 0.2, in which case the floor is 1.1 times that and the
+/// maximum is full. A fighter needs a twentieth of a throttle and keeps the
+/// shared law exactly; the B-52 (rolling deceleration 4.8 ft/s squared,
+/// 488,000 lb, 136,000 lbf) needs 0.53 and sat at its spot for 15 minutes
+/// with 0.4.
+pub fn taxi_throttle_of(flight: &crate::flight::State) -> (f64, f64) {
+    let config = flight.model().configuration();
+    let thrust = config.propulsion.military_thrust_lbf;
+    let base = super::airfield::TAXI_THROTTLE_MAX;
+    if thrust.is_nan() || thrust <= 0.0 {
+        return (0.0, base);
+    }
+    let weight = config.mass.empty_lbs + flight.fuel + flight.carried_lbs();
+    let balance = config.tuning.rolling_deceleration * weight / (thrust * 32.174);
+    if balance > 0.5 * base {
+        (1.1 * balance, 1.0)
+    } else {
+        (0.0, base)
+    }
+}
+
+/// [`AiActor::approach_minimum_fps`] of any flight state, ft/s.
+pub fn approach_minimum_of(flight: &crate::flight::State) -> f64 {
+    if flight.research.is_none() {
+        return 0.0;
+    }
+    let config = flight.model().configuration();
+    let altitude = flight.position[1];
+    let Some((clean_stall, maximum)) = config
+        .aerodynamics
+        .envelopes
+        .iter()
+        .find(|e| e.g == 1)
+        .and_then(|e| e.speeds(altitude))
+    else {
+        return 0.0;
+    };
+    let stall = clean_stall * 0.75;
+    let loading = 1.0
+        + (flight.fuel + flight.carried_lbs()) / config.mass.empty_lbs
+            * config.aerodynamics.loaded_elevator_percent
+            / 100.0;
+    // Where the ramp ends does not depend on the speed: found once.
+    let next = crate::flight::low_speed_ramp_end(
+        config
+            .aerodynamics
+            .envelopes
+            .iter()
+            .filter(|envelope| envelope.g > 1)
+            .map(|envelope| (envelope.g, envelope.speeds(altitude))),
+        stall,
+    );
+    let mut speed = stall;
+    while speed < maximum {
+        match next
+            .and_then(|next| crate::flight::low_speed_ceiling_on(next, speed, stall, false))
+            .map(|ceiling| ceiling.limit_g)
+        {
+            Some(g) if g / loading < APPROACH_G_MARGIN => speed += 5.0,
+            _ => return speed,
+        }
+    }
+    maximum
+}
+
 /// [`AiActor::speed_limits`] of any flight state: the minimum, maximum and
 /// corner speed the AI reads from the loaded envelopes at the aircraft's
 /// altitude. The AC-130's orbit hold plans with the same numbers as the AI
 /// gunship (docs/spec/ac130-linked-guns.md, "The orbit").
 pub fn speed_limits_of(flight: &crate::flight::State) -> SpeedLimits {
+    speed_limits_with_flaps(flight, flight.flaps)
+}
+
+/// [`speed_limits_of`] with the flaps at `flaps` (0 up, 1 full) instead of
+/// where they are: what the AI's limits would be once they moved there.
+/// The airfield sequence reads it with the flaps up (BMB-AI, 2026-11-16) to
+/// know whether the aircraft may raise them yet.
+pub fn speed_limits_with_flaps(flight: &crate::flight::State, flaps: f64) -> SpeedLimits {
     // Every row's band once: the passes below all read them.
     let rows = crate::flight::RowSpeeds::of(flight);
     let mut minimum = f64::INFINITY;
@@ -8492,7 +8533,7 @@ pub fn speed_limits_of(flight: &crate::flight::State) -> SpeedLimits {
     // current flap setting (`flight::State::minimum_level_speed`); on the
     // F/A-18D the rows alone gave 114 kt against the 140 kt it needs, and
     // finals built on it sank into the ground.
-    let level = flight.minimum_level_speed_with(&rows, flight.flaps);
+    let level = flight.minimum_level_speed_with(&rows, flaps);
     if level < maximum {
         minimum = minimum.max(level);
     }
