@@ -500,8 +500,14 @@ pub const HEAVY_FINAL_LOOKAHEAD_MIN_FT: f64 = 3000.0;
 /// wheels need power to taxi and whose long, slow-turning bodies snaked on
 /// the final. The B-1B and the Tu-160 are kept out: both fly the shared laws
 /// and pass the heavy airfield scenarios (B1B-9, BMB-AI2). A new aircraft gets
-/// the laws by an arm here, never by its ground fit.
-pub fn heavy_airfield(aircraft: AircraftId) -> bool {
+/// the laws by an arm here, never by its ground fit. Every law asks this one
+/// predicate, so a third law is one `if heavy_airfield(s)`.
+pub fn heavy_airfield(s: &Situation) -> bool {
+    s.heavy_airfield
+}
+
+/// [`heavy_airfield`] of an aircraft id, which fills [`Situation::heavy_airfield`].
+pub fn is_heavy_airfield_aircraft(aircraft: AircraftId) -> bool {
     matches!(
         aircraft.source(),
         AircraftId::B52 | AircraftId::Tu26 | AircraftId::Tu95
@@ -1897,7 +1903,7 @@ impl Sequence {
                 // (the B-52) is slow to roll and yaw, and the shared lookahead
                 // let it snake across the line (190 ft right, then 150 ft
                 // left of it at the touchdown, off the runway's edge).
-                let lookahead_min = if s.heavy_airfield {
+                let lookahead_min = if heavy_airfield(s) {
                     HEAVY_FINAL_LOOKAHEAD_MIN_FT
                 } else {
                     FINAL_LOOKAHEAD_MIN_FT
@@ -2195,7 +2201,7 @@ fn taxi_speed(heading_error_deg: f64) -> f64 {
 fn taxi_throttle(speed: f64, target: f64, s: &Situation) -> (f64, bool) {
     if speed > target + 8.0 {
         (0.0, true)
-    } else if s.heavy_airfield && speed > target {
+    } else if heavy_airfield(s) && speed > target {
         (0.0, false)
     } else {
         (
@@ -3100,11 +3106,11 @@ mod tests {
     #[test]
     fn the_heavy_airfield_laws_are_named_by_aircraft() {
         for id in [AircraftId::B52, AircraftId::Tu26, AircraftId::Tu95] {
-            assert!(heavy_airfield(id), "{id:?}");
+            assert!(is_heavy_airfield_aircraft(id), "{id:?}");
         }
         for id in AircraftId::ALL {
             let named = matches!(id, AircraftId::B52 | AircraftId::Tu26 | AircraftId::Tu95);
-            assert_eq!(heavy_airfield(id), named, "{id:?}");
+            assert_eq!(is_heavy_airfield_aircraft(id), named, "{id:?}");
         }
         for id in [
             AircraftId::B1b,
@@ -3119,7 +3125,7 @@ mod tests {
             AircraftId::Il76,
             AircraftId::F18,
         ] {
-            assert!(!heavy_airfield(id), "{id:?}");
+            assert!(!is_heavy_airfield_aircraft(id), "{id:?}");
         }
     }
 
