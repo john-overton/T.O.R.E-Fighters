@@ -2085,8 +2085,9 @@ impl Combat {
                 own.note_loaded();
                 // The swing wing's pylons ride the wing: the turn is a pure
                 // function of this aircraft's speed and flaps, the same on
-                // every peer (TOR-5).
-                own.set_wing_turn(tore_sim::combat::swing::wing_turn(s.speed, s.flaps));
+                // every peer (TOR-5). The aircraft's own swing spec gives it
+                // (SWING-1).
+                own.set_wing_flight(s.speed, s.flaps, s.gear);
             }
             if s.airburst()
                 && let Some(event) = self.state.ownship_airburst(aircraft, s.position)

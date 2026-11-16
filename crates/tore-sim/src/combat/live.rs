@@ -658,6 +658,15 @@ pub struct Configuration {
     pub fixed_pods: Vec<FixedPod>,
 }
 impl Configuration {
+    /// [`Self::set_wing_turn`] with the turn this aircraft's own swing spec
+    /// ([`super::swing::spec`]) gives at `speed_fps` with its flaps and gear
+    /// out (0 to 1; SWING-1): the host calls it every tick. An aircraft with
+    /// no swing wing is untouched.
+    pub fn set_wing_flight(&mut self, speed_fps: f64, flaps: f64, gear: f64) {
+        if let Some(spec) = super::swing::spec(self.aircraft) {
+            self.set_wing_turn(spec.turn(speed_fps, flaps, gear));
+        }
+    }
     /// Turn the swivelling wing stations ([`super::swing::swivels`]) with the
     /// swinging wing: every drawn rack on such a hardpoint is carried to where
     /// a wing turned `turn` radians ([`super::swing::wing_turn`]) puts it,
@@ -2571,6 +2580,12 @@ impl Ownship {
     /// ([`Configuration::set_wing_turn`]); the host calls it every tick.
     pub fn set_wing_turn(&mut self, turn: f64) {
         self.config.set_wing_turn(turn);
+    }
+    /// [`Self::set_wing_turn`] with the turn this aircraft's own swing spec
+    /// ([`super::swing::spec`]) gives at `speed_fps` with its flaps and gear
+    /// out (SWING-1).
+    pub fn set_wing_flight(&mut self, speed_fps: f64, flaps: f64, gear: f64) {
+        self.config.set_wing_flight(speed_fps, flaps, gear);
     }
     /// Remember which stations hold something now (every tick, so a station
     /// that later runs dry is known to have been loaded).

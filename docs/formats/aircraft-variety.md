@@ -9694,3 +9694,27 @@ press, 0.958 in the actual one-press probe), the doors stay 1 s after the releas
 reads `State::bay` on the RCS page only (no change to a row a radar reads), so it now applies
 to the F-117 at 1.5 times with the doors fully open, and the F-22's values are unchanged.
 Update to [F117-3 bay (interim)](#bay-interim-f117-4-f117-5-replaces-it): replaced.
+
+## Update (SWING-1, 2026-11-15): the shared swing-wing spec
+
+`combat::swing` is no longer Tornado-only. Its constants are fields of a `SwingSpec`
+(`swing::TORNADO`, every value unchanged) and `swing::spec(id)` looks one up by aircraft. The
+B-1B, Tu-160, F-111F and Tu-26 swing-wing surveys above ("B-1B swing-wing survey", "Tu-160
+swing-wing survey", "F-111F swing wing", "Tu-26 swing-wing survey") each said the constants had
+to become a per-aircraft spec chosen by `AircraftId::source()`; this is that change, with the
+values from the coordinator's decisions (`BOMBERS-DECISIONS-B.md`, `-C.md`, 2026-11-15). The
+design, the field list and the callers are in [Stores on pylons](../spec/stores-on-pylons.md#update-swing-1-2026-11-15-the-swing-wing-is-a-per-aircraft-spec).
+
+The four specs are constants (`B1B`, `TU160`, `F111F`, `TU26`) with no identity behind them yet:
+
+| Spec | Range (rest) | Pivot | Schedule | Notes |
+|---|---|---|---|---|
+| B-1B | 15 to 67.5 (15), a 52.5 degree turn | Shape (10, 11) at 4/3 ft a unit: 13.33 ft out, 14.67 ft forward | Spread to 280 kt, fully swept by 520 kt, linear | Flaps hold it spread; no swivel |
+| Tu-160 | 20 to 65 (20) | Shape (4.8, 0) at 8/3 ft a unit: 12.8 ft out (fitted to the three published spans) | 20 degrees to 250 kt, 35 from 320 to 520 kt, 65 from 600 kt, smoothstep between | Flaps hold it at 20; no swivel |
+| F-111F | 16 to 72.5 (16), a 56.5 degree turn | Shape (13, 2.5) at 2/3 ft with the size fit's x 0.859: 7.4 ft out, 1.67 ft forward | Spread to 250 kt, fully swept by 650 kt (option b of the review), linear | Flaps hold it spread; rows 5 and 6 swivel; rows 7 and 8 fixed, sweep held to 26 degrees or less while they carry stores (`max_sweep_with_fixed_stores`) |
+| Tu-26 | 20 to 65 (mesh at 18.4: the spread wing is already turned 1.6 degrees, the full turn is 46.6) | Shape (14, 3) at 4/3 ft a unit: 18.67 ft out, 4 ft forward | Spread to 300 kt, fully swept by 560 kt, linear | Flaps or gear hold it spread; no swivel |
+
+`swing::spec` returns only the Tornado's today (both versions). Wiring one of the four is one
+match arm there, written and commented out for each, once the aircraft has an `AircraftId`.
+`sweep_rate_dps` is `None` for all five: no source gives a rate and the drawn sweep is a pure
+function of speed. Nothing is drawn differently; the new aircraft's rigs are their own slices.
