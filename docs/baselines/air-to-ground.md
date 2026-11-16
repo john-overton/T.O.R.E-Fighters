@@ -323,6 +323,7 @@ leaves the Krivak damaged, not sunk.
 | F-16C | AM39 | A-G page, CUED, 15 nmi | CUED launch, seeker Midcourse; end 177 ft from the target (last Pitbull); target 200/500 |
 | Su-25 | AS16 | A-G page, CUED, 6 nmi | CUED launch, seeker Midcourse; end 178 ft from the target (last Pitbull); target 150/500 |
 | Su-35 | AS16 | A-G page, CUED, 6 nmi | CUED launch, seeker Midcourse; end 175 ft from the target (last Pitbull); target 150/500 |
+| Tu-160 (T160-6, 2026-11-16) | AS16 | A-G page, CUED, 6 nmi, forward bay, through its own radar | CUED launch, seeker Midcourse; end 99 ft from the target (last Pitbull); target 150/500 |
 
 ### Class 11, semi-active air-to-ground missiles
 

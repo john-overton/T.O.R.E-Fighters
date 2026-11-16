@@ -1215,6 +1215,43 @@ def b2_stick_problems(output: str) -> list[str]:
     return problems
 
 
+def tu160_stick_problems(output: str) -> list[str]:
+    """`ai-strike-tu160-stick` (T160-6): an AI Tu-160 at 20,000 ft drops the six Mk 82 of its forward bay from
+    the grid's own places (four abreast, outermost first, the forward row then the back one), the same cells
+    `a2g-release-origin-tu160` reads off a human's release; doors open for it, the bombs fall and it leaves."""
+    runs = parse_runs(output)
+    if len(runs) != 1:
+        return [f"expected one strike run, got {len(runs)}"]
+    run = runs[0]
+    problems = consistency_problems(run, "Tu-160 stick")
+    problems += bay_door_problems(run, "Tu-160 stick")
+    releases = run.of("RELEASE")
+    if len(releases) != 6:
+        problems.append(f"{len(releases)} releases, want the bay's six")
+    origins = [(float(r), float(u), float(f), st) for _, _, st, r, u, f in ORIGIN_LINE.findall(output)]
+    if len(origins) != len(releases):
+        problems.append(f"{len(origins)} origin lines for {len(releases)} releases")
+    columns = (-1.95, 1.95, -0.65, 0.65)
+    rows = (45.73, 38.18)
+    for n, (right, up, forward, station) in enumerate(origins):
+        want = (columns[n % 4], -1.95, rows[(n // 4) % 2])
+        if abs(right - want[0]) > 0.1 or abs(up - want[1]) > 0.1 or abs(forward - want[2]) > 0.5:
+            problems.append(f"bomb {n + 1} left from {right} {up} {forward}, the grid's place is {want}")
+        if station != "0":
+            problems.append(f"bomb {n + 1} left station {station}, want the forward bay's row 0")
+    if len(set(origins)) != len(origins):
+        problems.append("two bombs left from one place")
+    if not run.of("IMPACT"):
+        problems.append("no bomb landed")
+    if not run.of("EGRESS"):
+        problems.append("no EGRESS after the stick")
+    if run.of("LOST"):
+        problems.append("the Tu-160 was lost")
+    if run.setup.get("aircraft") != "Tu160":
+        problems.append(f"flew {run.setup.get('aircraft')}, want Tu160")
+    return problems
+
+
 def b2_climb_problems(output: str) -> list[str]:
     """`ai-strike-b2-climb`: from 5,000 ft 30 nm out an AI B-2 climbs to its release floor (10,000 ft
     or more) before it bombs, then bombs and gets out; it never gets low."""
@@ -1582,6 +1619,15 @@ def scenarios() -> list[Scenario]:
         notes="An AI B-2 (a Heavy) on the column at 20,000 ft, 12 nm out: a stick of eight Mk 82 from the left "
               "bay's grid, 0.25 s apart, from the grid's own first eight places (front row, bottom tier, "
               "outermost first), then egress. Doors stay shut for the AI's release (coordinator decision).",
+    ))
+    extra.append(Scenario(
+        name="ai-strike-tu160-stick", lane="flight",
+        args=pilot_run("UKR", "QUCOL", "--aircraft", "tu160", "--load", "MK82", "--altitude", "20000", "--from", "12",
+                       "--seconds", "200", "--follow-egress"),
+        timeout=600, expect=[r"RELEASE", r"ORIGIN", r"IMPACT", r"EGRESS"], check=tu160_stick_problems,
+        notes="An AI Tu-160 (a Heavy) on the column at 20,000 ft, 12 nm out: the six Mk 82 of the forward bay leave "
+              "from the grid's own places, the same cells a human's release uses (`a2g-release-origin-tu160`), "
+              "with the doors open for the release, then egress (T160-6).",
     ))
     extra.append(Scenario(
         name="ai-strike-b2-climb", lane="flight",

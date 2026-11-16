@@ -370,6 +370,10 @@ adds order kinds.
 | `ai-strike-b2-climb` (B2-9) | The same B-2 starting at 5,000 ft 30 nm out | Releases at 9,000 ft or more, never below 4,000 ft above the ground, an impact, egress, not lost |
 | `ai-strike-b2-paveway` (B2-9) | The B-2's Paveway III row | The release leaves the left bay's first Paveway place (-7.28, -1.79, 6.67), kills the tank, egress |
 | `a2g-release-origin-b2` (B2-6) | The human trigger on the B-2's four bay rows (`--a2g-run --attack release`, 12 presses a Mk 82 row, 4 a Paveway row) | Each release leaves where it hangs: outermost first, alternating sides, front row before back, bottom tier first |
+| `ai-strike-tu160-stick` (T160-6, 2026-11-16) | An AI Tu-160 (Heavy) on `~QUCOL` at 20,000 ft, 12 nm out, the forward bay's six Mk 82 (`--aircraft tu160 --load MK82`) | Six releases from the grid's own places (four abreast at 45.73 then 38.18 ft ahead, -1.95 ft up), doors open for the release, an impact, egress, not lost; the cells equal the human's in `a2g-release-origin-tu160` |
+| `a2g-release-origin-tu160` (T160-6, 2026-11-16) | The human trigger on the Tu-160's bays (`--a2g-run --attack release`, 6 AS-16 a bay, 6 Mk 82 of the forward bay) | Each release leaves where it hangs: AS-16 three abreast (-1.59, +1.59, 0), forward row then back (38.61 and 22.66 ft forward, aft bay -12.73 and -28.68); Mk 82 four abreast |
+| `a2g-antiship-tu160` (T160-6, 2026-11-16) | Over `~QUSFLT`: an AS-16 from the forward bay (`--station 0 --count 6 --from 6`) at the Krivak designated on the A-G page through the Tu-160's radar | Launched CUED at the Krivak, midcourse then Pitbull, the ship hit (150 of 500 left) |
+| `flight-countermeasures-tu160` (T160-6, 2026-11-16) | `--live-fire --aircraft tu160 --jammer-on`, five chaff and three flares | The record's 99 chaff and 99 flares, 94 and 96 left |
 | `a2g-laser-b2` (B2-6) | A GBU-27 from the left bay at 20,000 ft on the B-2's own laser spot | Guides to within a second of the ground, kills the tank |
 | `flight-livefire-b2-slot1` to `slot4`, `flight-countermeasures-b2` (B2-6) | `--live-fire --aircraft b2`, `STATIONS["b2"] = [32, 32, 0, 0]` | One Mk 82 a slot (the empty Paveway slots fall to the sister bay), 30 chaff and 30 flares |
 | `ai-strike-offset` | Level and dive Mk 82 passes at skill 2 starting 1,000 and 3,000 ft off the attack line (`--offset`) | The first release on pass 1 (the sideways law converges on the first pass) |
@@ -1046,8 +1050,9 @@ open before the missile leaves and close after it), `flight-bay-tu160-0`, `-0.5`
 `--flight-bay` frames, from `bay-{ac}-{bay}`), `render-tu160-clearance` (headless: the default 12 AS-16
 clear the open bays' walls, door leaves, ends, roof, floor and rail by at least 0.05 ft; the nearest-store
 figure is informational), `flight-livefire-tu160-slot1` and `-slot2` and `flight-jettison-tu160-slot2`
-(`STATIONS["tu160"] = [6, 6]`; the AS-16 fires at the practice aircraft as the Su-25's does, so neither
-slot is a refused one, and the bay stations cannot be jettisoned: the scenario still fires them). The probe's `bay` control is `Required` for the Tu-160
+(`STATIONS["tu160"] = [6, 6]`; the bay stations cannot be jettisoned: the scenario still fires them.
+Corrected in T160-6, 2026-11-16: the AS-16 fired at the practice aircraft only while the Tu-160 had no
+radar; with `TU160R.SEE` enabled both slots are refused slots, as the Su-25's). The probe's `bay` control is `Required` for the Tu-160
 (`flight-animation-tu160`: no lining and nothing hanging below a bay's belly plane at 0; 20 lining faces,
 a vertex on each hinge line and the free edge `3.8 ft * sin(90 degrees * value)` below the plane from a
 sixth of the travel on, every leaf vertex on a hinge line at 1). The glove plates change the

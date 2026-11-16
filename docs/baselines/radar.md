@@ -369,3 +369,17 @@ Sensor View name; no other aircraft changed). The jammer row is gone (BMB-A2), s
 chaff and no flare line. The laser works from the fixed row with a GBU-27 released from the bay (`a2g-laser-f117`:
 lased, released, guided, the tank destroyed). The RCS page reads `SIG 1` closed and `SIG 2` with the bay open.
 See [the F-117 section](../formats/aircraft-variety.md#f-117-ordnance-sensors-and-cockpit-f117-67-2026-11-15).
+
+## Tu-160 radar, jammer and the laser row, 2026-11-16 (T160-6, T160-7)
+
+`TU160R.SEE` (the record `B52R.SEE` renames) is reviewed `Preset::Transitional` and `TU160.ECM` (the
+`B52.ECM` and `AC130.ECM` record with 16 bytes changed) `Generation::Transitional`, strength 0.30
+(`sensors/profile.rs`, fitted). `--sensor-summary` reads: `Tu160: radar TU160R.SEE search 150 nmi 60x60
+deg track 150 nmi 45x45 deg look-down 0 TRANSITIONAL; infrared none; visual VIS300.SEE search 10 nmi
+150x120 deg track 5 nmi 150x120 deg; jammer TU160.ECM TRANSITIONAL strength 0.30; signature radar 100
+infrared 100` (both were `UNREVIEWED (not enabled)`). The radar window reads `RADAR OFF`, then `TWS 10
+... TRACK` on a contact; the weapons window `99 CHAFF`, `99 FLARE`, the RWR page `JAM` with the jammer on;
+the RCS page `SIG 100` closed and `SIG 150` with the bay open. `SU37L.SEE` is the built-in laser (the
+HUD box reads `LSR RDY` with an AS-16 selected), a fixed row with no pod body. The AS-16 now wants a
+surface target, so `a2g-antiship-tu160` flies it at the Krivak (150 of 500 left). See [the Tu-160
+section](../formats/aircraft-variety.md#tu-160-ordnance-sensors-hud-and-cockpit-t160-67-2026-11-16).

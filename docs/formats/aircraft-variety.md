@@ -15881,3 +15881,125 @@ grid caps no store (every admitted store's count under the grid is its record co
 5. The gear plates cross the aft bay's stores with the gear down and the doors open (finding 1).
 6. The glove plate is a fixed fit to the 65 degree pose; a plate that follows the sweep would also close
    the spread sliver.
+
+## Tu-160 ordnance, sensors, HUD and cockpit (T160-6/7, 2026-11-16)
+
+Implementation mode, slices T160-6 and T160-7 run together (bomber batch B). The coordinator's first pass
+(`BOMBERS-DECISIONS-B.md`, "Tu-160 Blackjack" items 7 and 8, "Tu-160 stations") applies: the default is
+the record's 12 AS-16 (Kh-15) in the two bays, `AS15.JT` (Kh-55) stays refused, `SU37L.SEE` stays a
+fixed laser row with no pod, the HUD follows the record (`b2.HUD`, stem `B2`), the pilot's eye is fitted
+at the drawn flight deck. Provenance: sensor rows, HUD module, panel names and art spec-derived (retail);
+bindings opinionated (coordinator first pass, John's review pending); the two radar and jammer
+assignments, the glass (the B-2's measured polygon) and the eye fitted (agent decisions, 2026-11-16).
+
+**Load Ordnance page.** Two `Internal Bay` rows, `AS-16 Kickback`, `6 loaded (max 6)` each: weight
+current 600,532 of 606,260 lb maximum (5,728 lb available), fuel 326,285 lb, 100 percent. The sensor line
+reads `Built-in laser designator: no pod needed for laser ordnance.` (the shared text; the page's message
+bar cuts it at the edge, as for every aircraft with that line). Frame `load-ordnance`. No pod row exists:
+the audit lists `TU160.PT` with 2 source rows (the bays) and no designator pod.
+`--validate-ordnance` reports no pin moved: 54 aircraft, 23 recovered stations, 5,385 weapon, 257 tank
+and 82 pod placements, 278 Cheat-only; `TU160.PT` 2 source rows, 60 placements, catalog 30 normal, 83 Cheat.
+
+**Live fire, jettison and a guided shot.** Before this slice the Tu-160 had no radar, so the AS-16 fired
+at the practice aircraft. The radar is now on (below), so the AS-16, an active-radar surface missile like
+the Su-25's and the B-52's Harpoon, is refused against an aircraft: `flight-livefire-tu160-slot1` and
+`-slot2` are refused slots (`REFUSED_SLOTS`, no shot, nothing spent), and `flight-jettison-tu160-slot2`
+still passes (a bay station is not jettisoned; the load is unchanged). The firing itself is the guided
+shot, `a2g-antiship-tu160` (`--a2g-run UKR QUSFLT --attack antiship --from 6 --aircraft tu160 --load AS16
+--station 0 --count 6`): the Krivak designated on the A-G page through the Tu-160's radar, launched in
+CUED (rounds 6 to 5), seeker Midcourse then Pitbull on the ship, ship at 150 of 500 (end 99 ft from the
+target at 22 s; the Su-25's and Su-35's AS-16 leave it at 150 as well). The HUD of that run reads
+`6 AS-16`, `R 5.7` and `LSR RDY` (frame `as16-guided-hud`). `flight-bay-fire-tu160-row4` and `-row5`
+(T160-5) still release an AS-16 through each bay's open doors. `SHOTS_PER_ROUND` is unchanged (the
+AS-16 is not a pack).
+
+**Release origin, the human's and the AI's cells.** `a2g-release-origin-tu160` (the human trigger,
+`--a2g-run --attack release`, 20,000 ft, 300 kt): the six AS-16 of the forward bay leave from three
+abreast and two long, x -1.59, +1.59 and 0 (outermost first, alternating, then the middle), the forward
+row at 38.61 ft ahead of the aircraft's origin then the back row at 22.66, -1.09 ft up; the aft bay the
+same columns at -12.73 and -28.68 ft, 1.58 ft up (the aft bay's belly plane is the flat one, 2.667 ft
+higher); a Mk 82 row of the forward bay from four abreast, -1.95, +1.95, -0.65, +0.65 at 45.73 then
+38.18 ft, -1.95 ft up. Every release's origin equals the point it hung at. The AI's cells are the same:
+`ai-strike-tu160-stick` (an AI Tu-160 on the column at 20,000 ft, 12 nm out, six Mk 82) prints six
+`ORIGIN` lines at the same places, doors open (bay 0.96 at the first, shut 1.9 s after the last), six
+impacts, egress, not lost. **The AI does not release the AS-16** (`--pilot ai --load AS16`: the strike
+driver picks `kind=RadarAgm` and the AI flies the pass and the egress with `no release`, against the T-90
+and against the Kiev, where it is lost to the defences): AI behaviour is T160-9's, noted open.
+
+**Countermeasures.** The record's `TU160.ECM` row (retail): 99 chaff and 99 flares and a jammer. The
+weapons window reads `99 CHAFF`, `99 FLARE`; `flight-countermeasures-tu160` (five chaff and three flare
+releases, jammer on) reads capacity 99 and carried 94 and 96; after the three flares and three chaff of
+the external frame `96 CHAFF`, `96 FLARE`, `JAM` on the RWR page, six flares burning. The jammer is now
+live: `TU160.ECM` was `UNREVIEWED (not enabled)`; it is the record `B52.ECM` and `AC130.ECM` with 16 bytes
+changed, so `Generation::for_record` gives it **Transitional** (fitted), strength 0.30. The devices leave
+the shared outlet (15 ft aft and 2 ft below the model origin), which for a 178 ft aircraft is under the
+middle of the fuselage, not the tail (77 ft aft); the same for the B-52. A per-aircraft outlet exists only
+for the Tornado's pod (`Release::from_outlet`); fitting one for the bombers is open (see below). Frames
+`countermeasures-chaff-flare-jammer`, `countermeasures-external`.
+
+**Sensors, row by row against the real aircraft.**
+
+| Row | Record | Real Tu-160 | In TORE |
+| --- | --- | --- | --- |
+| 0 | `VIS300.SEE` | the crew's eyes | visual channel, 10 nmi search, no body |
+| 1 | `TU160R.SEE` | nose radar | **enabled, `Preset::Transitional`** (below) |
+| 2 | `TU160.ECM` | active jamming system | **enabled, `Generation::Transitional`**, jammer toggles on J |
+| 3 | `SU37L.SEE` | none (no laser-guided stores; a forward video camera for aiming) | the built-in laser designator the record gives, a fixed row at (0, 0, 0), **no pod body, no station**; Paveway and Maverick class stores in the bay need it (kept, coordinator first pass) |
+
+The radar `TU160R.SEE` (150 nmi search, 60 by 60 degrees, track 45 by 45) is the record `B52R.SEE` is a
+rename of (T160-0, B52-7), so it takes the same class as the B-52's: `Preset::for_record` returns
+**Transitional** (fitted, agent decision; notch half-width 100 ft/s, centre factor 0.20, burn-through 8
+nmi). `--sensor-summary` now reads `Tu160: radar TU160R.SEE search 150 nmi 60x60 deg track 150 nmi 45x45
+deg look-down 0 TRANSITIONAL; infrared none; visual VIS300.SEE ...; jammer TU160.ECM TRANSITIONAL strength
+0.30; signature radar 100 infrared 100` (it was `UNREVIEWED (not enabled)` twice). The radar window now
+reads `RADAR OFF` until switched on, then `TWS 10 ... TRACK`; there is no ground-mapping mode (shared
+radar: the Tu-160's strike aid is the A-G designation of a radar contact, as the B-52's). The Tu-26 and
+Tu-95 radars and jammers stay unreviewed (their slices). No pod body hangs anywhere: the Tu-160 has no pod
+station, and the audit's one designator pod is another aircraft's. The real forward video camera has no row
+and no geometry (T160-0): not added.
+
+**HUD and cockpit.** `b2.HUD` and the B-2's stem `B2` (`~B2H.PIC`, 1394 by 508; no Tu-160 art exists in
+either archive, pinned by `tu160_cockpit.rs`): the shared HUD draws in the main window with the weapon
+and count (`ARM`, `6 AS-16`), the `LSR RDY` box and, with the bay open, `BAY` (frames `cockpit-front-view`,
+`cockpit-look-left-45`, `cockpit-view-up-f3`). **The glass aperture is measured, not closed**: the B-1B and
+the Tu-160 fly the very picture B2-7 measured, so the polygon (20 vertices, 246,986 of the main window's
+247,572 transparent pixels, no opaque pixel) is theirs; `the_b2_glass_is_measured_for_its_1394_picture`
+now checks both masks equal the B-2's pixel for pixel and fail closed on any other size, and the
+retail-reading `the_b2_glass_is_the_main_window_of_the_imported_art` checks each covers 246,986 pixels of
+the install's art.
+
+**The pilot's eye (`mirrors::eye_offset`).** The record's `viewOffset` (0, 35, 60) is the Tu-26's copy, 20
+ft ahead at this scale (the T160-0 reading), 52 ft behind the drawn glass and inside the fuselage. Measured
+from `TU160.SH` at 8/3 ft a unit, the skin on the centre line: the crown is flat at 4 units (10.67 ft)
+from 17 units (45 ft) to 27 (72 ft) ahead of the origin, the glass faces run 27 to 30 units (72 to 80 ft)
+falling to 5.3 ft, the nose cone to the tip at 38 (101 ft). The seat is **12 ft up and 71 ft ahead**: 1 ft
+behind the glass's foot, on the flight deck, 1.33 ft over the crown (the B-52 is 1.7 ft, the B-2 2.7 ft,
+the F-117 1.4 ft). The front view looks out of the B-2's main window over the nose; the back view (F2)
+clears the fuselage and looks down its length with the spread wings either side (frame
+`cockpit-view-back-f2`); a 45 degree look to the left shows the strut and the console, no skin (frame
+`cockpit-look-left-45`). The rear-mirror feed camera stays on the shared seat for every aircraft (the B-2
+art has no mirrors). Pinned by `the_fitted_seat_sits_over_the_crown_behind_the_windscreen` (retail-reading)
+and the `mirrors.rs` and `flight_views.rs` unit tests (the recorded Back view takes the seat too).
+
+**The RCS page.** Page 0 reads `SIG 100` with the bay closed and `SIG 150` with it open (the record's
+signature 100 and the open-bay term of 1.5, `Deployment::bay`; the oval is the exposure contour; frame
+`crop3x-rcs-closed-vs-bay-open`). The open bay reaches only this page, as for the B-52, B-2 and F-117.
+
+**Rear view.** There is no rear-view HUD cue (B-52 finding); the F2 Back view is the rear view (above).
+
+**Checks (all through `light3.sh`, profile `.local/m3-aircraft/profile-tu160` refreshed first; logs in
+`.local/m3-aircraft/checks/T160-6/`).** See the plan entry for the counts. New tests: the profile test
+(`the_tu160_radar_and_jammer_are_reviewed_transitional`), the eye and Back-view tests, the aperture
+checks, `tu160_cockpit.rs` (two retail-reading tests). New scenarios: `a2g-antiship-tu160`,
+`a2g-release-origin-tu160`, `ai-strike-tu160-stick`, `flight-countermeasures-tu160`.
+
+**Not changed, open for John.**
+1. The radar and jammer classes (Transitional, the B-52's) are fitted; Late-Cold-War for the jammer would
+   follow the year 2010 on the record, not the B-52 sibling.
+2. Flares and chaff leave the shared outlet, not the tail: a fitted outlet for the bombers (the Tornado
+   pod's `from_outlet` mechanism) is a shared-code choice.
+3. The AI does not fire the AS-16 (T160-9).
+4. The Kh-55 stays refused (decision 6); the real 24 Kh-15 stay at the record's 12.
+5. The glass is the main window only (the side panes stay out), as the B-2's; the whole picture (the
+   AC-130 choice) is a one-line change.
+6. No ground-mapping radar mode for a bomber (a sensor change, John's call).

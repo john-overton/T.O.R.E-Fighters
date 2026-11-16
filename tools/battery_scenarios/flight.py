@@ -1239,6 +1239,10 @@ REFUSED_SLOTS = {
     # its radar (`B52R.SEE`, enabled), so the Harpoon wants a surface target as everyone's does.
     # `a2g-antiship-b52` fires it at the Krivak.
     ("b52", 2),
+    # The Tu-160's AS-16 (Kh-15) bays are an active-radar surface missile (T160-6, 2026-11-16): the
+    # Tu-160 now has its radar (`TU160R.SEE`, Transitional), so, as everyone's, the AS-16 wants a
+    # surface target, not the practice aircraft. `a2g-antiship-tu160` fires it at the Krivak.
+    ("tu160", 1), ("tu160", 2),
 }
 
 
@@ -1541,6 +1545,13 @@ def countermeasure_scenarios() -> list[Scenario]:
     out.append(Scenario(name="flight-countermeasures-b2", lane="flight", args=args, window=True,
                         check=check_countermeasures, timeout=180,
                         notes="The B-2's retail F18.ECM row: 30 chaff and 30 flares, five and three released (B2-6)."))
+    # T160-6: the Tu-160's own TU160.ECM row, retail: 99 chaff, 99 flares and a jammer (Transitional), standard outlet.
+    args = ["--live-fire", "--aircraft", "tu160", "--jammer-on"] + ["--combat-command", "chaff"] * 5
+    args += ["--combat-command", "flare"] * 3
+    args += ["--countermeasure-preview", "240", "--capture-flight", "{work}/cm.ppm", "--no-audio"]
+    out.append(Scenario(name="flight-countermeasures-tu160", lane="flight", args=args, window=True,
+                        check=check_countermeasures, timeout=180,
+                        notes="The Tu-160's retail TU160.ECM row: 99 chaff and 99 flares, five and three released, jammer on (T160-6)."))
     out.extend(tornado_countermeasure_scenarios())
     return out
 

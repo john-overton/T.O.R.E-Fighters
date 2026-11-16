@@ -160,7 +160,7 @@ flying channel, instead of borrowing a preset.
 | Preset | Radar records | Notch half-width, ft/s | Range factor at notch centre | Reference burn-through B, nmi | Angular coupling half-width / sidelobe floor |
 | --- | --- | ---: | ---: | ---: | --- |
 | Basic | F4BR, MIG21R, MIG27R | Disabled | 1.0 | 5 | 3 degrees / 0.05 |
-| Transitional | F14R, B52R (B52-7, 2026-11-15, fitted: the Tu-160's record renamed, a long-range bomber set; the AC-130's class) | 100 | 0.20 | 8 | 2 degrees / 0.02 |
+| Transitional | F14R, B52R (B52-7, 2026-11-15, fitted: the Tu-160's record renamed, a long-range bomber set; the AC-130's class), TU160R (T160-6/7, 2026-11-16, fitted: the record B52R renames, so the B-52's class) | 100 | 0.20 | 8 | 2 degrees / 0.02 |
 | Advanced | F18R, MIG29R, SU24R, SU27R, F22R, MIG31R | 60 | 0.45 | 10 | 1 degree / 0.005 |
 
 Basic sets are primarily vulnerable to ground clutter and carry no Doppler notch,
@@ -219,7 +219,7 @@ borrowing a generation.
 | Generation | ECM records | Aircraft carrying them |
 | --- | --- | --- |
 | Early | F4.ECM, MIG21.ECM | A-4E; MiG-21, MiG-23 |
-| Transitional | F14.ECM, MIG29.ECM, SU24.ECM | F-14D; MiG-29; Su-25 |
+| Transitional | F14.ECM, MIG29.ECM, SU24.ECM, TU160.ECM (T160-6/7, 2026-11-16, fitted: `B52.ECM` and `AC130.ECM` with 16 bytes changed) | F-14D; MiG-29; Su-25; Tu-160 |
 | Late-Cold-War | F18.ECM, SU27.ECM, F22.ECM, MIG31.ECM | F/A-18D, Rafale C, X-31, Mirage 2000, Gripen; Su-27, Su-35; F-22A; MiG-31 |
 
 F4.ECM and MIG21.ECM carry no radar-deception mode flag and a zero deception
@@ -241,6 +241,10 @@ by John, O4), read as Early with no RF mode and strength 0.00 (MF1-7 sensor
 summary), so it too emits no RF noise; its radar is `F18R.SEE`. Unlike the
 Mirage 2000 it has no jammer worth a matchup row: the record gives chaff and
 flares only.
+
+Update (T160-6/7, 2026-11-16): the Tu-160's `TU160R.SEE` (150 nmi search, 60 by 60 degrees) is
+reviewed Transitional and its `TU160.ECM` (RF mode, strength 0.30) Transitional, so it flies with a radar
+and a jammer; both were unreviewed and never enabled. The Tu-26's and Tu-95's records stay unreviewed.
 
 Only installed, powered, undamaged RF jammers contribute. Jammer strength S is
 `clamp(ECM.radar_deception_chance / 100, 0, 1)`, repurposed as an authored

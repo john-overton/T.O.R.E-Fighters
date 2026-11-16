@@ -827,6 +827,12 @@ mod tests {
         );
         // The F-117's glass is keyed to its own 1673x508 picture, not this one.
         assert!(mask(&source, AircraftId::F117).iter().all(|v| *v == 0));
+        // T160-7: the B-1B and the Tu-160 fly the same `~B2H.PIC`, so they
+        // take its measured glass, pixel for pixel, and fail closed as it does.
+        for id in [AircraftId::B1b, AircraftId::Tu160] {
+            assert_eq!(mask(&source, id), b2, "{id:?}");
+            assert!(mask(&transparent(1280, 490), id).iter().all(|v| *v == 0));
+        }
     }
 
     /// F117-7: the F-117's own 1673x508 picture has a measured glass polygon
@@ -1039,5 +1045,16 @@ mod tests {
         assert!(covered * 100 >= B2_MAIN_WINDOW_PIXELS * 98);
         let connected = flood(250 * width + 697, &|at| mask[at] == 1);
         assert_eq!(connected.iter().filter(|v| **v).count(), covered);
+        // T160-7: the B-1B and the Tu-160 fly this very picture, so the glass
+        // measured here is theirs, not a closed mask.
+        for id in [AircraftId::B1b, AircraftId::Tu160] {
+            assert_eq!(id.cockpit(), name, "{id:?}");
+            let theirs = super::mask(&source, id);
+            assert_eq!(
+                theirs.iter().filter(|v| **v == 1).count(),
+                B2_GLASS_PIXELS,
+                "{id:?}"
+            );
+        }
     }
 }
