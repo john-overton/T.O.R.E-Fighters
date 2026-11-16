@@ -1266,6 +1266,146 @@ def su34_origin_problems(output: str) -> list[str]:
     return problems
 
 
+# SU34-9 (2026-11-16): the cells an AI Su-34's Mk 82 leaves from, one a station row: the cells a human's first
+# press of the same store leaves from (`a2g-release-origin` run by hand on the SU34-5 station positions: row 6
+# the fuselage pair under the intake duct, row 7 the outer wing pylon). (right, up, forward) in feet.
+SU34_MK82_CELLS = {1: (-4.50, -3.46, 6.15), 2: (-18.00, -1.78, -3.40)}
+# The cell an AGM-84E leaves the outer wing pylon from (a missile hangs 0.11 ft lower than the bomb).
+SU34_HARPOON_CELL = (-18.00, -1.89, -3.40)
+
+
+def su34_bombs_problems(output: str) -> list[str]:
+    """`ai-strike-su34-bombs`: an AI Su-34 (strike class Fighter: the fighter passes, one bomb a pass) drops a Mk 82
+    from each of its two bomb rows, the fuselage row (station 1, under the intake ducts) and the wing row
+    (station 2, the outer pylon): a level pass at 5,000 ft, the bomb leaving the cell a human's first press
+    leaves from, the bay doors untouched (no bay), a landing inside the skill's circle and gate, an egress."""
+    runs = parse_runs(output)
+    wanted = [
+        dict(label=f"Su-34 Mk 82 row {station}", profile="level", skill=1, miss=MISS_FT_MAX[1],
+             min_alt=4500.0, max_alt=5500.0)
+        for station in SU34_MK82_CELLS
+    ]
+    problems = strike_problems(output, wanted)
+    if len(runs) != len(wanted):
+        return problems
+    for run, (station, want) in zip(runs, SU34_MK82_CELLS.items()):
+        label = f"Su-34 Mk 82 row {station}"
+        if run.setup.get("aircraft") != "Su34" or run.setup.get("load") != "MK82.JT":
+            problems.append(f"{label}: flew {run.setup.get('aircraft')} with {run.setup.get('load')}")
+        release, origin = run.first("RELEASE"), run.first("ORIGIN")
+        if release is None or origin is None:
+            continue
+        if release.get("station") != str(station):
+            problems.append(f"{label}: released from station {release.get('station')}")
+        if number(release.get("bay")) > 0.05 or run.of("BAY"):
+            problems.append(f"{label}: a bay door moved on a jet with no bay")
+        got = tuple(float(origin[k]) for k in ("right", "up", "forward"))
+        for name, g, w, tol in zip(("right", "up", "forward"), got, want, (0.05, 0.05, 0.5)):
+            if abs(g - w) > tol:
+                problems.append(f"{label}: left {name} {g}, a human's first press leaves from {w}")
+        if not run.of("EGRESS"):
+            problems.append(f"{label}: no EGRESS")
+    return problems
+
+
+def su34_default_problems(output: str) -> list[str]:
+    """`ai-strike-su34-default`: an AI Su-34 on the default load picks its own store (`--choose-store`): a laser
+    store it can guide (the AS-14 or the AT-12, never the AA-11 or the gun), releases it guided on its own spot,
+    lands it within the guided limit, destroys the tank and egresses."""
+    runs = parse_runs(output)
+    if len(runs) != 1:
+        return [f"{len(runs)} runs finished, want 1"]
+    run, label = runs[0], "Su-34 default load"
+    problems = consistency_problems(run, label)
+    if run.setup.get("aircraft") != "Su34":
+        problems.append(f"{label}: flew {run.setup.get('aircraft')}")
+    plane = (run.first("start") or {}).get("plane", "0")
+    release, impact = run.first("RELEASE"), run.first("IMPACT")
+    if release is None or impact is None:
+        return problems + [f"{label}: no release or no impact"]
+    if release.get("weapon") not in ("AS14.JT", "AT12.JT"):
+        problems.append(f"{label}: released {release.get('weapon')}, want an AS-14 or an AT-12 of the default load")
+    selected = run.first("SELECTION") or {}
+    if selected.get("kind") != "Laser":
+        problems.append(f"{label}: selected a {selected.get('kind')} store, want a laser one")
+    if release.get("guided") != "Guiding" or release.get("spot_owner") != plane:
+        problems.append(f"{label}: {release.get('guided')} on aircraft {release.get('spot_owner')}'s spot, want guiding on its own ({plane})")
+    if not number(impact.get("miss_ft")) <= GUIDED_MISS_FT:
+        problems.append(f"{label}: landed {impact.get('miss_ft')} ft from the target, want at most {GUIDED_MISS_FT:.0f}")
+    if not _target_hurt(run):
+        problems.append(f"{label}: the target is unhurt ({run.summary.get('target_hp')})")
+    if not run.of("EGRESS"):
+        problems.append(f"{label}: no EGRESS")
+    if run.of("LOST"):
+        problems.append(f"{label}: the Su-34 was lost")
+    return problems
+
+
+def su34_quick_wing_problems(output: str) -> list[str]:
+    """`ai-strike-su34-quick-wing`: a Quick Mission with the Ukraine factory as the ground target: a Su-34 wing is
+    bomber class (the record's class word 0x4000), takes the Strike role, flies the strike from the default
+    load's AS-14 row on its own laser spot, lands the missile within the guided limit and egresses."""
+    runs = parse_runs(output)
+    if len(runs) != 1:
+        return [f"expected one strike run, got {len(runs)}"]
+    run, label = runs[0], "Su-34 quick wing"
+    problems = consistency_problems(run, label)
+    role = run.first("ROLE") or {}
+    if role.get("role") != "strike":
+        problems.append(f"{label}: the wing was given role {role.get('role')}, want strike")
+    if run.setup.get("aircraft") != "Su34" or run.setup.get("load") != "AS14.JT":
+        problems.append(f"{label}: flew {run.setup.get('aircraft')} with {run.setup.get('load')}, want the default AS-14")
+    release, impact = run.first("RELEASE"), run.first("IMPACT")
+    if release is None or impact is None:
+        return problems + [f"{label}: no release or no impact"]
+    if release.get("weapon") != "AS14.JT" or release.get("station") != "1":
+        problems.append(f"{label}: released {release.get('weapon')} from station {release.get('station')}")
+    if release.get("guided") != "Guiding" or release.get("spot_owner") != role.get("plane"):
+        problems.append(f"{label}: {release.get('guided')} on aircraft {release.get('spot_owner')}'s spot, want guiding on the wing's own ({role.get('plane')})")
+    if not number(impact.get("miss_ft")) <= GUIDED_MISS_FT:
+        problems.append(f"{label}: landed {impact.get('miss_ft')} ft from the target, want at most {GUIDED_MISS_FT:.0f}")
+    if not run.of("KILL"):
+        problems.append(f"{label}: the missile destroyed nothing")
+    if not run.of("EGRESS"):
+        problems.append(f"{label}: no EGRESS")
+    if run.of("LOST"):
+        problems.append(f"{label}: the Su-34 was lost")
+    return problems
+
+
+def su34_antiship_problems(output: str) -> list[str]:
+    """`ai-strike-su34-antiship`: an AI Su-34 with two AGM-84E on its outer wing pylons (row 7) sinks the Krivak of
+    the Ukraine surface fleet from 15 nm: one Harpoon leaves each wing, both hit and the ship is destroyed. The
+    run stops at 40 s: after the kill the AI flies on towards the fleet and is shot down at about 52 s, a known
+    limit (the B-52's run has the same, docs/formats/aircraft-variety.md, SU34-9)."""
+    runs = parse_runs(output)
+    if len(runs) != 1:
+        return [f"expected one strike run, got {len(runs)}"]
+    run, label = runs[0], "Su-34 Harpoon"
+    problems = consistency_problems(run, label)
+    releases = run.of("RELEASE")
+    if len(releases) != 2 or any(r.get("weapon") != "AGM84E.JT" or r.get("station") != "2" for r in releases):
+        problems.append(f"{label}: releases {[(r.get('weapon'), r.get('station')) for r in releases]}, want two AGM84E.JT from station 2")
+    rights = sorted(float(o.get("right", "nan")) for o in run.of("ORIGIN"))
+    if rights != [-18.0, 18.0]:
+        problems.append(f"{label}: the Harpoons left from {rights} ft out, want one a wing at 18 ft")
+    for origin in run.of("ORIGIN"):
+        for name, want in zip(("up", "forward"), SU34_HARPOON_CELL[1:]):
+            if abs(float(origin.get(name, "nan")) - want) > 0.1:
+                problems.append(f"{label}: a Harpoon left {name} {origin.get(name)}, the pylon's cell is {want}")
+    if any(number(r.get("bay")) > 0.05 for r in releases) or run.of("BAY"):
+        problems.append(f"{label}: a bay door moved on a jet with no bay")
+    if len(run.of("IMPACT")) != 2:
+        problems.append(f"{label}: {len(run.of('IMPACT'))} impacts, want 2")
+    if not any(k.get("victim") == KRIVAK_ID for k in run.of("KILL")):
+        problems.append(f"{label}: the Krivak ({KRIVAK_ID}) was not destroyed")
+    if run.of("LOST"):
+        problems.append(f"{label}: the Su-34 was lost inside the 40 s window")
+    if run.setup.get("target") != KRIVAK_ID:
+        problems.append(f"{label}: aimed at {run.setup.get('target')}, want the Krivak")
+    return problems
+
+
 def b2_climb_problems(output: str) -> list[str]:
     """`ai-strike-b2-climb`: from 5,000 ft 30 nm out an AI B-2 climbs to its release floor (10,000 ft
     or more) before it bombs, then bombs and gets out; it never gets low."""
@@ -1851,6 +1991,48 @@ def scenarios() -> list[Scenario]:
         timeout=600, expect=[r"RELEASE", r"ORIGIN", r"IMPACT", r"KILL"], check=b52_antiship_problems,
         notes="An AI B-52 with two AGM-84E on its pylons, 15 nm from the Ukraine surface fleet at 20,000 ft: one "
               "Harpoon leaves each wing, the doors stay shut, both hit the Krivak and it is destroyed.",
+    ))
+    # SU34-9: the Su-34 (strike class Fighter, bomber class word) flies the fighter passes from its fuselage and
+    # wing rows, picks its own store from the default load, takes the Strike role in a Quick Mission and sinks a
+    # ship with two Harpoons on its pylons (docs/formats/aircraft-variety.md, "Su-34 AI, missions, multiplayer
+    # and replay").
+    extra.append(Scenario(
+        name="ai-strike-su34-bombs", lane="flight",
+        args=pilot_run("UKR", "QUCOL", "--aircraft", "su34", "--load", "MK82", "--station", "1", "--seconds", "120",
+                       "--follow-egress"),
+        timeout=900,
+        then=[Step(pilot_run("UKR", "QUCOL", "--aircraft", "su34", "--load", "MK82", "--station", "2",
+                             "--seconds", "120", "--follow-egress"), timeout=600)],
+        expect=[r"RELEASE", r"ORIGIN", r"IMPACT", r"EGRESS"], check=su34_bombs_problems,
+        notes="An AI Su-34 (a Fighter, one bomb a pass) drops a Mk 82 from its fuselage row (station 1, under the "
+              "intake ducts) and from its wing row (station 2, the outer pylon): the level pass at 5,000 ft, the "
+              "bomb leaving the cell a human's first press leaves from, no bay door moving, then egress (SU34-9).",
+    ))
+    extra.append(Scenario(
+        name="ai-strike-su34-default", lane="flight",
+        args=pilot_run("UKR", "QUCOL", "--aircraft", "su34", "--station", "1", "--choose-store", "--seconds", "120",
+                       "--follow-egress"),
+        timeout=600, expect=[r"SELECTION", r"RELEASE", r"IMPACT", r"KILL", r"EGRESS"], check=su34_default_problems,
+        notes="An AI Su-34 on its default load chooses its own store: a guided AS-14, released on its own laser "
+              "spot, which destroys the tank; then egress (SU34-9).",
+    ))
+    extra.append(Scenario(
+        name="ai-strike-su34-quick-wing", lane="flight",
+        args=pilot_run("UKR", "QUFACT", "--aircraft", "su34", "--station", "1", "--quick-wing", "--seconds", "400",
+                       "--follow-egress"),
+        timeout=900, expect=[r"ROLE", r"RELEASE", r"IMPACT", r"EGRESS"], check=su34_quick_wing_problems,
+        notes="A Quick Mission with the Ukraine factory as the ground target: a Su-34 wing carries the bomber "
+              "class word, gets the Strike role, flies the default load's AS-14 on its own laser spot and egresses "
+              "(SU34-9).",
+    ))
+    extra.append(Scenario(
+        name="ai-strike-su34-antiship", lane="flight",
+        args=pilot_run("UKR", "QUSFLT", "--unit", KRIVAK_ID, "--aircraft", "su34", "--load", "AGM84E",
+                       "--station", "2", "--count", "2", "--from", "15", "--seconds", "40"),
+        timeout=600, expect=[r"RELEASE", r"ORIGIN", r"IMPACT", r"KILL"], check=su34_antiship_problems,
+        notes="An AI Su-34 with two AGM-84E on its outer wing pylons, 15 nm from the Ukraine surface fleet: one "
+              "Harpoon leaves each wing, both hit the Krivak and it is destroyed (SU34-9). The run stops at "
+              "40 s: the jet flies on to the fleet and is shot down at about 52 s (open).",
     ))
     return extra + [
         Scenario(

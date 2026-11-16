@@ -298,6 +298,28 @@ def b52_gun_fight_problems(output: str) -> list[str]:
     return problems
 
 
+def su34_air_fight_problems(output: str) -> list[str]:
+    """`ai-su34-quick-mission-2v2` (slice SU34-9): the probe's usual checks, the Su-34s shot (the fight has
+    shots in it) and at least one of them let an AA-11 go from its wingtip rails (a Su-34 starts with two); an
+    air-to-ground store (AS-14, AT-12) is not on the air-to-air list, so no actor holds more of either than the
+    four of the default load."""
+    problems = probe_problems(output)
+    lines = STORES_LINE.findall(output)
+    if len(lines) < 3:
+        problems.append(f"{len(lines)} AI stores lines, want one per Su-34")
+    for actor, stations in lines:
+        for store in ("AS-14", "AT-12"):
+            m = re.search(rf"{store} x(\d+)", stations)
+            if m and int(m.group(1)) > 4:
+                problems.append(f"actor {actor} holds {m.group(1)} {store}, the default load has 4")
+    if not any(m.group(1) != "2" for _, stations in lines for m in re.finditer(r"AA-11 x(\d+)", stations)):
+        problems.append("no Su-34 fired an AA-11: every wingtip pair is still whole")
+    total = SHOTS.search(output)
+    if total is None or int(total.group(1)) == 0:
+        problems.append("no shot in an all-Su-34 fight: neither the gun nor the AA-11s fired")
+    return problems
+
+
 def b2_no_air_to_air_checker() -> Callable[[str], list[str]]:
     """The B-2 wing in a fight (slice B2-9): the probe's usual checks, and the B-2s carry no gun (rounds=0) and
     nothing but Mk 82 and GBU-27 on their stations, so they fire no air-to-air shot; the player's own run
@@ -1716,6 +1738,21 @@ def scenarios() -> list[Scenario]:
             notes=f"An AI {aircraft.upper()} at Southampton at its full weight: it taxis, takes off, climbs out with its "
                   "flaps down until it can raise them, lands on the order at 175 kt or slower and parks, all on the "
                   "pavement (B52-9: the B-52's taxi-in used to leave it for six seconds at a corner)."))
+    # SU34-9 (2026-11-16): the Su-34 flies the same full cycle at the same 12,000 ft field at its default load
+    # (83,091 lb). It is no heavy (its flaps-up minimum is far under the heavy class's 190.5 kt, so no BMB-AI or
+    # B52-9 law engages and no airfield code changed): the scenario records that the fighter-bomber's own
+    # takeoff, climb-out, approach, touchdown, rollout, taxi and parking all stay on the pavement (it touches
+    # down at about 132 kt; the bound is 140).
+    out.append(probe("merged-airfield-su34-wing2", [
+        "--theater", "FRA", "--ground-start", "14",
+        "--aircraft", "su34", "--probe-friendly-aircraft", "su34",
+        "--probe-wing-size", "2", "--maneuver", "takeoff",
+        "--probe-wing-order", "12000:land-selected", "--separation", "200",
+        "--probe-wing-only", "--probe-pavement"],
+        ticks=108000, timeout=1800,
+        check=heavy_cycle(140),
+        notes="An AI Su-34 at Southampton at its default load: it taxis, takes off, climbs out, lands on the order "
+              "at 140 kt or slower and parks, all on the pavement. No heavy law engages (SU34-9)."))
     # Takeoff alone: the B-2 and B-52 from Athens (GRE 1, 12,000 ft; at their full weights they need about
     # 7,200 ft and the scripted player's own B-2 runs off the end of Mikonos' 7,246 ft), the F-117 from
     # Mikonos (GRE 2, 7,246 ft). Each leaves the ground, climbs out and flies on.
@@ -2125,6 +2162,25 @@ def scenarios() -> list[Scenario]:
                                               "--probe-enemy-aircraft", "su27",
                                               "--separation", "5", *attack), ticks=7200,
                      notes="The B-52 wing against Su-27s: the probe's usual checks hold for the B-52s and the "
+                           "Su-27s, whoever wins."))
+    # 13l. The Su-34 Platypus in a mission (slice SU34-9, 2026-11-16): a fighter-bomber (strike class Fighter by the
+    # rule) with the GSh-301, two AA-11 on the wingtip rails and AS-14 and AT-12 that are not on the air-to-air
+    # list. In an all-Su-34 fight the gun and the AA-11 are the only weapons it uses on an aircraft: the probe's
+    # usual checks must hold, the Su-34s must shoot and an AA-11 must leave a tip rail. The strike itself is
+    # `ai-strike-su34-*` (ai_strike.py).
+    out.append(probe("su34-quick-mission-2v2", fight(2, 2, "--aircraft", "su34",
+                                                     "--probe-friendly-aircraft", "su34",
+                                                     "--probe-enemy-aircraft", "su34",
+                                                     "--separation", "5", *attack), ticks=7200,
+                     check=su34_air_fight_problems,
+                     notes="All Su-34: the player's wing and the enemy wing fly the SU34.PT identity (two AL-31F, "
+                           "SU27R.SEE radar, GSh-301, two AA-11 on the tips, AS-14 and AT-12 on the pylons) in a "
+                           "2 v 2. The ground-attack stores stay on; the gun and the AA-11s do the shooting."))
+    out.append(probe("su34-vs-su27-2v2", fight(2, 2, "--aircraft", "su34",
+                                               "--probe-friendly-aircraft", "su34",
+                                               "--probe-enemy-aircraft", "su27",
+                                               "--separation", "5", *attack), ticks=7200,
+                     notes="The Su-34 wing against Su-27s: the probe's usual checks hold for the Su-34s and the "
                            "Su-27s, whoever wins."))
     # 14. The fixed acceptance probes.
     out.append(Scenario(name="ai-roster-probe", lane="ai", args=["--ai-roster-probe-ticks", "3600", "--no-audio"], timeout=1800))

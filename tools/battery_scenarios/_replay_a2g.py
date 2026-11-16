@@ -602,6 +602,31 @@ def scenarios() -> list[Scenario]:
         problems += rc.file_problems(work, "log-b52-ripple/log.jsonl", rc.check_jsonl)
         return problems
 
+    # SU34-9: a Su-34's ripple (four Mk 82 from the wing row's pylons, 0.5 s apart: the outer pair, left then right,
+    # then the middle pair) recorded, replayed tick for tick with `--verify-render` and read back as four releases and
+    # outcomes, the row's count falling 4 to 0. The Su-34 has no bay, so the recorded bay device never leaves shut.
+    su34_args = [*RUN, "UKR", "QUCOL", "--attack", "release", "--from", "1", "--altitude", "5000", "--speed", "420",
+                 "--repeat", "4", "--gap", "0.5", "--aircraft", "su34", "--station", "2", "--load", "MK82",
+                 "--count", "4", "--record", "{work}/su34-ripple.tore-replay", "--verify-render"]
+
+    def su34_check(work: Path, output: str) -> list[str]:
+        problems = verify_problems(output, "the Su-34 ripple", 3_000)
+        rows = events(work, "su34-ripple")
+        for name in ("weapon.release", "weapon.outcome"):
+            got = len(kind(rows, name))
+            if not 3 <= got <= 4:
+                problems.append(f"{got} {name} events for a ripple of 4 presses")
+        if len(kind(rows, "stores.items")) < 3:
+            problems.append("fewer stores.items entries than releases")
+        path = work / "log-su34-ripple" / "log.jsonl"
+        rows_all = [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+        bay = [r["devices"]["bay"] for r in rows_all
+               if r.get("id") == 0 and isinstance(r.get("devices"), dict) and "bay" in r["devices"]]
+        if any(b > 0.05 for b in bay):
+            problems.append(f"the Su-34 ripple: a bay device opened on a jet with no bay: {max(bay)}")
+        problems += rc.file_problems(work, "log-su34-ripple/log.jsonl", rc.check_jsonl)
+        return problems
+
     return [
         Scenario(
             name="replay-a2g",
@@ -640,5 +665,18 @@ def scenarios() -> list[Scenario]:
             check_work=b52_check,
             notes="A B-52 bay ripple (eight Mk 82 from the forward bay row) recorded, replayed tick for tick and read back "
                   "as eight releases and outcomes (B52-9).",
+        ),
+        Scenario(
+            name="replay-a2g-su34-ripple",
+            lane="replay",
+            args=su34_args,
+            timeout=300,
+            expect=[r"a2g-run: done"],
+            outputs=["su34-ripple.tore-replay"],
+            then=[Step(["--recording-log", "{work}/su34-ripple.tore-replay", "--out", "{work}/log-su34-ripple", "--rate", "5"],
+                       timeout=300)],
+            check_work=su34_check,
+            notes="A Su-34 ripple (four Mk 82 from the wing row's pylons) recorded, replayed tick for tick and read "
+                  "back as four releases and outcomes, with no bay device moving (SU34-9).",
         ),
     ]

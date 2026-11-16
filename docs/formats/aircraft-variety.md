@@ -16308,3 +16308,115 @@ only; no model term changed. No retail bytes committed.
 6. **Roll rate and the +9 G row.** The Su-27's 225 deg/s and a +9 row that the loaded-elevator
    rule divides to 6.9 G at the full tank; no real figure, and one source says +7.
 7. **Windows.** The liftoff and approach windows rest on no published speed.
+
+## Su-34 AI, missions, multiplayer and replay (SU34-9, 2026-11-16)
+
+Implementation and verification mode. The AI work was asked for by John through the bomber program
+(AGENTS.md: no AI work unless John asks). **No game code changed in `tore-sim` or `tore-world`:** the
+Su-34 flies the shared AI under the ordinary laws, and every scenario below passed on the first run.
+The one Rust change is a Quick Mission unit test. The base is `m3-su34` merged with `m3-aircraft`
+1699a86f (B52-9's heavy final lookahead and taxi coast, the battery's RAM profile copies).
+
+### What the Su-34 is to the AI
+
+| Fact | Value | Source |
+| --- | --- | --- |
+| Strike class | Fighter by the rule (maximum takeoff 97,000 lb is under the Heavy weight, +9 G over the Heavy G limit, 1,465 kt over the Attack top speed) | accepted, BOMBERS-DECISIONS-C |
+| Bomber class word | `0x4000` (the catalog row), so a friendly wing 2 or 3 takes the Strike role when a ground target is set | retail rule, [AI strike](../spec/ai-strike.md) |
+| Passes and release | The four fighter passes plus the level run, **one weapon a pass** (an AI Su-34 on four Mk 82 drops one and leaves) | shared Fighter behaviour |
+| Stations the AI strikes from | Row 6 (station 1, four under the intake ducts: AS-14, Mk 82), row 7 (station 2, four on the wing pylons: AT-12, Mk 82, LAU-61 pods, AGM-84E, AM-39), row 8 (station 3, the tip rails: AA-11 only) | SU34-5, SU34-6 |
+| Bay | none, so no door ever moves and no `BAY` line is printed | SU34-5 |
+| Air-to-air | the GSh-301 (180 rounds) and two AA-11 on the tips; the AS-14 and AT-12 are "not air to air" on the probe's list | SU34-6 |
+| Airfield laws | none engage: the flaps-up minimum is 119.8 kt against the heavy class's 190.5 kt, and `taxi_throttle_floor` is 0 | SU34-8 |
+
+### Strike (`ai-strike-su34-*`, flight lane)
+
+All on the Ukraine column or factory at the driver's defaults (skill Average, 450 kt, 5,000 ft, level pass).
+
+| Scenario | What the AI does | Numbers |
+| --- | --- | --- |
+| `ai-strike-su34-origin` (SU34-6, kept) | AS-14, AT-12 and a LAU-61 pod | each leaves the cell a human's first press leaves from |
+| `ai-strike-su34-bombs` | one Mk 82 from row 6, one from row 7 | released at 16 s, 5,004 ft, 402 kt, 12,440 ft out; origin (-4.50, -3.46, 6.15) from row 6 and (-18.00, -1.78, -3.40) from row 7, the same as `--attack release` by hand; landed 420 ft and 248 ft from the tank (the skill-1 limit is 814 ft); egress at 40 s; no bay door moved |
+| `ai-strike-su34-default` | picks its own store from the default load (`--choose-store`) | selects a laser store, releases an AS-14 at once on its own spot (`guided=Guiding`, spot owner 0), lands it 0.5 ft from the tank and destroys it at 19.6 s, egress at 42 s |
+| `ai-strike-su34-quick-wing` | a Quick Mission with the factory as the ground target (`--quick-wing`) | `ROLE strike` from the bomber class word, an AS-14 from station 1 at 3,340 ft on its own spot, 49.7 ft from the aim, destroys another object near the factory (`target=no`), egress at 73 s |
+| `ai-strike-su34-antiship` | two AGM-84E on the outer wing pylons, 15 nm from the Ukraine surface fleet | both leave at 0.017 s (one a wing, (-18.00, -1.89, -3.40) and (18.00, -1.89, -3.40)), both hit the Krivak 166 ft from the aim at 30.05 s and it is destroyed |
+
+The harness limit: `--a2g-run --pilot ai` with neither `--load` nor `--station` stops ("the aircraft has no
+air-to-ground station"): the driver's own search finds no station on the Su-34's default load. `--station 1`
+names the default AS-14 row, and the scenarios that say "default load" name it that way.
+
+### Airfield (`ai-merged-airfield-su34-wing2`, AI lane)
+
+`ai-heavy-takeoff-su34-gre-a1` and `ai-heavy-land-su34-ukr-a2` were SU34-8's. SU34-9 adds the full cycle at
+Southampton (FRA 14, 12,000 ft) at the default load, 83,091 lb: it taxis out, lines up and takes off at 26.7 s,
+is airborne in the climb-out at 73.7 s, holds at the marshal, lands on the order at 132 kt (the check bound is
+140 kt), clears the runway at 353.7 s and parks at 812.4 s. **All of 114,254 ground samples are on the pavement**
+(0 off), 0 anomalies. No airfield code was touched, so the BMB-AI baseline comparison (ai-takeoff, ground, theater,
+records-land, merged-airfield, ils-terrain, taxi, lost-lead) has nothing to prove for this slice: the binary is the
+merge's, and the scenarios of the other aircraft run in the final battery below. Gated laws (B52-9's final lookahead
+and taxi coast) read `taxi_throttle_floor > 0`, which is 0 for the Su-34.
+
+### Air-to-air (`ai-su34-*`, AI lane)
+
+- `ai-su34-quick-mission-2v2`: every wing the Su-34 (the player's too), 2 v 2 with the fight script. The probe's
+  usual checks hold (0 anomalies), 182 shots, an AA-11 left a tip rail (an enemy Su-34 ended on `AA-11 x0`), and no
+  actor holds more than the default load's four AS-14 or four AT-12 (`su34_air_fight_problems`).
+- `ai-su34-vs-su27-2v2`: two Su-34s against two Su-27s; the probe's usual checks hold whoever wins.
+
+### Quick Mission
+
+`the_su34_is_a_quick_mission_player_and_a_wing_choice` (`quick_mission.rs`): the Su-34 is in the player's list by
+`SU34.PT`, named "Su-34 Platypus", is an AI choice in all four wing fields, a draft carries it as the player and in
+every wing and never as the Su-27 or the Su-35, and it is not in the stealth night rule. The strike case is
+`ai-strike-su34-quick-wing` above.
+
+### Multiplayer (`net-a2g-stores-su34`, net lane)
+
+The `net-a2g-stores` drive with both players in Su-34s and `tore-bot --a2g bomb --load MK82.JT`: the watching
+client draws the bomber's stores, sees the bomber's Mk 82 and the AI MiG-29s' stores empty as they release (a Stores
+event of 16 bytes at most, 20 told), and its `bay doors` line is empty, **no door open on any aircraft**
+(`no_doors=True`). A Su-34 has no bay, so the scenario reads the absence of doors where the B-2 and F-117 ones read
+their presence. The gun's rounds on a watching client are not covered (`tore-bot` has no gun role).
+
+### Replay
+
+- `replay-rec-su34-2v2`: a Su-34 2 v 2 recorded three times: `--verify-render` passes (2,401 ticks, none missing or
+  differing), two recordings agree, the checkpoint code 55 round-trips.
+- `replay-a2g-su34-ripple`: four Mk 82 from the wing row's pylons, 0.5 s apart (the outer pair, left then right,
+  then the middle pair at 14 ft), recorded and replayed tick for tick with `--verify-render` (3,388 ticks, none
+  missing or differing), read back as four releases and outcomes, and the recorded bay device never leaves 0.
+
+### Findings
+
+1. **No code change was needed.** A fighter-bomber needs no heavy law: the cycle, the strike and the missions all
+   pass under the shared ones. The Quick Mission default hands the Su-34 a Strike role through its record's
+   class word (a fighter by `StrikeClass`, a bomber by `0x4000`), as retail does the Su-24 and the A-4E.
+2. **Fighter class drops one weapon a pass.** Four Mk 82 on a row leave one a pass, not a stick; the heavy stick is
+   for the Heavy class only. A Su-34 sent at a column with four AS-14 uses one and goes home. Whether a
+   fighter-bomber should salvo is John's call.
+3. **Anti-ship after the shot.** The run is stopped at 40 s because the lone driver-flown wing stays "In formation"
+   after the release (the PHASE lines show Exit and TurnBack for four ticks, then nothing), flies on at 450 kt into
+   the fleet's other ships, goes "Defending" at 27 s and is shot down at 51.8 s, 54,000 ft from the kill. The
+   B-52's run does the same (BMB-AI notes it as the B-52's post-kill loss). It looks like a driver artefact (no
+   lead to follow, no route to leave on) rather than a mission AI fault; an AI Quick Mission wing would be on a
+   route. Not traced further.
+4. **Harpoon and Exocet on a Su-34.** AGM-84E and AM-39 are on the Su-34's row 7 through the shared weapon
+   tables (the record's AS-14 bit admits them), not through anything specific to the Su-34. The real aircraft's
+   anti-ship stores are the Kh-35 family, absent from the retail data, so the scenario stands for "the aircraft
+   carries anti-ship stores in this game". The default load carries none.
+
+### Not run
+
+The AI lane's other 800 or so scenarios beyond the `ai-heavy-*`, `ai-merged-airfield-*` and `ai-strike-*`
+selected; `--smoke-test`; `check_assets`; a Quick Mission flown to the end (landing and parking after the strike);
+a gun round over the wire; a windowed run.
+
+### Open for John
+
+1. **Fighter-bomber salvo.** Fighter class drops one store a pass. If a Su-34 should ripple its Mk 82, that is a
+   strike class decision (an Attack or a new class), not a Su-34 change.
+2. **The anti-ship scenario stops at 40 s** for the reason in finding 3.
+3. **A full Quick Mission cycle** (strike, return, land, park) for the Su-34 has not been flown to the end.
+
+Provenance: scenarios, checks and the unit test are fitted agent decisions (2026-11-16); the Mk 82 and Harpoon cells
+are the human's first-press cells from SU34-5 and SU34-6. No retail bytes committed.

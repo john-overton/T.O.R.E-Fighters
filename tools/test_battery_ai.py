@@ -349,6 +349,8 @@ class HeavyBomberTests(unittest.TestCase):
             "ai-heavy-land-b2-ukr-a2", "ai-heavy-land-b52-ukr-a2", "ai-heavy-land-f117-ukr-a2",
             # SU34-8 (2026-11-16): the Su-34 takes off and lands under the ordinary laws and passes cleanly.
             "ai-heavy-takeoff-su34-gre-a1", "ai-heavy-land-su34-ukr-a2",
+            # SU34-9: and parks on the pavement after a full cycle.
+            "ai-merged-airfield-su34-wing2",
         ):
             self.assertIn(name, names)
 
@@ -365,6 +367,21 @@ class HeavyBomberTests(unittest.TestCase):
         self.assertFalse([p for p in problems if "Harpoon" in p or "shot" in p or "stores" in p], problems)
         self.assertTrue(any("Harpoons" in p for p in ai.b52_gun_fight_problems(text.replace("AGM-84E x12", "AGM-84E x11", 1))))
         self.assertTrue(any("never fired" in p for p in ai.b52_gun_fight_problems(text.replace("shots=251", "shots=0"))))
+
+    def test_the_su34_mission_scenarios_exist_and_the_fight_check_reads_aa11s_and_shots(self):
+        names = {s.name for s in ai.scenarios()}
+        self.assertIn("ai-su34-quick-mission-2v2", names)
+        self.assertIn("ai-su34-vs-su27-2v2", names)
+        stores = "\n".join(
+            f"AI stores: actor={n} tanks=0 external_fuel=0 payload=463 stations=[GSh-301 x180, AS-14 x4, AT-12 x4, AA-11 x{a}]"
+            for n, a in ((1, 2), (2, 2), (3, 0))
+        )
+        text = stores + "\nAI probe totals: wings=3 ticks=7200 shots=182 dropped=0 warnings=0\n"
+        problems = ai.su34_air_fight_problems(text)
+        self.assertFalse([p for p in problems if "AA-11" in p or "shot" in p or "stores" in p or "holds" in p], problems)
+        self.assertTrue(any("AA-11" in p for p in ai.su34_air_fight_problems(text.replace("AA-11 x0", "AA-11 x2"))))
+        self.assertTrue(any("no shot" in p for p in ai.su34_air_fight_problems(text.replace("shots=182", "shots=0"))))
+        self.assertTrue(any("holds 5 AS-14" in p for p in ai.su34_air_fight_problems(text.replace("AS-14 x4", "AS-14 x5", 1))))
 
 
 if __name__ == "__main__":

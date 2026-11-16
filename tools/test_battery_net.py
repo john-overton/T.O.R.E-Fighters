@@ -973,6 +973,14 @@ class BayDoorsTests(unittest.TestCase):
         self.assertIn("F117.PT", net_a2g.F117_STORES_MISSION)
         self.assertIn("B2.PT", net_a2g.B2_STRIKE_MISSION)
 
+    def test_the_su34_stores_scenario_is_listed_and_flies_su34s_with_no_bay_doors(self):
+        # SU34-9: a jet with no bay. The watching client sees stores leave and no door open on any aircraft.
+        (scenario,) = [sc for sc in net_a2g.scenarios() if sc.name == "net-a2g-stores-su34"]
+        self.assertEqual((scenario.lane, scenario.window), ("net", False))
+        self.assertIn("wing friendly 1 SU34.PT 2 average", net_a2g.SU34_STORES_MISSION)
+        self.assertNotIn("F16C.PT", net_a2g.SU34_STORES_MISSION.split("wing friendly 1 ")[1].split("\n")[0])
+        self.assertIn("wing enemy 1 MIG29.PT 2 average", net_a2g.SU34_STORES_MISSION)
+
 
 class ReservationReplyTests(unittest.TestCase):
     def test_live_probe_reads_the_rust_wire_golden_and_rejects_unrelated_replies(self):

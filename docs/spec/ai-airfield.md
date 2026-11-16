@@ -538,3 +538,12 @@ B-52 at every weight, nobody else in the roster), so every other aircraft's law 
 Evidence is in the [aircraft variety](../formats/aircraft-variety.md#b-52-ai-missions-multiplayer-and-replay-b52-9-2026-11-16)
 B52-9 section: the full Southampton cycle is on the pavement from takeoff to parking (743 ticks off before, none
 after), the 80,000 lb landing at Simferopol is on it from the touchdown (1,201 ticks off before, none after).
+
+**Update (SU34-9, 2026-11-16): the Su-34 needs no airfield law.** **Fitted**, agent decision (no code changed).
+The Su-34's flaps-up minimum is 119.8 kt, far under the heavy class's 190.5 kt, and its wheels need no throttle
+to taxi (`Situation::taxi_throttle_floor` is 0), so none of the BMB-AI or B52-9 laws engage and its takeoff,
+approach and rollout are the ordinary ones. The full Southampton cycle at the default load (83,091 lb) runs from the
+taxi to the parking stand on the pavement (all 114,254 ground samples; takeoff roll at 27 s, airborne 74 s, touchdown
+132 kt, parked 812 s), `ai-merged-airfield-su34-wing2`; SU34-8's `ai-heavy-takeoff-su34-gre-a1` and
+`ai-heavy-land-su34-ukr-a2` are the Athens takeoff and the Simferopol landing
+([evidence](../formats/aircraft-variety.md#su-34-ai-missions-multiplayer-and-replay-su34-9-2026-11-16)).

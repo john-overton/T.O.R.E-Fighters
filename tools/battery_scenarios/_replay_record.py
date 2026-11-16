@@ -626,6 +626,20 @@ def scenarios() -> list[Scenario]:
         )
     )
 
+    # The Su-34 Platypus as the player and in both wings (slice SU34-9): a 2 v 2 recorded three times, so the SU34.PT
+    # identity (checkpoint code 55, the Flanker-family rig, the gun, two AA-11 and the AS-14 and AT-12 rows)
+    # round-trips through the recording, plays back with nothing missing and records the same twice. Its
+    # release recording is `replay-a2g-su34-ripple`.
+    out.append(
+        record_scenario(
+            "replay-rec-su34-2v2",
+            ["--ai-probe-ticks", "2400", "--aircraft", "su34", "--probe-friendly-aircraft", "su34",
+             "--probe-enemy-aircraft", "su34", "--probe-fight", "2:2", "--separation", "5",
+             "--probe-attack", "300:10"],
+            timeout=500,
+        )
+    )
+
     # Every imported aircraft as the enemy and as the player.
     for ac in AIRCRAFT:
         out.append(

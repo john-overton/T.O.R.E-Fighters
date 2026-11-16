@@ -1439,6 +1439,104 @@ class B52Tests(unittest.TestCase):
         self.assertTrue(any("doors moved" in p for p in s.b52_antiship_problems(harpoon(bay=True))))
 
 
+def su34_run(weapon="MK82.JT", station=1, cell=(-4.50, -3.46, 6.15), alt=5004, miss=420.5, guided=False,
+             spot_owner="0", bay=False, egress=True, lost=False, kill=False, role=None, kind="Bomb", count=1,
+             rights=None, victim="0x50000001", aircraft="Su34", target="0x50000001", hp="170/200"):
+    """One Su-34 driver run in the driver's own format (slice SU34-9)."""
+    out = [
+        f"ai-strike: setup aircraft={aircraft} load={weapon} station={station} count=4 rounds=4 target={target} "
+        "name=T-90 target_at=1,2,3 hp=200 skill=1 profile=none handback=none order=none mode=none",
+        "ai-strike: PROFILE t=0.000 name=none requested=none note=chosen",
+        "ai-strike: start t=0.000 plane=0 range_ft=24304 alt_ft=5000 speed_kt=450",
+    ]
+    if role:
+        out.append(f"ai-strike: ROLE t=0.000 plane=1 role={role}")
+    out.append("ai-strike: PROFILE t=0.008 name=level")
+    out.append(f"ai-strike: SELECTION t=0.008 target={target} station={station} kind={kind} side=2 class=0x0400 name=T-90")
+    if bay:
+        out.append("ai-strike: BAY t=15.000 state=open bay=0.95")
+    for n in range(1, count + 1):
+        right, up, forward = cell
+        if rights:
+            right = rights[n - 1]
+        out.append(f"ai-strike: ORIGIN t=16.050 n={n} station={station} right={right:.2f} up={up:.2f} forward={forward:.2f}")
+        extra = f" guided=Guiding spot_owner={spot_owner}" if guided else ""
+        out.append(f"ai-strike: RELEASE t=16.050 n={n} weapon={weapon} station={station} alt_ft={alt} speed_kt=402 "
+                   f"range_ft=12442 pass={n} aim_ft=154 inside=yes lead_ft=902 dive_deg=-0{extra} bay={'0.95' if bay else '0.00'}")
+    for n in range(1, count + 1):
+        out.append(f"ai-strike: IMPACT t=34.592 n={n} miss_ft={miss} at=1,2,3")
+    if kill:
+        out.append(f"ai-strike: KILL t=34.592 victim={victim} category=0x0400 target=yes")
+    if egress:
+        out.append("ai-strike: EGRESS t=39.667 range_ft=6580 alt_ft=7512")
+    if lost:
+        out.append("ai-strike: LOST t=45.000 reason=destroyed crashed=yes")
+    out.append(
+        f"ai-strike: summary t=59.675 ran_s=59.7 profile=level releases={count} impacts={count} kills={1 if kill else 0} "
+        f"egress={'yes' if egress else 'no'} lost={'yes' if lost else 'no'} activity=Attacking target_hp={hp} "
+        "closest_ft=499 store_rounds_left=3 min_agl_ft=5000"
+    )
+    out.append("ai-strike: done")
+    return "\n".join(out)
+
+
+class Su34Tests(unittest.TestCase):
+    """The Su-34 strike checks (slice SU34-9)."""
+
+    def bombs(self, **second):
+        return su34_run(station=1, cell=s.SU34_MK82_CELLS[1]) + "\n" + su34_run(
+            **{"station": 2, "cell": s.SU34_MK82_CELLS[2], **second}
+        )
+
+    def test_a_mk82_from_each_row_leaves_the_cell_a_humans_first_press_leaves_from(self):
+        self.assertEqual(s.su34_bombs_problems(self.bombs()), [])
+        self.assertTrue(any("first press" in p for p in s.su34_bombs_problems(self.bombs(cell=(-17.0, -1.78, -3.40)))))
+        self.assertTrue(any("bay door" in p for p in s.su34_bombs_problems(self.bombs(bay=True))))
+        self.assertTrue(any("EGRESS" in p for p in s.su34_bombs_problems(self.bombs(egress=False))))
+        self.assertTrue(any("500" in p or "at most" in p for p in s.su34_bombs_problems(self.bombs(alt=7000))))
+        self.assertTrue(any("Su34" in p or "Su-34" in p for p in s.su34_bombs_problems(self.bombs(aircraft="B52"))))
+        self.assertTrue(any("2 run" in p or "runs" in p for p in s.su34_bombs_problems(su34_run())))
+
+    def default_run(self, **kwargs):
+        args = dict(weapon="AS14.JT", station=1, cell=(-4.50, -2.05, 8.90), alt=5000, miss=0.5, guided=True, kind="Laser",
+                    kill=True, hp="0/200")
+        args.update(kwargs)
+        return su34_run(**args)
+
+    def test_the_default_load_run_wants_a_guided_laser_store_on_its_own_spot(self):
+        self.assertEqual(s.su34_default_problems(self.default_run()), [])
+        self.assertTrue(any("own" in p for p in s.su34_default_problems(self.default_run(spot_owner="1"))))
+        self.assertTrue(any("laser" in p for p in s.su34_default_problems(self.default_run(kind="Bomb"))))
+        self.assertTrue(any("want an AS-14" in p for p in s.su34_default_problems(self.default_run(weapon="MK82.JT"))))
+        self.assertTrue(any("unhurt" in p for p in s.su34_default_problems(self.default_run(hp="200/200"))))
+        self.assertTrue(any("ft from the target" in p for p in s.su34_default_problems(self.default_run(miss=900.0))))
+        self.assertTrue(any("lost" in p for p in s.su34_default_problems(self.default_run(lost=True))))
+
+    def test_the_quick_wing_run_wants_the_strike_role_and_the_default_as14(self):
+        run = self.default_run(role="strike", miss=49.7, spot_owner="1")
+        self.assertEqual(s.su34_quick_wing_problems(run), [])
+        self.assertTrue(any("role" in p for p in s.su34_quick_wing_problems(self.default_run(spot_owner="1"))))
+        self.assertTrue(any("role cap" in p for p in s.su34_quick_wing_problems(run.replace("role=strike", "role=cap"))))
+        self.assertTrue(any("wing's own" in p for p in s.su34_quick_wing_problems(self.default_run(role="strike", spot_owner="0"))))
+        self.assertTrue(any("destroyed nothing" in p for p in s.su34_quick_wing_problems(
+            self.default_run(role="strike", spot_owner="1", kill=False))))
+
+    def harpoons(self, **kwargs):
+        args = dict(weapon="AGM84E.JT", station=2, cell=(-18.0, -1.89, -3.40), rights=(-18.0, 18.0), count=2, miss=166.4,
+                    kill=True, victim=s.KRIVAK_ID, target=s.KRIVAK_ID, kind="Seeker", egress=False, alt=5000, hp="0/500")
+        args.update(kwargs)
+        return su34_run(**args)
+
+    def test_the_harpoon_run_wants_one_a_wing_and_the_ship_destroyed(self):
+        self.assertEqual(s.su34_antiship_problems(self.harpoons()), [])
+        self.assertTrue(any("not destroyed" in p for p in s.su34_antiship_problems(self.harpoons(kill=False))))
+        self.assertTrue(any("one a wing" in p for p in s.su34_antiship_problems(self.harpoons(rights=(-18.0, -18.0)))))
+        self.assertTrue(any("bay door" in p for p in s.su34_antiship_problems(self.harpoons(bay=True))))
+        self.assertTrue(any("pylon's cell" in p for p in s.su34_antiship_problems(self.harpoons(cell=(-18.0, -1.0, -3.40)))))
+        self.assertTrue(any("lost" in p for p in s.su34_antiship_problems(self.harpoons(lost=True))))
+        self.assertTrue(any("two AGM84E" in p for p in s.su34_antiship_problems(self.harpoons(station=1))))
+
+
 if __name__ == "__main__":
     unittest.main()
 
