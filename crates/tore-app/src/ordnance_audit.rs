@@ -152,7 +152,14 @@ const TANK_RECORDS: usize = 9;
 /// AS-16 alone, one placement. Measured with the batch's own station
 /// corrections only (the retail rows were not measured separately: the bay
 /// row cannot take its default selection before the active-radar bit).
-const WEAPON_PLACEMENTS: usize = 5395;
+/// 5,344 from 5,395 (B1B-5, 2026-11-16, measured by `--validate-ordnance`): the
+/// B-1B's three bay rows refuse 17 of the 21 stores the retail mask admitted
+/// ([`tore_formats::aircraft::stations::B1B_BAY_REFUSED`]: they clip the bay's
+/// ends or walls or touch their neighbours on the shared grid, and the Mk 84 by
+/// decision), 51 fewer placements: `B1.PT` 63 to 12. The capacity of each row
+/// is 20 now (the record's 4 stay the default load) and the weight class and the
+/// grid cap each store's count, which the audit already follows; no other aircraft moves.
+const WEAPON_PLACEMENTS: usize = 5344;
 /// 188 from 182: the F-16A's centreline tank row (F150.GAS or F250.GAS) plus
 /// the tank selection its two 0x07e5 wing rows accept, 6 tank placements.
 /// 192 from 188: the MiG-31 (M31-1). 201 from 192: the Mirage 2000 (M2K-1).

@@ -85,6 +85,42 @@ pub(crate) fn centre_doors(face: &Face, fraction: f64, o: &Opening, unit: f64) -
     )
 }
 
+/// [`centre_doors`] for several centred bays one behind another, as the B-1B's
+/// three (B1B-5): each bay's two leaves are cut from `face` (or from what the
+/// bays before it left of it), a bay `face` does not reach adds nothing, and
+/// the rest of the skin is kept whole. A bay that runs over the edge of `face`
+/// is cut from each of the faces it crosses (the B-1B's forward bay crosses the
+/// seam between its two belly polygons), the leaves of both turning about the
+/// same hinge lines.
+pub(crate) fn centre_doors_all(
+    face: &Face,
+    fraction: f64,
+    bays: &[Opening],
+    unit: f64,
+) -> Vec<Face> {
+    let mut leaves = Vec::new();
+    let mut skin = vec![face.clone()];
+    for o in bays {
+        let half = units_at(o.outer, unit);
+        let mut rest = Vec::new();
+        for piece in skin {
+            let (mut turned, kept) = crate::roster_animation::cut_door_parts(
+                &piece,
+                fraction,
+                [(-half, 0., -half, 1.), (0., half, half, -1.)],
+                units_at(o.aft, unit),
+                units_at(o.fore, unit),
+                units_at(o.belly, unit),
+            );
+            leaves.append(&mut turned);
+            rest.extend(kept);
+        }
+        skin = rest;
+    }
+    leaves.extend(skin);
+    leaves
+}
+
 /// The recess of a centred bay (as [`centre_doors`]) and a rail under its ceiling
 /// at each of `rails` (feet right of the centre line, aft end, fore end, feet
 /// forward) and a post from the floor to the ceiling at each of `posts`
@@ -97,6 +133,20 @@ pub(crate) fn centre_lining(
     unit: f64,
     rails: &[[f64; 3]],
     posts: &[[f64; 2]],
+) -> Vec<Face> {
+    centre_lining_in(template, o, unit, rails, posts, [WALL, CEILING, RAIL])
+}
+
+/// [`centre_lining`] with the palette indices of the walls, the ceiling and the
+/// rails and posts chosen by the aircraft (the B-1B's recess is its own bay
+/// plate's grey, 144, B1B-5).
+pub(crate) fn centre_lining_in(
+    template: &Face,
+    o: &Opening,
+    unit: f64,
+    rails: &[[f64; 3]],
+    posts: &[[f64; 2]],
+    [wall_color, ceiling_color, rail_color]: [u8; 3],
 ) -> Vec<Face> {
     const N: f32 = 32765.;
     let u = |feet: f64| units_at(feet, unit);
@@ -112,7 +162,7 @@ pub(crate) fn centre_lining(
                 [-half, fore, roof],
             ],
             [0., -N, 0.],
-            CEILING,
+            ceiling_color,
         ),
         // The left wall faces right, the right wall left.
         panel(
@@ -124,7 +174,7 @@ pub(crate) fn centre_lining(
                 [-half, aft, roof],
             ],
             [N, 0., 0.],
-            WALL,
+            wall_color,
         ),
         panel(
             template,
@@ -135,7 +185,7 @@ pub(crate) fn centre_lining(
                 [half, aft, roof],
             ],
             [-N, 0., 0.],
-            WALL,
+            wall_color,
         ),
         // The aft wall faces forward, the fore wall aft.
         panel(
@@ -147,7 +197,7 @@ pub(crate) fn centre_lining(
                 [-half, aft, roof],
             ],
             [0., 0., N],
-            WALL,
+            wall_color,
         ),
         panel(
             template,
@@ -158,7 +208,7 @@ pub(crate) fn centre_lining(
                 [-half, fore, roof],
             ],
             [0., 0., -N],
-            WALL,
+            wall_color,
         ),
     ];
     // A box from the ceiling down, or up from the floor to it: four sides
@@ -174,7 +224,7 @@ pub(crate) fn centre_lining(
                 [x[0], y[1], end],
             ],
             [0., sign, 0.],
-            RAIL,
+            rail_color,
         ));
         for (x, normal) in [(x[0], -N), (x[1], N)] {
             faces.push(panel(
@@ -186,7 +236,7 @@ pub(crate) fn centre_lining(
                     [x, y[0], other],
                 ],
                 [normal, 0., 0.],
-                RAIL,
+                rail_color,
             ));
         }
         for (y, normal) in [(y[0], -N), (y[1], N)] {
@@ -199,7 +249,7 @@ pub(crate) fn centre_lining(
                     [x[0], y, other],
                 ],
                 [0., 0., normal],
-                RAIL,
+                rail_color,
             ));
         }
     };

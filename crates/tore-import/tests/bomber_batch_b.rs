@@ -55,9 +55,11 @@ fn the_three_records_parse_as_their_own_identities_with_their_retail_rows() {
                 ("F18.ECM", 1),
                 ("PAVESPK.SEE", 1),
                 ("AV8IR.SEE", 1),
-                ("MK82AIR.JT", 4),
-                ("MK82AIR.JT", 4),
-                ("MK82AIR.JT", 4),
+                // B1B-5: the three bays hold 20 each (the record's 4 are the
+                // default load, `default_counts`).
+                ("MK82AIR.JT", 20),
+                ("MK82AIR.JT", 20),
+                ("MK82AIR.JT", 20),
             ],
         ),
         (
@@ -122,6 +124,16 @@ fn the_corrected_records_carry_the_real_figures_and_station_flags() {
     // Mach 1.25 above the tropopause: 1,210 ft/s on the 1 G row.
     assert_eq!(top(&b1b, 1), 1_210.);
     assert!(b1b.hardpoints[5..8].iter().all(|h| h.flags == 0x1100));
+    // B1B-5: a bay's capacity is the grid's 20 and the default load is still the
+    // record's 4 Mk 82 AIR a bay (12 in all), weight class 140 unchanged.
+    assert!(b1b.hardpoints[5..8].iter().all(|h| h.count == 20));
+    assert!(b1b.hardpoints[5..8].iter().all(|h| h.weight_class == 140));
+    let mut defaults = b1b.hardpoints.clone();
+    stations::default_counts(AircraftId::B1b, &mut defaults);
+    assert_eq!(
+        defaults[5..8].iter().map(|h| h.count).collect::<Vec<_>>(),
+        [4, 4, 4]
+    );
 
     let tu160 = read(AircraftId::Tu160);
     assert_eq!(n(&tu160, "weight"), 242_500);

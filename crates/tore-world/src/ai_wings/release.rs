@@ -388,4 +388,58 @@ mod tests {
             assert!(forward > opening.aft && forward < opening.fore, "{forward}");
         }
     }
+
+    /// B1B-5: an AI bomb leaves each of the B-1B's three bay rows (grid
+    /// magazines on the shared grid) inside that row's own opening, through the
+    /// shared release; as the other bays, it does not wait for doors.
+    #[test]
+    fn an_ai_bomb_leaves_each_b1b_bay_grid_inside_its_own_opening() {
+        use tore_formats::aircraft::{AircraftId, Hardpoint};
+        use tore_sim::combat::{bays, hardpoints};
+        for (row, opening) in [5, 6, 7].into_iter().zip(bays::openings(AircraftId::B1b)) {
+            let (mut wings, _) = build(None);
+            let mut state = combat_fixture(false);
+            state.projectiles.clear();
+            let id = wings.mission().actors()[1].id();
+            let mut config = state.own().configuration().clone();
+            config.stations[0].weapon = mk82_pack(config.stations[0].weapon.clone());
+            let record = Hardpoint {
+                location: 3,
+                flags: 0x1100,
+                position: [0; 3],
+                store: None,
+                count: 20,
+                weight_class: 140,
+                slew: [0; 4],
+            };
+            let (mount, rack) = hardpoints::placed_on(AircraftId::B1b, row, &record, None);
+            config.stations[0].mount = mount;
+            config.stations[0].rack = rack;
+            config.stations[0].count = 20;
+            wings.configs.insert(id, config.clone());
+            let weapon = config.stations[0].weapon.clone();
+            let ground = |_: f64, _: f64| 0.;
+            let emitted =
+                wings.release(&launch(id, 0x5000_0001), &mut state, &weapon, &[], &ground);
+            assert!(emitted > 0, "row {row}");
+            let launcher = crate::combat::launcher(wings.mission().actor(id).unwrap().flight());
+            // The first bomb leaves the grid's outermost column on the left (four
+            // columns 1.3 ft apart, so 1.95 ft out; the pack record's six stores
+            // stage 2 ft apart from that point, retail's `pack_offset`), and every
+            // round starts inside its own bay's length.
+            let sides: Vec<f64> = state
+                .projectiles
+                .iter()
+                .map(|p| p.position[0] - launcher.position[0])
+                .collect();
+            assert!((sides[0] + 1.95).abs() < 0.1, "row {row} {sides:?}");
+            for p in &state.projectiles {
+                let forward = p.position[2] - launcher.position[2];
+                assert!(
+                    forward > opening.aft && forward < opening.fore,
+                    "row {row} {forward}"
+                );
+            }
+        }
+    }
 }

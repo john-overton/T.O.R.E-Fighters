@@ -1039,3 +1039,16 @@ at least 0.05 ft with the doors open, and no two touch).
 Update (B2-5, 2026-11-15): the B-2's default load is the two Mk 82 bays alone (64 bombs, 32,000 lb), so
 `flight-liftoff-b2` records 155.2 kt after 7,232 ft (was 158.1 kt) and `flight-approach-b2` 167.5 kt (was 166.2 kt);
 the windows (140 to 165 kt and 140 to 170 kt) are unchanged.
+
+Update (B1B-5, 2026-11-16): the B-1B's three fitted bays. `flight-animation-b1b`'s bay row now checks the door
+leaves (belly polygons `3617` and `362e` whole and no lining at 0; 15 lining faces, a vertex on each bay's four
+hinge corners and the lowest edge `3 units * sin(90 degrees * value)` below the belly plane; the old `7b16`
+plates never drawn). `STATIONS["b1b"] = [4, 4, 4]` adds `flight-livefire-b1b-slot1` to `slot3` and
+`flight-jettison-b1b-slot2` and `slot3` (one retarded Mk 82 seven-pack a slot). New scenarios:
+`flight-bay-fire-b1b-row5`, `-row6` and `-row7` (the one-press release through each bay: the doors open to 0.95
+before the pack leaves, then close), `flight-bay-ripple-b1b` (20 Mk 82 in the forward bay, 20 presses: one bomb a
+press from the bottom tier up, outermost first alternating sides; the row's own release points),
+`bay-b1b-0`, `-0.5` and `-1` (the `--flight-bay` frames), `render-b1b-clearance` (headless: 60 Mk 82, 20 a bay, clear
+the door leaves, ends, roof and floor and each other by at least 0.05 ft with the doors open) and
+`render-b1b-clearance-default` (the default 12 seven-packs, centred in the bays). `render-b1b-skin` keeps
+`--loadout none` (its skin check needs no stores; the default load now starts since the start-fuel fix, 6f0277d8).

@@ -538,8 +538,8 @@ enum SpecificRig {
     /// B2-3 and B2-4: the elevons, the drag rudders and speed brake, the gear
     /// and the fitted bays (B2-5).
     B2(crate::b2_animation::Rig),
-    /// B1B-3: the swing wing, tailerons, rudder, spoilers, gear, interim bay
-    /// walls and plumes.
+    /// B1B-3: the swing wing, tailerons, rudder, spoilers, gear and plumes; the
+    /// three fitted bays (B1B-5).
     B1b(crate::b1b_animation::Rig),
     /// F117-3 and F117-4: the ruddervators, the gear and the interim bay pose.
     F117(crate::f117_animation::Rig),
@@ -1130,6 +1130,7 @@ impl Rig {
             Some(SpecificRig::F14(rig)) => rig.faces(source, state),
             Some(SpecificRig::B2(rig)) => rig.faces(source, state),
             Some(SpecificRig::B52(rig)) => rig.faces(source, state),
+            Some(SpecificRig::B1b(rig)) => rig.faces(source, state),
             Some(SpecificRig::F117(rig)) => rig.faces(source, state),
             _ => vec![source.clone()],
         }

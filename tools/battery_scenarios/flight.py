@@ -123,6 +123,10 @@ STATIONS["faxx"] = STATIONS["f22n"]
 # six a wing); its three bay rows (3, 5 and 6, nine Mk 82 each) start empty and keep an
 # empty Mk 82 selection, so three never-loaded slots follow.
 STATIONS["b52"] = [1242, 12, 0, 0, 0]
+# The B-1B (B1B-5, 2026-11-16) carries no gun and no external station: its three weapon rows are the
+# bays' (rows 5 to 7, forward, intermediate and aft), four retarded Mk 82 each by default (12), up to
+# 20 a bay on the shared grid.
+STATIONS["b1b"] = [4, 4, 4]
 
 
 def _numbers(output: str, prefix: str) -> dict:
@@ -1241,8 +1245,10 @@ REFUSED_SLOTS = {
 
 # Stations whose one round is a pack of several bodies: the shots counted are the bodies, the
 # station's ammunition falls by one pack. The Tornado's MK82P3.JT row (inner wing) is the only
-# one: each release sends three Mk 82s (1,500 lb) and takes one round (TOR-6, 2026-11-11).
-SHOTS_PER_ROUND = {("tornado", 3): 3, ("tornadoc", 3): 3}
+# one: each release sends three Mk 82s (1,500 lb) and takes one round (TOR-6, 2026-11-11). The B-1B's
+# three bay rows hold the retail MK-82 AIR 7-Pack (`MK82AIR.JT`, 3,500 lb): a release sends seven
+# bombs and takes one round (B1B-5, 2026-11-16).
+SHOTS_PER_ROUND = {("tornado", 3): 3, ("tornadoc", 3): 3, ("b1b", 1): 7, ("b1b", 2): 7, ("b1b", 3): 7}
 
 
 def check_slot(ac: str, slot: int):
@@ -1397,7 +1403,57 @@ def slot_scenarios() -> list[Scenario]:
         timeout=300,
         notes="B-52 pylon release: a Mk 82 leaves the underwing beam with the bay doors shut (18 loaded, nine a wing; the Harpoon default needs a target the preview does not give it, its live-fire slot scenario covers it).",
     ))
+    # B1B-5 (2026-11-16): the B-1B's three fitted bays (rows 5, 6 and 7, four retarded Mk 82 seven-packs
+    # each by default) through the same actual one-press release: the doors open to 0.95 before the pack
+    # leaves, then close; and a 20-press ripple from the forward bay (a full bay of 20 Mk 82: the bottom
+    # tier first, the stores of a row abreast outermost first alternating sides).
+    for row in (5, 6, 7):
+        out.append(Scenario(
+            name=f"flight-bay-fire-b1b-row{row}", lane="flight",
+            args=["--stores-preview", "{work}/frames"], window=True,
+            env={"TORE_STORES_PREVIEW_AIRCRAFT": "b1b",
+                 "TORE_STORES_PREVIEW_FIRE": str(row)},
+            expect=[f"Stores firing: b1b row={row} PASS"],
+            outputs=[f"frames/b1b-fire-row{row}-t000.png", f"frames/b1b-fire-row{row}-t400.png"],
+            timeout=300,
+            notes="B-1B bay release: the doors open before the retarded Mk 82 pack leaves and close after it, as the F-22's, F-117's and B-2's do (forward, intermediate and aft bay).",
+        ))
+    out.append(Scenario(
+        name="flight-bay-ripple-b1b", lane="flight",
+        args=["--stores-preview", "{work}/frames"], window=True,
+        env={"TORE_STORES_PREVIEW_AIRCRAFT": "b1b",
+             "TORE_STORES_PREVIEW_RECORDS": "5=MK82.JT:20",
+             "TORE_STORES_PREVIEW_FIRE": "5",
+             "TORE_STORES_PREVIEW_PRESSES": "20"},
+        expect=["Stores firing: b1b row=5 PASS", "Stores ripple: b1b"],
+        check=b1b_ripple_problems,
+        timeout=300,
+        notes="20 presses through the B-1B's forward bay holding 20 Mk 82: one bomb a press, the bottom tier first, outermost first alternating sides.",
+    ))
     return out
+
+
+def b1b_ripple_problems(output: str) -> list[str]:
+    """A full B-1B bay (20: 4 abreast, 5 tiers) empties one bomb a press from the bottom tier up (B1B-5)."""
+    rows = [(int(m.group(1)), tuple(float(v) for v in m.group(2).split()))
+            for m in re.finditer(r"Stores ripple: b1b tick=\d+ station=(\d+) at \[([-\d. ]+)\]", output)]
+    if len(rows) != 20:
+        return [f"{len(rows)} releases, expected 20"]
+    problems = []
+    if len({station for station, _ in rows}) != 1:
+        problems.append(f"the ripple left one bay: {[station for station, _ in rows]}")
+    points = [p for _, p in rows]
+    tiers = [round(p[1], 3) for p in points]
+    for tier in range(5):
+        row = tiers[tier * 4:tier * 4 + 4]
+        if len(set(row)) != 1:
+            problems.append(f"tier {tier} was not four stores at one height: {row}")
+    if tiers != sorted(tiers):
+        problems.append("the ripple did not go up a tier at a time from the bottom")
+    first = [p[0] for p in points[:4]]
+    if not (first[0] < first[2] < first[3] < first[1] and first[0] < 0 < first[1]):
+        problems.append(f"the first row was not outermost first alternating sides: {first}")
+    return problems
 
 
 def b2_ripple_problems(output: str) -> list[str]:
@@ -2155,7 +2211,7 @@ def capture_scenarios() -> list[Scenario]:
     # AL1 and refuses a ground start ("an enemy airfield").
     for ac in AIRCRAFT:
         add(f"groundstart-{ac}", ["--free-flight", "--aircraft", ac, "--theater", "UKR", "--ground-start", "9", "--flight-view", "1", "--flight-look", "150,-15", "--flight-zoom", "1.5"])
-    for ac in ("f22", "f22n", "b52", "f117", "b2"):
+    for ac in ("f22", "f22n", "b52", "f117", "b2", "b1b"):
         for bay in ("0", "0.5", "1"):
             add(f"bay-{ac}-{bay}", ["--free-flight", "--aircraft", ac, "--flight-view", "1", "--flight-look", "150,-30", "--flight-bay", bay])
     return out

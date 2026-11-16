@@ -1,13 +1,16 @@
 //! Independent B-1B whole-panel witnesses (B1B-3): the swing wing (17 faces a
 //! side turned as one panel about the shared vertex line (+-10, 11)), the two
 //! flap strips and their caps, the two tailerons, the rudder, the spoilers,
-//! the gear plates, the interim bay walls and the plumes. Measures the shared
+//! the gear plates, the fitted bays (B1B-5) and the plumes. Measures the shared
 //! Airframe output and never repeats the rig's algorithm: the witnesses are
 //! named source vertices, rigid-body distances and the seam on the pivot line.
 //! Witness points are named in shape units (the B-1B scale is the identity,
 //! 4/3 ft a unit is the probe's `scale`).
 use super::*;
-use crate::b1b_animation::{CAP_L, CAP_R, GEAR, STRIP_L, STRIP_R, TAIL_L, TAIL_R, WING_L, WING_R};
+use crate::b1b_animation::{
+    BELLY, CAP_L, CAP_R, GEAR, LINING, LINING_BASE, STRIP_L, STRIP_R, TAIL_L, TAIL_R, WING_L,
+    WING_R,
+};
 
 const RUDDER: [usize; 2] = [0x4c6b, 0x4c8a];
 const SPOILER_R: [usize; 2] = [0x52fa, 0x5311];
@@ -15,6 +18,7 @@ const SPOILER_L: [usize; 2] = [0x5328, 0x533f];
 const NOSE: [usize; 4] = [0x51a7, 0x51c6, 0x51e5, 0x5204];
 const MAIN_R: [usize; 4] = [0x5025, 0x5044, 0x5063, 0x5082];
 const MAIN_L: [usize; 4] = [0x50e6, 0x5105, 0x5124, 0x5143];
+/// The interim wall plates (word 7b16), never drawn since B1B-5.
 const BAY: [usize; 8] = [
     0x41fc, 0x4213, 0x422a, 0x4241, 0x4258, 0x426f, 0x4286, 0x429d,
 ];
@@ -501,26 +505,46 @@ fn gear(value: f64, reference: &[Face], pose: &[Face], scale: f32, m: &mut Metri
     }
 }
 
-/// Interim bay walls: drawn only while the bay is open, the belly edge (z -1)
-/// stays on the belly polygon, the lowest point is -1 - 3 value.
-fn bay(value: f64, reference: &[Face], pose: &[Face], scale: f32, m: &mut Metrics) {
+/// The fitted bays (B1B-5): shut (0) both belly polygons are whole, nothing
+/// hangs below the belly plane and no lining draws; open (above 0) the lining
+/// draws (ceiling and four walls a bay) and the door leaves hang on their hinge
+/// lines (the bays' outer edges, x +/-3 units, at the belly plane) with their
+/// free edges `3 units * sin(90 degrees * value)` below it. The old interim
+/// plates (word 7b16) are never drawn.
+fn bay(value: f64, _reference: &[Face], pose: &[Face], scale: f32, m: &mut Metrics) {
+    // The B-1B draws at the identity scale: shape units are the faces' own.
+    let belly = -1f32;
+    let lining = pose.iter().filter(|f| f.address >= LINING_BASE).count();
+    let skins: Vec<&Face> = pose.iter().filter(|f| BELLY.contains(&f.address)).collect();
+    let lowest = skins
+        .iter()
+        .flat_map(|f| f.positions.iter())
+        .map(|p| p[2])
+        .fold(f32::MAX, f32::min);
+    m.reviewed_direction_failures += usize::from(present(pose, &BAY) != 0);
     if value == 0. {
-        m.reviewed_direction_failures += usize::from(present(pose, &BAY) != 0);
+        m.reviewed_direction_failures +=
+            usize::from(lining != 0 || skins.len() != BELLY.len() || lowest < belly - 1e-4);
         return;
     }
-    m.reviewed_direction_failures += usize::from(present(pose, &BAY) != 8);
-    for point in [
-        [3., 21., -1.],
-        [3., 10., -1.],
-        [3., 22., -1.],
-        [3., 32., -1.],
-        [-3., 10., -1.],
-        [-3., 32., -1.],
-    ] {
-        pin(m, pinned(reference, pose, &BAY, point, scale));
+    m.reviewed_direction_failures += usize::from(lining != LINING);
+    // A vertex stays on each hinge line at the belly plane, in every bay.
+    for o in tore_sim::combat::bays::openings(tore_formats::aircraft::AircraftId::B1b) {
+        for hinge in [o.outer, -o.outer] {
+            for y in [o.aft, o.fore] {
+                let (x, y) = (hinge as f32 / scale, y as f32 / scale);
+                let held = skins.iter().flat_map(|f| f.positions.iter()).any(|p| {
+                    (p[0] - x).abs() < 1e-3
+                        && (p[1] - y).abs() < 1e-3
+                        && (p[2] - belly).abs() < 1e-3
+                });
+                m.reviewed_anchor_missing |= !held;
+            }
+        }
     }
-    let want = -1. - 3. * value as f32;
-    m.reviewed_direction_failures += usize::from((lowest(pose, &BAY) - want).abs() > 1e-3);
+    let leaf = tore_sim::combat::bays::B1B_BAY_HALF as f32 / scale;
+    let hang = leaf * (value as f32 * std::f32::consts::FRAC_PI_2).sin();
+    m.reviewed_direction_failures += usize::from((belly - lowest - hang).abs() > 2e-3);
 }
 
 /// Plumes: drawn only while the exhaust is on, rooted on the nozzle plane

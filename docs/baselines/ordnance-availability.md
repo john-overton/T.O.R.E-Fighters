@@ -1148,3 +1148,30 @@ The `menus-ordnance-availability` expected line reads 54 aircraft, 23 recovered 
 5,395 weapon and 257 tank placements; `a2g-catalog` carries 54, 23, 257 and 278;
 `test_battery_a2g.py` carries 54, 23 and 257. Earlier sections quoting 22 recovered stations,
 5,447 weapon placements or 276 Cheat-only placements stay as written for their own states.
+
+## B-1B bay rows refuse 17 stores (B1B-5, 2026-11-16)
+
+The B-1B's three bay rows (`B1.PT` rows 5 to 7) are fitted magazine stations on the shared grid
+([B-1B weapon bays](../spec/stores-on-pylons.md#b-1b-weapon-bays-b1b-5-2026-11-16)). Capacity is 20 a row
+(the record's 4 stay the default load, 12 `MK82AIR.JT` seven-packs), the weight class stays 140, and
+17 of the 21 stores the retail mask admitted are refused by name
+(`aircraft_stations::B1B_BAY_REFUSED`): they clip a bay's end or wall or touch their neighbours on
+the grid, and the Mk 84 is refused by decision (the heavy stores wait for the combined bay).
+Four stay: `MK82AIR` (4 a row by its 3,500 lb weight), `MK82` (20), `MK82P3` (9) and `FAB1000` (4).
+One pin moved, on purpose, measured by `--validate-ordnance` (profile refreshed first):
+
+| Pin | From | To | Why |
+| --- | ---: | ---: | --- |
+| Weapon placements | 5,395 | 5,344 | `B1.PT` 63 to 12 (17 stores refused on each of three rows: 51) |
+| Aircraft, recovered stations, tank placements, pods, Cheat-only, records | 54, 23, 257, 82, 278, 82 / 9 | unchanged | Cheat loading skips the refusals, which are not novelty records |
+
+```text
+ordnance B1.PT: 3 source rows, 0 optional weapon rows, 12 compatible weapon placements, 0 tank placements; defaults and restart passed; catalog 4 normal, 83 Cheat
+ordnance audit: 54 aircraft, 23 recovered weapon stations, 5344 weapon placements, 257 tank placements, 82 weapon and 9 tank records; passed
+ordnance audit: 1 designator pods, 82 pod placements, one to an aircraft, loaded and restored through the saved mission; passed
+ordnance audit: 2 novelty records, 278 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
+```
+
+The `menus-ordnance-availability` expected line reads 5,344 weapon placements; `a2g-catalog` and
+`test_battery_a2g.py` carry no weapon-placement total, so they are unchanged. Earlier sections
+quoting 5,395 stay as written for their own states.

@@ -14376,9 +14376,10 @@ point -8 units at 1. The 202-value dense sweep passes rigid, never below gear do
 (z -1 to 6, nose within x 2).
 
 **Bay walls (`7b16`), interim.** The four walls (x +-3, y 10 to 21 and 22 to 32, z -1 to -4, two
-windings) drop from the belly polygon line as `State::bay` opens (hidden at 0); the closed belly
-stays drawn over the opening. B1B-5 replaces them with doors and the bay machinery.
-(`State::bay_available` is F-22 only, so nothing raises the B-1B bay in play yet.)
+windings) dropped from the belly polygon line as `State::bay` opened (hidden at 0); the closed belly
+stayed drawn over the opening. **Update (B1B-5, 2026-11-16):** replaced by two door leaves a bay cut
+from the belly polygons and a lined recess ([B-1B Lancer stations, bays and pylons](#b-1b-lancer-stations-bays-and-pylons-b1b-5-2026-11-16));
+the walls are no longer drawn, and `State::bay_available` is true for the B-1B, so its doors move on a release.
 
 **Plumes (`7b10`).** Sixteen plates, a vertical and a flat pair per engine, y -17 to -28; they
 scale from the nozzle plane y -17 with `State::exhaust` (hidden at 0), so the plates sharing the
@@ -14406,7 +14407,7 @@ as the Tornado's does.
 
 **Open items for John.** (1) The rudder travel is the retail word's 43 degrees and opens a 4.4 ft
 gap at the taileron roots at full pedal; a smaller fitted limit (0.45 rad, 2.6 ft) is a one-line
-change. (2) The swept span is 74.2 ft against the real 78 (decision 2, accepted). (3) The flap
+change (**Update, B1B-5, 2026-11-16: applied**, `RUDDER_LIMIT` 0.45 rad). (2) The swept span is 74.2 ft against the real 78 (decision 2, accepted). (3) The flap
 slot (0.66 ft) and the spoilers staying on the glove are visible simplifications. (4) The default
 loadout of the B-1B is refused at start with `payload outside aircraft mass limits` (free flight
 and ground start, at the base commit 7bd8048e, before this slice); `--loadout none` and
@@ -14414,7 +14415,10 @@ and ground start, at the base commit 7bd8048e, before this slice); `--loadout no
 under the 477,000 lb maximum), and `--headless-flight` without a ground start sets no payload and
 flies. The default stores' weight was not traced; it belongs to B1B-6 (default load) and B1B-8, and
 `Loadout::cap_default_fuel` caps only the loadout's own fuel. The frames were taken with
-`--loadout none`.
+`--loadout none`. **Update (B1B-5, 2026-11-16): fixed** by the start-fuel fix (`6f0277d8`): the
+default load (12 `MK82AIR.JT` seven-packs, 42,000 lb) starts with 243,000 lb of fuel, 477,000 lb gross
+of the 477,000 lb maximum (`--ground-start 1 --headless-flight 600`: no crash, 0 non-finite); the B1B-5
+frames are taken with it.
 
 ## Tu-160 shape and rig (T160-2/3, 2026-11-15)
 
@@ -15563,3 +15567,169 @@ astern with no further change; the Tu-95's dorsal and ventral rows (5 and 6, cle
 BMB-C2) stay empty and are not stations. Pinned by
 `the_retail_tu26_and_tu95_gun_rows_are_slewed_tail_guns_that_fire_astern` in
 `ai_wings/tail_gun_tests.rs`. The "rear-facing mount lands later" caveats above are met.
+
+## B-1B Lancer stations, bays and pylons (B1B-5, 2026-11-16)
+
+Implementation mode. The decisions are the coordinator's first pass of 2026-11-15
+(`BOMBERS-DECISIONS-B`, "B-1B Lancer" 3 and 4 and "B-1B rig"), not John's; every number
+below is **fitted** (agent, 2026-11-16) from the measurements in
+[B-1B bay and station survey](#b-1b-bay-and-station-survey) unless it says it is the
+record's, retail's or cited. The machinery is batch A's: the shared bay grid
+([B-2 weapon bays](#b-2-weapon-bays-b2-5-2026-11-15)), the centred bay and its door helper
+([B-52 bay, pylons and tail gun](#b-52-bay-pylons-and-tail-gun-b52-5-2026-11-15)) and the
+shared stores preview. Earlier sections stay as written; the interim bay walls and the
+rudder travel of [B-1B shape and rig](#b-1b-shape-and-rig-b1b-23-2026-11-15) are
+superseded here and carry a dated Update line.
+
+**What the record's store is.** `MK82AIR.JT` is the retail **MK-82 AIR 7-Pack**
+([air-to-ground baseline](../baselines/air-to-ground.md)): one store of seven retarded
+Mk 82 weighing 3,500 lb, which a release sends off as seven bombs staggered 2 ft apart
+sideways. The record's four a bay are therefore 28 bombs a bay, **84 in all, the real
+load** (the B-1B's 84 Mk 82), and the weight class 140 (14,000 lb a bay) is exactly four
+packs. This is why the default load is 12 stores, why `MK82AIR.JT` is capped at 4 a row
+whatever the grid holds (14,000 lb over 3,500 lb), and why the "60" of the B1B-0 proposal
+is a count of *single-bomb* stores (the plain Mk 82 and its kin: 4 abreast, 5 tiers, 20 a
+bay) and not of the default.
+
+**Stations (`bays::STATIONS`, `GRIDS`).** `B1.PT` rows 5, 6 and 7 (Internal Bay, flags
+`0x1100` once BMB-B2 cleared the designator bit) are `Location::Magazine` stations on the
+centre line. The record's capacity of 4 becomes 20
+(`aircraft_stations::B1B_BAY_ITEMS`, `adjust_defaults`), the weight class stays 140, and the
+default load stays the record's 4 a row (`B1B_BAY_DEFAULT`, `default_counts`, as the B-52's
+12 Harpoons of 18): **12 retarded Mk 82 packs, 42,000 lb**. The pair flag was never set, so
+there is nothing to clear; `Rack::grid` and the ceiling ride in the rack as for the B-2.
+
+| Row | Bay | Opening forward, feet | Length | Grid floor | Mount (right / up / forward) |
+| ---: | --- | --- | ---: | --- | --- |
+| 5 | forward (the shape's walls y 22 to 32 units) | 29.33 to 42.67 | 13.33 ft | 5.3 x 13.33 ft | 0 / -1.333 / 35.30 |
+| 6 | intermediate (walls y 10 to 21 units) | 13.33 to 28.00 | 14.67 ft | 5.3 x 14.67 ft | 0 / -1.333 / 19.97 |
+| 7 | aft (**not drawn**: the real 15 ft, B1.INF "4.57 m", centred on the record's -12.33 ft) | -19.83 to -4.83 | 15.00 ft | 5.3 x 15.00 ft | 0 / -1.333 / -13.03 |
+
+Every bay is 8.0 ft wide (the `7b16` walls stand at x +-3 units, 4/3 ft a unit; no public
+source gave a width), with the belly plane at -1.333 ft (z -1 unit) as the floor of the grid
+and a **flat roof 6.7 ft over it** (z 4.025 units). The forward and intermediate bays are 1.33 ft
+apart (the movable bulkhead). The roof is fitted: five tiers of Mk 82 stand 6.55 ft
+(0.08 ft, a 1.27 ft body and four 1.3 ft pitches) so a sixth (7.85 ft) cannot, and the top
+skin over the stores' columns (x within 2.6 ft) is 8.5 to 9.3 ft above the belly plane, 6.9 ft at
+the aft bay's outer wall (z 4.16 units), so the roof stands under the skin everywhere. The
+grid floor is the B-2's 5.3 ft width (four stores of 1.3 ft and 0.1 ft over); a Mk 82 (7.3 ft,
+1.27 ft fins) hangs **4 abreast, 1 long, 5 tiers = 20 a bay, 60 in all** (the length is
+13.33 ft / 7.55 ft: one long); a Mk 82 pack, the default, one tier of four.
+
+**Where the stores hang.** Stores hang by their shape's origin, which is not their middle:
+the retarded Mk 82 (`MK82A.SH`, the default) spans -1.39 to +5.91 ft about its origin and the
+plain Mk 82 (`MK82.SH`) -4.52 to +2.78 ft. For the 13.33 ft forward bay, the shortest, both clear
+the two ends by at least 1.45 ft for any mount between -2.15 and +0.76 ft of the bay's middle
+(`bays::B1B_MOUNT_OFFSET`, -0.7 ft, balances them: Mk 82 1.45 ft aft and 4.59 fore, retarded Mk 82
+4.58 aft and 1.46 fore). Centring the retarded Mk 82 alone (an offset of -2.26 ft) leaves the
+plain Mk 82 0.11 ft through the forward bay's aft wall, the reason for the compromise. The record's rows
+(36.67, 21.0 and -12.33 ft) are the bays' middles within 0.7 ft; the retail hangs the pack by
+its origin there, which puts it flush against the forward bay's front wall (0.09 ft clear).
+
+**Doors and belly.** Two door leaves a bay (**fitted**: no public source gave a number),
+six in all, each 4.0 ft wide and 90 degrees down to -5.33 ft, hinged on the outer edges of the
+opening, cut from the flat belly with `bay_doors::centre_doors_all` (the B-52's leaves, several
+bays one behind another). The belly is **two polygons, not one**: `3617` (8 vertices, y -16
+to 29 units) holds the aft and intermediate bays and the forward bay up to y 29, and `362e`
+(y 29 to 48) the last 3 units of the forward bay, so both are cut and the forward bay's leaves come in
+two pieces on one hinge line (the B1B-5 brief said `3617` alone; the forward bay does not fit in it).
+The recess is a closed lined box (ceiling and four walls a bay, 15 faces) in the grey of the
+shape's own bay plate (palette 144), drawn only while the doors are off their seat, so the
+belly polygons stay whole shut and no sky shows through open. The `7b16` interim wall plates
+are no longer drawn (one is the lining's material). **All three bays open together**:
+`State::bay` is one fraction, as for the B-2's two bays; the real jet opens the bay in use
+(open for John). `State::bay_available` is true for every aircraft with a row in
+`bays::STATIONS`, so the B-1B's doors now move on a release and the open-bay term of the
+signature page applies. Release timing, the 0.95 gate and the hold are the F-22's.
+
+**Release.** A press releases from the selected row and the selection stays on it until it is
+empty: the three bays are on the centre line, so `Ownship::sister_bay` (which alternates
+opposite sides) hands over nothing, as for the B-52's rows. A row empties bottom tier first, the
+stores of a row abreast outermost first alternating sides (columns -1.95, +1.95, -0.65, +0.65 ft),
+then the next tier up (battery scenario `flight-bay-ripple-b1b`: 20 Mk 82 from the forward bay,
+first release at tick 116 with the doors at 0.958, then every 12 ticks). The AI releases through
+the shared strike release, which does not wait for doors (as the other bays'); the test
+`an_ai_bomb_leaves_each_b1b_bay_grid_inside_its_own_opening` pins it for each bay.
+A seven-pack leaves as seven bombs staggered up to 6 ft sideways (retail's `pack_offset`),
+which is wider than the 8.0 ft bay's half width by 2 ft; unchanged shared code, listed for John.
+
+**Clearance, feet, doors open** (`TORE_STORES_PREVIEW_B52CLEAR=1`, which now reports every
+opening of an aircraft with several; scenarios `render-b1b-clearance` and
+`render-b1b-clearance-default`; positive is clear). Worst of each bay:
+
+| Load | Bay | Side wall | Door leaf | Aft end | Fore end | Roof | Above the belly plane | Nearest store |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 12 packs (default, four a bay) | forward | 1.60 | 1.62 | 4.58 | 1.46 | 5.53 | 0.26 | 0.40 |
+| | intermediate | 1.60 | 1.62 | 5.24 | 2.12 | 5.53 | 0.26 | 0.40 |
+| | aft | 1.60 | 1.62 | 5.41 | 2.29 | 5.53 | 0.26 | 0.40 |
+| 60 Mk 82 (20 a bay) | forward | 1.60 | 1.62 | 1.45 | 4.59 | 0.34 | 0.25 | 0.39 |
+| | intermediate | 1.60 | 1.62 | 2.11 | 5.25 | 0.34 | 0.25 | 0.39 |
+| | aft | 1.60 | 1.62 | 2.28 | 5.42 | 0.34 | 0.25 | 0.39 |
+
+**What each row admits.** The retail mask `0x1100` admits 21 stores on each row. The sweep
+(`.local/m3-aircraft/checks/B1B-5/bay-sweep.txt`, `summ.py`: every store at its catalog
+capacity in all three bays, doors open, worst of the three) leaves **four**:
+
+| Store | Capacity a row | Ends (worst, aft / fore) | Nearest store |
+| --- | ---: | ---: | ---: |
+| `MK82AIR.JT` (the default seven-pack) | 4 (14,000 lb / 3,500 lb) | 4.58 / 1.46 | 0.40 |
+| `MK82.JT` | 20 (grid) | 1.45 / 4.59 | 0.39 |
+| `MK82P3.JT` (three-bomb pack) | 9 | 1.45 / 4.59 | 0.39 |
+| `FAB1000.JT` | 4 | 1.12 / 2.81 | 0.33 |
+
+The other 17 are refused by name (`aircraft_stations::B1B_BAY_REFUSED`, one list for the three
+rows, the shared 0.05 ft rule of the B-52's): `AGM45`, `AGM88` (HARM class, 13.7 ft, 0.9 to 1.8 ft
+through the bays' front walls, touching), `AT2` (0.19 ft through the forward bay's aft wall, touching),
+`CBU87`, `CBU89`, `FAB500`, `GBU38`, `MK20`, `RBK500` (fins wider than the 1.3 ft pitch or touching their
+neighbours), `FAB250` and `RBK250` (0.8 and 1.0 ft through the forward bay's aft wall, 0.1 to 0.4 ft
+through the intermediate bay's), `MK82HD` and `MK82P` (Snakeye, 0.03 ft from a neighbour), `GBU29`,
+`GBU29P` and `GBU30` (the GBU-27 class: 5.4 ft fins 0.65 ft through the side walls and 1.1 to 2.0 ft
+through the aft walls) and **`MK84` by decision, not by fit**: the Mk 84 measures 0.33 ft through the
+forward bay's aft wall but 0.33 and 0.50 ft clear of the other two bays' (seven a bay by the
+weight class, 0.11 ft from its neighbour), refused with the rest of the "heavy stores" (the Mk 84,
+JASSM and GBU-31 of the sources) until the combined forward and intermediate bay exists. The
+roster has no JASSM, and the GBU-31's nearest records are the three GBU-27 class refused above.
+Real cluster, JDAM and Mk 20 loads (30 CBU-87, 24 GBU-31, 15 GBU-38) are out of reach of the shared
+grid, whose pitch is capped at 1.3 ft: they come back with a wider pitch for fat stores or the
+combined bay (follow-up, B1B-6). `--validate-ordnance`: weapon placements **5,395 to 5,344**
+(`B1.PT` 63 to 12), every other pin unchanged (see
+[ordnance availability](../baselines/ordnance-availability.md#b-1b-bay-rows-refuse-17-stores-b1b-5-2026-11-16)).
+
+**No external stations, no pods.** The record has none and none is authored: the real jet's
+six to eight fuselage hardpoints are not in the record or the shape and no source says they were
+fitted, so Load Ordnance offers three rows (Internal Bay x3) and nothing under the wing or fuselage
+(frames `closed-default-under`, `closed-mk82x60-under`). The five sensor rows (`VIS340.SEE`,
+`F18R.SEE`, `F18.ECM`, `PAVESPK.SEE`, `AV8IR.SEE`, flags `0x1008`, no designator bit) stay as rows
+and draw no pod body: a designator pod can only be hung where the row carries `0x400` and these
+do not. Pave Spike stays the targeting row.
+
+**Rudder travel capped (decision "B-1B rig").** Full pedal is now **0.45 rad** (25.8 degrees), not
+the retail word's 0.75 rad (43 degrees): `b1b_animation::RUDDER_LIMIT`, applied to the turn the rig
+measures from the word (the pedal still scales the whole travel linearly, signed, rigid). The
+vertex shared with both taileron roots opens **2.6 ft** at full pedal (4.4 ft before). Frames
+`tail-rudder-right`, `-left`, `-neutral` and `tail-rudder-43deg-vs-0.45rad-sheet` (columns: old
+right, new right, old left, new left; rear three-quarter view). The probe's rudder rows pass
+unchanged (direction, rigidity and the hinge).
+
+**Update (B1B-5, 2026-11-16) to [B-1B shape and rig](#b-1b-shape-and-rig-b1b-23-2026-11-15):**
+the "Bay walls (`7b16`), interim" paragraph is superseded by the fitted bays above (the walls
+are no longer drawn; the probe's bay row checks the door leaves, the 15 lining faces and the
+hinge lines instead of the plates), `State::bay_available` is now true for the B-1B, and open
+item (1), the rudder's 43 degrees, is closed by the 0.45 rad cap.
+
+**Probe and frames.** `--aircraft b1b --animation-probe`: bay shut, belly polygons whole and no
+lining; open, 15 lining faces and the hinge vertices on the belly plane at every bay's four
+corners; half open, the leaves hang on a sine of the fraction. Frames
+(`.local/m3-aircraft/frames/B1B-5/`, `capture.sh` and `cap.sh`): `closed-default`, `opening-half-default`,
+`open-default` and `open-mk82x60` x `under`, `oblique`, `side`, `close`, `front`;
+`closed-mk82x60-under`; the rudder frames above.
+
+**Open for John.** (1) The Mk 84, JASSM and GBU-31 (the heavy stores): refused until the combined
+forward and intermediate bay; options are alternatives (`bays::ALTERNATIVES` of rows 5 and 6 as one
+long row) or a 29.3 ft bay row. (2) The refusals are strict (17 of 21); the shared grid's 1.3 ft
+pitch cap is what refuses the cluster, rocket, JDAM and Mk 20 loads the real jet carries.
+(3) All three bays open at once. (4) The aft bay is not drawn: it is the real 15 ft on the record
+row, between the nacelles' inner walls (x +-4 ft, where the nacelle underside reaches z -2 units
+beside the doors' hinge line). (5) The fitted door count (two a bay) and the 6.7 ft roof. (6) The
+bay stores hang 0.7 ft aft of each bay's middle to suit two different shape origins.
+(7) Real external stations: none authored.

@@ -1,9 +1,11 @@
 //! B-1B Lancer (`B1.SH`) own-source rig (B1B-3): the swing wing (two 17 face
 //! panels, flap strips riding them), the two whole-quad tailerons, the signed
 //! rudder, the roll spoilers and speed brake, the six gear plates a leg group,
-//! the interim bay walls and the four afterburner plumes.
+//! the three fitted weapon bays (B1B-5: two door leaves cut from the belly
+//! polygons a bay, a lined recess, drawn through [`crate::bay_doors`]) and the
+//! four afterburner plumes.
 //! See docs/formats/aircraft-variety.md "B-1B shape and rig (B1B-2/3,
-//! 2026-11-15)".
+//! 2026-11-15)" and "B-1B Lancer stations, bays and pylons (B1B-5, 2026-11-16)".
 //!
 //! `B1.SH` ships seven state words: 0x7b10 the plumes (sixteen plates), 0x7b16
 //! the bay walls (eight), 0x7b1c the spoilers (four faces, both sides), 0x7b22
@@ -29,6 +31,7 @@ use tore_formats::{
     aircraft::{AircraftId, scale::scale_point},
     shape::{Face, Shape},
 };
+use tore_sim::combat::bays::Opening;
 use tore_sim::combat::swing::B1B;
 
 const ID: AircraftId = AircraftId::B1b;
@@ -78,11 +81,38 @@ pub(crate) const GEAR: [usize; 12] = [
     0x5025, 0x5044, 0x5063, 0x5082, 0x50e6, 0x5105, 0x5124, 0x5143, 0x51a7, 0x51c6, 0x51e5, 0x5204,
 ];
 /// Bay word 0x7b16: four vertical walls (x +-3, y 10 to 21 and 22 to 32, z -1
-/// to -4), two windings each. Interim until B1B-5 cuts the bays.
+/// to -4), two windings each. Only reviewed since B1B-5, which cuts the bays
+/// from the belly polygons below: the plates are no longer drawn, and one is
+/// the material of the lining.
 pub(crate) const BAY: [usize; 8] = [
     0x41fc, 0x4213, 0x422a, 0x4241, 0x4258, 0x426f, 0x4286, 0x429d,
 ];
-const BAY_TOP_Z: f32 = -1.;
+/// The flat belly polygons the fitted bays are cut from, both at z -1 and
+/// facing down: `3617` (8 vertices, x -10 to 10, y -16 to 29) and `362e` ahead
+/// of it (y 29 to 48), which the forward bay (y 22 to 32) runs into.
+pub(crate) const BELLY: [usize; 2] = [0x3617, 0x362e];
+/// The belly plane in shape units.
+const BELLY_Z: f32 = -1.;
+/// The first address of the lining's faces (above every face of the shape,
+/// whose code is 27,468 bytes).
+pub(crate) const LINING_BASE: usize = 0x7000;
+/// A lining is the ceiling and four walls of each of the three bays.
+pub(crate) const LINING: usize = 3 * 5;
+/// The shape's feet a unit (4/3, its header scale).
+pub(crate) const UNIT: f64 = 4. / 3.;
+/// The palette index of the recess: the grey of the shape's own bay plate
+/// (the one winding that is not the skin's 157).
+const LINING_GREY: u8 = 144;
+
+fn lining(address: usize) -> bool {
+    address >= LINING_BASE
+}
+
+/// The rudder's full-pedal deflection, radians (decision "B-1B rig", 2026-11-16,
+/// B1B-5): the retail word's 43 degrees (0.75 rad) opens a 4.4 ft gap at the
+/// taileron roots, 0.45 rad opens 2.6 ft. Fitted; the pedal still scales the
+/// whole travel.
+pub(crate) const RUDDER_LIMIT: f64 = 0.45;
 /// Plume word 0x7b10: per engine a vertical plate (x +-5 and +-8) and a flat
 /// one (x 4 to 6 and 7 to 9, z -3), two windings each, y -17 to -28.
 pub(crate) const FLAME: [usize; 16] = [
@@ -274,6 +304,8 @@ fn hinge_of(a: [f32; 3], b: [f32; 3], angle: f64) -> Hinge {
 }
 
 pub struct Rig {
+    /// The three bays, forward to aft ([`tore_sim::combat::bays::openings`]).
+    bays: Vec<Opening>,
     /// The rudder quad's hinge and the turn to the +1 pose.
     rudder: Hinge,
     /// The spoiler hinges, right then left, and the turn from the closed
@@ -319,6 +351,19 @@ fn branch(
 
 fn has(face: &Face, p: [f32; 3]) -> bool {
     face.positions.contains(&p)
+}
+
+/// Whether the plan-view point `p` (shape units, right and forward) lies in
+/// the convex polygon `face` (edges included).
+fn contains(face: &Face, p: [f32; 2]) -> bool {
+    let n = face.positions.len();
+    let sides: Vec<f32> = (0..n)
+        .map(|i| {
+            let (a, b) = (face.positions[i], face.positions[(i + 1) % n]);
+            (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
+        })
+        .collect();
+    sides.iter().all(|&c| c >= -1e-4) || sides.iter().all(|&c| c <= 1e-4)
 }
 
 impl Rig {
@@ -507,6 +552,54 @@ impl Rig {
         if root != NOZZLE_PLANE || tip != FLAME_TIP {
             return Err("unreviewed B1.SH plume extent".into());
         }
+        // The belly polygons the fitted bays are cut from: whole, flat at the
+        // belly plane and facing down, and between them they cover every corner
+        // of the three openings.
+        let bays: Vec<Opening> = tore_sim::combat::bays::openings(ID).collect();
+        if bays.len() != 3 {
+            return Err("B1B bay openings missing".into());
+        }
+        let plane = scale_point(ID, [0., 0., BELLY_Z])[2];
+        for &address in &BELLY {
+            let face = one(&shape, address)?;
+            if !face.normal.is_some_and(|n| n[1] < -32000.)
+                || !face.positions.iter().all(|p| (p[2] - plane).abs() < 1e-4)
+            {
+                return Err(format!("unreviewed B1.SH belly skin {address:x}").into());
+            }
+        }
+        let belly: Vec<&Face> = BELLY
+            .iter()
+            .map(|&a| one(&shape, a))
+            .collect::<Result<_, _>>()?;
+        for o in &bays {
+            for (x, y) in [
+                (-o.outer, o.aft),
+                (o.outer, o.aft),
+                (-o.outer, o.fore),
+                (o.outer, o.fore),
+            ] {
+                let point = [(x / UNIT) as f32, (y / UNIT) as f32];
+                if !belly.iter().any(|f| contains(f, point)) {
+                    return Err("unreviewed B1.SH belly skin under a bay".into());
+                }
+            }
+        }
+        // The recess, drawn only while the doors are open, takes the material
+        // of the shape's own bay plate (no longer drawn itself).
+        let template = one(&bay, BAY[0])?.clone();
+        let lining_faces = bays
+            .iter()
+            .flat_map(|o| {
+                crate::bay_doors::centre_lining_in(&template, o, UNIT, &[], &[], [LINING_GREY; 3])
+            })
+            .enumerate()
+            .map(|(k, mut f)| {
+                f.address = LINING_BASE + k;
+                f
+            })
+            .collect::<Vec<_>>();
+        debug_assert_eq!(lining_faces.len(), LINING);
         let mut extra: Vec<Face> = Vec::new();
         extra.extend(
             spoil
@@ -515,7 +608,7 @@ impl Rig {
                 .filter(|f| SPOILER.contains(&f.address)),
         );
         extra.extend(gear.faces.into_iter().filter(|f| GEAR.contains(&f.address)));
-        extra.extend(bay.faces.into_iter().filter(|f| BAY.contains(&f.address)));
+        extra.extend(lining_faces);
         extra.extend(
             flame
                 .faces
@@ -528,6 +621,7 @@ impl Rig {
             spoilers.try_into().map_err(|_| "two spoiler hinges")?;
         Ok((
             Self {
+                bays,
                 rudder,
                 spoilers: [spoiler_r, spoiler_l],
             },
@@ -582,6 +676,21 @@ impl Rig {
         result
     }
 
+    /// The faces a source face becomes: with the bay doors off their seat
+    /// the two belly polygons are cut into the door leaves of the three bays,
+    /// turned down about their hinges by `state.bay` (the doors' 1 second
+    /// travel is the flight's); the lining draws only then.
+    pub fn faces(&self, source: &Face, state: &State) -> Vec<Face> {
+        let a = source.address;
+        if BELLY.contains(&a) && state.bay > 0. {
+            return crate::bay_doors::centre_doors_all(source, state.bay, &self.bays, UNIT);
+        }
+        if lining(a) && state.bay <= 0. {
+            return Vec::new();
+        }
+        vec![source.clone()]
+    }
+
     pub fn animate(&self, source: &Face, state: &State) -> Option<Face> {
         let a = source.address;
         let right = WING_R.contains(&a) || a == CAP_R;
@@ -607,7 +716,8 @@ impl Rig {
         }
         if RUDDER.contains(&a) {
             let mut result = source.clone();
-            let angle = self.rudder.angle * state.rudder.clamp(-1., 1.);
+            let angle =
+                self.rudder.angle.clamp(-RUDDER_LIMIT, RUDDER_LIMIT) * state.rudder.clamp(-1., 1.);
             if angle != 0. {
                 turn(&mut result, self.rudder.pivot, self.rudder.axis, angle);
             }
@@ -639,19 +749,9 @@ impl Rig {
             gear_positions(&mut result, state.gear, state.nosewheel_angle());
             return Some(result);
         }
-        if BAY.contains(&a) {
-            let bay = state.bay.clamp(0., 1.) as f32;
-            if bay <= 0. {
-                return None;
-            }
-            // The walls drop out of the belly as the bay opens (interim,
-            // fitted): their top edge stays on the belly polygon.
-            let top = scale_point(ID, [0., 0., BAY_TOP_Z])[2];
-            let mut result = source.clone();
-            for p in &mut result.positions {
-                p[2] = top + (p[2] - top) * bay;
-            }
-            return Some(result);
+        // The lining draws only while the doors are off their seat.
+        if lining(a) && state.bay <= 0. {
+            return None;
         }
         if FLAME.contains(&a) {
             if state.exhaust <= 0. {
@@ -776,6 +876,7 @@ mod tests {
             std::array::from_fn(|k| p[k] - f64::from(RUDDER_HINGE[0][k]))
         };
         Rig {
+            bays: tore_sim::combat::bays::openings(ID).collect(),
             rudder: hinge_of(
                 RUDDER_HINGE[0],
                 RUDDER_HINGE[1],
@@ -1014,6 +1115,15 @@ mod tests {
             rig.animate(&rudder, &s).unwrap().positions,
             rudder.positions
         );
+        // B1B-5: full pedal is 0.45 rad, not the retail word's 0.75: the free
+        // vertex (4.47 units off the hinge line) moves 4.47 sin 0.45 to the side.
+        s.rudder = 1.;
+        let full = rig.animate(&rudder, &s).unwrap();
+        assert!((f64::from(full.positions[0][0]) - 4.472_136 * RUDDER_LIMIT.sin()).abs() < 1e-3);
+        assert!(rig.rudder.angle.abs() > RUDDER_LIMIT);
+        s.rudder = -1.;
+        let other = rig.animate(&rudder, &s).unwrap();
+        assert!((full.positions[0][0] + other.positions[0][0]).abs() < 1e-4);
 
         // Spoilers: one open fraction a side, hidden closed, the source pose
         // fully open, the hinge edge always on the glove skin.
@@ -1102,7 +1212,9 @@ mod tests {
                 .all(|p| p[1] <= 49.01 && p[2] >= -1e-3)
         );
 
-        // Bay walls drop from the belly polygon line; flames from the nozzle plane.
+        // The interim bay walls (B1B-3) are no longer drawn since B1B-5, the
+        // fitted bays replace them (`the_b1b_bays_cut_six_door_leaves_from_the_belly_and_line_the_recess`):
+        // the source plate comes back as it is, whatever the bay. Flames grow from the nozzle plane.
         let wall = face(
             0x41fc,
             &[
@@ -1113,13 +1225,10 @@ mod tests {
             ],
         );
         let mut s = state();
-        assert!(rig.animate(&wall, &s).is_none());
-        s.bay = 1.;
-        assert_eq!(rig.animate(&wall, &s).unwrap().positions, wall.positions);
-        s.bay = 0.5;
-        let h = rig.animate(&wall, &s).unwrap();
-        assert!((h.positions[1][2] + 2.5).abs() < 1e-5);
-        assert_eq!(h.positions[0][2], -1.);
+        for bay in [0., 0.5, 1.] {
+            s.bay = bay;
+            assert_eq!(rig.animate(&wall, &s).unwrap().positions, wall.positions);
+        }
         let plume = face(
             0x4d70,
             &[
@@ -1162,5 +1271,85 @@ mod tests {
             assert!((swept[0] - sign * 31.8).abs() < 0.3, "{swept:?}");
             assert!((swept[2] + 40.0).abs() < 0.3, "{swept:?}");
         }
+    }
+
+    /// B1B-5: the bays cut the belly polygons into six door leaves while the
+    /// doors are off their seat (two a bay, the forward bay's from both
+    /// polygons), draw their lining then, and leave the skin whole shut.
+    #[test]
+    fn the_b1b_bays_cut_six_door_leaves_from_the_belly_and_line_the_recess() {
+        let rig = rig();
+        let big = face(
+            BELLY[0],
+            &[
+                [-9., -11., -1.],
+                [-3., -16., -1.],
+                [3., -16., -1.],
+                [9., -11., -1.],
+                [10., 11., -1.],
+                [5., 29., -1.],
+                [-5., 29., -1.],
+                [-10., 11., -1.],
+            ],
+        );
+        let fore = face(
+            BELLY[1],
+            &[
+                [-2., 48., -1.],
+                [-5., 29., -1.],
+                [5., 29., -1.],
+                [2., 48., -1.],
+            ],
+        );
+        let ceiling = face(LINING_BASE, &[[-3., 10., 4.], [3., 10., 4.], [3., 21., 4.]]);
+        let mut s = state();
+        s.bay = 0.;
+        assert_eq!(rig.faces(&big, &s).len(), 1);
+        assert_eq!(rig.faces(&fore, &s).len(), 1);
+        assert!(rig.faces(&ceiling, &s).is_empty() && rig.animate(&ceiling, &s).is_none());
+        s.bay = 1.;
+        let hanging = |faces: Vec<Face>| {
+            faces
+                .into_iter()
+                .filter(|f| f.positions.iter().any(|p| p[2] < -1. - 2.))
+                .collect::<Vec<_>>()
+        };
+        let low = hanging(rig.faces(&big, &s));
+        let high = hanging(rig.faces(&fore, &s));
+        // Each of the two belly polygons gives two leaves in the bays it reaches:
+        // the big one the intermediate, aft and forward bays' (so six), the one
+        // ahead the forward bay's two.
+        assert_eq!((low.len(), high.len()), (6, 2));
+        // A leaf is 3 units wide, hangs 3 units below the belly plane, on x +/-3.
+        for leaf in low.iter().chain(&high) {
+            let bottom = leaf.positions.iter().map(|p| p[2]).fold(f32::MAX, f32::min);
+            assert!((bottom - (-1. - 3.)).abs() < 1e-3, "{bottom}");
+            assert!(
+                leaf.positions
+                    .iter()
+                    .all(|p| (p[0].abs() - 3.).abs() < 1e-3)
+            );
+        }
+        // The forward bay's leaves from the two polygons share the hinge line
+        // and the seam: one runs y 22 to 29, the other 29 to 32.
+        let reach = |leaves: &[Face], lo: f32, hi: f32| {
+            leaves.iter().any(|f| {
+                f.positions
+                    .iter()
+                    .all(|p| p[1] >= lo - 1e-3 && p[1] <= hi + 1e-3)
+                    && f.positions.iter().any(|p| (p[1] - lo).abs() < 1e-3)
+            })
+        };
+        assert!(reach(&low, 22., 29.) && reach(&high, 29., 32.));
+        assert_eq!(rig.faces(&ceiling, &s).len(), 1);
+        // Half open the leaves hang on a quarter turn's sine.
+        s.bay = 0.5;
+        let lowest = rig
+            .faces(&big, &s)
+            .iter()
+            .flat_map(|f| f.positions.clone())
+            .map(|p| p[2])
+            .fold(f32::MAX, f32::min);
+        assert!((lowest - (-1. - 3. * (FRAC_PI_2 as f32 * 0.5).sin())).abs() < 1e-3);
     }
 }
