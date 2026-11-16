@@ -1,8 +1,11 @@
 //! The shared drawing of a fitted belly bay: its doors cut from the belly
 //! skin and its lined recess, for the aircraft in
-//! [`tore_sim::combat::bays::OPENINGS`] (the F-117 so far; the B-2 and B-52
-//! add a row there and their face addresses in their own rig).
-//! See docs/spec/stores-on-pylons.md, "F-117 weapon bays".
+//! [`tore_sim::combat::bays::OPENINGS`] (the F-117 and the B-2, the latter with
+//! its face addresses in its own rig), and for the B-52's one centred bay (its
+//! `OPENINGS` row has `centre` and `inner` 0, B52-5, folded onto the shared
+//! table at the batch A integration): two doors hinged on the outer edges, a
+//! lined recess and a rail per store lane.
+//! See docs/spec/stores-on-pylons.md, "F-117 weapon bays" and "B-52 bay".
 //!
 //! The geometry is in shape units: a third of a foot a unit, right, forward
 //! and up, the shape already scaled per axis. Stored normals are right, up and
@@ -15,29 +18,206 @@ pub(crate) fn units(feet: f64) -> f32 {
     (feet * 3.) as f32
 }
 
+/// The four door rectangles of `o` (left edge, right edge, hinge x, turn
+/// sign), shape units: a door hinged on its left edge swings its free right
+/// edge down with a positive turn about the forward axis. Each bay has two,
+/// hinged at its inner and outer edges.
+fn door_rectangles(o: &Opening) -> [(f32, f32, f32, f64); 4] {
+    let (inner, outer) = (units(o.inner), units(o.outer));
+    let middle = (inner + outer) / 2.;
+    let c = units(o.centre);
+    [
+        (c - outer, c - middle, c - outer, 1.),
+        (c - middle, c - inner, c - inner, -1.),
+        (c + inner, c + middle, c + inner, 1.),
+        (c + middle, c + outer, c + outer, -1.),
+    ]
+}
+
 /// The leaves of the belly skin `face` at door travel `fraction` (0 shut, 1
 /// open): both bays' two doors cut from it and turned about their hinge
 /// lines, the rest of the skin kept whole.
 pub(crate) fn belly_doors(face: &Face, fraction: f64, o: &Opening) -> Vec<Face> {
-    let (inner, outer) = (units(o.inner), units(o.outer));
-    let middle = (inner + outer) / 2.;
-    // (left edge, right edge, hinge x, turn sign): a door hinged on its left
-    // edge swings its free right edge down with a positive turn about the
-    // forward axis.
-    let doors = [
-        (-outer, -middle, -outer, 1.),
-        (-middle, -inner, -inner, -1.),
-        (inner, middle, inner, 1.),
-        (middle, outer, outer, -1.),
-    ];
     crate::roster_animation::cut_doors(
         face,
         fraction,
-        doors,
+        door_rectangles(o),
         units(o.aft),
         units(o.fore),
         units(o.belly),
     )
+}
+
+/// The skin `face` with both bays' openings cut out of it and nothing drawn
+/// in them (the B-2's belly polygon, whose doors are the separate panels laid
+/// under it, B2-5).
+pub(crate) fn belly_hole(face: &Face, o: &Opening) -> Vec<Face> {
+    crate::roster_animation::cut_door_parts(
+        face,
+        0.,
+        door_rectangles(o),
+        units(o.aft),
+        units(o.fore),
+        units(o.belly),
+    )
+    .1
+}
+
+/// Shape units from feet for a shape drawn at `unit` feet a unit.
+fn units_at(feet: f64, unit: f64) -> f32 {
+    (feet / unit) as f32
+}
+
+/// The two leaves of a centred bay (an [`Opening`] with `centre` and `inner`
+/// 0, `outer` feet either side of the centre line, in a shape drawn at `unit`
+/// feet a unit) cut from the belly skin `face` at door travel `fraction` (0
+/// shut, 1 open): each half the width, hinged on its outer edge, its inner
+/// edge swinging down; the rest of the skin kept whole.
+pub(crate) fn centre_doors(face: &Face, fraction: f64, o: &Opening, unit: f64) -> Vec<Face> {
+    let half = units_at(o.outer, unit);
+    crate::roster_animation::cut_doors(
+        face,
+        fraction,
+        [(-half, 0., -half, 1.), (0., half, half, -1.)],
+        units_at(o.aft, unit),
+        units_at(o.fore, unit),
+        units_at(o.belly, unit),
+    )
+}
+
+/// The recess of a centred bay (as [`centre_doors`]) and a rail under its ceiling
+/// at each of `rails` (feet right of the centre line, aft end, fore end, feet
+/// forward) and a post from the floor to the ceiling at each of `posts`
+/// (feet right, feet forward), drawn only while the doors are open: a
+/// ceiling, four walls facing in, the rails and the posts, closed on every
+/// side so no sky shows through.
+pub(crate) fn centre_lining(
+    template: &Face,
+    o: &Opening,
+    unit: f64,
+    rails: &[[f64; 3]],
+    posts: &[[f64; 2]],
+) -> Vec<Face> {
+    const N: f32 = 32765.;
+    let u = |feet: f64| units_at(feet, unit);
+    let (aft, fore, half) = (u(o.aft), u(o.fore), u(o.outer));
+    let (floor, roof) = (u(o.belly), u(o.belly + o.depth));
+    let mut faces = vec![
+        panel(
+            template,
+            [
+                [-half, aft, roof],
+                [half, aft, roof],
+                [half, fore, roof],
+                [-half, fore, roof],
+            ],
+            [0., -N, 0.],
+            CEILING,
+        ),
+        // The left wall faces right, the right wall left.
+        panel(
+            template,
+            [
+                [-half, aft, floor],
+                [-half, fore, floor],
+                [-half, fore, roof],
+                [-half, aft, roof],
+            ],
+            [N, 0., 0.],
+            WALL,
+        ),
+        panel(
+            template,
+            [
+                [half, aft, floor],
+                [half, fore, floor],
+                [half, fore, roof],
+                [half, aft, roof],
+            ],
+            [-N, 0., 0.],
+            WALL,
+        ),
+        // The aft wall faces forward, the fore wall aft.
+        panel(
+            template,
+            [
+                [-half, aft, floor],
+                [half, aft, floor],
+                [half, aft, roof],
+                [-half, aft, roof],
+            ],
+            [0., 0., N],
+            WALL,
+        ),
+        panel(
+            template,
+            [
+                [-half, fore, floor],
+                [half, fore, floor],
+                [half, fore, roof],
+                [-half, fore, roof],
+            ],
+            [0., 0., -N],
+            WALL,
+        ),
+    ];
+    // A box from the ceiling down, or up from the floor to it: four sides
+    // and the lower end (5 faces).
+    let mut boxed = |x: [f32; 2], y: [f32; 2], z: [f32; 2]| {
+        let (end, other, sign) = (z[0], z[1], -N);
+        faces.push(panel(
+            template,
+            [
+                [x[0], y[0], end],
+                [x[1], y[0], end],
+                [x[1], y[1], end],
+                [x[0], y[1], end],
+            ],
+            [0., sign, 0.],
+            RAIL,
+        ));
+        for (x, normal) in [(x[0], -N), (x[1], N)] {
+            faces.push(panel(
+                template,
+                [
+                    [x, y[0], end],
+                    [x, y[1], end],
+                    [x, y[1], other],
+                    [x, y[0], other],
+                ],
+                [normal, 0., 0.],
+                RAIL,
+            ));
+        }
+        for (y, normal) in [(y[0], -N), (y[1], N)] {
+            faces.push(panel(
+                template,
+                [
+                    [x[0], y, end],
+                    [x[1], y, end],
+                    [x[1], y, other],
+                    [x[0], y, other],
+                ],
+                [0., 0., normal],
+                RAIL,
+            ));
+        }
+    };
+    for &[x, y0, y1] in rails {
+        boxed(
+            [u(x - RAIL_HALF), u(x + RAIL_HALF)],
+            [u(y0), u(y1)],
+            [roof - u(RAIL_DROP), roof],
+        );
+    }
+    for &[x, y] in posts {
+        boxed(
+            [u(x - RAIL_HALF / 2.), u(x + RAIL_HALF / 2.)],
+            [u(y - RAIL_HALF / 2.), u(y + RAIL_HALF / 2.)],
+            [floor, roof],
+        );
+    }
+    faces
 }
 
 /// A flat panel cut from `template`'s material: four corners, one stored
@@ -62,72 +242,93 @@ const RAIL: u8 = 148;
 /// cut-out leaves no hole into the sky. `template` supplies the material (a
 /// flat grey face of the shape).
 pub(crate) fn lining(template: &Face, o: &Opening) -> Vec<Face> {
+    lining_in(template, o, [WALL, CEILING, RAIL])
+}
+
+/// [`lining`] with the palette indices of the walls, the ceiling and the rail
+/// chosen by the aircraft (the B-2's recess is its own bay grey, 147).
+pub(crate) fn lining_in(template: &Face, o: &Opening, [wall, ceiling, rail]: [u8; 3]) -> Vec<Face> {
     const N: f32 = 32765.;
     let (aft, fore) = (units(o.aft), units(o.fore));
-    let (floor, roof) = (units(o.belly), units(o.belly + o.depth));
+    let floor = units(o.belly);
+    let (outer_roof, inner_roof) = (units(o.belly + o.depth), units(o.belly + o.inner_depth));
+    let c = units(o.centre);
     let mut faces = Vec::new();
     for sign in [-1f32, 1.] {
-        let (a, b) = (sign * units(o.inner), sign * units(o.outer));
+        let (a, b) = (c + sign * units(o.inner), c + sign * units(o.outer));
         let (x0, x1) = (a.min(b), a.max(b));
+        // The roof is a plane under the skin: `outer_roof` over the outer
+        // wall, `inner_roof` over the inner, level when they are equal.
+        let roof = |x: f32| {
+            let t = (x - b) / (a - b);
+            outer_roof + (inner_roof - outer_roof) * t
+        };
+        let slope = (roof(x1) - roof(x0)) / (x1 - x0);
+        let tilt = (1. + slope * slope).sqrt();
         // The inner wall faces outboard, the outer wall inboard.
         let (inner_normal, outer_normal) = (sign * N, -sign * N);
         faces.push(panel(
             template,
             [
-                [x0, aft, roof],
-                [x1, aft, roof],
-                [x1, fore, roof],
-                [x0, fore, roof],
+                [x0, aft, roof(x0)],
+                [x1, aft, roof(x1)],
+                [x1, fore, roof(x1)],
+                [x0, fore, roof(x0)],
             ],
-            [0., -N, 0.],
-            CEILING,
+            [slope * N / tilt, -N / tilt, 0.],
+            ceiling,
         ));
         faces.push(panel(
             template,
             [
                 [a, aft, floor],
                 [a, fore, floor],
-                [a, fore, roof],
-                [a, aft, roof],
+                [a, fore, roof(a)],
+                [a, aft, roof(a)],
             ],
             [inner_normal, 0., 0.],
-            WALL,
+            wall,
         ));
         faces.push(panel(
             template,
             [
                 [b, aft, floor],
                 [b, fore, floor],
-                [b, fore, roof],
-                [b, aft, roof],
+                [b, fore, roof(b)],
+                [b, aft, roof(b)],
             ],
             [outer_normal, 0., 0.],
-            WALL,
+            wall,
         ));
         faces.push(panel(
             template,
             [
                 [x0, aft, floor],
                 [x1, aft, floor],
-                [x1, aft, roof],
-                [x0, aft, roof],
+                [x1, aft, roof(x1)],
+                [x0, aft, roof(x0)],
             ],
             [0., 0., N],
-            WALL,
+            wall,
         ));
         faces.push(panel(
             template,
             [
                 [x0, fore, floor],
                 [x1, fore, floor],
-                [x1, fore, roof],
-                [x0, fore, roof],
+                [x1, fore, roof(x1)],
+                [x0, fore, roof(x0)],
             ],
             [0., 0., -N],
-            WALL,
+            wall,
         ));
-        // The trapeze rail: a box hung from the ceiling on the centre line.
+        // The trapeze rail: a box hung from the ceiling on the centre line
+        // (none where the opening has no rail).
+        if o.rail[0] == o.rail[1] {
+            continue;
+        }
         let centre = (a + b) / 2.;
+        let roof = roof(centre);
         let (r0, r1) = (centre - units(RAIL_HALF), centre + units(RAIL_HALF));
         let (y0, y1) = (units(o.rail[0]), units(o.rail[1]));
         let low = roof - units(RAIL_DROP);
@@ -135,14 +336,14 @@ pub(crate) fn lining(template: &Face, o: &Opening) -> Vec<Face> {
             template,
             [[r0, y0, low], [r1, y0, low], [r1, y1, low], [r0, y1, low]],
             [0., -N, 0.],
-            RAIL,
+            rail,
         ));
         for (x, normal) in [(r0, -N), (r1, N)] {
             faces.push(panel(
                 template,
                 [[x, y0, low], [x, y1, low], [x, y1, roof], [x, y0, roof]],
                 [normal, 0., 0.],
-                RAIL,
+                rail,
             ));
         }
         for (y, normal) in [(y0, -N), (y1, N)] {
@@ -150,7 +351,7 @@ pub(crate) fn lining(template: &Face, o: &Opening) -> Vec<Face> {
                 template,
                 [[r0, y, low], [r1, y, low], [r1, y, roof], [r0, y, roof]],
                 [0., 0., normal],
-                RAIL,
+                rail,
             ));
         }
     }
@@ -231,6 +432,71 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_centred_bay_cuts_two_leaves_hinged_on_the_outer_edges_and_lines_a_closed_recess() {
+        let o = tore_sim::combat::bays::opening(AircraftId::B52).unwrap();
+        // The B-52 draws at 2/3 ft a unit: 1.5 units a foot.
+        let unit = 2. / 3.;
+        let belly = units_at(o.belly, unit);
+        assert!((belly + 9.).abs() < 1e-4);
+        let skin = face(
+            0x46ae,
+            vec![
+                [-40., -40., belly],
+                [40., -40., belly],
+                [40., 70., belly],
+                [-40., 70., belly],
+            ],
+        );
+        let shut = centre_doors(&skin, 0., &o, unit);
+        assert!((shut.iter().map(area).sum::<f64>() - 80. * 110.).abs() < 1e-1);
+        assert!(
+            shut.iter()
+                .all(|f| f.positions.iter().all(|p| p[2] == belly))
+        );
+        let open = centre_doors(&skin, 1., &o, unit);
+        let hanging: Vec<_> = open
+            .iter()
+            .filter(|f| f.positions.iter().any(|p| p[2] < belly - 1.))
+            .collect();
+        // Two leaves, each 3 ft wide, hung on x = +/-3 ft (4.5 units).
+        assert_eq!(hanging.len(), 2);
+        let half = units_at(o.outer, unit);
+        for leaf in hanging {
+            let low = leaf.positions.iter().map(|p| p[2]).fold(f32::MAX, f32::min);
+            assert!((low - (belly - half)).abs() < 1e-3, "{low}");
+            assert!(
+                leaf.positions
+                    .iter()
+                    .all(|p| (p[0].abs() - half).abs() < 1e-3)
+            );
+        }
+        // The lining: ceiling, four walls, five faces a rail.
+        let template = face(0x2000, vec![[0.; 3]; 3]);
+        let rails = [[-1.42, -8., 0.], [0., -8., 0.], [1.42, -8., 0.]];
+        let lining = centre_lining(&template, &o, unit, &rails, &[[0., 0.]]);
+        assert_eq!(lining.len(), 5 + 5 * rails.len() + 5);
+        let roof = units_at(o.belly + o.depth, unit);
+        let ceiling: Vec<_> = lining
+            .iter()
+            .filter(|f| f.positions.iter().all(|p| p[2] == roof))
+            .collect();
+        assert_eq!(ceiling.len(), 1);
+        let want =
+            f64::from(units_at(2. * o.outer, unit)) * f64::from(units_at(o.fore - o.aft, unit));
+        assert!((area(ceiling[0]) - want).abs() < 1e-1);
+        // Four walls and the four sides of the one post stand from the belly
+        // plane to the roof.
+        let tall = lining
+            .iter()
+            .filter(|f| {
+                f.positions.iter().any(|p| p[2] == belly)
+                    && f.positions.iter().any(|p| p[2] == roof)
+            })
+            .count();
+        assert_eq!(tall, 4 + 4);
     }
 
     #[test]

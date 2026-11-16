@@ -619,6 +619,61 @@ kt at 1,000 ft), the landing rollout with the brake out is 19 percent longer, an
 record ceiling is 50,000 ft. Evidence, tables and open questions:
 [B-2 flight review](../formats/aircraft-variety.md#b-2-flight-review-b2-8-2026-11-15).
 
+## B-2A fuel flow (B2-6, 2026-11-15)
+
+Dated note, additions only. One more `B2.PT` field is read differently, applied only while the record
+still holds its retail value and every other B-2 correction still holds (`aircraft_corrections.rs`,
+`B2_FUEL_LB_PER_S`):
+
+| Field | Retail | Read as | Label |
+| --- | ---: | ---: | --- |
+| `fuelConsumption` (military, all four engines, lb/s) | 6 (the B-1B's) | 7 | opinionated (coordinator first pass, 2026-11-15, held for John): 69,200 lbf x 0.375 lb/(lbf h) / 3,600 = 7.2, the F118-GE-100 figure BMB-A2 cites; the page that gives 0.375 was not recorded |
+
+The record has no afterburner flow (0). What a player notices: the same 167,000 lb of fuel lasts
+398 minutes at full power instead of 464, and 930 minutes instead of 1,066 in the probe's trimmed
+cruise, which is 4,779 nm (5,486 nm at 6 lb/s; the published unrefuelled range is about 6,000 nm).
+The thrust, weights, fuel, 50,000 ft ceiling and the speed brake are unchanged. Evidence:
+[B-2 ordnance, missions, multiplayer and replay](../formats/aircraft-variety.md#b-2-ordnance-missions-multiplayer-and-replay-b2-69-2026-11-15).
+
+## F-117A flight review: no speed brake (F117-8, 2026-11-15)
+
+Dated note, additions only. One more `F117.PT` field is read differently, applied only
+while the record still holds its retail value and every other F-117 correction (BMB-A2)
+still holds, in `tore-formats` `aircraft_corrections.rs`:
+
+| Field | Retail | Read as | Label |
+| --- | ---: | ---: | --- |
+| `airBrakesDrag` | 256 (a fighter's airbrake) | 0 | fitted: the real jet has no speed brake, no flaps and no drag device but the gear and the landing drag chute (a pilot's forum account, unofficial; the record's `flapsLift` and `flapsDrag` are already 0 and the shape has no airbrake surface) |
+
+The brake lever still moves the state but adds no drag (it was 0.30 G of extra
+deceleration at 295 kt, 0.66 G at 530 kt). The scripted landing's rollout from touchdown
+is 25 percent longer (2,504 ft to 3,117 ft at the default load). Thrust, weights, fuel,
+the 2 lb/s flow, ceiling, envelopes, the 180 degree a second roll block, the stealth
+signature (infrared 20, radar 1) and `bayDrag` (which the hybrid adapter does not read)
+are unchanged. Evidence, the before, after and real table, and the open questions:
+[F-117 flight review](../formats/aircraft-variety.md#f-117-flight-review-f117-8-2026-11-15).
+
+## F-117A fuel flow fit (F117-9, 2026-11-15)
+
+Dated note, additions only. One more `F117.PT` field is read differently, applied only
+while the record still holds its retail value and every other F-117 correction (BMB-A2,
+F117-8) still holds, in `tore-formats` `aircraft_corrections.rs`:
+
+| Field | Retail | Read as | Label |
+| --- | ---: | ---: | --- |
+| `fuelConsumption` | 2 lb/s | 3 lb/s | fitted (the coordinator's first pass, 2026-11-15): the published range of 930 nautical miles (Wikipedia, flugzeuginfo) needs about 3.3 lb/s for both engines at military power; the record keeps whole pounds a second, so 3 is the nearest value it can hold (4 would give 758 nautical miles, 18 percent under) |
+
+The retail 2 lb/s is 0.333 lb/(lbf h) on the 21,600 lbf, a high-bypass figure, and flew the
+Mach 0.82 cruise at 36,000 ft for 1,516 nautical miles from the 18,500 lb tank. At 3 lb/s
+(0.500 lb/(lbf h)) the same cruise burns 2.39 lb/s and reaches 1,011 nautical miles (9
+percent over the published 930), the 65 percent cruise at 20,000 ft 1,457 nautical miles
+(was 2,186), and military power at full tank lasts 102.8 minutes (was 154.2). The F404's own
+cited 0.81 lb/(lbf h) (4.86 lb/s, about 630 nautical miles) is not used: a flow fitted to
+the one published range is the cheaper claim. Thrust, weights, the airbrake word, ceiling,
+envelopes and the stealth signature are unchanged. The pin is loose (a unit test keeps the
+range within 95 to 115 percent of 930); the figures and the re-measurement are in
+[F-117A in missions, multiplayer and replay](../formats/aircraft-variety.md#f-117a-in-missions-multiplayer-and-replay-f117-9-2026-11-15).
+
 ## Bomber batch B record corrections: B-1B, Tu-160, F-111F (BMB-B2, 2026-11-15)
 
 **Opinionated (coordinator first pass, `BOMBERS-DECISIONS-B.md`, for John to review),

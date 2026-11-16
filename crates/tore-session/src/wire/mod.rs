@@ -280,7 +280,10 @@ pub fn path_words(path: Path) -> &'static str {
 /// move-ahead ambush on moving targets (new checkpoint state).
 /// 83 widens the aircraft identity on the wire from 6 to 9 bits (512
 /// identities, room for mods); no rules change.
-pub const PROTOCOL_VERSION: u16 = 83;
+/// 84 (simulation version 12) is for the surface-to-air detection rules
+/// (SAM-1), the bomber batch A weapon bays and the maximum-take-off fuel cap;
+/// rules only, no new bytes.
+pub const PROTOCOL_VERSION: u16 = 84;
 
 /// Bits of an aircraft identity on the wire: its place among
 /// [`AircraftId::SELECTABLE`] (6 bits up to protocol 82, 9 since 83, so 512

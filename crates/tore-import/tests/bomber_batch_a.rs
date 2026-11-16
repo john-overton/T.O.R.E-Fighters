@@ -55,10 +55,14 @@ fn the_three_records_parse_as_their_own_identities_with_their_retail_rows() {
                 ("VIS300.SEE", 1),
                 ("B52R.SEE", 1),
                 ("B52.ECM", 1),
-                ("AGM84E.JT", 12),
+                // B52-5 (2026-11-15): the three bay rows (3, 5, 6) hold nine and
+                // start empty; row 7 is the appended underwing pylon pair with the
+                // Harpoons (capacity 18).
+                ("", 9),
                 ("M61.JT", 1242),
-                ("", 12),
-                ("", 12),
+                ("", 9),
+                ("", 9),
+                ("AGM84E.JT", 18),
             ],
         ),
         (

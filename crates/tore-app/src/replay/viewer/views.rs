@@ -120,6 +120,13 @@ pub(super) fn sight_record(
             .map(|e| e.name)
             .filter(|n| !n.trim().is_empty())
             .unwrap_or_else(|| name.trim_end_matches(".SEE").to_owned());
+        // The F-117's turret reads IRADS, whatever its record is called, and
+        // its other sight record (the FLIR) FLIR (F117-7, decision 26).
+        let label = match profile.id.sensor_names() {
+            Some(names) if sensor.laser => names.sight.to_owned(),
+            Some(names) => names.infrared.to_owned(),
+            None => label,
+        };
         if found.as_ref().is_none_or(|(_, f)| sensor.laser && !f.laser) {
             found = Some((tore_formats::text::upper(&label), sensor));
         }
@@ -1391,5 +1398,60 @@ mod tape_tests {
         assert!(tape.shows_again(&shape(), (6000, 0.), true, soon));
         let next = t0 + Duration::from_millis(43);
         assert!(!tape.shows_again(&shape(), (6000, 0.), true, next));
+    }
+}
+
+/// F117-9 (2026-11-15): the replay's Sensor View names the F-117's own sights
+/// from its record, the way the live cockpit does (F117-7, decision 26): the
+/// laser row (`PAVESPK.SEE`) is the IRADS turret, the other sight row
+/// (`AV8IR.SEE`) the FLIR. Another aircraft keeps its record's own name.
+/// Reads the user's install and skips quietly without one.
+#[cfg(test)]
+mod sight_label_tests {
+    use super::*;
+    use tore_formats::aircraft::{Aircraft, AircraftId};
+
+    fn resources(id: AircraftId) -> Option<(Aircraft, BTreeMap<String, Vec<u8>>)> {
+        let root = std::env::var_os("TORE_GAME_DIR").map_or_else(
+            || {
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../gameassets/fighters-anthology")
+            },
+            std::path::PathBuf::from,
+        );
+        let media = tore_import::MediaSource::detect(&root).ok()?;
+        let libraries: Vec<_> = ["FA_1.LIB", "FA_2.LIB", "FA_4B.LIB", "FA_4D.LIB"]
+            .iter()
+            .filter_map(|name| media.archive(name).ok())
+            .collect();
+        let read = |name: &str| libraries.iter().find_map(|l| l.read(name).ok());
+        let aircraft = Aircraft::parse_as(&read(id.pt())?, id).ok()?;
+        let mut map = BTreeMap::new();
+        for store in aircraft
+            .hardpoints
+            .iter()
+            .filter_map(|h| h.store.as_deref())
+        {
+            if let Some(bytes) = read(store) {
+                map.insert(store.to_owned(), bytes);
+            }
+        }
+        Some((aircraft, map))
+    }
+
+    #[test]
+    fn the_sensor_view_names_the_f117s_turret_irads_and_another_aircrafts_sight_by_its_record() {
+        let Some((f117, map)) = resources(AircraftId::F117) else {
+            eprintln!("skipped: no retail install");
+            return;
+        };
+        let (label, sensor) = sight_record(&f117, &map).expect("the F-117's turret");
+        assert_eq!(label, "IRADS");
+        assert!(sensor.laser, "the turret lases");
+        let (f16, map) = resources(AircraftId::F16C).expect("the F-16C");
+        let (label, sensor) = sight_record(&f16, &map).expect("the F-16C's pod");
+        assert!(sensor.laser);
+        assert_ne!(label, "IRADS", "{label}");
+        assert!(!label.is_empty());
     }
 }

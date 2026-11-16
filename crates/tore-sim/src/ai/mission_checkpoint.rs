@@ -83,6 +83,7 @@ crate::checkpoint_struct!(StationSpec {
     employment_zone,
     infrared_envelope,
     mount,
+    slew,
 });
 
 crate::checkpoint_struct!(ObservedAttack {

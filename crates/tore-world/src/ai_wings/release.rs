@@ -297,4 +297,95 @@ mod tests {
             assert!(forward > opening.aft && forward < opening.fore, "{forward}");
         }
     }
+
+    /// B2-5: an AI bomb leaves the B-2's gridded bay inside its left opening,
+    /// through the shared release; as the F-22's and F-117's, it does not wait for doors.
+    #[test]
+    fn an_ai_bomb_leaves_a_b2_bay_grid_from_its_first_place() {
+        use tore_formats::aircraft::{AircraftId, Hardpoint};
+        use tore_sim::combat::{bays, hardpoints};
+        let (mut wings, _) = build(None);
+        let mut state = combat_fixture(false);
+        state.projectiles.clear();
+        let id = wings.mission().actors()[1].id();
+        let mut config = state.own().configuration().clone();
+        config.stations[0].weapon = mk82_pack(config.stations[0].weapon.clone());
+        let row = Hardpoint {
+            location: 3,
+            flags: 0x1100,
+            position: [0; 3],
+            store: None,
+            count: 32,
+            weight_class: 160,
+            slew: [0; 4],
+        };
+        let (mount, rack) = hardpoints::placed_on(AircraftId::B2, 5, &row, None);
+        config.stations[0].mount = mount;
+        config.stations[0].rack = rack;
+        config.stations[0].count = 32;
+        wings.configs.insert(id, config.clone());
+        let weapon = config.stations[0].weapon.clone();
+        let ground = |_: f64, _: f64| 0.;
+        let emitted = wings.release(&launch(id, 0x5000_0001), &mut state, &weapon, &[], &ground);
+        assert!(emitted > 0);
+        let launcher = crate::combat::launcher(wings.mission().actor(id).unwrap().flight());
+        let opening = bays::opening(AircraftId::B2).unwrap();
+        let first = &state.projectiles[0];
+        let at = [0, 1, 2].map(|k| first.position[k] - launcher.position[k]);
+        // Inside the left opening and between its ends.
+        assert!(at[0] > opening.centre - opening.outer && at[0] < opening.centre - opening.inner);
+        assert!(at[2] > opening.aft && at[2] < opening.fore, "{at:?}");
+    }
+
+    /// B52-5 and B2-5: an AI bomb leaves the B-52's bay row 5 (a grid magazine on the
+    /// shared grid) inside its one centred opening; its doors stay shut (the F-22's
+    /// and F-117's precedent: the AI's release does not wait for them, and
+    /// `bay_ready` is not part of its release).
+    #[test]
+    fn an_ai_bomb_leaves_a_b52_bay_grid_inside_the_centred_opening() {
+        use tore_formats::aircraft::{AircraftId, Hardpoint};
+        use tore_sim::combat::{bays, hardpoints};
+        let (mut wings, _) = build(None);
+        let mut state = combat_fixture(false);
+        state.projectiles.clear();
+        let id = wings.mission().actors()[1].id();
+        let mut config = state.own().configuration().clone();
+        config.stations[0].weapon = mk82_pack(config.stations[0].weapon.clone());
+        let row = Hardpoint {
+            location: 3,
+            flags: 0x1120,
+            position: [0; 3],
+            store: None,
+            count: 9,
+            weight_class: 70,
+            slew: [0; 4],
+        };
+        let (mount, rack) = hardpoints::placed_on(AircraftId::B52, 5, &row, None);
+        config.stations[0].mount = mount;
+        config.stations[0].rack = rack;
+        config.stations[0].count = 9;
+        wings.configs.insert(id, config.clone());
+        let weapon = config.stations[0].weapon.clone();
+        let ground = |_: f64, _: f64| 0.;
+        let emitted = wings.release(&launch(id, 0x5000_0001), &mut state, &weapon, &[], &ground);
+        assert!(emitted > 0);
+        let launcher = crate::combat::launcher(wings.mission().actor(id).unwrap().flight());
+        let opening = bays::opening(AircraftId::B52).unwrap();
+        // The first bomb leaves the grid's outermost column on the left (the
+        // shared grid's ripple: four columns 1.3 ft apart, so 1.95 ft out); the
+        // pack record (six stores, 2 ft apart) stages across that point, which
+        // only the pack does, the real bay's stores are single. Every round
+        // starts within the opening's length.
+        let sides: Vec<f64> = state
+            .projectiles
+            .iter()
+            .map(|p| p.position[0] - launcher.position[0])
+            .collect();
+        let middle = sides.iter().sum::<f64>() / sides.len() as f64;
+        assert!((-2.0..-1.0).contains(&middle), "{sides:?}");
+        for p in &state.projectiles {
+            let forward = p.position[2] - launcher.position[2];
+            assert!(forward > opening.aft && forward < opening.fore, "{forward}");
+        }
+    }
 }

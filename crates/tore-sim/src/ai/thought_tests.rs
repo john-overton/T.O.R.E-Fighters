@@ -185,6 +185,7 @@ fn hostile(id: u32, position: [f64; 3]) -> TargetView {
 
 fn missile_station(maximum_range_ft: f64) -> StationView {
     StationView {
+        slew: Default::default(),
         station: StationId(0),
         guided: true,
         capability: weapon_service::StoreCapability::AIR_TO_AIR_MISSILE,

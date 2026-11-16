@@ -8,7 +8,7 @@ use super::{
 };
 use crate::{
     ai_wings::{ENEMY_SIDE, FRIENDLY_SIDE},
-    mission::{Condition, MissionSpec},
+    mission::{Condition, Defense, MissionSpec},
     terrain::{Overrides, Terrain},
     test_support::resources::THEATER,
     world::{Seating, World},
@@ -147,10 +147,67 @@ fn the_night_rule_mans_every_aaa_slot_with_a_novice_zsu23() {
     let sams = slots(&resolved, Placeholder::Sam);
     assert!(sams.iter().any(|(_, r)| r != "ZSU23.NT"));
     assert_eq!(resolved.units[0].skill, 2);
-    // Dormant today: no F-117 or B-2 is imported, so no spec triggers it.
+    // Any other aircraft at night leaves the rule off.
     let mut spec = MissionSpec::new(THEATER, AircraftId::F18);
     spec.condition = Condition::Night;
     assert!(!resolve::night_stealth(&spec));
+}
+
+/// F117-6: the retail night rule is live now that the F-117 and the B-2 are
+/// imported (decision 3, John, 2026-11-15): night with either in a friendly
+/// wing switches it on, in the ground target and in the area defenses.
+#[test]
+fn the_night_rule_wakes_for_a_friendly_f117_or_b2_at_night() {
+    let night = |player| {
+        let mut spec = MissionSpec::new(THEATER, player);
+        spec.condition = Condition::Night;
+        spec
+    };
+    for stealth in [AircraftId::F117, AircraftId::B2] {
+        let mut spec = night(stealth);
+        assert!(resolve::night_stealth(&spec), "{stealth:?}");
+        // By day it stays off, whatever the aircraft.
+        spec.condition = Condition::Clear;
+        assert!(!resolve::night_stealth(&spec), "{stealth:?} by day");
+        // A second friendly wing counts as well (wings 2 and 3), a wing with
+        // no aircraft in it does not, and the enemy's wings never do.
+        let mut mixed = night(AircraftId::F18);
+        mixed.wings[2].aircraft = stealth;
+        mixed.wings[2].count = 2;
+        assert!(resolve::night_stealth(&mixed), "{stealth:?} in wing 3");
+        mixed.wings[2].count = 0;
+        assert!(
+            !resolve::night_stealth(&mixed),
+            "{stealth:?} with no planes"
+        );
+        let mut enemy = night(AircraftId::F18);
+        enemy.wings[3].aircraft = stealth;
+        enemy.wings[3].count = 2;
+        assert!(!resolve::night_stealth(&enemy), "{stealth:?} enemy wing");
+    }
+    // The creator's AAA strength carries the rule into the ground target and
+    // the area defenses a mission resolves.
+    let mut spec = night(AircraftId::F117);
+    spec.aaa = Defense::Moderate;
+    spec.sam = Defense::Moderate;
+    assert!(
+        resolve::AreaDefense::from_spec(&spec)
+            .unwrap()
+            .night_stealth
+    );
+    spec.ground_target = Some("~QUCITY".to_owned());
+    assert!(
+        resolve::GroundTarget::from_spec(&spec)
+            .unwrap()
+            .night_stealth
+    );
+    let mut day = spec.clone();
+    day.condition = Condition::Clear;
+    assert!(
+        !resolve::GroundTarget::from_spec(&day)
+            .unwrap()
+            .night_stealth
+    );
 }
 
 #[test]
@@ -322,7 +379,6 @@ fn base_layout_units_keep_their_layout_ids_and_take_their_sides() {
 
 /// A mission whose spec names `target`, built as the creator's would be.
 pub(super) fn world_with_target(r: &BTreeMap<String, Vec<u8>>, target: &GroundTarget) -> World {
-    use crate::mission::Defense;
     let mut spec = MissionSpec::new(THEATER, AircraftId::F18);
     spec.ground_target = Some(target.stem.clone());
     spec.aaa = Defense::from_level(target.aaa).unwrap();
@@ -545,7 +601,7 @@ fn mount_positions_scale_with_the_unit_to_real_size() {
 /// The spec of a mission with `target`, one enemy aircraft and Red 20 nm
 /// ahead.
 fn spec_with_enemy(target: &GroundTarget) -> MissionSpec {
-    use crate::mission::{Defense, Skill};
+    use crate::mission::Skill;
     let mut spec = MissionSpec::new(THEATER, AircraftId::F18);
     spec.ground_target = Some(target.stem.clone());
     spec.aaa = Defense::from_level(target.aaa).unwrap();

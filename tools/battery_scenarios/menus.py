@@ -498,9 +498,12 @@ def scenarios() -> list[Scenario]:
             # BMB-A1 (2026-11-15): 48 aircraft, 20 recovered stations and 4,792 weapon placements after the B-52 (71), B-2 (102) and F-117 (38) joined; tanks stay 233.
             # BMB-A2 (2026-11-15): 4,776 weapon placements, the B-2's four bay rows lose the designator bit 0x400 (B-2 102 to 86; designator pods 84 to 80).
             # F117-5 (2026-11-15): 4,784, the F-117's two bay rows take the Paveway II bombs (F-117 38 to 46).
-            # BMB-B1 and BMB-B2 (2026-11-15): 51 aircraft, 5,145 weapon and 249 tank placements after the B-1B (63), Tu-160 (70) and F-111F (228 weapon, 16 tank) joined with their station corrections (designator bit cleared on the B-1B bay rows and the F-111F wing rows; BMB-B1 alone measured 5,173).
-            # BMB-C1 and BMB-C2 (2026-11-15): 54 aircraft, 22 recovered stations, 5,447 weapon and 257 tank placements after the Tu-26 (129), Tu-95 (36) and Su-34 (137 weapon, 8 tank) joined with their station corrections (Tu-26 bay row and Tu-95 pylon row flags, the Tu-26 glove pairs cut to two, the Tu-95 pylon row AS-16 only); 276 Cheat-only and 82 designator pod placements.
-            expect=[r"ordnance audit: 54 aircraft, 22 recovered weapon stations, 5447 weapon placements, 257 tank placements, 82 weapon and 9 tank records; passed"],
+            # B2-5 (2026-11-15): 4,776, the B-2's two Mk 82 bay rows refuse four stores that do not fit (B-2 86 to 78).
+            # B52-5 (2026-11-15): 4,746 and 21 recovered stations, the B-52's bay rows take five stores and its new pylon row 22 less five (B-52 71 to 33).
+            # Batch A integration (2026-11-15): 4,732, measured. The B-2 bays refuse four stores (B-2 86 to 78) and the B-52 bays, folded onto the shared grid, hold three stores (B-52 71 to 27); the slices alone gave 4,776 and 4,746, not added.
+            # BMB-B1/B2 (2026-11-15): 51 aircraft and 249 tank placements after the B-1B, Tu-160 and F-111F joined (F-111F 16 tank); the integration of batches A and B is dated in ordnance_audit.rs.
+            # Bomber batches A, B and C integration (2026-11-16): 54 aircraft, 23 recovered stations, 5,395 weapon, 257 tank, 278 Cheat-only and 82 designator pod placements, measured: 5,093 plus the Tu-26 (129), Tu-95 (36) and Su-34 (137 weapon, 8 tank) joined with their BMB-C2 station corrections (the batch's own 5,447 was from the pre-round-2 5,145; not added). Dated in ordnance_audit.rs.
+            expect=[r"ordnance audit: 54 aircraft, 23 recovered weapon stations, 5395 weapon placements, 257 tank placements, 82 weapon and 9 tank records; passed"],
             notes="All reviewed source stations, compatible supported weapons/tanks, empty defaults and accepted-load restoration. The audit fails when a supported weapon or tank record is missing or a pinned count moves (ordnance_audit.rs).",
         )
     )
@@ -822,6 +825,12 @@ def scenarios() -> list[Scenario]:
         ("f5e", "lobby-ordnance-laser", True, True, True),
         ("mf1", "lobby-ordnance-laser", True, True, True),
         ("tornado", "lobby-ordnance-laser", False, True, True),
+        # Slice F117-9: the F-117A has the PAVESPK.SEE row (its IRADS turret), so no warning, and its
+        # sensor helper line reads "Built-in IRADS" (measured, not assumed).
+        ("f117", "lobby-ordnance-laser", False, True, True),
+        # Slice B2-9: the B-2's decoded wing mask admits a laser store (the GBU-27 rows) and its record has
+        # the Pave Spike sensor row (`PAVESPK.SEE`, no pod body), so there is no warning, as the F-15E's.
+        ("b2", "lobby-ordnance-laser", False, True, True),
     ):
         out.append(
             Scenario(

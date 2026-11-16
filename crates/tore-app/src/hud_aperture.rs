@@ -209,11 +209,42 @@ pub fn mask(source: &Sprite, id: AircraftId) -> Vec<u8> {
         // Tu-95 item 10): the whole picture, as the B-52.
         | AircraftId::Tu26
         | AircraftId::Tu95 => ((1280, 490), &[(0, 0), (1279, 0), (1279, 489), (0, 489)]),
-        // Bomber batch A (BMB-A1, 2026-11-15): the F-117 (~F117H.PIC) has a
-        // cockpit picture of its own, whose glass has not been measured. No
-        // expected size, so the aperture fails closed (an empty mask) until
-        // its cockpit slice measures a polygon.
-        AircraftId::F117 => ((0, 0), &[]),
+        // F-117 (F117-7, 2026-11-15): `F117.HUD` and the cockpit art
+        // `~F117H.PIC` (1673 x 508, John decision 28, opinionated). BMB-A1
+        // left this arm failing closed. The art has no combiner: its
+        // transparent area is three panes, a left and a right one (about 189,000
+        // pixels each, divided from the middle by the two canopy bow posts) and
+        // the windscreen between the posts. A thin bar closes the windscreen at
+        // y 128 and an open sky strip lies above it (x 735 to 940, its own
+        // pane); the console's vent block and two teeth break the windscreen's
+        // lower edge from y 346. The HUD is the windscreen's: the polygon runs
+        // one pixel outside it (the bar's lower edge at y 128, the bow posts'
+        // inner edges, x 711 to 725 on the left and 949 to 963 on the right,
+        // widening from y 141 to 224 and narrowing again to y 308), and its
+        // foot at y 367 lets the opaque art trim the console. It covers 56,562 of
+        // the windscreen's 56,572 pixels. Measured on the imported art,
+        // `the_f117_glass_is_the_windscreen_of_the_imported_art`. Fitted.
+        AircraftId::F117 => (
+            (1673, 508),
+            &[
+                (724, 128),
+                (950, 128),
+                (950, 141),
+                (963, 224),
+                (963, 262),
+                (962, 272),
+                (962, 300),
+                (961, 308),
+                (961, 367),
+                (713, 367),
+                (713, 308),
+                (712, 300),
+                (712, 272),
+                (711, 262),
+                (711, 224),
+                (724, 141),
+            ],
+        ),
         // B-2 (B2-7, 2026-11-15): `B2.HUD` and the cockpit art `~B2H.PIC`
         // (1394 x 508, John decision 17, opinionated). The art has no
         // combiner: its transparent area is three panes divided by the left
@@ -768,8 +799,7 @@ mod tests {
     }
 
     /// B2-7: the B-2's own 1394x508 picture has a measured glass polygon (the
-    /// main window between the two struts); any other size fails closed, and
-    /// the F-117's glass is still unmeasured.
+    /// main window between the two struts); any other size fails closed.
     #[test]
     fn the_b2_glass_is_measured_for_its_1394_picture() {
         let source = transparent(1394, 508);
@@ -795,7 +825,132 @@ mod tests {
                 .iter()
                 .all(|v| *v == 0)
         );
+        // The F-117's glass is keyed to its own 1673x508 picture, not this one.
         assert!(mask(&source, AircraftId::F117).iter().all(|v| *v == 0));
+    }
+
+    /// F117-7: the F-117's own 1673x508 picture has a measured glass polygon
+    /// (the windscreen between the two bow posts); any other size fails
+    /// closed.
+    #[test]
+    fn the_f117_glass_is_measured_for_its_1673_picture() {
+        let source = transparent(1673, 508);
+        let f117 = mask(&source, AircraftId::F117);
+        assert_eq!(f117.len(), 1673 * 508);
+        let at = |x: usize, y: usize| f117[y * 1673 + x];
+        // Inside: the middle of the windscreen, beside the HUD's centre.
+        assert_eq!(at(837, 250), 1);
+        assert_eq!(at(740, 340), 1);
+        // Outside: the sky strip above the bar, the left and right panes
+        // beyond the bow posts, below the console foot.
+        assert_eq!(at(837, 100), 0);
+        assert_eq!(at(300, 250), 0);
+        assert_eq!(at(1400, 250), 0);
+        assert_eq!(at(837, 400), 0);
+        // An opaque art pixel inside the polygon stays out of the glass.
+        let mut framed = transparent(1673, 508);
+        framed.rgba[(250 * 1673 + 837) * 4 + 3] = 255;
+        assert_eq!(mask(&framed, AircraftId::F117)[250 * 1673 + 837], 0);
+        // A 1394x508 picture is not the F-117's: fail closed.
+        assert!(
+            mask(&transparent(1394, 508), AircraftId::F117)
+                .iter()
+                .all(|v| *v == 0)
+        );
+    }
+
+    /// Transparent pixels of the retail `~F117H.PIC`'s windscreen and the
+    /// mask's coverage of them (F117-7).
+    const F117_WINDSCREEN_PIXELS: usize = 56_572;
+    const F117_GLASS_PIXELS: usize = 56_562;
+
+    /// Retail-reading (skips without an install): the polygon on the real
+    /// `~F117H.PIC` covers the windscreen almost whole, never an opaque
+    /// pixel, and neither of the two side panes nor the sky strip above the
+    /// bar.
+    #[test]
+    fn the_f117_glass_is_the_windscreen_of_the_imported_art() {
+        let root = std::env::var_os("TORE_GAME_DIR").map_or_else(
+            || {
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../gameassets/fighters-anthology")
+            },
+            std::path::PathBuf::from,
+        );
+        let Ok(media) = tore_import::MediaSource::detect(&root) else {
+            eprintln!("skipped: no retail install at {}", root.display());
+            return;
+        };
+        let Ok(library) = media.archive("FA_1.LIB") else {
+            eprintln!("skipped: no retail FA_1.LIB");
+            return;
+        };
+        let name = AircraftId::F117.cockpit();
+        assert_eq!(name, "~F117H.PIC");
+        let pic = tore_formats::Pic::parse(&library.read(name).unwrap()).unwrap();
+        assert_eq!((pic.width, pic.height), (1673, 508));
+        let source = Sprite {
+            width: pic.width,
+            height: pic.height,
+            rgba: pic.rgba(&[[0; 3]; 256]),
+            glyphs: vec![],
+        };
+        let mask = mask(&source, AircraftId::F117);
+        let (width, height) = (source.width, source.height);
+        let flood = |start: usize, allowed: &dyn Fn(usize) -> bool| -> Vec<bool> {
+            let mut seen = vec![false; width * height];
+            let mut todo = vec![start];
+            while let Some(at) = todo.pop() {
+                if seen[at] || !allowed(at) {
+                    continue;
+                }
+                seen[at] = true;
+                let x = at % width;
+                if x > 0 {
+                    todo.push(at - 1);
+                }
+                if x + 1 < width {
+                    todo.push(at + 1);
+                }
+                if at >= width {
+                    todo.push(at - width);
+                }
+                if at + width < width * height {
+                    todo.push(at + width);
+                }
+            }
+            seen
+        };
+        let transparent_at = |at: usize| source.rgba[at * 4 + 3] == 0;
+        // The transparent panes: the windscreen, the sky strip above its bar,
+        // and one each side of the bow posts.
+        let window = flood(250 * width + 837, &transparent_at);
+        let strip = flood(60 * width + 837, &transparent_at);
+        let left = flood(250 * width + 300, &transparent_at);
+        let right = flood(250 * width + 1400, &transparent_at);
+        assert_eq!(
+            window.iter().filter(|v| **v).count(),
+            F117_WINDSCREEN_PIXELS,
+            "the posts and bar no longer close the windscreen"
+        );
+        assert!(!window[60 * width + 837] && !window[250 * width + 300]);
+        assert!(!window[250 * width + 1400]);
+        let covered = mask.iter().filter(|v| **v == 1).count();
+        assert_eq!(covered, F117_GLASS_PIXELS, "glass area moved");
+        for (at, covered_pixel) in mask.iter().enumerate() {
+            if *covered_pixel == 1 {
+                assert_eq!(source.rgba[at * 4 + 3], 0, "mask covers opaque art");
+                assert!(window[at], "mask leaves the windscreen at {at}");
+                assert!(
+                    !strip[at] && !left[at] && !right[at],
+                    "mask reaches another pane"
+                );
+            }
+        }
+        // Almost all of the windscreen is drawn.
+        assert!(covered * 100 >= F117_WINDSCREEN_PIXELS * 98);
+        let connected = flood(250 * width + 837, &|at| mask[at] == 1);
+        assert_eq!(connected.iter().filter(|v| **v).count(), covered);
     }
 
     /// Transparent pixels of the retail `~B2H.PIC`'s main window and the mask's

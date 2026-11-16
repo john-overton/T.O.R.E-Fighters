@@ -3522,6 +3522,36 @@ mod tests {
         }
     }
 
+    /// Slice B2-9: the B-2 Spirit is offered as the player's aircraft and,
+    /// because the AI can fly it, in every AI wing field. The identity the
+    /// mission flies is named exactly (`B2.PT`), never aliased to the F-117 or
+    /// the B-1B-shaped template it was authored from.
+    #[test]
+    fn the_b2_is_a_quick_mission_player_and_a_wing_choice() {
+        let mut q = full_catalog();
+        // The player's own list offers it by its selection key, B2.PT.
+        let player = q
+            .aircraft_files
+            .iter()
+            .position(|f| f == AircraftId::B2.selection_key())
+            .unwrap();
+        q.apply(6, player);
+        assert_eq!(q.player(), Some(AircraftId::B2));
+        // The AI's list offers it too, in every wing field.
+        for field in AI_AIRCRAFT_FIELDS {
+            let index = q.ai_choice(AircraftId::B2).unwrap();
+            q.apply(field, index);
+            assert_eq!(q.wing_aircraft(field), Some(AircraftId::B2));
+        }
+        // The mission the draft flies carries the B-2 as the player and in
+        // every wing, and never another aircraft.
+        let spec = q.mission_spec().unwrap();
+        assert_eq!(spec.wings[0].aircraft, AircraftId::B2);
+        for wing in spec.wings.iter().skip(1) {
+            assert_eq!(wing.aircraft, AircraftId::B2);
+        }
+    }
+
     /// Slice GRI-9: the Saab Gripen is offered as the player's aircraft and,
     /// because the AI can fly it, in every AI wing field. The identity the
     /// mission flies is named exactly (`GRIPEN.PT`), never aliased to another
@@ -3665,6 +3695,58 @@ mod tests {
         for wing in spec.wings.iter().skip(1) {
             assert_eq!(wing.aircraft, AircraftId::Tornado);
         }
+    }
+    /// F117-9 (2026-11-15): the F-117A is offered as the player's aircraft and
+    /// in every AI wing field, by its own selection key, and a draft carries it
+    /// as the player and in every wing. It never stands in for another
+    /// aircraft, and the stealth night rule keys on the same `F117.PT`.
+    #[test]
+    fn the_f117_is_a_quick_mission_player_and_a_wing_choice() {
+        let mut q = full_catalog();
+        assert_eq!(AircraftId::F117.selection_key(), "F117.PT");
+        let player = q
+            .aircraft_files
+            .iter()
+            .position(|f| f == AircraftId::F117.selection_key())
+            .unwrap();
+        assert_eq!(q.aircraft_names[player], "F-117A Nighthawk");
+        q.apply(6, player);
+        assert_eq!(q.player(), Some(AircraftId::F117));
+        for field in AI_AIRCRAFT_FIELDS {
+            let index = q.ai_choice(AircraftId::F117).unwrap();
+            assert_eq!(q.values(field)[index], "F-117A Nighthawk");
+            q.apply(field, index);
+            assert_eq!(q.wing_aircraft(field), Some(AircraftId::F117));
+        }
+        let spec = q.mission_spec().unwrap();
+        assert_eq!(spec.wings[0].aircraft, AircraftId::F117);
+        for wing in spec.wings.iter().skip(1) {
+            assert_eq!(wing.aircraft, AircraftId::F117);
+        }
+        // The retail night rule's pair is the F-117 and the B-2, by file name,
+        // and the draft's spec wakes it at night whether the F-117 is the
+        // player's or only a friendly AI wing's (the enemy's never counts).
+        assert!(
+            tore_formats::quick_template::tables::NIGHT_STEALTH_AIRCRAFT
+                .contains(&AircraftId::F117.pt())
+        );
+        let mut night = spec.clone();
+        night.condition = tore_world::mission::Condition::Night;
+        assert!(tore_world::surface::resolve::night_stealth(&night));
+        night.wings[0].aircraft = AircraftId::F18;
+        night.wings[1].count = 2;
+        assert!(
+            tore_world::surface::resolve::night_stealth(&night),
+            "an AI wing's F-117 counts"
+        );
+        night.wings[1].aircraft = AircraftId::F18;
+        night.wings[2].aircraft = AircraftId::F18;
+        assert!(!tore_world::surface::resolve::night_stealth(&night));
+        night.wings[3].aircraft = AircraftId::F117;
+        assert!(
+            !tore_world::surface::resolve::night_stealth(&night),
+            "the enemy's F-117 does not"
+        );
     }
     #[test]
     fn the_vertical_lifters_lead_wingmen_in_the_air_and_off_the_ground() {

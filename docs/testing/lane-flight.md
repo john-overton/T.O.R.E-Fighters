@@ -176,6 +176,13 @@ bomber's climb on a constant equivalent airspeed, its pitch held by a speed inte
 `PROBE_TURN_MACH`. Evidence: the
 [variety flight review](../formats/aircraft-variety.md#b-2-flight-review-b2-8-2026-11-15).
 
+Update (F117-8, 2026-11-15): the F-117A (`f117`) joins the liftoff, retail-stall and approach
+scenarios of `flight.py` (it was already in `VARIETY_AIRCRAFT`): fitted windows 155 to 185 kt
+liftoff and 150 to 180 kt approach, recorded 177.2 and 166.2 kt at the 52,000 lb default
+load, an internal fuel of 18,500 lb (the approach flies 65 percent, 12,025 lb) and the
+ordinary takeoff allowance. Evidence: the
+[F-117 flight review](../formats/aircraft-variety.md#f-117-flight-review-f117-8-2026-11-15).
+
 `flight-variety-gcurve-*` sweeps the full-stick G limit of the seven transports
 and airliners from 100 to 750 kt at 5,000 ft (`--maneuver gcurve`). Once the
 limit has passed 1.4 G it must not fall below 1.3 G, through the top speed and
@@ -233,6 +240,8 @@ rule](../spec/ordnance-presentation.md#novelty-bombs-are-cheat-only)).
 | `a2g-harm-bore` | Over `~QVRDRI` (seed 4, heavy defenses): an F-4G's AGM-88 with nothing designated, at an SA-6 battery's Straight Flush at ace and at novice experience | The HUD cue lists several emitters with the radar as the BORE candidate; the HARM leaves in BORE at it; the ace radar shuts down within 10 nm and the HARM keeps homing, locked, and kills it; the novice radar stays on and dies |
 | `a2g-harm-page` | The same F-4G on the HARM page (M), T to the Straight Flush | The designation turns the cue to CUED; the HARM leaves in CUED at the radar and kills it |
 | `a2g-antiship` | Over `~QUSFLT`: an F/A-18D's AGM-84A and a Rafale's AM-39 at the Krivak designated on the A-G page | Launched midcourse at the Krivak, the seeker goes active on it and it is hit |
+| `a2g-antiship-b52` (B52-6, 2026-11-15) | Over `~QUSFLT`: two AGM-84E from the B-52's underwing pylons (`--station 1 --count 2`) at the Krivak designated on the A-G page through the B-52's radar | Designated, launched at the Krivak, the ship is hit |
+| `flight-b52-tail-gun` (B52-6, 2026-11-15) | `--aircraft f22 --probe-enemy-aircraft b52 --probe-enemy-skill ace --probe-geometry rear --separation 1 --probe-guns --ai-probe-ticks 3000`: a scripted F-22 closes on two AI B-52s from behind | The debrief's `enemy_gun=hits/shots` shows the B-52's slewed M61 firing astern and reaching the F-22 (shots above zero, hits above zero) |
 | `a2g-sarh` | Over `~QUCOL`: a MiG-23's AS-7 on a tank designated on the A-G page, then the same with the A-G page turned off two seconds after launch | On the track it kills its tank, never unguided; with the page off it loses its target for good (status Lost, unguided) and the tank is not hit |
 | `a2g-sarh-uncued` | A MiG-23 AS-7 released at 0.5 seconds with no A-G track; the page opens at 3 seconds and designation follows | Initial targetless Search without permanent disablement, then Locked on later illumination; `--attack sarh-uncued` uses ordinary player controls |
 
@@ -355,6 +364,14 @@ adds order kinds.
 | `ai-strike-rockets-popup`, `ai-strike-rockets-dive` | An A-4E's LAU-61 pop-up and dive at skill 2 on `~QUCOL` | Rockets released, within the circle limits with 250 ft of rocket spread |
 | `ai-strike-snakeye` | An A-4E's Mk 82 Snakeye laydown at skills 1 and 2 | Released under 1,000 ft with a lead on the column, within the circle limits |
 | `ai-strike-heavy-level` | A C-130 with an added bay of eight Mk 82 on `~QUFACT`, `--mission-altitude 10000`, starting at 7,000 ft 8 nm out | Released at 9,500 ft or more (the floor is the mission height, not the 5,000 ft base), no lead on the standing factory |
+| `ai-strike-f117` (slice F117-9, 2026-11-15) | An F-117A on a GBU-27 from the left bay station against the Ukraine armored column (`--aircraft f117 --load PAVEWA3 --station 0`), then as a Quick Mission wingman on the factory (`--quick-wing`) | PROFILE level only (no dive, no pop-up), released at 4,500 to 5,500 ft, the bomb guiding on the F-117's own IRADS spot, 150 ft or less from the tank and the tank destroyed (the first run), the wingman given the Strike role (the second), EGRESS, not lost |
+| `ai-strike-heavy-level` update (B2-9, 2026-11-15) | The same run | Its eight bombs now leave as a stick (a quarter second apart), not one a pass |
+| `ai-strike-b2-stick` (B2-9) | An AI B-2 (Heavy) on `~QUCOL` at 20,000 ft, 12 nm out, 32 Mk 82 in the left bay | Eight releases 0.25 s apart from the grid's first eight places (the new `ai-strike: ORIGIN` lines: right, up and forward of the aircraft), all inside the left opening, no two from one place, release above the 15,000 ft threat floor, an impact, egress, not lost |
+| `ai-strike-b2-climb` (B2-9) | The same B-2 starting at 5,000 ft 30 nm out | Releases at 9,000 ft or more, never below 4,000 ft above the ground, an impact, egress, not lost |
+| `ai-strike-b2-paveway` (B2-9) | The B-2's Paveway III row | The release leaves the left bay's first Paveway place (-7.28, -1.79, 6.67), kills the tank, egress |
+| `a2g-release-origin-b2` (B2-6) | The human trigger on the B-2's four bay rows (`--a2g-run --attack release`, 12 presses a Mk 82 row, 4 a Paveway row) | Each release leaves where it hangs: outermost first, alternating sides, front row before back, bottom tier first |
+| `a2g-laser-b2` (B2-6) | A GBU-27 from the left bay at 20,000 ft on the B-2's own laser spot | Guides to within a second of the ground, kills the tank |
+| `flight-livefire-b2-slot1` to `slot4`, `flight-countermeasures-b2` (B2-6) | `--live-fire --aircraft b2`, `STATIONS["b2"] = [32, 32, 0, 0]` | One Mk 82 a slot (the empty Paveway slots fall to the sister bay), 30 chaff and 30 flares |
 | `ai-strike-offset` | Level and dive Mk 82 passes at skill 2 starting 1,000 and 3,000 ft off the attack line (`--offset`) | The first release on pass 1 (the sideways law converges on the first pass) |
 | `ai-strike-lead-dive`, `ai-strike-lead-level` | John's comparison: the same A-4E Mk 82 dive (level) on the moving column `~QUCOL` and the standing factory `~QUFACT` at every skill | A lead on the moving target and none on the standing one, each within the circle limits; the miss and kill of each run read side by side |
 
@@ -997,3 +1014,16 @@ Run both with `python3 tools/battery.py --scenario '*target-select' --jobs 4
 --windows 1 --profile <private-import> --keep-data`. The battery wraps windows
 with `tools/agent-run.sh`. See the
 [target-selection specification](../spec/radar.md#target-selection-keys).
+
+Update (B2-5, 2026-11-15): the B-2's bay sweep (`bay-sweep.csv`, 8 values) joins `flight-animation-b2`
+(the fitted doors: the belly polygon cut open and no lining at 0, 10 lining faces, a vertex on each
+of the four hinge lines, free edges `leaf * sin(90 degrees * value)` below the door plane). New scenarios:
+`flight-bay-fire-b2-row5` and `-row6` (the one-press release through the B-2's two Mk 82 bays),
+`flight-bay-ripple-b2` (16 presses: the bays alternate, each empties its bottom tier first, front to
+back; `TORE_STORES_PREVIEW_PRESSES`), `bay-b2-0`, `-0.5` and `-1` (the `--flight-bay` frames) and
+`render-b2-bay-clearance` (headless: the default 64 Mk 82 clear the doors, ends, sloped roof and top skin by
+at least 0.05 ft with the doors open, and no two touch).
+
+Update (B2-5, 2026-11-15): the B-2's default load is the two Mk 82 bays alone (64 bombs, 32,000 lb), so
+`flight-liftoff-b2` records 155.2 kt after 7,232 ft (was 158.1 kt) and `flight-approach-b2` 167.5 kt (was 166.2 kt);
+the windows (140 to 165 kt and 140 to 170 kt) are unchanged.

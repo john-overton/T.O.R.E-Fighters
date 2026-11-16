@@ -343,7 +343,34 @@ impl Loadout {
             })
             .sum()
     }
+    /// A bay holds one of its two rows, not both ([`super::bays::alternative`],
+    /// the B-2's Mk 82 and Paveway III rows): loading `slot` empties the
+    /// other row of its bay (its quantity goes; the station keeps its count, as a
+    /// station unloaded in the editor does).
+    fn clear_bay_alternative(&mut self, slot: usize) {
+        let Some(row) = self
+            .configuration
+            .hardpoint_slots
+            .iter()
+            .position(|s| *s == Some(slot))
+        else {
+            return;
+        };
+        if self.quantities[slot] == 0 {
+            return;
+        }
+        if let Some(Some(other)) = super::bays::alternative(self.aircraft, row).map(|other| {
+            self.configuration
+                .hardpoint_slots
+                .get(other)
+                .copied()
+                .flatten()
+        }) {
+            self.quantities[other] = 0;
+        }
+    }
     fn clear_tank_on_weapon_slot(&mut self, slot: usize) -> Result<()> {
+        self.clear_bay_alternative(slot);
         for tank in &mut self.configuration.tanks {
             if self.configuration.hardpoint_slots.get(tank.hardpoint) == Some(&Some(slot)) {
                 tank.quantity = 0;
@@ -525,6 +552,24 @@ impl Loadout {
             // One pod a station, whatever the row's own capacity and weight
             // class allow (the F-4B's centreline row holds four Sidewinders).
             .min(if live::is_gun_pod(w) { 1 } else { i32::MAX })
+            // A bay's grid holds what fits under its roof (the B-2's: four
+            // tiers of Mk 82, one tier of Paveway III).
+            .min(self.grid_limit(slot, w))
+    }
+    /// The most stores of `w` the gridded bay at `slot` holds; no limit
+    /// elsewhere.
+    fn grid_limit(&self, slot: usize, w: &Weapon) -> i32 {
+        let Some(station) = self.configuration.stations.get(slot) else {
+            return i32::MAX;
+        };
+        match (station.rack.grid(), station.rack.grid_ceiling()) {
+            (Some(floor), Some(ceiling)) => i32::from(super::hardpoints::grid_capacity(
+                super::store_sizes::StoreSize::of_weapon(w),
+                floor,
+                ceiling - station.mount[1],
+            )),
+            _ => i32::MAX,
+        }
     }
     /// How many of a designator pod station `slot` takes: one where the
     /// retail equipment rule allows it (a pod station, flag 0x400, within
@@ -731,6 +776,23 @@ impl Loadout {
                 return Err(super::invalid(
                     "This store is available for setup only; its flight behavior is not implemented yet.",
                 ));
+            }
+        }
+        // A bay holds one of its two rows (the B-2's Mk 82 or Paveway III).
+        for (row, slot) in self.configuration.hardpoint_slots.iter().enumerate() {
+            if let Some(slot) = slot
+                && self.quantities[*slot] > 0
+                && let Some(Some(other)) =
+                    super::bays::alternative(self.aircraft, row).map(|other| {
+                        self.configuration
+                            .hardpoint_slots
+                            .get(other)
+                            .copied()
+                            .flatten()
+                    })
+                && self.quantities[other] > 0
+            {
+                return Err(super::invalid("A bay holds one of its two rows, not both."));
             }
         }
         if self.configuration.tanks.len() != self.tank_hardpoints.len() {

@@ -34,12 +34,18 @@ AIRCRAFT = re.compile(
 # weapon count here matches any number, and 222 Cheat-only placements stay as measured.
 # BMB-A1 (2026-11-15): 48 aircraft, 20 recovered stations (the B-52's two empty bay rows) and
 # 240 Cheat-only placements after the B-52, B-2 and F-117 joined; tank placements stay 233.
-# BMB-B1 (2026-11-15): 51 aircraft and 249 tank placements after the B-1B, Tu-160 and F-111F
-# joined (the F-111F's wing rows take 16 tank placements); 258 Cheat-only placements.
-# BMB-C1 and BMB-C2 (2026-11-15): 54 aircraft, 22 recovered stations and 257 tank placements after
-# the Tu-26, Tu-95 and Su-34 joined (the Su-34's two 0x07e5 rows take 8 tank placements); 276
-# Cheat-only placements.
-AUDIT = re.compile(r"^ordnance audit: 54 aircraft, 22 recovered weapon stations, \d+ weapon placements, "
+# B52-5 (2026-11-15): 21 recovered stations (the B-52's third empty bay row) and 242 Cheat-only
+# placements (the B-52's underwing pylon row).
+# Batch A integration (2026-11-15): 4,732 weapon placements measured after the B-2 bay refusals and
+# the B-52 fold onto the shared grid; the recovered (21) and Cheat-only (242) counts are unchanged.
+# BMB-B1 (2026-11-15): 51 aircraft and 249 tank placements after the B-1B, Tu-160 and F-111F joined
+# (the F-111F's wing rows take 16 tank placements). Batches A and B integration (2026-11-15): 5,093
+# weapon placements measured; 260 Cheat-only placements (242 plus batch B's 18); 21 recovered.
+# BMB-C1 and BMB-C2 (2026-11-15): 54 aircraft and 257 tank placements after the Tu-26, Tu-95 and Su-34
+# joined (the Su-34's two 0x07e5 rows take 8 tank placements). Batches A, B and C integration
+# (2026-11-16): 23 recovered stations (21 plus the Tu-26 and Tu-95 empty rows) and 278 Cheat-only
+# placements (260 plus batch C's 18).
+AUDIT = re.compile(r"^ordnance audit: 54 aircraft, 23 recovered weapon stations, \d+ weapon placements, "
                    r"257 tank placements, (\d+) weapon and 9 tank records; passed$", re.M)
 # Aircraft with a bomb or rocket station the A2G records fit; the cargo and
 # radar aircraft carry nothing.
@@ -79,9 +85,9 @@ def scenarios() -> list[Scenario]:
             args=["--validate-ordnance", "--no-audio"],
             timeout=600,
             expect=[
-                r"ordnance audit: 54 aircraft, 22 recovered weapon stations, \d+ weapon placements, 257 tank placements, \d+ weapon and 9 tank records; passed",
+                r"ordnance audit: 54 aircraft, 23 recovered weapon stations, \d+ weapon placements, 257 tank placements, \d+ weapon and 9 tank records; passed",
                 r"ordnance audit: 1 designator pods, \d+ pod placements, one to an aircraft, loaded and restored through the saved mission; passed",
-                r"ordnance audit: 2 novelty records, 276 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed",
+                r"ordnance audit: 2 novelty records, 278 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed",
             ],
             forbid=[r"PROBLEM"],
             check=catalog_problems,

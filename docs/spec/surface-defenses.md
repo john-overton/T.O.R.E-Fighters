@@ -312,6 +312,17 @@ Further rules, all retail data unless noted:
    turns every `<aaa>` into a ZSU-23 with skill 0. No F-117 or B-2 is flyable
    yet, so the rule is dormant; it keys on those aircraft names and wakes when
    they are imported.
+   Update (F117-6, 2026-11-15; John, decision 3 of the bomber batch, "switch it on
+   with the import", retail behaviour): the F-117 and the B-2 are flyable, so the
+   rule is live. It reads `F117.PT` and `B2.PT` against the pilots' wings
+   (`resolve::night_stealth`: condition night, any of friendly wings 1 to 3 with
+   planes in it, never an enemy wing) and applies in both places a creator defense
+   level reaches: a ground target's `<aaa>` slots and the enemy area defenses' gun
+   sites ([Which](#area-defenses)), in each case at skill 0 (novice). Nothing else
+   changed; a mission with neither aircraft, or by day, resolves as before and its
+   surface digest is the same. A wing the lobby fills per plane
+   (`plane_aircraft`) is not read: the rule is keyed on the wing's aircraft, as
+   retail's is on the wings.
 2. `<tank>`, `<afv>`, `<vehicle>`, `<small>`, `<hovercraft>`, `<destroyer>`,
    `<cruiser>`, `<carrier>` and `<cargo>` are always placed.
 3. A placeholder carrying the destroy-target flag (0x80) that fails its roll is

@@ -276,6 +276,39 @@ def checker(**kw) -> Callable[[str], list[str]]:
     return lambda output: probe_problems(output, **kw)
 
 
+B2_ACTOR = re.compile(r"^actor=(\d+) (\S+ [\d-]+) B2 activity=\S+ alive=\w+ rounds=(\d+) ", re.M)
+STORES_LINE = re.compile(r"^AI stores: actor=(\d+) .*? stations=\[(.*)\]$", re.M)
+SHOT_AT_STATION = re.compile(r"^AI probe attack: .* missiles=(\d+) gun_bursts=(\d+) gun_rounds=(\d+) ", re.M)
+
+
+def b2_no_air_to_air_checker() -> Callable[[str], list[str]]:
+    """The B-2 wing in a fight (slice B2-9): the probe's usual checks, and the B-2s carry no gun (rounds=0) and
+    nothing but Mk 82 and GBU-27 on their stations, so they fire no air-to-air shot; the player's own run
+    (also a B-2) fires no missile or gun burst either."""
+    base = checker()
+
+    def check(output: str) -> list[str]:
+        problems = base(output)
+        ids = {m.group(1) for m in B2_ACTOR.finditer(output)}
+        if not ids:
+            problems.append("no B-2 actor in the probe")
+        for m in B2_ACTOR.finditer(output):
+            if int(m.group(3)) != 0:
+                problems.append(f"{m.group(2)} (B-2) holds {m.group(3)} gun rounds")
+        for m in STORES_LINE.finditer(output):
+            if m.group(1) in ids:
+                names = re.findall(r"([A-Z0-9-]+) x\d+", m.group(2))
+                other = [n for n in names if n not in ("MK-82", "GBU-27")]
+                if other:
+                    problems.append(f"B-2 actor {m.group(1)} carries {other}")
+        shots = SHOT_AT_STATION.search(output)
+        if shots and (int(shots.group(1)), int(shots.group(2)), int(shots.group(3))) != (0, 0, 0):
+            problems.append(f"the B-2 player fired {shots.groups()} (missiles, gun bursts, gun rounds)")
+        return problems
+
+    return check
+
+
 DATALINK_LINE = re.compile(r"^t=(\d+) data link: (member|lock|unlock) plane=(\d+)(?: radar=(true|false)| target=(\d+))$", re.M)
 
 
@@ -866,6 +899,33 @@ def vertical_scenarios() -> list[Scenario]:
               "60, 40, 20) and the Yak-141 lands on the runway; every wingman leaves the taxiway.",
     ))
     return out
+
+
+# F117-9 (2026-11-15): the F-117A carries two GBU-27 and nothing that can hit an aircraft (no gun, no
+# air-to-air missile, no radar), so the AI never engages a fighter: its two stores are still in
+# the bays at the end of every fight, whoever it flew against and whether or not it was shot down.
+F117_ACTOR = re.compile(r"^actor=\d+ (\S+ \d-\d) F117 activity=(.*?) alive=(true|false) rounds=(\d+)", re.M)
+F117_ROUNDS = 2
+SHOTS = re.compile(r"^AI probe totals: .*? shots=(\d+) dropped=(\d+)", re.M)
+
+
+def f117_unarmed_problems(output: str, *, shots: int | None = None) -> list[str]:
+    """The usual checks, plus: every F-117 still carries both GBU-27 and never engaged. With `shots`
+    the whole fight's shot count (the F-117s' enemies included) is exactly that."""
+    problems = probe_problems(output)
+    actors = F117_ACTOR.findall(output)
+    if not actors:
+        problems.append("no F-117 in the actor list")
+    for label, activity, alive, rounds in actors:
+        if int(rounds) != F117_ROUNDS:
+            problems.append(f"{label} F117 ({activity}) has {rounds} rounds left, want {F117_ROUNDS}: it fired")
+    total = SHOTS.search(output)
+    if shots is not None:
+        if total is None:
+            problems.append("no 'AI probe totals' line")
+        elif int(total.group(1)) != shots:
+            problems.append(f"{total.group(1)} shots in the fight, want {shots}")
+    return problems
 
 
 def probe(name: str, args: list[str], *, ticks: int = 7200, timeout: float = 900, check=None, expect=None, outputs=None, notes: str = "") -> Scenario:
@@ -1543,6 +1603,19 @@ def scenarios() -> list[Scenario]:
                 "--probe-wing-only", "--probe-pavement"],
                 ticks=264000, timeout=2400, check=on_pavement(size-1),
                 notes="Two/four aircraft at merged Southampton or Spassk Dalniy, including the old second-half ID."))
+    # F117-9 (2026-11-15): the F-117A takes off from Southampton, climbs out, takes the land order and
+    # lands and parks on the pavement (no off-pavement tick). It lands at the AI's minimum level
+    # speed, about 224 kt (an F/A-18D's is 142 kt: the F-117 has no flap to lower that minimum);
+    # the check does not bound the speed (reported in docs/formats/aircraft-variety.md).
+    out.append(probe("merged-airfield-f117-wing2", [
+        "--theater", "FRA", "--ground-start", "14",
+        "--aircraft", "f117", "--probe-friendly-aircraft", "f117",
+        "--probe-wing-size", "2", "--maneuver", "takeoff",
+        "--probe-wing-order", "12000:land-selected", "--separation", "200",
+        "--probe-wing-only", "--probe-pavement"],
+        ticks=108000, timeout=1800, check=on_pavement(1),
+        notes="An AI F-117A at Southampton: takeoff, climb-out, land order, approach, final, rollout, "
+              "taxi clear and park, all on the pavement."))
     # An enemy ground start in single player (slice CL-R): Enemy Wing 1 parks
     # at Kharkiv (UKR 6, a Redfor field) while the player's wing leaves Odesa;
     # the AI pair must start on the ground and be flying at the end.
@@ -1863,6 +1936,50 @@ def scenarios() -> list[Scenario]:
                      notes="Tornado IDS (Clean) against Tornado IDS (Combat) in a 2 v 2 fight: "
                            "the Combat version's chaff and flares leave its BOZ-107."))
 
+    # 13j. The F-117A (slice F117-9): it has two GBU-27 and nothing for an aircraft, so no F-117
+    # engages anyone. All F-117 in a 2 v 2 fight (the player's own included): no shot is fired and
+    # the stores are untouched. Then against F-16Cs, which do shoot: the F-117s fire nothing, whether
+    # or not the F-16Cs bring them down.
+    out.append(Scenario(
+        name="ai-f117-quick-mission-2v2", lane="ai",
+        args=["--ai-probe-ticks", "7200", *fight(2, 2, "--aircraft", "f117",
+                                                 "--probe-friendly-aircraft", "f117",
+                                                 "--probe-enemy-aircraft", "f117",
+                                                 "--separation", "5", *attack), "--no-audio"],
+        timeout=900, expect=[r"AI probe totals:"],
+        check=lambda output: f117_unarmed_problems(output, shots=0),
+        notes="All F-117A: the player's wing and the enemy wing fly the F117.PT identity (two F404, no "
+              "radar, no gun, two GBU-27 in the bays) in a 2 v 2 fight: nobody engages, no shot, both "
+              "bombs still in every bay."))
+    out.append(Scenario(
+        name="ai-f117-vs-f16c-2v2", lane="ai",
+        args=["--ai-probe-ticks", "7200", *fight(2, 2, "--aircraft", "f117",
+                                                 "--probe-friendly-aircraft", "f117",
+                                                 "--probe-enemy-aircraft", "f16c",
+                                                 "--separation", "5", *attack), "--no-audio"],
+        timeout=900, expect=[r"AI probe totals:"],
+        check=lambda output: f117_unarmed_problems(output),
+        notes="F-117A against F-16C in a 2 v 2 fight: the F-16Cs fire (and may bring an F-117 down), "
+              "the F-117s fire nothing and keep both GBU-27 whatever happens."))
+
+    # 13j. The B-2 Spirit in a mission (slice B2-9, 2026-11-15): the strike class is Heavy (BMB-A1) with
+    # no override, the record has no air-to-air store and no gun, the Load Ordnance default is 64 Mk 82
+    # in the two bays. Against its own kind nobody can shoot; against Su-27s it must not fire anything
+    # (no air-to-air engagement) and does what a bomber does, which is fly. The strike itself is
+    # `ai-strike-b2-*` (ai_strike.py). The return to base is not registered: the AI B-2 does not land
+    # (docs/formats/aircraft-variety.md, "B-2 ordnance, missions, multiplayer and replay").
+    out.append(probe("b2-quick-mission-2v2", fight(2, 2, "--aircraft", "b2",
+                                                    "--probe-friendly-aircraft", "b2",
+                                                    "--probe-enemy-aircraft", "b2",
+                                                    "--separation", "5", *attack), ticks=7200,
+                     notes="All B-2: the player's wing and the enemy wing fly the B2.PT identity (four F118 "
+                           "class engines, bay Mk 82 default load, no gun, no air-to-air store) in a 2 v 2."))
+    out.append(probe("b2-vs-su27-2v2", fight(2, 2, "--aircraft", "b2",
+                                              "--probe-friendly-aircraft", "b2",
+                                              "--probe-enemy-aircraft", "su27",
+                                              "--separation", "5", *attack), ticks=7200,
+                     check=b2_no_air_to_air_checker(),
+                     notes="The B-2 wing against Su-27s: the B-2s fire nothing (no air-to-air store, no gun)."))
     # 14. The fixed acceptance probes.
     out.append(Scenario(name="ai-roster-probe", lane="ai", args=["--ai-roster-probe-ticks", "3600", "--no-audio"], timeout=1800))
     out.append(Scenario(name="ai-probe-matrix", lane="ai",

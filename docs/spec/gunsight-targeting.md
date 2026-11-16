@@ -100,3 +100,58 @@ head-look translation and fade. It is not a helmet-mounted display. Projection
 and clipping must remain finite during full bank, steep pitch, rearward targets,
 zoom and wide or tall windows. Off-HUD pippers are hidden, never clamped into a
 false aimpoint; the edge chevron belongs to the target, not the computed pipper.
+
+## Slewed gun mounts: the B-52's tail gun (B52-6, 2026-11-15)
+
+Implementation mode, **fitted**, an agent decision (the coordinator's first pass of
+2026-11-15 on the bomber batch: "a tail gun firing forward is a bug"). The record
+parts are spec-derived from the retail aircraft records; the split between forward and
+slewed mounts, the centre-line fire for a human and the HUD cue are fitted.
+
+**What the record says.** An aircraft's gun row carries four angle words, 182 units a
+degree: `slewH` and `slewP` (where the mount points at rest) and `slewLimitH` and
+`slewLimitP` (the half-arc either side). The B-52's M61 reads heading 32,760 (180
+degrees, astern), pitch 0 and 5,460 (30 degrees) each way. The Tu-26's `T23_1.JT`
+turret reads heading 32,760 with 30 degree arcs, and the Tu-95's three turrets read heading 32,760, pitches 0, +3,640 (20 degrees up, the
+dorsal turret) and -3,640 (20 degrees down, the ventral one), arcs 45 degrees in heading and 45, 5 and 5 degrees in pitch. Before this
+change nothing read these words: every aircraft gun fired along the nose, so the B-52's
+tail gun fired forward from the tail cone, 92 ft behind the reference point, through its own airframe.
+
+**The rule (every reader follows it, `tore_sim::combat::slew`).**
+
+- A mount whose heading word is zero is a **forward gun**. It fires along the nose,
+  exactly as before, whatever its pitch word says. (The helicopters' chain guns read a 20 degree
+  depression that has never been applied and still is not: honouring it would move every
+  helicopter's sight and hits.)
+- A mount with a heading is **slewed**. Its fire direction is the mount's rest
+  direction in the aircraft's frame: the nose turned by the heading (clockwise seen from
+  above, positive right) and then by the pitch (positive up). It turns, rolls and pitches
+  with the aircraft. The muzzle is still the record's mount point.
+- A gun station carries the slew only when it is an aircraft gun and the aircraft is not
+  the AC-130 (whose trained mounts have their own rules, [AC-130 linked guns](ac130-linked-guns.md)).
+  Every store, every pod and every forward gun carries the default, which is the nose line.
+
+**Who reads the direction.**
+
+| Reader | What it does with a slewed gun |
+| --- | --- |
+| The round (`State::release_round`: a human's trigger and an AI's alike) | leaves the muzzle along the rest direction; the shared dispersion cone is taken around it |
+| The hit model, live fire, rewind | nothing to change: they read the round's own position and direction |
+| The human's gunsight (HUD, the gunnery probe, the Load Ordnance gun check) | the 1,000 ft pipper and the radar lead are solved along the rest direction from the same muzzle (`Station::gun_view`); a forward gun gets its launcher back unchanged |
+| The HUD (`weapon_hud::draw_gun`) | reads `<rounds> M61` and `TAIL` where a forward gun reads `LCOS` (`SAFE` while unarmed). No pipper: the line is behind the glass |
+| A networked client's drawn rounds (`net::guns::gun_line`) | start at the mount and leave along the rest direction, as the host's do |
+| A recorded mission (replay) | the projectiles are the simulation's own, so they replay as fired |
+| The AI | see [AI gun employment](ai-gun-employment.md#slewed-guns-the-b-52s-tail-gun-b52-6-2026-11-15) |
+
+**Aiming (fitted, simple).** A human fires the tail gun along the mount's centre line, astern
+(the 30 degree arcs are not used by the human, no manual swing). There is no rear-view
+reticle in the game's rear views (F2 Back has no HUD), so the cue is the `TAIL` text and the tracers
+(every third round) going aft. The rounds do not carry the aircraft's own velocity (as for every gun), so the
+rounds' paths are the same as a forward gun's.
+
+**Tests.** `tore-sim`: `combat::slew::tests` (the record words, the forward mount's pitch ignored, the
+aft mount, the Tu-95 dorsal tilt, the arcs, the muzzle point in the mount's frame) and
+`combat::live::pair_tests` (`a_slewed_gun_fires_astern_and_a_forward_gun_does_not`,
+`a_forward_gun_keeps_the_nose_line_and_its_sight_view`,
+`a_slewed_guns_sight_view_points_astern_from_the_same_muzzle`). `tore-world`: `ai_wings::tail_gun_tests`.
+

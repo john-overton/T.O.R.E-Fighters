@@ -50,9 +50,108 @@ pub const B52_GUN: usize = 4;
 /// AN/ASG-21). The record carries 2,000, the Tu-95 and Tu-26 tail-gun rows'
 /// number.
 pub const B52_GUN_ROUNDS: i32 = 1_242;
+/// Where the B-52's tail gun hangs, record units (a third of a foot): on the
+/// centre line at the end of the drawn tail cone, 92 ft aft and 2 ft up
+/// (`B52.SH` y -138 and z 3 units at 2/3 ft a unit). The retail mount is
+/// (0, 20, -220), 73 ft aft, 19 ft ahead of the cone (B52-0). Fitted; John's
+/// decision 13, 2026-11-15 (B52-5).
+pub const B52_GUN_MOUNT: [i32; 3] = [0, 6, -276];
+/// The B-52's three internal bay rows (`B52.PT` rows 3, 5 and 6): the
+/// retail 12 stores and 16,600 lb class become the real bay's 27 bombs of
+/// 500 lb class (nine a row) and 7,000 lb a row, 21,000 lb in all (B52-5,
+/// opinionated, John's decision 7; the real bay is 27 bombs or 8 heavy
+/// stores, aircraftinformation.info). The row's default store goes: the bay
+/// starts empty.
+pub const B52_BAY_ROWS: [usize; 3] = [3, 5, 6];
+pub const B52_BAY_ITEMS: i32 = 9;
+pub const B52_BAY_CLASS: i32 = 70;
+/// The B-52's underwing pylon pair (decision 8): row 7, one pylon a wing (a
+/// wing row is always a pair), 17.3 ft out and 10.3 ft forward (the middle of
+/// the free span between the fuselage and the inboard engine pod and of the
+/// wing's chord there, measured, B52-0), store axis 1 ft under the wing's
+/// underside (3.8 ft up there). Capacity 18 a row (nine a wing) is opinionated
+/// (the real stub pylon takes 12 to 18, aircraftinformation.info). The weight
+/// class is 17,000 lb, not the 20,000 lb of B52-0's proposal (John's decision 8):
+/// a row's default weapon loads at its weight limit, and a saved load must equal
+/// the default count (`mission.rs`), so the class that holds the default 12
+/// Harpoons (1,380 lb each) and no more is 166 to 179; 20,000 lb would admit 14.
+/// Twelve is also the real figure (aircraftinformation.info: Harpoon 8 to 12
+/// a pylon pair). Mk 82 reaches 18 (9,000 lb) at this class. The flags are the bay row's bomb mask (`0x1100`), the pair bit and
+/// the base bit. The record holds the default 12 AGM-84E Harpoons, six a wing
+/// (John's decision 9).
+pub const B52_PYLONS: usize = 7;
+pub const B52_PYLON_FLAGS: i32 = 0x1105;
+pub const B52_PYLON_MOUNT: [i32; 3] = [52, 8, 31];
+pub const B52_PYLON_ITEMS: i32 = 18;
+pub const B52_PYLON_CLASS: i32 = 170;
+/// The default Harpoons, 12.
+pub const B52_PYLON_DEFAULT: i32 = 12;
+/// Stores the underwing pylon row refuses though its mask and weight class
+/// admit them: the 13.7 to 13.9 ft stores whose three rows of three, 1.05
+/// lengths apart, reach the flap strip and the wing's trailing edge (0.00 to
+/// 0.01 ft at capacity, measured with the pylon clearance report, B52-5,
+/// 2026-11-15): `AGM45.JT`, `AGM88.JT` (HARM class) and the three
+/// GBU-27 class (`GBU29.JT`, `GBU29P.JT`, `GBU30.JT`).
+pub const B52_PYLON_REFUSED: [&str; 5] =
+    ["AGM45.JT", "AGM88.JT", "GBU29.JT", "GBU29P.JT", "GBU30.JT"];
+/// Stores the B-52's bay rows refuse though the retail masks admit them,
+/// where the measured grid (the shared magazine grid of B2-5: 4 abreast at
+/// the span plus 0.03 ft capped at 1.3 ft, one long in an 8.67 ft slab, tiers
+/// up to a flat roof 6 ft over the belly plane, a 6 ft wide recess, stores
+/// hung by their shape's origin) leaves under 0.05 ft to a wall, the roof, the
+/// floor, a rail or post, or another store, or runs through one: the long
+/// stores, the 3 ft span missiles the 0x20 mask admits on rows 5 and 6, the
+/// Snakeye, and (since the fold onto the shared grid, whose 1.3 ft pitch is
+/// tighter than B52-5's span plus 0.15 ft) `GBU38.JT` and `RBK250.JT`, whose
+/// fins now touch their neighbours. Three stay (`MK82`, `MK82P3`, `FAB250`);
+/// measured with the bay clearance sweep, B52-5 and the batch A integration,
+/// 2026-11-15. See `docs/spec/stores-on-pylons.md`.
+pub const B52_BAY_REFUSED: [&str; 22] = [
+    "AGM45.JT",
+    "AGM84A.JT",
+    "AGM84E.JT",
+    "AGM88.JT",
+    "AM39.JT",
+    "AS16.JT",
+    "AT2.JT",
+    "CBU87.JT",
+    "CBU89.JT",
+    "FAB1000.JT",
+    "FAB500.JT",
+    "GBU29.JT",
+    "GBU29P.JT",
+    "GBU30.JT",
+    "GBU38.JT",
+    "MK20.JT",
+    "MK82AIR.JT",
+    "MK82HD.JT",
+    "MK82P.JT",
+    "MK84.JT",
+    "RBK250.JT",
+    "RBK500.JT",
+];
 /// The B-2's four internal bay rows (`B2.PT` rows 5 to 8, flags `0x1504`):
-/// [`adjust_defaults`] clears the designator bit `0x400` on them.
+/// [`adjust_defaults`] clears the designator bit `0x400` on them (BMB-A2) and
+/// the pair flag `0x4` (B2-5).
 pub const B2_BAY_ROWS: std::ops::Range<usize> = 5..9;
+/// The B-2's two Mk 82 rows (`B2.PT` rows 5 and 6, one a bay) and its two
+/// Paveway III rows (rows 7 and 8): the rows of one bay are alternatives
+/// ([`tore_sim::combat::bays::alternative`]).
+pub const B2_MK82_ROWS: std::ops::Range<usize> = 5..7;
+pub const B2_PAVEWAY_ROWS: std::ops::Range<usize> = 7..9;
+/// The stores the B-2's two Mk 82 rows (rows 5 and 6) refuse (B2-5, fitted,
+/// the 0.3 ft rule of the F-117's bays, measured with the doors open at each
+/// store's full count under the grid's ceiling): the three Paveway III class
+/// laser and JDAM bombs, whose 5.4 ft fins stand 0.9 to 1.2 ft through the roof
+/// and skin and 0.65 ft through the door planes on a row that is not hung
+/// low (they are the Paveway rows' stores), and the Mk 20 Rockeye (0.42 ft
+/// through the roof). The Paveway rows (7 and 8) refuse nothing: every store
+/// there clears the doors and the ends by 0.5 ft or more, bar the GBU-27
+/// class, whose fin tips stand 0.65 ft past the door planes on every row.
+pub const B2_MK82_REFUSED: [&str; 4] = ["GBU29.JT", "GBU29P.JT", "GBU30.JT", "MK20.JT"];
+/// A station's pair flag (`0x4`): a record at x mirrors to -x and its stores
+/// alternate sides.
+pub const PAIRED_BIT: i32 = 0x4;
 /// The designator bit of a station's flags (a targeting or laser pod may sit
 /// there, and a multi-store pod: `loading.rs`).
 pub const DESIGNATOR_BIT: i32 = 0x400;
@@ -253,6 +352,7 @@ pub fn tank_allowed(id: AircraftId, row: usize, name: &str) -> bool {
 /// mask (0x85) admits, as the F-14's glove-pylon rail does). The F-117's two bay
 /// rows refuse only [`F117_BAY_REFUSED`] (F117-5: the measured bay clearances
 /// leave every store the mask and [`extra_weapon`] admit clear of the doors).
+/// The B-2's two Mk 82 rows refuse [`B2_MK82_REFUSED`] (B2-5).
 /// The Tu-95's wing pylon row (row 8) refuses everything but `AS16.JT`
 /// (BMB-C2).
 pub fn weapon_allowed(id: AircraftId, row: usize, source: &str) -> bool {
@@ -268,6 +368,17 @@ pub fn weapon_allowed(id: AircraftId, row: usize, source: &str) -> bool {
             _ => true,
         },
         AircraftId::F117 => !(F117_BAY_ROWS.contains(&row) && F117_BAY_REFUSED.contains(&source)),
+        AircraftId::B2 => !(B2_MK82_ROWS.contains(&row) && B2_MK82_REFUSED.contains(&source)),
+        AircraftId::B52 => {
+            let refused = if row == B52_PYLONS {
+                &B52_PYLON_REFUSED[..]
+            } else if B52_BAY_ROWS.contains(&row) {
+                &B52_BAY_REFUSED[..]
+            } else {
+                &[]
+            };
+            !refused.contains(&source)
+        }
         // The Tu-95's wing pylons take the AS-16 and nothing else (BMB-C2):
         // the active-radar bit the Kh-15 needs also admits the Harpoon class.
         AircraftId::Tu95 => row != TU95_WING_PYLONS || source == "AS16.JT",
@@ -514,6 +625,7 @@ pub fn side_rail(id: AircraftId, rows: &mut Vec<Hardpoint>) {
         store: Some("AIM9M.JT".into()),
         count: 2,
         weight_class: 5,
+        slew: [0; 4],
     });
 }
 
@@ -788,15 +900,25 @@ fn default_signature(id: AircraftId) -> &'static [Signature] {
 ///   is closest in range but has no reviewed preset and would never switch on.
 /// - **B-52** (`B52.PT` row 4, the tail gun; BMB-A2, John's decision 13): the
 ///   row's round count is 1,242 in place of 2,000, the real H magazine
-///   ([`B52_GUN_ROUNDS`]). The gun keeps its row, mask, slew, weight class and
-///   position; moving the mount to the tail cone is the B-52 station slice's.
+///   ([`B52_GUN_ROUNDS`]). The gun keeps its row, mask, slew, weight class.
+///   Update (B52-5, 2026-11-15): its mount moves to the drawn tail cone
+///   ([`B52_GUN_MOUNT`]), the three bay rows are capped to the real bay and
+///   start empty ([`B52_BAY_ROWS`]), and one row is appended, row 7, the
+///   underwing pylon pair holding the default Harpoons ([`B52_PYLONS`]): the
+///   only place this function adds a row, guarded on the whole retail table
+///   like the rest (so the table has seven rows only while it is retail).
 /// - **B-2** (`B2.PT` rows 5 to 8, the four bay rows; BMB-A2, John's decision
 ///   16 and the coordinator's call on the BMB-A1 finding): the designator bit
 ///   `0x400` of the flags (`0x1504`) is cleared (`0x1104`), so no targeting or
 ///   laser pod and no multi-store pod is offered on a bomb bay (B7: the real
 ///   jet has no pod station). **Fitted** (agent decision 2026-11-15). The
 ///   default stores, counts, classes and positions stay; every other bit stays.
-///   This is the one place the function changes a row's flags.
+///   Update (B2-5, 2026-11-15, John's decision 21, as the F-22N's bay rows
+///   were corrected): the pair flag `0x4` is cleared too (`0x1100`), so a row
+///   is one bay, not a pair that mirrors to the other bay. The counts (32 Mk 82
+///   and 4 Paveway III a bay, the record's 64 and 8) and the weight classes
+///   stay: the real 80 Mk 82 does not fit the bay (docs/formats/aircraft-variety.md,
+///   "B-2 weapon bays").
 /// - **F-117** (`F117.PT` row 2): no default `F18.ECM`. The real F-117
 ///   carried no jammer (docs/formats/aircraft-variety.md, "F-117 sensors,
 ///   jammer and pods"), and the record's row also carried 30 chaff and 30
@@ -850,7 +972,7 @@ fn default_signature(id: AircraftId) -> &'static [Signature] {
 ///   GSh-30-1 magazine), and the fuselage row 6 moves up from -10 ft to -6 ft
 ///   ([`SU34_FUSELAGE_UP`]: the retail point is 1.7 ft under the main wheels'
 ///   bottoms). **Fitted** (agent decision).
-pub fn adjust_defaults(id: AircraftId, rows: &mut [Hardpoint]) {
+pub fn adjust_defaults(id: AircraftId, rows: &mut Vec<Hardpoint>) {
     if !is_retail(id, rows) {
         return;
     }
@@ -864,10 +986,27 @@ pub fn adjust_defaults(id: AircraftId, rows: &mut [Hardpoint]) {
             rows[MF1_CENTRELINE].store = None;
             rows[MF1_BELLY].count = MF1_BELLY_CAPACITY;
         }
-        AircraftId::B52 => rows[B52_GUN].count = B52_GUN_ROUNDS,
+        AircraftId::B52 => {
+            rows[B52_GUN].count = B52_GUN_ROUNDS;
+            rows[B52_GUN].position = B52_GUN_MOUNT;
+            for row in B52_BAY_ROWS {
+                rows[row].count = B52_BAY_ITEMS;
+                rows[row].weight_class = B52_BAY_CLASS;
+                rows[row].store = None;
+            }
+            rows.push(Hardpoint {
+                location: 4,
+                flags: B52_PYLON_FLAGS,
+                position: B52_PYLON_MOUNT,
+                count: B52_PYLON_ITEMS,
+                weight_class: B52_PYLON_CLASS,
+                store: Some("AGM84E.JT".into()),
+                slew: [0; 4],
+            });
+        }
         AircraftId::B2 => {
             for row in &mut rows[B2_BAY_ROWS] {
-                row.flags &= !DESIGNATOR_BIT;
+                row.flags &= !(DESIGNATOR_BIT | PAIRED_BIT);
             }
         }
         AircraftId::F117 => rows[F117_JAMMER].store = None,
@@ -923,6 +1062,43 @@ pub const TORNADO_CENTRELINE: usize = 5;
 /// record keeps its own default) and on the identity; repeated application
 /// is a no-op. Applied by `tore_sim::combat::hardpoints::default_records`.
 pub fn default_counts(id: AircraftId, rows: &mut [Hardpoint]) {
+    if id == AircraftId::B2 {
+        // The B-2's two Paveway III rows start empty (B2-5, John's decision
+        // 21): a bay holds the Mk 82 or the Paveway III, not both, and the
+        // Mk 82 rows are the default. The rows keep their store (the mask
+        // admits the GBU-27 only as the row's own default), capacity and
+        // position, so Load Ordnance still offers the Paveway III.
+        for row in B2_PAVEWAY_ROWS {
+            if let Some(row) = rows.get_mut(row)
+                && row.store.as_deref() == Some("PAVEWA3.JT")
+                && row.location == 3
+                && row.flags == 0x1100
+            {
+                row.count = 0;
+            }
+        }
+        return;
+    }
+    // The B-52's pylon row (B52-5, John's decision 9) holds 12 Harpoons of
+    // its 18: six a wing. The row is the one `adjust_defaults` appended.
+    if id.source() == AircraftId::B52
+        && let Some(row) = rows.get_mut(B52_PYLONS)
+        && (
+            row.location,
+            row.flags,
+            row.position,
+            row.count,
+            row.weight_class,
+        ) == (
+            4,
+            B52_PYLON_FLAGS,
+            B52_PYLON_MOUNT,
+            B52_PYLON_ITEMS,
+            B52_PYLON_CLASS,
+        )
+    {
+        row.count = B52_PYLON_DEFAULT;
+    }
     if id.source() != AircraftId::Tornado {
         return;
     }
@@ -1055,6 +1231,7 @@ pub fn append(id: AircraftId, rows: &mut Vec<Hardpoint>) {
         count,
         weight_class,
         store: None,
+        slew: [0; 4],
     };
     match id {
         AircraftId::F15 => {
@@ -1103,6 +1280,7 @@ mod tests {
                     store: Some(s.3.into()),
                     count: s.4,
                     weight_class: s.5,
+                    slew: [0; 4],
                 })
                 .collect();
             let mut rows = original.clone();
@@ -1139,6 +1317,7 @@ mod tests {
                 store: Some(s.3.into()),
                 count: s.4,
                 weight_class: s.5,
+                slew: [0; 4],
             })
             .collect();
         append(AircraftId::F15, &mut rows);
@@ -1225,6 +1404,7 @@ mod tests {
                     store: Some(s.3.into()),
                     count: s.4,
                     weight_class: s.5,
+                    slew: [0; 4],
                 })
                 .collect::<Vec<_>>()
         };
@@ -1386,6 +1566,7 @@ mod tests {
             store: Some(store.into()),
             count,
             weight_class,
+            slew: [0; 4],
         };
         let retail = vec![
             row(1, 0x8, [0, 0, 0], "VIS340.SEE", 1, 0),
@@ -1428,6 +1609,7 @@ mod tests {
             store: (!store.is_empty()).then(|| store.into()),
             count,
             weight_class,
+            slew: [0; 4],
         }
     }
 
@@ -1799,22 +1981,55 @@ mod tests {
         adjust_defaults(AircraftId::B52, &mut rows);
         let mut expected = key(&retail);
         expected[B52_GUN].4 = 1_242;
+        // B52-5 (2026-11-15): the gun moves to the tail cone, the three bay
+        // rows are capped and start empty, and row 7 is the pylon pair with
+        // the Harpoons.
+        expected[B52_GUN].2 = [0, 6, -276];
+        for row in B52_BAY_ROWS {
+            expected[row].3 = None;
+            expected[row].4 = 9;
+            expected[row].5 = 70;
+        }
+        expected.push((4, 0x1105, [52, 8, 31], Some("AGM84E.JT".into()), 18, 170));
         assert_eq!(key(&rows), expected);
         assert_eq!(rows[B52_GUN].store.as_deref(), Some("M61.JT"));
         adjust_defaults(AircraftId::B52, &mut rows);
         assert_eq!(key(&rows), expected);
-        // B-2: the four bay rows lose only the designator bit (0x1504 to
-        // 0x1104); the sensor rows and every other field stay.
+        // The default load is 12 of the pylon row's 18, six a wing, and the
+        // bay holds nothing.
+        let mut load = rows.clone();
+        default_counts(AircraftId::B52, &mut load);
+        assert_eq!((load[B52_PYLONS].count, rows[B52_PYLONS].count), (12, 18));
+        assert!(B52_BAY_ROWS.iter().all(|r| load[*r].store.is_none()));
+        default_counts(AircraftId::B52, &mut load);
+        assert_eq!(load[B52_PYLONS].count, 12);
+        // A record with a changed row keeps all of its own rows, no pylon.
+        let mut edited = retail.clone();
+        edited[3].weight_class += 1;
+        adjust_defaults(AircraftId::B52, &mut edited);
+        assert_eq!(edited.len(), 7);
+        // B-2: the four bay rows lose the designator bit and the pair flag
+        // (0x1504 to 0x1100); the sensor rows and every other field stay.
         let retail = default_rows(AircraftId::B2);
         let mut rows = retail.clone();
         adjust_defaults(AircraftId::B2, &mut rows);
         let mut expected = key(&retail);
         for row in &mut expected[5..9] {
-            row.1 = 0x1104;
+            row.1 = 0x1100;
         }
         assert_eq!(key(&rows), expected);
         assert!(rows[5..9].iter().all(|h| h.flags & DESIGNATOR_BIT == 0));
         assert!(rows[..5].iter().all(|h| h.flags == 0x1008));
+        // B2-5: the Paveway III rows start empty (a bay holds the Mk 82 or the
+        // Paveway III); the Mk 82 rows and every other field stay.
+        let mut defaults = rows.clone();
+        default_counts(AircraftId::B2, &mut defaults);
+        let mut expected = key(&rows);
+        expected[7].4 = 0;
+        expected[8].4 = 0;
+        assert_eq!(key(&defaults), expected);
+        default_counts(AircraftId::B2, &mut defaults);
+        assert_eq!(key(&defaults), expected);
         // F-117: the jammer row holds nothing, in its place with its mask.
         let retail = default_rows(AircraftId::F117);
         assert_eq!(retail[F117_JAMMER].store.as_deref(), Some("F18.ECM"));

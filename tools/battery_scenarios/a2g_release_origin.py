@@ -382,6 +382,49 @@ def tornado_args(speed: str, station: str, load: str, count: str) -> list[str]:
             "--load", load, "--count", count]
 
 
+# The B-2's bays (B2-6, 2026-11-15; B2-5's grid, `hardpoints::grid_point`): per run, (station, store,
+# presses, bay centre right ft, forward ft of the rows, up ft of the first tier, how many places to
+# check). A 4 abreast row leaves outermost first, alternating sides (centre -1.95, +1.95, -0.65,
+# +0.65 ft); the Mk 82s hang two rows long (10.44 then 2.89 ft forward), a tier 1.3 ft up from the
+# last, the Paveway III one row (6.67 ft) 1.79 ft under the reference. The AI's release uses the same
+# places (`ai-strike-b2-stick`).
+B2_COLUMNS = (-1.95, 1.95, -0.65, 0.65)
+B2_RUNS = [
+    (0, "MK82", "32", 12, -5.333, (10.44, 2.89), -2.95, 9),
+    (1, "MK82", "32", 12, 4.667, (10.44, 2.89), -2.95, 9),
+    (2, "PAVEWA3", "4", 4, -5.333, (6.67,), -1.79, 3),
+    (3, "PAVEWA3", "4", 4, 4.667, (6.67,), -1.79, 3),
+]
+
+
+def b2_args(station: int, load: str, count: str, presses: int) -> list[str]:
+    return ["--a2g-run", "UKR", "QUCOL", "--attack", "release", "--from", "1", "--altitude", "20000",
+            "--speed", "300", "--repeat", str(presses), "--gap", "0.5", "--aircraft", "b2", "--station",
+            str(station), "--load", load, "--count", count]
+
+
+def b2_origin_problems(output: str) -> list[str]:
+    parts = runs(output)
+    if len(parts) != len(B2_RUNS):
+        return [f"{len(parts)} runs finished, want {len(B2_RUNS)}"]
+    problems: list[str] = []
+    for part, (station, load, _, _, centre, rows, up0, checked) in zip(parts, B2_RUNS):
+        label = f"B-2 station {station} {load}"
+        found = ORIGIN.findall(part)
+        if len(found) < checked:
+            problems.append(f"{label}: {len(found)} releases, want at least {checked}")
+        for n, (_, r, u, f, _station, _after, hr, hu, hf, _depth) in enumerate(found[:checked]):
+            r, u, f, hr, hu, hf = (float(v) for v in (r, u, f, hr, hu, hf))
+            want_r = centre + B2_COLUMNS[n % 4]
+            want_f = rows[(n // 4) % len(rows)]
+            want_u = up0 + 1.3 * (n // (4 * len(rows)))
+            if abs(r - hr) > 0.05 or abs(u - hu) > 0.05 or abs(f - hf) > 0.5:
+                problems.append(f"{label}: release {n} left from {r:.2f} {u:.2f} {f:.2f}, hung at {hr:.2f} {hu:.2f} {hf:.2f}")
+            if abs(r - want_r) > 0.05 or abs(u - want_u) > 0.06 or abs(f - want_f) > 0.5:
+                problems.append(f"{label}: release {n} at {r:.2f} {u:.2f} {f:.2f}, want {want_r:.2f} {want_u:.2f} {want_f:.2f}")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     base = ["--a2g-run", "UKR", "QUCOL", "--attack", "release", "--from", "1", "--altitude", "3000",
             "--speed", "420"]
@@ -483,6 +526,16 @@ def scenarios() -> list[Scenario]:
             ],
             check=tornado_origin_problems,
             notes="The Tornado's default stores leave from where they hang at both sweeps: the shoulder Paveways from fixed 2 inch rails whatever the speed, the inner wing Mk 82s from 9.50 ft out at 25 degrees (200 kt) and from the swivelled pylons at 67 degrees (650 kt), left then right (TOR-6). Update (TOR-12, 2026-11-12): 7.96 ft out and 1.70 ft ahead at 25 degrees, 8.77 ft out and 1.39 ft aft at 67 degrees, after John's wing review.",
+        ),
+        Scenario(
+            name="a2g-release-origin-b2", lane="flight",
+            args=b2_args(*B2_RUNS[0][:3], B2_RUNS[0][3]),
+            timeout=300,
+            then=[Step(b2_args(*r[:3], r[3]), timeout=300) for r in B2_RUNS[1:]],
+            check=b2_origin_problems,
+            notes="The B-2's bay grids (B2-5): the left and right bays' Mk 82 rows leave nine presses from the grid's own "
+                  "places (front row of the bottom tier first, outermost first, alternating sides, then the back row, then "
+                  "the next tier up) and the Paveway III rows three from their one row, each from where it hangs.",
         ),
         Scenario(
             name="a2g-release-origin-tornado-rail", lane="flight",

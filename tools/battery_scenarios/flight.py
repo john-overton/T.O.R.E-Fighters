@@ -111,9 +111,18 @@ STATIONS = {
     # a fourth weapon slot.
     "tornado": [360, 4, 2, 2],
 }
+# The B-2 carries no gun: its four weapon rows are the bays', row 5 and 6 the Mk 82 (32 a bay), rows 7
+# and 8 the Paveway III rows, empty by default (a bay holds one or the other, B2-5), so they end the
+# list at 0 as the F-22's empty row does (B2-6, 2026-11-15).
+STATIONS["b2"] = [32, 32, 0, 0]
 STATIONS["tornadoc"] = STATIONS["tornado"]
 STATIONS["f22n"] = [750, 2, 2, 4, 0]
 STATIONS["faxx"] = STATIONS["f22n"]
+# The B-52H (B52-5, 2026-11-15): the M61 tail gun (row 4, 1,242 rounds, now at the
+# drawn tail cone) and the 12 default AGM-84E Harpoons on the underwing pylons (row 7,
+# six a wing); its three bay rows (3, 5 and 6, nine Mk 82 each) start empty and keep an
+# empty Mk 82 selection, so three never-loaded slots follow.
+STATIONS["b52"] = [1242, 12, 0, 0, 0]
 
 
 def _numbers(output: str, prefix: str) -> dict:
@@ -359,6 +368,18 @@ APPROACH_TARGET["mf1"] = (125, 150)
 # 6,700 ft at an unstated weight, Aerocorner).
 LIFTOFF_TARGET["b2"] = (140, 165)
 APPROACH_TARGET["b2"] = (140, 170)
+# The F-117A's windows (F117-8, 2026-11-15) are fitted, agent decisions, from
+# secondary figures only (docs/formats/aircraft-variety.md, "F-117 flight
+# review"): approach 150 kt (Aerocorner), a rotation speed of 160 kt and a
+# touchdown at 150 to 160 kt (a FlightGear simulator guide, unofficial), and a
+# pilot's account that the jet is Approach Category E, "oftentimes the approach
+# speed was in the 180s" (a forum post). The scripted runs fly the default load
+# (gross 52,000 lb at takeoff: two GBU-27 and a full tank), so the measured
+# 177.2 kt liftoff after 3,647 ft and the 166.2 kt approach (the 0.85 times the
+# record's landing limit cap) sit inside a liftoff window of 155 to 185 kt and an
+# approach window of 150 to 180 kt.
+LIFTOFF_TARGET["f117"] = (155, 185)
+APPROACH_TARGET["f117"] = (150, 180)
 # The figures the model gives with the fitted per-aircraft stall references
 # (`STALL_REFERENCE_FRACTIONS`, 2026-09-30), for the aircraft whose figure is not
 # exactly inside John's range, kept as a regression window of plus or minus 6
@@ -378,8 +399,15 @@ KNOWN_APPROACH.update({"f15e": 156.1})
 KNOWN_LIFTOFF["mf1"] = 121.0
 KNOWN_APPROACH["mf1"] = 127.6
 # The B-2's measured liftoff and approach at its default load (B2-8, 2026-11-15).
-KNOWN_LIFTOFF["b2"] = 158.1
-KNOWN_APPROACH["b2"] = 166.2
+KNOWN_LIFTOFF["b2"] = 155.2
+KNOWN_APPROACH["b2"] = 167.5
+# Update (B2-5, 2026-11-15, agent decision): the default load is now the two Mk 82 bays alone, 64 bombs
+# (32,000 lb; a bay holds the Mk 82 or the Paveway III, not both), not 48,000 lb of bay bombs: liftoff is
+# 155.2 kt after 7,232 ft (was 158.1 kt after 7,987 ft) and the scripted approach 167.5 kt (was 166.2).
+# The windows (140 to 165 kt and 140 to 170 kt) hold; the recorded values follow the new ones.
+# The F-117A's measured liftoff and approach at its default load (F117-8, 2026-11-15).
+KNOWN_LIFTOFF["f117"] = 177.2
+KNOWN_APPROACH["f117"] = 166.2
 # TOR-6 (2026-11-11): the Tornado's default load is lighter than TOR-8 measured (one centreline tank, 1,650
 # lb of external fuel, not two): liftoff 146.4 kt (was 150.6), approach 155.1 kt (was 160.1), both inside the
 # windows and the plus or minus 6 percent regression band, so no window was refitted and the known values above
@@ -395,6 +423,11 @@ KNOWN_APPROACH["b2"] = 166.2
 LIFTOFF_TARGET["b52"] = (150, 175)
 APPROACH_TARGET["b52"] = (150, 170)
 KNOWN_LIFTOFF["b52"] = 158.6
+# B52-5 (2026-11-15): the default load now carries 12 AGM-84E on the pylons (16,588 lb counted, so the
+# default tank starts at 286,412 lb, not 303,000 lb: the gross weight is the same 488,000 lb). Measured
+# liftoff 158.7 kt after 7,324 ft (GRE, was 158.6 kt), approach 166.2 kt (the model's cap, unchanged,
+# at 404,516 lb gross, was 387,928 lb), touchdown 153.7 kt: both stay in their windows, none refitted.
+KNOWN_LIFTOFF["b52"] = 158.7
 KNOWN_APPROACH["b52"] = 166.2
 # The B-52H's liftoff and approach scenarios start from a 12,000 ft runway (Greece, airport 1):
 # UKR airport 1 is 5,532 ft, shorter than its 7,674 ft takeoff run and its 5,000 ft rollout.
@@ -434,6 +467,8 @@ INTERNAL_FUEL_LB["b52"] = 312197
 # B-2's approach scenario uses that cap (60 percent); the scripted approach speed
 # does not depend on the fuel in any case (B2-8).
 INTERNAL_FUEL_LB["b2"] = 167000
+# F117.PT internal fuel, 18,500 lb (the record's own tank; the approach scenario flies 65 percent, 12,025 lb).
+INTERNAL_FUEL_LB["f117"] = 18500
 APPROACH_FUEL_CAP_LB = 100000
 
 
@@ -547,6 +582,8 @@ LIFTOFF_AIRCRAFT += ["tornadoc"]
 LIFTOFF_AIRCRAFT += ["b52"]
 # The B-2 joins them (B2-8, 2026-11-15).
 LIFTOFF_AIRCRAFT += ["b2"]
+# The F-117A joins them (F117-8, 2026-11-15).
+LIFTOFF_AIRCRAFT += ["f117"]
 
 
 def liftoff_scenarios() -> list[Scenario]:
@@ -1195,6 +1232,10 @@ REFUSED_SLOTS = {
     ("m2000", 2),
     # The Gripen's AGM-65G is a surface missile (GRI-6).
     ("gripen", 2),
+    # The B-52's AGM-84E Harpoons are a surface missile (B52-7, 2026-11-15): the B-52 now has
+    # its radar (`B52R.SEE`, enabled), so the Harpoon wants a surface target as everyone's does.
+    # `a2g-antiship-b52` fires it at the Krivak.
+    ("b52", 2),
 }
 
 
@@ -1305,7 +1346,79 @@ def slot_scenarios() -> list[Scenario]:
             timeout=300,
             notes="F-117 bay release: the doors open before the GBU-27 leaves and close after it, as the F-22's do.",
         ))
+    # B2-5 (2026-11-15): the B-2's two fitted Mk 82 bays through the same actual one-press release
+    # (rows 5 and 6; the doors open to 0.95 before the bomb leaves, then close), and a 16-press
+    # ripple: the bays alternate, each empties its bottom tier first, front to back.
+    for row in (5, 6):
+        out.append(Scenario(
+            name=f"flight-bay-fire-b2-row{row}", lane="flight",
+            args=["--stores-preview", "{work}/frames"], window=True,
+            env={"TORE_STORES_PREVIEW_AIRCRAFT": "b2",
+                 "TORE_STORES_PREVIEW_FIRE": str(row)},
+            expect=[f"Stores firing: b2 row={row} PASS"],
+            outputs=[f"frames/b2-fire-row{row}-t000.png", f"frames/b2-fire-row{row}-t400.png"],
+            timeout=300,
+            notes="B-2 bay release: the doors open before the Mk 82 leaves and close after it, as the F-22's do.",
+        ))
+    out.append(Scenario(
+        name="flight-bay-ripple-b2", lane="flight",
+        args=["--stores-preview", "{work}/frames"], window=True,
+        env={"TORE_STORES_PREVIEW_AIRCRAFT": "b2",
+             "TORE_STORES_PREVIEW_FIRE": "5",
+             "TORE_STORES_PREVIEW_PRESSES": "16"},
+        expect=["Stores firing: b2 row=5 PASS", "Stores ripple: b2"],
+        check=b2_ripple_problems,
+        timeout=300,
+        notes="16 presses through both B-2 bays: one bomb a press, the bays alternate, the bottom tier goes first, front to back.",
+    ))
+    # B52-5 (2026-11-15): the B-52's fitted bay rows (3, 5 and 6) hold nine Mk 82 each in a
+    # grid; one press opens the doors, the bomb leaves from its cell once they are at 0.95 and
+    # the doors close; the pylon row 7 (default 12 Harpoons) releases with the doors shut.
+    for row in (3, 5, 6):
+        out.append(Scenario(
+            name=f"flight-bay-fire-b52-row{row}", lane="flight",
+            args=["--stores-preview", "{work}/frames"], window=True,
+            env={"TORE_STORES_PREVIEW_AIRCRAFT": "b52",
+                 "TORE_STORES_PREVIEW_RECORDS": f"{row}=MK82.JT:9",
+                 "TORE_STORES_PREVIEW_FUEL": "150000",
+                 "TORE_STORES_PREVIEW_FIRE": str(row)},
+            expect=[f"Stores firing: b52 row={row} PASS"],
+            outputs=[f"frames/b52-fire-row{row}-t000.png", f"frames/b52-fire-row{row}-t400.png"],
+            timeout=300,
+            notes="B-52 bay release: the doors open before the Mk 82 leaves and close after it, as the F-22's and F-117's do.",
+        ))
+    out.append(Scenario(
+        name="flight-bay-fire-b52-pylon-row7", lane="flight",
+        args=["--stores-preview", "{work}/frames"], window=True,
+        env={"TORE_STORES_PREVIEW_AIRCRAFT": "b52", "TORE_STORES_PREVIEW_FIRE": "7",
+             "TORE_STORES_PREVIEW_RECORDS": "7=MK82.JT:18", "TORE_STORES_PREVIEW_FUEL": "150000"},
+        expect=["Stores firing: b52 row=7 PASS"],
+        outputs=["frames/b52-fire-row7-t000.png", "frames/b52-fire-row7-t400.png"],
+        timeout=300,
+        notes="B-52 pylon release: a Mk 82 leaves the underwing beam with the bay doors shut (18 loaded, nine a wing; the Harpoon default needs a target the preview does not give it, its live-fire slot scenario covers it).",
+    ))
     return out
+
+
+def b2_ripple_problems(output: str) -> list[str]:
+    """The B-2 ripple alternates its bays and takes each bay's bottom tier first, front to back (B2-5)."""
+    rows = [(int(m.group(1)), tuple(float(v) for v in m.group(2).split()))
+            for m in re.finditer(r"Stores ripple: b2 tick=\d+ station=(\d+) at \[([-\d. ]+)\]", output)]
+    problems = []
+    if len(rows) != 16:
+        return [f"{len(rows)} releases, expected 16"]
+    stations = [row[0] for row in rows]
+    if stations != [0, 1] * 8:
+        problems.append(f"the bays did not alternate: {stations}")
+    for bay in (0, 1):
+        points = [p for station, p in rows if station == bay]
+        if len({round(p[1], 3) for p in points}) != 1:
+            problems.append(f"bay {bay}: the first eight were not one tier")
+        if not points[0][2] > points[-1][2]:
+            problems.append(f"bay {bay}: the ripple did not run front to back")
+    if rows[0][1][0] >= 0 or rows[1][1][0] <= 0:
+        problems.append("the first release was not the left bay, the second the right")
+    return problems
 
 
 def check_jettison(ac: str, slot: int):
@@ -1405,6 +1518,13 @@ def countermeasure_scenarios() -> list[Scenario]:
         args += ["--combat-command", "flare"] * 3
         args += ["--countermeasure-preview", "240", "--capture-flight", "{work}/cm.ppm", "--no-audio"]
         out.append(Scenario(name=f"flight-countermeasures-{ac}", lane="flight", args=args, window=True, check=check_countermeasures, timeout=180))
+    # B2-6: the B-2 keeps the retail F18.ECM row (decision 18): 30 chaff and 30 flares, a jammer.
+    args = ["--live-fire", "--aircraft", "b2"] + ["--combat-command", "chaff"] * 5
+    args += ["--combat-command", "flare"] * 3
+    args += ["--countermeasure-preview", "240", "--capture-flight", "{work}/cm.ppm", "--no-audio"]
+    out.append(Scenario(name="flight-countermeasures-b2", lane="flight", args=args, window=True,
+                        check=check_countermeasures, timeout=180,
+                        notes="The B-2's retail F18.ECM row: 30 chaff and 30 flares, five and three released (B2-6)."))
     out.extend(tornado_countermeasure_scenarios())
     return out
 
@@ -2035,7 +2155,7 @@ def capture_scenarios() -> list[Scenario]:
     # AL1 and refuses a ground start ("an enemy airfield").
     for ac in AIRCRAFT:
         add(f"groundstart-{ac}", ["--free-flight", "--aircraft", ac, "--theater", "UKR", "--ground-start", "9", "--flight-view", "1", "--flight-look", "150,-15", "--flight-zoom", "1.5"])
-    for ac in ("f22", "f22n", "f117"):
+    for ac in ("f22", "f22n", "b52", "f117", "b2"):
         for bay in ("0", "0.5", "1"):
             add(f"bay-{ac}-{bay}", ["--free-flight", "--aircraft", ac, "--flight-view", "1", "--flight-look", "150,-30", "--flight-bay", bay])
     return out
@@ -2463,7 +2583,37 @@ def fight_scenarios() -> list[Scenario]:
                     timeout=600,
                 )
             )
+    # B52-6 (2026-11-15): the B-52's tail gun fires astern. A scripted F-22
+    # closes on an AI B-52 from behind and the B-52's gun hits it; nothing
+    # fires from the nose of a bomber in a tail chase otherwise.
+    out.append(
+        Scenario(
+            name="flight-b52-tail-gun",
+            lane="flight",
+            args=[
+                "--aircraft", "f22", "--probe-enemy-aircraft", "b52", "--probe-enemy-skill", "ace",
+                "--probe-geometry", "rear", "--separation", "1", "--probe-guns",
+                "--ai-probe-ticks", "3000", "--no-audio",
+            ],
+            check=b52_tail_gun_problems,
+            timeout=600,
+            notes="B52-6: an AI B-52's slewed M61 fires astern at a fighter in its rear arc (enemy_gun hits on the player).",
+        )
+    )
     return out
+
+
+def b52_tail_gun_problems(output: str) -> list[str]:
+    m = re.search(r"enemy_gun=(\d+)/(\d+)", output)
+    if not m:
+        return ["no debrief line with enemy_gun"]
+    hits, shots = int(m.group(1)), int(m.group(2))
+    problems = []
+    if shots == 0:
+        problems.append("the B-52's tail gun never fired at the fighter behind it")
+    elif hits == 0:
+        problems.append(f"the tail gun fired {shots} rounds and none reached the fighter")
+    return problems
 
 
 ATTACK_LINE = re.compile(

@@ -2141,3 +2141,9 @@ frames show no underside through the top, no z-fighting and no blank or skin-fil
 scale; no whole-body damage variant is registered. The `render-f117-skin`
 scenario pins the look. Details and the list of what follows the scale:
 [F-117 shape and real size](aircraft-variety.md#f-117-shape-and-real-size-f117-2-2026-11-15).
+
+**Cockpit family (F117-7, 2026-11-15).** The F-117 draws its own `~F117H.PIC` cockpit art (1673 x 508, a
+windscreen between two bow posts under a thin bar and two side panes, no combiner and no overlay pictures;
+the record's HUD field is null and `F117.HUD` is bound by name; John, 2026-11-15, opinionated). Its HUD glass
+aperture is measured on that art (the windscreen, 56,562 of 56,572 pixels) and its pilot's eye is a
+per-aircraft table entry; see [the F-117 ordnance, sensors and cockpit section](aircraft-variety.md#f-117-ordnance-sensors-and-cockpit-f117-67-2026-11-15). No retail art is committed.

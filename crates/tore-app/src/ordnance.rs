@@ -1683,6 +1683,14 @@ pub fn sensor_helper(loadout: &Loadout, pods: bool) -> Option<String> {
     let Some(sensor) = loadout.configuration.sight else {
         return pods.then(|| "No built-in designator: hang a Pave Spike pod to lase.".to_string());
     };
+    // The F-117's turret has its own name (F117-7, decision 26): the line
+    // says IRADS, whatever the shared gimbal rule calls its record.
+    if let Some(names) = loadout.configuration.aircraft.sensor_names() {
+        return Some(format!(
+            "Built-in {}: no pod needed for laser ordnance.",
+            names.sight
+        ));
+    }
     let (what, needs) = if sensor.laser {
         ("laser designator", "laser ordnance")
     } else {
@@ -2259,10 +2267,11 @@ pub fn validate_sources(
                 }
                 let gun_station =
                     &gun.state.own().configuration().stations[gun.state.own().selected];
+                let (gun_launcher, gun_mount) = gun_station.gun_view(&launcher);
                 let pipper = tore_sim::combat::gunsight::solve(
                     &gun_station.weapon,
-                    &launcher,
-                    gun_station.gun_mount(),
+                    &gun_launcher,
+                    gun_mount,
                     None,
                 )?
                 .ok_or_else(|| format!("{id:?}: imported gun has no 1000-foot sight solution"))?;
@@ -2872,6 +2881,7 @@ mod tests {
                     store: Some(if i == 2 { "M61.JT" } else { "AIM9M.JT" }.into()),
                     count: if i == 2 { 500 } else { 4 },
                     weight_class: 0,
+                    slew: [0; 4],
                 })
                 .collect(),
         };
@@ -3002,6 +3012,7 @@ mod tests {
             store: Some(tank.source.clone()),
             count: 2,
             weight_class: 0,
+            slew: [0; 4],
         }];
         ui.loadout.configuration.refresh_tanks().unwrap();
         ui.tanks = vec![tank];
@@ -3055,6 +3066,7 @@ mod tests {
                     store: Some(tank.source.clone()),
                     count: 2,
                     weight_class: 0,
+                    slew: [0; 4],
                 }
             };
             ui.loadout.tank_hardpoints.push(source);
@@ -4381,6 +4393,17 @@ mod tests {
                 assert_eq!(sensor_helper(&ui.loadout, pods).as_deref(), Some(words));
             }
         }
+        // F117-7: the F-117's turret has its own name, whatever the gimbal.
+        let own = ui.loadout.configuration.aircraft;
+        ui.loadout.configuration.aircraft = tore_formats::aircraft::AircraftId::F117;
+        for gimbal in [CONE, Gimbal::Hemisphere] {
+            ui.loadout.configuration.sight = Some(sensor(true, gimbal));
+            assert_eq!(
+                sensor_helper(&ui.loadout, false).as_deref(),
+                Some("Built-in IRADS: no pod needed for laser ordnance.")
+            );
+        }
+        ui.loadout.configuration.aircraft = own;
     }
     /// The first and last row of `ink` in the page's pixels, and whether any
     /// of it is there.

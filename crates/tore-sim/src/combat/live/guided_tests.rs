@@ -127,6 +127,7 @@ fn tank_box(z: f64) -> OrientedBox {
 fn scene(weapon: Weapon, designator: bool, ahead: f64) -> State {
     let mut config = fixture(false).own().configuration().clone();
     config.stations = vec![Station {
+        slew: Default::default(),
         weapon,
         mount: [0.; 3],
         count: 4,

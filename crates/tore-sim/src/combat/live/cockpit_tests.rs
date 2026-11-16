@@ -32,6 +32,7 @@ fn pave_spike() -> SightSensor {
 fn config(weapon: Weapon, designator: bool) -> Configuration {
     let mut config = fixture(false).own().configuration().clone();
     config.stations = vec![Station {
+        slew: Default::default(),
         weapon,
         mount: [2., -3., 1.],
         count: 4,

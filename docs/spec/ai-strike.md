@@ -492,6 +492,9 @@ The pass types, the line flown and the 5 s commitment are unchanged.
 | Raised by perceived threat: Clear and Air +0, Guns +5,000 ft, Missiles +10,000 ft, never above 90% of the aircraft's ceiling | opinionated (John, 2026-10-11) for "raised by threat"; the amounts are fitted |
 | "The mission's airborne height" is the Quick Mission altitude setting ([Quick Mission](quick-mission-menu.md)); for an imported mission (none yet) or a striker tasked outside one, the height above the ground the striker was first tasked at. Read as AGL over the target area. Built (slice ST-T2): the host hands the setting to every striker each step | fitted; confirm with John |
 | Release is the weapon record's own burst (rounds and spacing from the record), centred on the aim point as a stick. There is no ripple setting | retail (burst fields), fitted (centring) |
+| Update (B2-9, 2026-11-15, the B-2, the first heavy with bombs of its own): a heavy's bombs leave as a stick of up to 8, one every record cadence (a quarter second for the Mk 82), the first on the aim and the rest walking on beyond it (not centred: centring is a checkpointed field, left for John); the pass is not ended by the cue passing the aim while the stick goes and exits after the last bomb or two seconds without the next | fitted (agent) |
+| Update (B2-9): a heavy's free-falling bomb is not held to the weapon record's zone 1 maximum range (the Mk 82's 20,000 ft slant): its release from the threat floor is a longer slant (22,500 ft at 15,000 ft), so the B-2 never released. A fighter's bomb is still held to it | fitted (agent) |
+| Update (B2-9): a heavy whose corner speed is under its minimum level-flight speed flies its level run and the legs round it at 1.3 times that minimum, not at the corner speed (the B-2: 316 against 378 ft/s at 5,000 ft; it wallowed and sank to the ground). A heavy whose corner speed is above its minimum (the C-130) is unchanged | fitted (agent) |
 | Exit climbs toward 50,000 ft (never above the ceiling), then turns back | retail |
 | Stand-off missiles are fired from level flight at the reach | opinionated (agent) |
 
@@ -1338,7 +1341,7 @@ AC-130 circle and mount arcs, how retail gives the AI a ground target, Alt+F,
 Alt+E, Alt+R and Alt+W receiver behaviour, HARM and missile release gates, skill
 (retail strikes ignore it), AI guided bombs with no designator (they glide at
 -20 degrees below 293 ft/s) and retail's Quick Mission strike wings.
-| Whether heavy burst spacing from the record gives a sensible stick on the first imported heavy | The record's spacing | Test when a heavy with bombs is imported |
+| Whether heavy burst spacing from the record gives a sensible stick on the first imported heavy | The record's spacing | Tested on the B-2 (B2-9, 2026-11-15): a quarter second a Mk 82, a stick of eight about 900 ft long at 300 kt, impacts 100 to 700 ft from the aim; there was no stick code, now there is. Whether eight is the right count, and centring, are John's |
 
 ## Confirm with John
 

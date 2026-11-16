@@ -3316,6 +3316,20 @@ again with an observer; the capture format did not change for it.
   by one, so the build refuses a roster of `1 << AIRCRAFT_BITS` or more). The
   other 6-bit fields (interpolation delay, stem-list counts) are unchanged.
   No rules change; the compatibility simulation version stays 11.
+  84 (2026-11-15, John's first-pass decision, bomber batch A integration):
+  simulation behaviour changes without new bytes: surface-to-air detection
+  (SAM-1), the bomber batch A internal weapon bays (the shared magazine grid,
+  doors that open before a release and the open-bay signature term) and the
+  fuel cap at the maximum take-off weight (a default load starts its tank at
+  what the maximum allows). The compatibility simulation version is 12.
+  Still inside 84 (batches A and B integration, 2026-11-15, agent decision):
+  the B-1B, Tu-160 and F-111F join at wire positions 50 to 52 and checkpoint
+  codes 50 to 52 (the 9-bit layout is unchanged; identity additions have never
+  raised the version on their own), and the AI strike rules of B2-6/9 (a Heavy
+  with its own unguided bombs has no slant-range cap, an eight-bomb stick at
+  the record cadence, a Heavy slower than its minimum level speed flies at 1.3
+  times it) change simulation behaviour in the same unreleased cycle, so 84 and
+  simulation version 12 cover them (v0.2.2 shipped protocol 82).
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

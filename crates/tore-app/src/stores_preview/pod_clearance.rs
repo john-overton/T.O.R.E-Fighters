@@ -15,7 +15,7 @@ use crate::{aircraft::Airframe, flight, snapshot::StoreLook};
 use tore_sim::attitude::{Vector, dot};
 use tore_sim::combat::swing;
 
-type Tri = [Vector; 3];
+pub(super) type Tri = [Vector; 3];
 
 fn sub(a: Vector, b: Vector) -> Vector {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
@@ -88,7 +88,7 @@ fn samples(t: &Tri, step: f64) -> Vec<Vector> {
 
 /// The smallest distance between two triangle sets, sampled both ways, with
 /// where on the first it is (zero when they touch or cross).
-fn gap(one: &[Tri], two: &[Tri]) -> (f64, Vector) {
+pub(super) fn gap(one: &[Tri], two: &[Tri]) -> (f64, Vector) {
     let (mut best, mut at) = (f64::MAX, [0.; 3]);
     for (first, second) in [(one, two), (two, one)] {
         let (low, high) = bounds(second);
@@ -163,7 +163,7 @@ fn airframe_parts(airframe: &Airframe, state: &flight::State) -> Vec<(&'static s
 }
 
 /// A drawn store's triangles (its pylon and body), feet right, up, forward.
-fn drawn(store: &StorePose, airframe: &Airframe, art: &CombatArt) -> Vec<Tri> {
+pub(super) fn drawn(store: &StorePose, airframe: &Airframe, art: &CombatArt) -> Vec<Tri> {
     let mut buffer = Vec::new();
     crate::pylons::vertices(
         &mut buffer,

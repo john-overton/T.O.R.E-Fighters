@@ -69,6 +69,59 @@ def f117_bay_problems(output: str) -> list[str]:
     return problems
 
 
+def b2_bay_problems(output: str) -> list[str]:
+    """The default 32 Mk 82 a bay (4 abreast, 2 long, 4 tiers) clear the B-2's open doors, both
+    ends, the sloped recess roof and the top skin, and no two stores touch (B2-5)."""
+    problems = []
+    for side in ("left", "right"):
+        m = re.search(
+            rf"Bay clearance: row\d MK82\.SH {side}: inner door (-?[\d.]+), outer door (-?[\d.]+), "
+            r"aft end (-?[\d.]+), fore end (-?[\d.]+), roof (-?[\d.]+), hangs (-?[\d.]+) below the belly plane, "
+            r"top skin (-?[\d.]+) at", output)
+        if not m:
+            problems.append(f"no bay clearance line for the {side} Mk 82s")
+            continue
+        inner, outer, aft, fore, roof, _hang, skin = map(float, m.groups())
+        for label, value in (("inner door", inner), ("outer door", outer), ("aft end", aft),
+                             ("fore end", fore), ("recess roof", roof), ("top skin", skin)):
+            if value < 0.05:
+                problems.append(f"{side} Mk 82s clear the {label} by only {value:.2f} ft")
+    m = re.search(r"Bay clearance: b2 (\d+) stores, closest pair .*?: nearest vertices (-?[\d.]+) ft apart, (\d+) pairs under", output)
+    if not m or int(m.group(1)) != 64:
+        problems.append("no closest-pair line for 64 stores")
+    elif float(m.group(2)) < 0.05 or int(m.group(3)):
+        problems.append(f"two Mk 82s are only {m.group(2)} ft apart")
+    return problems
+
+
+def b52_clearance_problems(output: str) -> list[str]:
+    """The B-52's 27 Mk 82 and 12 Harpoons clear the open bay and each other (B52-5)."""
+    problems = []
+    stores = [line for line in output.splitlines() if re.match(r"Bay clearance: row\d MK82\.SH slot\d:", line)]
+    if len(stores) != 27:
+        problems.append(f"{len(stores)} bay stores reported, expected 27")
+    for line in stores:
+        for label in ("side wall", "door leaf", "aft end", "fore end", "roof", "above the belly plane", "rails and posts"):
+            m = re.search(rf"{label} (-?[\d.]+)", line)
+            if not m:
+                problems.append(f"no {label} in {line[:48]}")
+            elif float(m.group(1)) < 0.05:
+                problems.append(f"{line[:46]} clears the {label} by only {m.group(1)} ft")
+    m = re.search(r"Bay clearance: b52 27 stores, nearest pair (-?[\d.]+) ft", output)
+    if not m or float(m.group(1)) < 0.05:
+        problems.append("the bay stores touch each other")
+    m = re.search(r"Pylon clearance: b52 \d+ stores, nearest pair (-?[\d.]+) ft .*, (\d+) pairs under", output)
+    if not m or int(m.group(2)) != 0:
+        problems.append("the pylon stores touch each other")
+    for flaps in ("up", "down 15 deg"):
+        m = re.search(rf"Pylon clearance: b52 row 7 flaps {flaps} .*?flap strip (-?[\d.]+) .*?wing \(stores only\) (-?[\d.]+)", output)
+        if not m:
+            problems.append(f"no pylon line with the flaps {flaps}")
+        elif min(float(m.group(1)), float(m.group(2))) < 0.05:
+            problems.append(f"the Harpoons touch the flap strip or the wing with the flaps {flaps}")
+    return problems
+
+
 def skin_capture_problems(output: str) -> list[str]:
     """Every aircraft skin capture drew a non-blank frame."""
     captures = [line for line in output.splitlines() if line.startswith("Scene capture:")]
@@ -105,6 +158,23 @@ def scenarios() -> list[Scenario]:
                  "TORE_STORES_PREVIEW_AIRCRAFT": "f117"},
             expect=["Bay clearance: f117 opening"], check=f117_bay_problems,
             notes="Headless F-117 bay clearances in feet with the doors open (F117-5): door planes, ends, roof, top skin and trapeze rail.",
+        ),
+        Scenario(
+            name="render-b2-bay-clearance", lane="flight",
+            args=["--stores-preview", "{work}/stores"],
+            env={"TORE_STORES_PREVIEW_CPU": "1", "TORE_STORES_PREVIEW_BAYCLEAR": "1",
+                 "TORE_STORES_PREVIEW_AIRCRAFT": "b2"},
+            expect=["Bay clearance: b2 opening"], check=b2_bay_problems,
+            notes="Headless B-2 bay clearances in feet with the doors open (B2-5): the default 64 Mk 82 against the door planes, ends, sloped roof and top skin.",
+        ),
+        Scenario(
+            name="render-b52-clearance", lane="flight",
+            args=["--stores-preview", "{work}/stores"],
+            env={"TORE_STORES_PREVIEW_CPU": "1", "TORE_STORES_PREVIEW_B52CLEAR": "1",
+                 "TORE_STORES_PREVIEW_AIRCRAFT": "b52",
+                 "TORE_STORES_PREVIEW_RECORDS": "3=MK82.JT:9,5=MK82.JT:9,6=MK82.JT:9"},
+            expect=["Bay clearance: b52 opening", "Pylon clearance: b52 row 7"], check=b52_clearance_problems,
+            notes="Headless B-52 clearances in feet (B52-5): 27 Mk 82 in the open bay against the doors, walls, roof, floor, rails and each other; 12 default Harpoons on the pylons against the pod, the flap strip up and down, the fuselage, the gear and the ground.",
         ),
         Scenario(
             name="render-ah64-stub-wing-pylons", lane="flight",

@@ -96,6 +96,7 @@ mod tests {
 
     fn station(weapon: Weapon, count: u16, location: Location) -> Station {
         Station {
+            slew: Default::default(),
             weapon,
             mount: [4., -3., 0.],
             count,

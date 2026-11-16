@@ -680,6 +680,79 @@ fn the_floor_the_zone_and_a_warning_hold_the_release_back() {
     assert!(strike.step(&world.context(40)).release.is_some());
 }
 
+/// B2-9: the record's zone 1 maximum holds a fighter's bomb back (above) but
+/// not a heavy's: a heavy's level release from its threat floor is a slant
+/// longer than the Mk 82's 20,000 ft zone, and the B-2 never bombed.
+#[test]
+fn a_heavys_bomb_is_not_held_back_by_the_zone_maximum() {
+    let mut world = quiet_world();
+    world.inputs.class = StrikeClass::Heavy;
+    let mut strike = Strike::new(9);
+    strike.force(Some(Pass::Level), None);
+    strike.step(&world.context(0));
+    assert_eq!(strike.pass(), Some(Pass::Level));
+    let (aim, _) = strike.aim();
+    let aim_point = [aim[0], 0., 24_000. + aim[1]];
+    // 20,000 ft up, the cue 27,900 ft slant away, past the 20,000 ft zone.
+    world.own.position = [0., 20_000., 15_000.];
+    world.own.agl_ft = 20_000.;
+    world.inputs.stores[0].maximum_range_ft = 20_000.;
+    world.inputs.solution = Some(solution(TARGET_AT, aim_point, true));
+    assert!(strike.step(&world.context(10)).release.is_some());
+    // The same cue holds a fighter's pass back.
+    let mut world = quiet_world();
+    world.inputs.class = StrikeClass::Fighter;
+    let mut strike = Strike::new(9);
+    strike.force(Some(Pass::Level), None);
+    strike.step(&world.context(0));
+    world.own.position = [0., 20_000., 15_000.];
+    world.own.agl_ft = 20_000.;
+    world.inputs.stores[0].maximum_range_ft = 20_000.;
+    world.inputs.solution = Some(solution(TARGET_AT, aim_point, true));
+    assert_eq!(strike.step(&world.context(10)).release, None);
+}
+
+/// B2-9: a heavy's bombs leave as a stick, one at each of the record's
+/// cadences once the first is due (the cue need not stay due), eight at most
+/// (or as many as it holds), and the pass exits after the last.
+#[test]
+fn a_heavys_bombs_leave_as_a_stick_at_the_records_cadence() {
+    let run = |rounds: u32| -> (Vec<u64>, Phase) {
+        let mut world = quiet_world();
+        world.inputs.class = StrikeClass::Heavy;
+        world.inputs.stores = vec![bomb(rounds)];
+        let mut strike = Strike::new(9);
+        strike.force(Some(Pass::Level), None);
+        strike.step(&world.context(0));
+        let (aim, _) = strike.aim();
+        let aim_point = [aim[0], 0., 24_000. + aim[1]];
+        world.own.position = [0., 8_000., 15_000.];
+        world.own.agl_ft = 8_000.;
+        world.inputs.solution = Some(solution(TARGET_AT, aim_point, true));
+        let mut released = Vec::new();
+        for tick in 10..600 {
+            if tick == 12 {
+                // The cue is past the aim after the first bomb.
+                world.inputs.solution = Some(solution(TARGET_AT, aim_point, false));
+            }
+            if strike.step(&world.context(tick)).release.is_some() {
+                released.push(tick);
+                // The store's count falls with each bomb.
+                world.inputs.stores[0].rounds = rounds - released.len() as u32;
+            }
+        }
+        (released, strike.phase())
+    };
+    let (ticks, phase) = run(32);
+    assert_eq!(ticks.len() as u32, HEAVY_STICK_BOMBS, "{ticks:?}");
+    assert!(ticks.windows(2).all(|w| w[1] - w[0] == 30), "{ticks:?}");
+    assert_eq!(phase, Phase::Exit);
+    // A heavy with three bombs drops three.
+    let (ticks, phase) = run(3);
+    assert_eq!(ticks.len(), 3, "{ticks:?}");
+    assert_eq!(phase, Phase::Exit);
+}
+
 #[test]
 fn a_defence_hands_over_and_the_striker_resumes_only_when_safe() {
     let mut world = quiet_world();

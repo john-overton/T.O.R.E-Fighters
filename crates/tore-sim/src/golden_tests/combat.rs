@@ -627,6 +627,7 @@ fn configuration(stations: Vec<(Weapon, u16, bool)>) -> Configuration {
         stations: stations
             .into_iter()
             .map(|(weapon, count, internal)| Station {
+                slew: Default::default(),
                 weapon,
                 mount: [0.; 3],
                 count,

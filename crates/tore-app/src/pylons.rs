@@ -375,6 +375,7 @@ pub fn vertices<'a>(
                     place.pylon.slots.len() as u16,
                     size,
                     fixed,
+                    store.rack.location(),
                 );
             }
         }
@@ -577,11 +578,16 @@ fn hanger(
     on: u16,
     size: StoreSize,
     fixed: Option<f64>,
+    location: Location,
 ) {
     let p = pylon.point;
     let lugs = p[1] + dims.top;
     if let Some(length) = fixed {
         fixed_pylon(out, at, pylon, dims, on, size, length);
+        return;
+    }
+    if location == Location::Beam {
+        beam_pylon(out, at, airframe, pylon, dims, on, size);
         return;
     }
     let desired_middle = p[2] + dims.middle;
@@ -672,6 +678,56 @@ fn hanger(
     }
 }
 
+/// The B-52's heavy stores adapter beam and pylon (B52-5, fitted): a flat
+/// beam across the stores' lugs, wide as the stores abreast
+/// ([`tore_sim::combat::hardpoints::beam_pitch`]) and as long as the rows of
+/// them, 0.5 ft deep, and the pylon above it, [`PYLON_WIDTH`] wide, half as long
+/// as the beam (3 to 12 ft), its top following the wing's underside over the
+/// whole of its length. The stores' lugs hang [`PYLON_DEPTH`] under the
+/// surface, so the beam takes half of that and the pylon the rest.
+fn beam_pylon(
+    out: &mut Vec<f32>,
+    at: &impl Fn(Vector) -> Vector,
+    airframe: Option<&impl Under>,
+    pylon: &PylonPlace,
+    dims: &Dims,
+    on: u16,
+    size: StoreSize,
+) {
+    use tore_sim::combat::hardpoints::{BEAM_ABREAST, beam_pitch};
+    let p = pylon.point;
+    let lugs = p[1] + dims.top;
+    let rows = on.max(1).div_ceil(BEAM_ABREAST);
+    let across = on.clamp(1, BEAM_ABREAST);
+    let long = f64::from(rows - 1) * 1.05 * size.length + 0.9 * size.length;
+    let wide = f64::from(across - 1) * beam_pitch(size) + 0.6;
+    let depth = 0.5;
+    block(
+        out,
+        at,
+        [p[0], lugs + depth / 2., p[2]],
+        [wide.max(PYLON_WIDTH), depth, long],
+        PYLON,
+    );
+    let top_of_beam = lugs + depth;
+    let length = (0.5 * long).clamp(3., 12.);
+    let half = PYLON_WIDTH / 2.;
+    let surface = airframe
+        .and_then(|a| hanger_surface(a, p[0], p[2], top_of_beam))
+        .filter(|surface| surface - top_of_beam > 0.05);
+    if let (Some(airframe), Some(surface)) = (airframe, surface) {
+        let [back, front] = along_surface(airframe, p[0], p[2], length, top_of_beam, surface);
+        slab(
+            out,
+            at,
+            [p[0] - half, p[0] + half],
+            [back[0], front[0]],
+            top_of_beam,
+            [back[1], front[1], back[1], front[1]].map(|h| h + SINK),
+        );
+    }
+}
+
 /// What holds a store on a rail on a pylon's flank: the F-14's glove pylon
 /// Sidewinder on its outboard shoulder ([`Location::Shoulder`]), the
 /// Tornado's on the inboard flank ([`Location::InboardRail`], TOR-11). The
@@ -712,6 +768,7 @@ fn shoulder_rail(
             1,
             size,
             fixed,
+            Location::Wing,
         );
         let spread = tore_sim::combat::hardpoints::TWIN_SHOULDER_OUT;
         block(
@@ -747,6 +804,7 @@ fn shoulder_rail(
         1,
         size,
         fixed,
+        Location::Wing,
     );
     // The arm leaves the pylon's face turned to the store.
     let face = pylon_x + side * flank * PYLON_WIDTH / 2.;
@@ -1413,6 +1471,7 @@ mod tests {
             store: None,
             count: i32::from(store.loaded),
             weight_class: 0,
+            slew: [0; 4],
         };
         let (_, placed) = tore_sim::combat::hardpoints::placed(&h, Some(&model));
         store.rack.over = placed.over;
@@ -1520,6 +1579,7 @@ mod tests {
             1,
             StoreSize::body(PLAIN),
             None,
+            Location::Wing,
         );
         let top = grey(&vertices)
             .iter()
@@ -1661,6 +1721,7 @@ mod tests {
             weapon.burst.actual_rounds_per_game = 1;
             let store = on_flat_wing(plain(mount, location, count));
             tore_sim::combat::live::Station {
+                slew: Default::default(),
                 weapon,
                 mount,
                 count,

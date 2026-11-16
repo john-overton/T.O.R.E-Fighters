@@ -40,6 +40,7 @@ fn lau61() -> Weapon {
 
 fn station(weapon: Weapon) -> Station {
     Station {
+        slew: Default::default(),
         weapon,
         mount: [0.; 3],
         count: 4,

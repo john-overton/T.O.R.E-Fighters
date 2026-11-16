@@ -38,11 +38,14 @@ const AIRCRAFT: usize = 54;
 /// is a third batch-5 optional weapon row (B5-2, John 2026-11-10).
 /// 20 from 18: the B-52's two empty bay rows (rows 5 and 6, no default weapon)
 /// keep an empty Mk 82 selection (BMB-A1, 2026-11-15).
-/// 22 from 20: the Tu-26's empty bay row (row 5, `AS16.JT` now fits it) and the
+/// 21 from 20: the B-52's bay row 3 no longer holds the Harpoons (they move to
+/// the new underwing pylon row 7), so it is a third empty bay row with an empty
+/// Mk 82 selection (B52-5, 2026-11-15).
+/// 23 from 21: the Tu-26's empty bay row (row 5, `AS16.JT` now fits it) and the
 /// Tu-95's empty pylon row (row 8) are two more optional weapon rows (BMB-C1
 /// and BMB-C2, 2026-11-15): the empty selection is the AS-16, a default store
-/// of another row that each now admits.
-const RECOVERED_STATIONS: usize = 22;
+/// of another row that each now admits (batch C alone was 22 from 20).
+const RECOVERED_STATIONS: usize = 23;
 const TANK_RECORDS: usize = 9;
 /// 3,817 from 3,684: the F-16A's four wing and wingtip rows join the roster
 /// (slice F16A-4, 133 compatible supported-weapon placements: two 0x07e5 rows
@@ -102,17 +105,46 @@ const TANK_RECORDS: usize = 9;
 /// `GBU10A.JT`, `PAVEWAY.JT` and `GBU12.JT`, one a row; `GBU16.JT` refused by
 /// name), so `F117.PT` goes from 38 to 46 placements (the normal catalog from
 /// 19 to 23 stores).
-/// 5,145 from 4,784: the bomber batch B records join (BMB-B1, 2026-11-15) and
-/// take their station corrections (BMB-B2): B-1B 63, Tu-160 70, F-111F 228.
-/// Measured with the retail rows first (BMB-B1 alone: 5,173, B-1B 75 and
-/// F-111F 244); clearing the designator bit on the B-1B's three bay rows
-/// (`0x1500` to `0x1100`) and the F-111F's four wing rows (`0x07e5` to
-/// `0x03e5`) removes the multi-store pods those rows admitted, 12 on the
-/// B-1B and 16 on the F-111F (BMB-B2, fitted). The F-111F's weight class cap
-/// (70 and 60 to 50) refuses nothing (the heaviest carried store is the
-/// GBU-28 at 4,500 lb).
-/// 5,447 from 5,145: the bomber batch C records join (BMB-C1, 2026-11-15) and
-/// take their station corrections (BMB-C2): Tu-26 129, Tu-95 36, Su-34 137.
+/// 4,776 from 4,784: the B-2's two Mk 82 bay rows (rows 5 and 6) refuse four
+/// stores that do not fit their grid (B2-5, 2026-11-15, fitted, the F-117's
+/// 0.3 ft rule: `GBU29.JT`, `GBU29P.JT`, `GBU30.JT` and `MK20.JT`, measured
+/// with the doors open), so `B2.PT` goes from 86 to 78 placements. The bays'
+/// capacities also fall to what fits under the roof (four tiers of Mk 82, one
+/// tier of Paveway III); that moves no placement. The audit caps a gridded
+/// row's expected count the same way.
+/// 4,746 from 4,784: the B-52's three bay rows hold five stores (`MK82`,
+/// `MK82P3`, `FAB250`, `GBU38`, `RBK250`; 20 refused for fit, the 3 ft span
+/// missiles among them) and the new underwing pylon row (row 7) takes 22 less
+/// the five long stores it refuses, so `B52.PT` goes from 71 to 33 placements
+/// (B52-5, 2026-11-15, fitted; normal catalog 18 stores; the integration
+/// total below replaces this slice's own 4,746).
+/// 4,732 from 4,784 (batch A integration, 2026-11-15, measured by
+/// `--validate-ordnance`): the B-2's two Mk 82 bay rows refuse four stores
+/// (B2-5, `B2.PT` 86 to 78, minus 8) and the B-52's bay rows, folded onto the
+/// shared magazine grid (B2-5's 1.3 ft pitch), hold three stores (`MK82`,
+/// `MK82P3`, `FAB250`; 22 refused for fit, `GBU38` and `RBK250` joining the 20
+/// that B52-5's own grid refused) while the new pylon row takes 22 less the
+/// five it refuses, so `B52.PT` goes from 71 to 27 placements (minus 44; B52-5
+/// alone gave 33). The F-117's F117-6 to F117-9 slices move no placement
+/// (`F117.PT` stays 46). The two slices' separate totals, 4,776 and 4,746,
+/// are not added: 4,784 - 8 - 44 = 4,732.
+/// 5,093 from 4,732 (batches A and B integration, 2026-11-15, measured by
+/// `--validate-ordnance`): the bomber batch B records join (BMB-B1) and take
+/// their station corrections (BMB-B2): B-1B 63, Tu-160 70, F-111F 228, 361 in
+/// all, on top of batch A's 4,732. The batch's own total, 5,145 from the
+/// pre-round-2 4,784, is not added: 4,732 + 361 = 5,093. BMB-B1 alone gave
+/// 5,173 (B-1B 75 and F-111F 244); clearing the designator bit on the B-1B's
+/// three bay rows (`0x1500` to `0x1100`) and the F-111F's four wing rows
+/// (`0x07e5` to `0x03e5`) removes the multi-store pods those rows admitted, 12
+/// on the B-1B and 16 on the F-111F (BMB-B2, fitted). The F-111F's weight class
+/// cap (70 and 60 to 50) refuses nothing (the heaviest carried store is the
+/// GBU-28 at 4,500 lb). The shared grid and the B-52 rows are not touched by
+/// batch B, so no placement moves twice.
+/// 5,395 from 5,093 (batches A, B and C integration, 2026-11-16, measured by
+/// `--validate-ordnance`): the bomber batch C records join (BMB-C1, 2026-11-15)
+/// and take their station corrections (BMB-C2): Tu-26 129, Tu-95 36, Su-34 137,
+/// 302 in all, on top of 5,093. The batch's own total, 5,447 from the
+/// pre-round-2 5,145, is not added: 5,093 + 302 = 5,395.
 /// The Tu-26's bay row loses the designator bit and gains the active-radar bit
 /// (`0x1500` to `0x1120`), which admits the AS-16, Harpoon and AM-39; its
 /// glove rows hold two (capacity only); the Tu-95's pylon row goes from the
@@ -120,7 +152,7 @@ const TANK_RECORDS: usize = 9;
 /// AS-16 alone, one placement. Measured with the batch's own station
 /// corrections only (the retail rows were not measured separately: the bay
 /// row cannot take its default selection before the active-radar bit).
-const WEAPON_PLACEMENTS: usize = 5447;
+const WEAPON_PLACEMENTS: usize = 5395;
 /// 188 from 182: the F-16A's centreline tank row (F150.GAS or F250.GAS) plus
 /// the tank selection its two 0x07e5 wing rows accept, 6 tank placements.
 /// 192 from 188: the MiG-31 (M31-1). 201 from 192: the Mirage 2000 (M2K-1).
@@ -149,11 +181,16 @@ const TANK_PLACEMENTS: usize = 257;
 /// more (TOR-6b, John 2026-11-11).
 /// 240 from 222: the bomber batch A records (BMB-A1, 2026-11-15), 18 more
 /// Cheat-only pairs on the B-52, B-2 and F-117 bay rows.
-/// 258 from 240: the bomber batch B records (BMB-B1, 2026-11-15), 18 more
-/// Cheat-only pairs on the B-1B, Tu-160 and F-111F rows (measured).
-/// 276 from 258: the bomber batch C records (BMB-C1, BMB-C2, 2026-11-15), 18
-/// more Cheat-only pairs on the Tu-26, Tu-95 and Su-34 rows (measured).
-const NOVELTY_PLACEMENTS: usize = 276;
+/// 242 from 240: the B-52's new underwing pylon row (row 7) takes the two novelty
+/// bombs under Cheat loading (B52-5, 2026-11-15), as the other bomb rows do.
+/// 260 from 242 (batches A and B integration, 2026-11-15): the bomber batch B
+/// records (BMB-B1) add 18 Cheat-only pairs on the B-1B, Tu-160 and F-111F rows
+/// (measured), on top of batch A's 242 (the batch's own 258 was from 240, before
+/// the B-52's pylon row).
+/// 278 from 260 (batches A, B and C integration, 2026-11-16): the bomber batch
+/// C records (BMB-C1, BMB-C2) add 18 Cheat-only pairs on the Tu-26, Tu-95 and
+/// Su-34 rows (measured), on top of 260 (the batch's own 276 was from 258).
+const NOVELTY_PLACEMENTS: usize = 278;
 /// Station and designator-pod pairs the normal rules accept (A2G decision 7).
 /// 67 from 65: the F-16A's two 0x07e5 wing rows carry the decoded designator
 /// bit 0x400, one pod each (slice F16A-4). 68: the MiG-31 (M31-1). 71: the Mirage 2000 (M2K-1).
@@ -475,6 +512,20 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                         .map_or(0, |slot| standard.capacity(slot, weapon))
                 } else {
                     expected
+                };
+                // The B-2's gridded bays hold no more than fits under their roof
+                // (B2-5): the retail count capped by `grid_capacity`.
+                let expected = match tore_sim::combat::bays::grid(id, hardpoint)
+                    .zip(tore_sim::combat::bays::station(id, hardpoint))
+                {
+                    Some(([width, length, ceiling], mount)) => {
+                        expected.min(i32::from(tore_sim::combat::hardpoints::grid_capacity(
+                            tore_sim::combat::store_sizes::StoreSize::of_weapon(weapon),
+                            [width, length],
+                            ceiling - mount[1],
+                        )))
+                    }
+                    None => expected,
                 };
                 // John, 2026-11-10 (F15E-5): the F-15E's bomb pair and wing pair
                 // refuse the stores that clip; normal loading must offer none.

@@ -187,6 +187,12 @@ pub struct Hardpoint {
     pub store: Option<String>,
     pub count: i32,
     pub weight_class: i32,
+    /// `slewH`, `slewP`, `slewLimitH`, `slewLimitP` of the record: where the
+    /// mount points at rest and the half-arc either side, 182 units a degree
+    /// ([`crate::surface_unit::ANGLE_UNITS_PER_DEGREE`]). A forward gun reads
+    /// zero heading; the B-52's tail gun 32,760 (180 degrees), 5,460 (30).
+    /// Rows the game adds read zero.
+    pub slew: [i32; 4],
 }
 /// Reviewed retail identities and explicit opinionated runtime variants.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -258,6 +264,16 @@ pub enum AircraftId {
     Tu95,
     Su34,
 }
+/// An aircraft's own names for its targeting sight (the target camera's
+/// title, the Load Ordnance sensor line, the replay's Sensor View) and for
+/// its infrared channel (the radar page's IR label). See
+/// [`AircraftId::sensor_names`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SensorNames {
+    pub sight: &'static str,
+    pub infrared: &'static str,
+}
+
 impl AircraftId {
     /// Retail donor for an opinionated runtime variant.
     pub fn source(self) -> Self {
@@ -1028,6 +1044,21 @@ impl AircraftId {
             Self::Su34 => Some("SU27R.SEE"),
         }
     }
+    /// The F-117's own names for the two sensors its record shares with every
+    /// other aircraft (F117-7, 2026-11-15; John, decision 26, opinionated):
+    /// the `PAVESPK.SEE` row is its IRADS turret (the laser designator the
+    /// laser bombs need) and the `AV8IR.SEE` row is its FLIR. Text only: the
+    /// records, the sight and the channel behave as the shared ones. `None`
+    /// for every other aircraft, which keep the generic labels.
+    pub fn sensor_names(self) -> Option<SensorNames> {
+        match self {
+            Self::F117 => Some(SensorNames {
+                sight: "IRADS",
+                infrared: "FLIR",
+            }),
+            _ => None,
+        }
+    }
     /// Primary installed gun. Multi-gun identities expose every type in `guns`.
     pub fn gun(self) -> Option<&'static str> {
         self.guns().first().copied()
@@ -1309,6 +1340,12 @@ impl Aircraft {
                 store: resolve(&f["defaultTypeName"])?,
                 count: f["maxItems"].number()?,
                 weight_class: f["maxWeight"].number()?,
+                slew: [
+                    f["slewH"].number()?,
+                    f["slewP"].number()?,
+                    f["slewLimitH"].number()?,
+                    f["slewLimitP"].number()?,
+                ],
             });
         }
         stations::append(id, &mut hardpoints);
@@ -2265,6 +2302,21 @@ mod profile_tests {
         assert!(!AircraftId::B52.has_pts());
         assert!(AircraftId::B2.has_pts() && AircraftId::F117.has_pts());
     }
+    /// F117-7: only the F-117 has its own sensor names (IRADS turret and FLIR,
+    /// decision 26); every other aircraft, the B-2 included, keeps the
+    /// generic labels.
+    #[test]
+    fn only_the_f117_has_its_own_sensor_names() {
+        for id in AircraftId::ALL {
+            let names = id.sensor_names();
+            if id == AircraftId::F117 {
+                let names = names.unwrap();
+                assert_eq!((names.sight, names.infrared), ("IRADS", "FLIR"));
+            } else {
+                assert_eq!(names, None, "{id:?}");
+            }
+        }
+    }
     #[test]
     fn the_bomber_batch_b_aircraft_parse_by_key_and_follow_their_records() {
         // BMB-B1 (2026-11-15): checkpoint codes 50 to 52, in batch order.
@@ -2665,7 +2717,7 @@ mod profile_tests {
             (121_000., 235_220.)
         );
         // B-2A: thrust 69,200, empty 158,000, fuel 167,000, maximum 376,000;
-        // the fuel flow stays the retail 6 lb/s.
+        // the fuel flow 6 lb/s becomes 7 (B2-6).
         // B2-8 adds the real 50,000 ft ceiling (both top edges up 1,000 ft)
         // and the fitted airbrake drag 64 (the B-1B's 256 in the record).
         let b2 = [
@@ -2715,7 +2767,7 @@ mod profile_tests {
             (a.number("internalFuel"), a.number("maxTakeoffWeight")),
             (167_000., 376_000.)
         );
-        assert_eq!(a.number("fuelConsumption"), 6.);
+        assert_eq!(a.number("fuelConsumption"), 7.);
         assert_eq!(
             (a.number("maxAlt"), a.number("airBrakesDrag")),
             (50_000., 64.)
@@ -2794,6 +2846,8 @@ mod profile_tests {
             ("thrust", 21_600),
             ("maxTakeoffWeight", 54_000),
             ("internalFuel", 18_500),
+            ("fuelConsumption", 2),
+            ("airBrakesDrag", 256),
         ];
         let text = batch_text(
             "F117.PT",
@@ -2811,6 +2865,10 @@ mod profile_tests {
             (52_500., 45_000.)
         );
         assert_eq!(a.number("thrust"), 21_600.);
+        // F117-8: the real jet has no speed brake, so the record's 256 reads 0.
+        assert_eq!(a.number("airBrakesDrag"), 0.);
+        // F117-9: the fuel flow fitted to the published range, 2 to 3 lb/s.
+        assert_eq!(a.number("fuelConsumption"), 3.);
         let env = |g: i32| a.envelopes.iter().find(|e| e.g == g).unwrap();
         assert_eq!(
             env(1).points,

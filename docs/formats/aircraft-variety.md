@@ -7514,6 +7514,8 @@ match is clean: `F117.HUD` exists (4,608 bytes) and names `~f117`, `~f117h`,
 (Eurofighter HUD). `hud_aperture.rs` has no F-117 arm, so the glass mask fails
 closed (empty) until a slice measures `~F117H.PIC` (the Gripen, F-5E and Tornado
 precedent). The bomb sight type of `F117.HUD` is not read here.
+Update (F117-7, 2026-11-15): the glass is measured now, on the 1673 x 508 art; see
+[F-117 ordnance, sensors and cockpit](#f-117-ordnance-sensors-and-cockpit-f117-67-2026-11-15).
 
 ### F-117 record against the other records
 
@@ -7812,6 +7814,11 @@ No pod body is ever drawn for these rows: they name no shape. The fixed-pod
 body path in `crates/tore-app/src/pylons.rs` draws a fitted body only on
 a station; rows 0 to 3 are not stations, so nothing hangs anywhere.
 
+Update (BMB-A2 and F117-7, 2026-11-15): John chose decision 26. `F18.ECM` is dropped
+(BMB-A2 cleared its default: no jammer, no chaff, no flares), `PAVESPK.SEE` stays as the
+IRADS turret and `AV8IR.SEE` as the FLIR, with the F-117's own text labels; see
+[F-117 ordnance, sensors and cockpit](#f-117-ordnance-sensors-and-cockpit-f117-67-2026-11-15).
+
 ### F-117 stealth finding (standing decision 4)
 
 **The code already has a radar and an infrared signature concept, and the record
@@ -7844,6 +7851,8 @@ carries a stealth signature.**
   novice crew (`NIGHT_STEALTH_AIRCRAFT`, `crates/tore-formats/src/quick_template/tables.rs`;
   [surface-defenses.md](../spec/surface-defenses.md), dormant until the aircraft
   is imported; `docs/formats/quick-mission.md`).
+  Update (F117-6, 2026-11-15): the rule is live now that both aircraft are
+  imported; see [F-117 ordnance, sensors and cockpit](#f-117-ordnance-sensors-and-cockpit-f117-67-2026-11-15).
 
 So decision 4 resolves without a new fitted value: the **real signature is
 already the record's own** (radar 1, retail data; not an invented value). The
@@ -7931,6 +7940,7 @@ identities at the end needs no protocol change.
 | Choice | Interim | Why |
 | --- | --- | --- |
 | HUD glass of the B-2 and F-117 | `hud_aperture.rs` fails closed (an empty mask) | `~B2H.PIC` and `~F117H.PIC` have no measured polygon. Their cockpit slices measure them. |
+| (Update, F117-7, 2026-11-15) | The F-117's glass is measured (B2-7 did the B-2's) | See [F-117 ordnance, sensors and cockpit](#f-117-ordnance-sensors-and-cockpit-f117-67-2026-11-15). |
 | HUD glass of the B-52 | The AC-130 family's whole-picture aperture (the arm the C-130, E-3, IL-76 and the airliners use) | The B-52 flies the same `~AC130H.PIC` picture, so it takes the shared reviewed glass; it needs no polygon of its own. Switch it to an empty mask if John wants it closed until a B-52 cockpit slice. |
 | Rig | Gear word only; the other words pinned, unmapped | As batch 5: the shared fitted gear law until each aircraft's rig slice. |
 | B-52 empty bay rows | Rows 5 and 6 keep an empty Mk 82 selection | The Harpoon and the M61 (the only defaults) fit neither row, so without a fallback the audit found the rows hiding compatible weapons (`live.rs`, the same device as the Mirage F1's belly pair). |
@@ -9205,6 +9215,12 @@ replaces this with real bay cuts, doors and the magazine grid (and owns the
 (`bay-*`) came from a temporary, reverted patch to the capture option. The probe drives
 `State::bay` directly (control `bay`, 5 poses).
 
+Update (B2-5, 2026-11-15): the interim plates are no longer added or drawn; the fitted bay
+doors, the belly cut and the lined recess replace them
+([B-2 weapon bays](#b-2-weapon-bays-b2-5-2026-11-15)), `State::bay_available` is true for the
+B-2 and `--flight-bay` accepts it. The probe's bay check and an 8-value bay sweep
+(`bay-sweep.csv`) now test the doors.
+
 ### Burner, flame, hook, flaps
 
 The B-2 has no flame word, no nozzle faces and no afterburner thrust (`engine_material`
@@ -9695,6 +9711,1081 @@ reads `State::bay` on the RCS page only (no change to a row a radar reads), so i
 to the F-117 at 1.5 times with the doors fully open, and the F-22's values are unchanged.
 Update to [F117-3 bay (interim)](#bay-interim-f117-4-f117-5-replaces-it): replaced.
 
+## F-117 ordnance, sensors and cockpit (F117-6/7, 2026-11-15)
+
+Slices F117-6 (ordnance, default load, countermeasures) and F117-7 (sensors, HUD, cockpit,
+instruments) ran together (implementation mode, bomber batch A). They apply John's accepted
+decisions of 2026-11-15: **3** (switch the retail night rule on with the import), **25**
+(default two GBU-27 in the bays; F117-5 cut them), **26** (keep `PAVESPK.SEE` relabelled as
+the IRADS turret, keep `AV8IR.SEE` as the FLIR, drop the jammer row; BMB-A2 dropped it) and
+**28** (`F117.HUD` and the F117 cockpit art). Earlier F-117 sections stay as written (B11);
+they carry Update lines that point here. Frames are under
+`.local/m3-aircraft/frames/F117-6/`, logs under `.local/m3-aircraft/checks/F117-6/`.
+
+### F117-6: the load, the bays and the sights
+
+**Default load (unchanged by this slice, checked).** Rows 4 and 5, the two bay stations (F117-5),
+each hold one `PAVEWA3` (GBU-27) by default: 4,000 lb of stores, 52,000 of the 52,500 lb maximum
+with the 18,500 lb of fuel. Rows 0 to 3 are the fixed equipment rows (`VIS340.SEE`,
+`PAVESPK.SEE`, the cleared `F18.ECM` row, `AV8IR.SEE`): they are not stations, hold no
+weapon, and the Load Ordnance page shows only the two bays (frames `load-ordnance`,
+`load-ordnance-laser`; the four lower frames of the right-hand panel are empty by design, there
+is nothing to put in them). `--validate-ordnance` reads `F117.PT: 2 source rows, 0 optional weapon
+rows, 46 compatible weapon placements, 0 tank placements; defaults and restart passed; catalog 23
+normal, 83 Cheat`, and the whole audit passes (48 aircraft, 20 recovered stations, 4,784 weapon
+placements, 233 tank placements, 80 pod placements, 240 Cheat-only; no pin moved).
+
+**What the page offers.** Each bay admits the same 23 stores, one a bay (F117-5: the retail mask
+`0x1100`'s 19 plus the four Paveway II laser bombs `GBU10`, `GBU10A`, `PAVEWAY` and `GBU12`). The
+air-to-surface page lists them over three screens: the page's first screen with the laser bombs
+and the cluster and Russian bombs is the frame `load-ordnance-laser`. **There are no presets**:
+Load Ordnance has no named loads for any aircraft, so the default load (two GBU-27) is the only
+one, and a bay takes one store from the list at a time (the Tornado and F-15E slices had none
+either). The retail mask also admits the AGM-88, AGM-45 and AT-2, which the real F-117 does not carry
+(F117-5 listed them for John; unchanged here).
+
+**Live fire, the target camera and the laser all work from the bays.**
+- `--live-fire --aircraft f117 --weapon-slot 1` releases the left bay's GBU-27 (one shot, ammo
+  `[0, 1]`, payload 4,000 to 2,000 lb) once the doors are open; with `--flight-bay 1` it leaves at
+  once. The HUD reads `ARM`, `1 GBU-27`, the reach scale (`R 4.6`, `4.9`, `1.0`) and the new `BAY` cue
+  while the bay is available (frame `target-cam-irads-gbu27-laser`).
+- Designation and the laser run through the fixed `PAVESPK.SEE` row, as the F-16C's and the B-2's: with
+  `--combat-command sight-pin` the target camera reads `PIN`, `ZOOM 3`, then `LASE` (it blinks twice a
+  second, so a frame at the wrong phase misses it) with `4.7 NM`, and the HUD reads `IN RNG` and
+  `LSR 4.7`. A hand-off with the laser key (`laze`) reads `NO LASER` and `LSR RDY` (frame
+  `hud-slot1-gbu27-no-laser-laze-off`).
+- The scripted run (new battery scenario `a2g-laser-f117`, `--a2g-run UKR QUCOL --attack laser --aircraft
+  f117 --load PAVEWA3 --station 0 --count 1`, 15,000 ft at 480 kt): designated at 8.0 s (`laser Lasing`),
+  released from the left bay at 16.2 s inside the reach (`in-reach yes`, mode `Guiding`, spot owner 0),
+  tracked to the tank, which is destroyed (`hp 0/200`), as the F-15E's belly Paveway does. (A count of 2
+  on the one station is refused: with the other bay's bomb it is over the take-off limit.)
+
+**Countermeasures: none, as decided.** BMB-A2 cleared the `F18.ECM` default row (no source was found
+that the real F-117 carried dispensers). Nothing shows: the Weapons window reads `2 GBU-27` with no
+`CHAFF` or `FLARE` line (the window's `no_countermeasures` rule, which TOR-13 wrote for the Tornado IDS
+(Clean), keys on the record's counts), the RWR never lights `JAM` (`no_jammer`: there is no
+jammer row), and the systems page shows engine, fuel and no countermeasures. Pressing the chaff and
+flare commands and `--jammer-on` with `--countermeasure-preview 60` changes nothing and breaks nothing
+(frame `countermeasure-keys-no-dispenser-strip`, no panic in the log). `--sensor-summary` reads `jammer
+none`.
+
+### F117-7: sensors
+
+**Sensor rows.** `VIS340.SEE`, `PAVESPK.SEE` and `AV8IR.SEE`: `--sensor-summary` reads `F117: radar none;
+infrared AV8IR.SEE search 15 nmi 60x60 deg track 15 nmi 45x45 deg; visual VIS340.SEE search 10 nmi
+170x140 deg track 5 nmi 170x140 deg; jammer none; signature radar 1 infrared 20`. The records, the sight
+and the channel behave as the shared ones; decision 26 is text only.
+
+**Labels (text only, nothing else changed).** One new table entry, `AircraftId::sensor_names()` (`SensorNames
+{ sight: "IRADS", infrared: "FLIR" }`, `None` for every other aircraft, the B-2 included), and four readers:
+
+| Where | Every other aircraft | The F-117 |
+| --- | --- | --- |
+| Window 4's title (`instruments.rs`, `CombatReadout::sight_title`) | `TARGET CAM` | `IRADS`; a weapon's seeker picture (and its lost feed) keeps `TARGET CAM`, as it is the weapon's view |
+| Load Ordnance sensor line (`ordnance::sensor_helper`) | `Built-in laser designator: no pod needed for laser ordnance.` or `Aircraft laser pod equipped` | `Built-in IRADS: no pod needed for laser ordnance.` (the shared hemisphere-gimbal rule would have said `Aircraft laser pod equipped`) |
+| Radar window, infrared channel (`combat_view.rs`) | `IR` | `FLIR` (frame `crop-flir-irads-radar-page`: `FLIR`, `10`, the contact) |
+| Replay Sensor View's sight name (`replay/viewer/views.rs::sight_record`) | the sensor record's own name (`PAVE SPIKE`, `AAS-38`) | `IRADS` for the laser row, `FLIR` for the infrared row |
+
+Everything else says what the shared code says: the HUD's `LSR`, `IN RNG`, `ARM`, the page's `PIN`, `ZOOM`,
+`LASE`, the keys. `--sensor-summary`'s record names and the logs keep the retail file names. Tests:
+`aircraft::tests::only_the_f117_has_its_own_sensor_names`, `instruments::tests::the_target_page_title_is_the_aircraft_sight_name_when_it_has_one`
+and the extension of `ordnance::tests::the_helper_line_says_what_the_aircraft_brings_from_its_data`.
+
+**Radar: none, as the record says.** The radar window reads `NOT INSTALLED` (frame
+`cockpit-front-view`), the channel key still reaches the infrared channel (the FLIR above), and nothing in
+the sim, the data link or the AI assumes a radar for the F-117 (`has_radar` is false, BMB-A1's datalink
+test lists it as the eighth type without one; `radar()` is `None`). **No ground-mapping mode**
+exists in the shared radar, as for the B-2 (a sensor change, John's call).
+
+**RCS page: `SIG 1`, and the open bay raises it.** Page 0 reads `SIG 1` with a dot for the exposure contour
+with the doors closed and `SIG 2` with the bay open (frames `rcs-page-closed`, `rcs-page-bay-open`; the
+second frame has released its GBU-27, which the stores term does not count against, since the
+real figure the page rounds is 1 x 1.5). Against a 90 nmi radar nose-on that is 9.0 nmi closed and
+11.0 nmi open (F117-0, F117-5; the page prints the rounded figure). Nothing in the signature code changed.
+
+### F117-7: the cockpit
+
+**Bindings (spec-derived names, opinionated, decision 28).**
+
+| Item | Value |
+| --- | --- |
+| Record `hudName` | null pointer (as retail; never read) |
+| `AircraftId::hud()` | `F117.HUD`, naming the instrument frame `~f117_p`, read as `~F117_P.PIC` |
+| Cockpit stem, shape stem | `F117`, `F117` |
+| Forward art | `~F117H.PIC`, **1673 x 508** (wider than the B-2's 1394 x 508 and the 1280 x 490 of the older families, so the aperture is keyed to this size) |
+| Other pictures | `~F117.PIC` and `~F117S.PIC` (the other two resolutions, which TORE does not read) |
+| Overlays | none: `~F117_LH.PIC`, `~F117_CH.PIC` and `~F117_RH.PIC` do not exist, so the F-117 is a no-overlay stem (BMB-A1) |
+| Record `viewOffset` | 0, 20, 60 (the Tornado's, no host code reads it) |
+
+All of it is pinned by the retail-reading test `crates/tore-import/tests/f117_cockpit.rs` (the three sensor
+rows, `radar()` none, the names, the HUD module and its panel frame, the four-picture family, the art size,
+no other aircraft on the family, `viewOffset`).
+
+**The glass aperture (fitted, measured).** `~F117H.PIC` has no combiner. Its transparent pixels are four
+panes: a left pane (x 5 to 572, y 21 to 480, 189,456 pixels) and a right pane (x 1100 to 1667, 189,970
+pixels), the open sky strip above the bar (x 735 to 940, above y 118), and the **windscreen** between the
+two bow posts, under a thin bar: x 712 to 962, y 129 to 366, **56,572 pixels** (a flood fill from the
+middle). The console's vent block and two teeth break its lower edge from y 346. `hud_aperture::mask` had
+failed closed for the F-117 (BMB-A1's interim). It now has a 16-vertex polygon one pixel outside the
+windscreen (the bar's lower edge at y 128, the posts' inner edges widening from x 725 and 949 at y 141 to
+x 712 and 962 at y 224 and back in to x 714 and 960 from y 308, the foot at y 367 for the opaque console to
+trim). It covers **56,562 of the 56,572 pixels** (99.98 percent): no opaque pixel, no other pane, one
+connected region. Two tests pin it: a synthetic one (centre and the lower corner in; the sky strip, both
+panes and the foot out; an opaque pixel inside left out; any other picture size, the B-2's included, fails
+closed) and a retail-reading one (the same four panes by flood fill, the exact coverage, no opaque pixel, no
+other pane, connected, at least 98 percent). The HUD is the windscreen's, narrow (250 pixels wide), and the
+symbols sit well inside it (frame `cockpit-front-view`); drawing it in the side panes too would be a
+polygon change.
+
+**Views.** Front (the art with the HUD in its glass and the six small-layout windows, bezel
+`~F117_P.PIC`), look left and right 45 degrees (the art turns away with the look; nothing replaces it, as for
+the B-2, F-16 and AC-130), look up 60 degrees (open sky), F2 Back from the pilot's eye (below) and F3 Up (does
+not use the eye). The ten instrument pages (0 to 9) draw with the F-117 bezel (frame `instrument-pages-0-to-9`,
+a headless panel snapshot, so its window 4 reads the generic title: the labels are a combat-readout feature).
+No mirror seeds exist for the family, so no mirror draws (`--cockpit-sheet` prints `NO MIRRORS FITTED`; the
+rear feed stays on the shared seat for every aircraft).
+
+**The eye (fitted, from the scaled shape).** `mirrors::eye_offset` gains the F-117: **6 ft up and 14 ft
+ahead** of the model origin (the shared seat is 7 up and 10 ahead; the B-2 is 10 and 20). Measured on `F117.SH`
+after F117-2's per-axis real-size factors (x 0.7647, y 1.0463, z 0.8869, 1/3 ft a unit): the centre line top
+surface rises evenly from the tail (0 ft at about 26 ft aft of the origin, 3.9 ft at 9 ft ahead), then the
+faceted canopy runs from 10.5 to 18.8 ft ahead with its crown 4.6 ft up at 14.6 ft ahead (4.4 ft at 12 ft,
+3.6 ft at 17.4 ft, 2.9 ft at the base of the windscreen at 18.8 ft). The seat is the middle of the canopy, 14
+ft ahead, and 1.4 ft over the crown, so F2 Back looks over the glass and down the spine to the ruddervators
+(frame `cockpit-view-back-f2`; the shared seat's frame is `pre-view-back-f2-shared-eye`, 4 ft too far aft of the
+cockpit). The record's `viewOffset` (0, 20, 60), read at the shape's 1/3 ft a unit, would put the eye 6.7 ft up
+and 20 ft ahead, at the front of the glass; that reading of its units is unproven and is not used. Every other
+aircraft keeps the shared seat: the test `mirrors::tests::only_the_b2_and_the_f117_have_their_own_pilot_eye`
+(the renamed B2-7 test) checks the table for every identity. Readers are the ones B2-7 listed (F2 Back, replay
+Back, cockpit and HUD cameras and the listening seat); the forward cockpit, the padlock and the target
+camera never read the eye.
+
+### F117-6: the night rule is live (decision 3)
+
+The retail rule, in `tore-formats/src/quick_template/tables.rs` (`NIGHT_STEALTH_AIRCRAFT` `F117.PT` and `B2.PT`,
+`NIGHT_AAA` `ZSU23.NT`, `NIGHT_AAA_SKILL` 0), was written as dormant because neither aircraft was flyable.
+The matching code (`tore_world::surface::resolve::night_stealth`) compares each friendly wing's
+`AircraftId::pt()`, so it woke by itself when BMB-A1 added the identities. This slice made it deliberate:
+the stale "dormant" comments are corrected, the old "dormant today" assertion in
+`surface::tests::the_night_rule_mans_every_aaa_slot_with_a_novice_zsu23` is replaced, and one new test
+(`the_night_rule_wakes_for_a_friendly_f117_or_b2_at_night`) pins the condition for both aircraft: night
+only (clear by day stays off); any of friendly wings 1 to 3 with planes in it (a wing of zero planes does
+not count, an enemy wing never does); and that the creator's AAA strength carries it into both
+`GroundTarget::from_spec` (a template's `<aaa>` slots) and `AreaDefense::from_spec` (the enemy's gun sites).
+**It applies to the B-2 the same way.** No data, behaviour or digest changed for a mission with another
+aircraft or by day. See [surface defenses](../spec/surface-defenses.md#templates-and-defended-slots).
+A wing the lobby fills per plane (`plane_aircraft`) is not read, as retail's rule keys on the wings.
+
+### Checks
+
+`cargo fmt --all -- --check` clean; `cargo clippy --workspace --all-targets --locked -- -D warnings` clean;
+`cargo test --locked --workspace --no-fail-fast`: 7,766 passed, 0 failed, 108 ignored; `--validate-ordnance`
+passes; `--aircraft f117 --headless-flight 600`: 600 samples, 0 non-finite, 389.8 kt, 5,000 to 5,003 ft, fuel
+18,500 to 18,493 lb, no loss; the F-117 battery scenarios and the surface and quick-template scenarios as
+the plan's Session log lists them; `check_docs` passes. Not done: the flight model (F117-8), AI and
+multiplayer (F117-9), the AI bay doors (F117-5).
+
+Provenance: sensor rows, HUD module, panel names, cockpit art and the night rule spec-derived (retail); the
+bindings opinionated (John, 2026-11-15, decisions 26 and 28), the night rule switch on John's decision 3;
+the glass polygon, the eye entry and the label text fitted or agent decisions 2026-11-15. No retail bytes
+committed.
+
+
+## F-117 flight review (F117-8, 2026-11-15)
+
+Validation and fitting, slice F117-8 (bomber batch A), Claude Sonnet (sonnet-high). The
+F-117A flies the hybrid adapter's `variety` configuration built from `F117.PT` and
+`F117.SH` with BMB-A2's corrections (maximum take-off 52,500 lb, ceiling 45,000 ft, the
+1 G fast edge at 36,000 ft trimmed to Mach 0.92). The record's own thrust (21,600 lbf,
+two non-afterburning F404-F1D2), empty weight (29,500 lb), tank (18,500 lb), flow (2
+lb/s), G rows (-3 to +6), 180 degree a second roll block and the other envelope rows
+were read and validated, not changed. Raw probe output is local:
+`.local/m3-aircraft/checks/F117-8/` (`before/`, `after/`, `run_perf.sh`,
+`run_probes.sh`, `battery.txt`, `headless-f117-1200.txt`). "Before" is the repository at
+c10543c7, "after" is with the one fit below.
+
+### What is wrong
+
+**One thing was clearly wrong and citable: the speed brake.** The record carries
+`airBrakesDrag` 256, a fighter's airbrake, and the hybrid adapter turns it into a drag of
+weight x 256/256 x the brake x the speed share: 0.30 G of extra deceleration at 295 kt,
+0.49 G at 413 kt and 0.66 G at 530 kt at 1,000 ft on the 48,000 lb jet (more than the
+whole clean drag). The real jet has none: a pilot's account says "there are no drag
+devices on the jet: no speed brakes, no flaps, nothing" except the landing gear and, on
+landing, the drag chute (jetcareers.com forum, "F-117 Cloaking Device", read 2026-11-15,
+an unofficial source; the post also says aerodynamic braking was prohibited). The shape
+has no airbrake word to draw (F117-3, "Brake: none ... the real jet has none"), and the
+record's `flapsLift` and `flapsDrag` are already 0, so the record agreed about the flaps
+and disagreed about the brake. **Fitted:** `airBrakesDrag` 256 to 0
+(`F117_AIRBRAKE_DRAG`, a `CORRECTIONS` row applied only while the record still holds 256
+and the other F-117 corrections hold). The brake lever still moves the state but adds no drag. A visible effect: the
+scripted landing deploys the brake on its rollout, so the rollout from touchdown goes
+from 2,504 ft to 3,117 ft (default load) and from 2,569 ft to 3,218 ft (clean), nearer
+the published figure, and the `devices` probe's final speed is 435 kt against 372 kt.
+
+**Nothing else was clearly wrong.** Each remaining difference is either inside the
+published scatter, rests on a source too weak to fit to, or is a shared-model feature:
+
+- **Top speed.** The record's sea-level edge, 592.2 kt (Mach 0.90), equals the Wikipedia
+  infobox's 594 kn (684 mph); the high-altitude edge is Mach 0.92 after BMB-A2, the
+  published Mach. The other published figures disagree: 541 kn "at high altitude"
+  (Wikipedia body text), 562 kt (flugzeuginfo.net), 646 mph or 656 mph, Mach 0.98
+  (Aerocorner, MILAVIA), 594 kn. A lifting-line style check says a 21,600 lbf jet with a
+  zero-lift drag coefficient of 0.025 to 0.03 on 780 square feet would be thrust limited
+  at 520 to 570 kt at sea level, so 592 kt is at the top of the plausible band (it needs
+  a coefficient of 0.023), but no source gives sea-level speed alone, so it was **not
+  changed**; see the question at the end.
+- **Climb.** The published rates do not agree (2,820 ft/min in the Wikipedia body, 3,000
+  ft/min and 9,000 ft/min on two other listings; not one states a weight or altitude).
+  The model gives 6,800 ft/min over the first 5,000 ft and 9,300 ft/min at its best (clean,
+  full tank, 300 KEAS to Mach 0.75). At a thrust to weight of 0.45 and a drag of about
+  0.2 of the weight at 370 kt, 6,000 to 9,000 ft/min is what the arithmetic gives, and
+  2,820 ft/min cannot be a maximum. No fit.
+- **Drag shape.** A per-aircraft `DragShape` (the B-52H's way, B52-8) was **not
+  justified.** The B-52's edge is a placard; the F-117's is thrust limited with no
+  afterburner (the real jet cannot go supersonic), so the shared square law
+  (drag equals the thrust at the edge) is the right kind of curve. The one published
+  figure that checks cruise drag, the range, points the other way from the B-52's: the
+  model's range at Mach 0.82 and 36,000 ft is 1,516 nautical miles against the published
+  930 (Wikipedia, flugzeuginfo; 1,140 with a full bomb load, Aerocorner), so the model's
+  cruise is more efficient than the real jet, and a drag shape that lowers cruise drag
+  would widen the gap. The fuel flow, not the drag, is the likelier cause (below).
+- **Takeoff and landing speeds.** The model's weight-scaled stall puts the default load's
+  rotation at 169.7 kt and liftoff at 177.2 kt (3,647 ft run), clean 162.8 and 170.3 kt
+  (3,091 ft), against a published rotation speed of 160 kt and takeoff speed of 165 kt
+  (a FlightGear simulator guide and an unnamed listing: unofficial, no weight), so the
+  model is 6 to 8 percent high on weak figures. The `--retail-stall-speeds` figure,
+  146.5 kt, is 11 percent low against the same figures, so the real number sits between
+  the two switches. The approach is 166.2 kt (the cap, 0.85 times the record's 195.5 kt
+  landing limit) with touchdown at 170 kt at a 45,525 lb landing weight: Aerocorner says 150
+  kt approach and the FlightGear guide 150 to 160 kt touchdown at AoA 9 degrees, but the
+  pilot account says the jet is Approach Category E (166 kt or more), "oftentimes the
+  approach speed was in the 180s". With the 150 kt published at an unstated and probably
+  lighter weight (the speed scales with the square root of the weight: 166 kt at 45,525 lb is 150 kt at about
+  37,000 lb, a plausible landing weight, 29,500 empty plus 7,500 of fuel), the model agrees. No fit; the battery
+  windows are loose.
+- **Takeoff and landing distances.** The takeoff run is 3,647 ft against the published
+  6,200 ft take-off distance and the landing 3,117 ft against 7,400 ft (Aerocorner; neither
+  states a weight, a surface or whether it is a ground run or a distance over a 50 ft
+  obstacle). The shared takeoff has no flap, gear or induced drag and no thrust lost with
+  speed, a physical ground-run estimate (T/W 0.41, 278 ft/s liftoff, 0.33 g mean) is about 3,600 ft,
+  and the real jet lands with its **drag chute**, which the model does not have
+  (see below), so these are not fitted.
+- **Thrust lapse.** The shared lapse (`exp(-h/70,000)`) keeps 0.60 of the sea-level thrust
+  at 36,000 ft; the B-52 fit used 0.3 for a TF33. No F404 figure was found, so unlike the B-52
+  (TF33, B52-8) it was not fitted. Of the model's figures this is the one most likely to
+  make the F-117's 4,000 to 4,600 ft/min climb rate at 30,000 to 35,000 ft too good.
+
+### Before, after and real
+
+Probe: `performance_probe` and `--headless-flight`, full tank (18,500 lb), clean 48,000
+lb unless a row says otherwise, "default" is the Load Ordnance default, two GBU-27
+(4,000 lb), 52,000 lb gross, "approach" flies 65 percent fuel (12,025 lb) from 1,280 ft
+at `--theater UKR --ground-start 1` (5,532 ft runway). Logs in
+`.local/m3-aircraft/checks/F117-8/`.
+
+| Figure | Before | After | Real (source) |
+| --- | --- | --- | --- |
+| Thrust to weight at maximum take-off, 52,500 lb | 0.41 | 0.41 | 0.40 (Wikipedia; its own 2 x 9,040 lbf would give 0.34, so the figure agrees with the record's 21,600) |
+| Takeoff, default load: rotation, liftoff, run | 169.7 kt, 177.2 kt, 3,647 ft | 169.7 kt, 177.2 kt, 3,646 ft | rotation 160 kt, takeoff 165 kt (FlightGear guide, unnamed listing; unofficial); takeoff distance 6,200 ft (Aerocorner, unstated weight) |
+| Takeoff, clean 48,000 lb: liftoff, run | 170.3 kt, 3,091 ft | 170.3 kt, 3,091 ft | none |
+| Takeoff, retail stall speeds (default load) | 146.5 kt, 2,445 ft | the same | none |
+| Time to 5,000 / 10,000 / 20,000 / 30,000 / 36,000 / 40,000 ft, clean, 300 KEAS to Mach 0.75 | 44 / 76 / 161 / 303 / 382 / 445 s | the same | none found for times |
+| Same, default load | 47 / 81 / 176 / 329 / 414 / 484 s | the same | none |
+| BMB-A2 probe schedule (fighter climb, 450 kt to Mach 0.8), 36,000 ft | 381 s | 381 s | not a real figure |
+| Climb rate, first 5,000 ft average / best | 6,800 / 9,300 ft/min | the same | 2,820 (Wikipedia body), 3,000, 9,000 ft/min (listings), no weight stated |
+| Highest altitude on the schedule (clean / default) | 44,518 / 44,509 ft | the same | service ceiling 45,000 ft (Wikipedia infobox); 43,000 to 45,000 (body); 50,000 est. (MILAVIA) |
+| Level top speed, sea level / 15,000 / 30,000 / 36,000 ft | 592.2 / 565.3 / 538.3 / 527.5 kt (Mach 0.90, 0.90, 0.91, 0.92) | the same | 594 kn (infobox), 541 kn at altitude (body), 562 kt (flugzeuginfo), Mach 0.92 (Wikipedia, aerospaceweb), Mach 0.98 (MILAVIA) |
+| Level top speed, 40,000 ft | 502 kt (Mach 0.88), the edge | the same | none |
+| Acceleration 364 to 460 kt at sea level (clean / default) | 23 s / 25 s | the same | none |
+| Acceleration 316 to 460 kt at 36,000 ft (clean / default) | 68 s / 83 s | the same | none |
+| Sustained turn, speed held, sea level, 330 / 461 / 527 kt (Mach 0.5, 0.7, 0.8) | 2.91 G (70 deg bank) / 2.28 G / 1.70 G | the same | none found |
+| Sustained turn, held, 15,000 ft, Mach 0.7 / 0.9 | 2.00 G / 1.16 G | the same | none |
+| Sustained turn, held, 30,000 ft, Mach 0.7 / 0.8 / 0.9 | 1.55 G / 1.56 G / 1.21 G | the same | none (BMB-A2: 1.56 to 1.21 G at Mach 0.9 with the edge trim) |
+| Instantaneous pull, full stick, 3 s, 1,000 ft, Mach 0.5 / 0.7 | 4.84 G, 14.8 deg/s / 4.85 G, 10.0 deg/s | the same | +6 G limit (Aerocorner); the loaded-elevator rule divides it by 1.25 at this load |
+| Instantaneous pull, 15,000 ft / 30,000 ft, Mach 0.7 | 3.23 G / 1.62 G | the same | none (the envelope's 2 G and 3 G rows narrow with height) |
+| Roll rate, full stick | 180 deg/s | 180 deg/s | none found (the record's block, the A-4E's 180 / 214 / 427) |
+| Speed brake, extra deceleration at 295 / 413 / 532 kt at 1,000 ft | 0.30 / 0.49 / 0.66 G | 0 | none: no speed brake (pilot account, unofficial) |
+| Cruise Mach 0.82 (470 kt) at 36,000 ft: burn, range from 18,500 lb | 1.59 lb/s, 1,516 nm | the same | range 930 nmi (Wikipedia, flugzeuginfo), 1,140 nm with payload (Aerocorner) |
+| Cruise 65 percent of the edge at 20,000 ft (362 kt) | 0.85 lb/s, 2,186 nm | the same | none |
+| Military power, full tank | 2.00 lb/s, 154 min | the same | F404 dry fuel consumption 0.81 lb/lbf/h (-402) gives 4.86 lb/s |
+| Approach, default load, 65 percent fuel | 166.2 kt, touchdown 169.9 kt, rollout from touchdown 2,504 ft | 166.2 kt, 169.9 kt, 3,117 ft | approach 150 kt (Aerocorner), touchdown 150 to 160 kt (FlightGear guide), often in the 180s (pilot account); landing distance 7,400 ft (Aerocorner) |
+| Approach, clean | 166.2 kt, touchdown 171.6 kt, rollout 2,569 ft | 166.2 kt, 171.6 kt, 3,218 ft | the same |
+| Stealth signature, infrared / radar | 20 / 1 | 20 / 1 | n/a (below) |
+
+Sources read 2026-11-15: Wikipedia "Lockheed F-117 Nighthawk" (specifications block and
+body text; read through the first 100,000 characters), aerospaceweb.org "F-117 data",
+flugzeuginfo.net "Lockheed F-117 Nighthawk", MILAVIA "F-117 specifications", Aerocorner
+"Lockheed Martin F-117 Nighthawk" (read through a search result; the page itself failed to
+fetch, so the takeoff, landing, approach and 2,850 gallon fuel figures are a search
+summary's), Wikipedia "General Electric F404" (0.81 lb/lbf/h is the -402's), the Air and
+Space Forces Magazine "The Black Jet" (52,000 lb gross, JP-4, tailhook, drag chute released
+when the nosewheel touches down), the FlightGear F-117 guide (a simulator guide; the page
+refused a direct fetch, so its 160 kt rotation, 150 to 160 kt touchdown and AoA 9 degrees
+are a search result's summary) and the jetcareers.com forum post by an F-117 pilot. Every
+figure from a forum or simulator guide is used only as a plausibility target. No official
+take-off, landing or climb figure was found; the Dash One was not available.
+
+### Instantaneous and sustained turns, and the probe's limits
+
+The generic probe schedules can fly the F-117 off its envelope, as they did the bombers:
+the accelerations at 40,000 and 45,000 ft start at Mach 0.55 (315 kt), which is under the
+envelope's low edge there, so they drift 6,000 to 9,000 ft and settle at nonsense speeds
+(501 kt at 40,000 ft, 567 kt at 45,000 ft); the 1 G band at 45,000 ft is 338 to 424 kt
+(Mach 0.59 to 0.74), the ceiling polygon BMB-A2 shifted up by 3,000 ft. The fighter climb
+probe at Mach 0.9 never leaves sea level (it flies at 463 kt, an edge it cannot
+hold). Both are probe artifacts, not the aircraft. The sustained turns above hold the speed
+(`PROBE_HOLD_SPEED=1`); with the speed free, the sea-level Mach 0.5 turn is 2.91 G and
+the aircraft slows to 346 kt. At 36,000 ft the band is too narrow for any sustained or
+instantaneous pull (a G limit of 1.0 at Mach 0.5 to 0.9), and at Mach 0.9 and 1,000 ft
+the pull is 1.61 G, because the edge there is 592 kt.
+
+The sustained turn at Mach 0.9 and 30,000 ft that BMB-A2 reported as falling from 1.56 G
+to 1.21 G is the edge, not a defect: at 530 kt the drag equals the thrust by the law
+(0.89 of the edge speed); at 0.8 Mach, the more usual speed, the model sustains 1.56 G (50 deg bank, 2.8 deg/s).
+
+### Open-bay drag: `bayDrag` is not read on the hybrid adapter
+
+The record's `bayDrag` (25) is read into `DragProfile.bay` (`tore-formats`
+`flight_model/profile.rs`) and used only by `flight_model/forces.rs`, the native
+(retail-law) diagnostic. The hybrid adapter's one drag expression
+(`State::airframe_drag`, `flight/airframe.rs`) reads gear, flaps and airbrake from
+`c.native.drag` and nothing else: no `bay`, `rudder` or `wheel` term. An open F-117 bay
+(or an F-22's) therefore adds no drag, and the open bay has no effect on speed, climb or
+range, though it does raise the radar signature (below). The coefficient 25 is 10
+percent of the weight (25 / 256 = 0.098 W) with the bay fully open, 4,700 lbf on the
+48,000 lb jet, 22 percent of the sea-level thrust, before the device fraction the
+airbrake term uses; the real bay is open for seconds on a bombing run. **Not added**: reading it would change
+the flight of every bay aircraft (the F-22 family and the F-117, the aircraft with reviewed bays) and the result needs a sim version bump; it is John's call.
+Options: leave it, or add `bay x bayDrag/256 x the speed share` to the airframe drag
+beside the airbrake term.
+
+### Stealth signature
+
+The sensor code has a radar signature concept (`sensors/signature.rs`,
+`docs/radar.md`): `sigs[3]` radar and `sigs[2]` infrared, from the record. The F-117's are
+radar 1 and infrared 20 (B-2: 1 and 15; F-22: 10), unchanged and pinned by the record
+test. Detection range goes with the square root of the signature over 100: nose-on, clean,
+a radar of 90 nmi nominal range sees it at 9 nmi, 11 nmi with the bay fully open
+(1 + 0.5 x the open fraction), 13 nmi abeam (x2 aspect weight) and 18 nmi from straight
+above or below (x4); gear down adds 25 percent to the signature (a 12 percent longer
+range). Stores in the bay do not count (only external stores add 3 each and 2 per 1,000
+lb, which the F-117 cannot carry). The infrared signature gives 0.45 of the nominal IR
+range (sqrt(20/100)). Surface radars read the signature since SAM-1 (they use the
+air-to-air model) but not the gear, flap and bay deployment, so SAMs do not yet see an
+open F-117 bay (SAM-1's open item). The numbers are gameplay tuning, not measured cross
+sections; none was found for the real jet, so no fitted value was needed.
+
+### The drag chute (not modelled)
+
+The real jet lands with a drag chute (required except in crosswinds), which the game does
+not model for any aircraft. The scripted rollout uses wheel brakes alone, so the rollout
+is 3,117 ft where a real chute landing is shorter and the published landing distance is
+7,400 ft. Not added; option for John: map the airbrake key to a chute for the F-117, or
+fit the shared brake deceleration (18 ft/s squared) down per aircraft the way the B-52
+did (an unofficial source gives no figure for the F-117).
+
+### Other findings
+
+- Air maneuvers (`--headless-flight`, the B-2 set): level (445 kt at 5,000 ft after 7,200
+  ticks), pull (4.85 G), loop (completed), roll, sprint (583 kt), rudder, devices,
+  stall-recover (recovered at tick 1,843, 216.9 kt minimum), spin-recover and `dive` and
+  `overspeed` ended in the overspeed loss by design. `roll` and `rudder` end with
+  `crashed=true` in the shared harness because they hold a full stick or pedal with no
+  recovery (the run is not an acceptance of the stick; same before and after). All had
+  `non_finite=0`.
+- `--headless-flight 1200 --aircraft f117`: 399.1 kt level at 5,016 ft, fuel 18,486 lb, no
+  crash, 0 non-finite. The ground-start takeoff (`--theater UKR --ground-start 1`,
+  `takeoff`) completes at 3,582 ticks, 100 ft, 199 kt.
+- The flaps: `flapsLift` and `flapsDrag` are 0 in the record, so the flap lever does
+  nothing for lift or drag (`flaps_lift_f8=0` in the envelope line), as for the real
+  jet.
+- `_gpullDrag` 38 (induced drag per G above 1, 0.148 of the weight) checks against a
+  lifting-line estimate for the F-117's 2.4 aspect ratio (780 sq ft, 43.25 ft span, e
+  0.8): 0.25 W at 3 G at 330 kt at sea level, against the record's 0.30 W; kept.
+- `loadedElevator` 40: the +6 G row divides by 1 + 0.4 x loading, to 4.8 G at the probe's
+  air start (full tank, no stores) and 4.6 G with the 4,000 lb of GBU-27; the real limit is
+  +6 G (Aerocorner) at an unstated weight.
+- Fuel flow: see the question below; the record's 2 lb/s is a high-bypass figure (SFC
+  0.333 at the rated thrust), the F404's low-bypass dry figure is 0.81.
+- The battery (`tools/battery_scenarios/flight.py`): `f117` joins the liftoff,
+  liftoff-retail and approach scenarios (it was already in `VARIETY_AIRCRAFT`), with
+  fitted windows (liftoff 155 to 185 kt, approach 150 to 180 kt, agent decisions from the
+  weak figures above; recorded 177.2 and 166.2 kt), an internal fuel of 18,500 lb (65
+  percent, 12,025 lb, for the approach) and the ordinary take-off tick allowance (it lifts
+  off at 3,582 ticks, under the 4,500 limit); no theater override (the 5,532 ft runway
+  holds its 3,646 ft run and 3,117 ft rollout, 1,004 ft to spare).
+
+### Checks
+
+`cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D
+warnings`, `cargo test --locked --workspace --no-fail-fast` (counts in the plan's Session
+log; the new test is
+`the_f117_has_no_speed_brake_and_climbs_like_a_subsonic_strike_jet`, a loose pin, and
+`the_b52_b2_and_f117_read_their_real_figures_only_while_retail` now also checks the brake),
+`--headless-flight 1200 --aircraft f117`, a ground-start takeoff, `battery.py --lane
+flight --scenario '*f117*'` 13 of 13 (animation, liftoff, liftoff-retail, approach, variety,
+the three bay-fire and three bay scenarios, a2g-laser, bay-clearance, skin), the tools
+unittests, `check_docs`.
+
+Provenance: the airbrake fit is **fitted** (an agent decision, 2026-11-15) on an
+unofficial but unambiguous account that the jet has no speed brake, consistent with the
+record's zero flap terms and the rig; the thrust, weights, fuel, ceiling and top-speed
+edge are BMB-A2's; the battery windows are fitted agent decisions; every real figure is
+a public page, forum or guide, for comparison only; nothing else changed.
+
+### Open for John
+
+1. **Sea-level top speed.** Keep the record's 592 kt (Mach 0.90, equal to the 594 kn
+   infobox) or trim the sea-level edge (1,000 ft/s) toward the 541 to 562 kt of the
+   other sources (about 5 to 9 percent), the one-vertex way BMB-A2 trimmed 36,000 ft?
+2. **Fuel flow.** 2 lb/s (SFC 0.333, a high-bypass figure) or the F404's cited 0.81 lb/lbf/h
+   x 21,600 lbf = 4.86 lb/s, which would give a cruise range of about 630 nmi against the
+   published 930 (the record's 2 gives 1,516)? A flow of 3.3 lb/s reproduces 930 exactly. The
+   B-2's equivalent question is open too.
+3. **`bayDrag`**: read it on the hybrid adapter (a sim change for every bay aircraft) or
+   leave it?
+4. **Drag chute**: add a landing aid for the F-117 or leave the wheel brakes alone?
+5. **Thrust lapse**: the shared 70,000 ft lapse keeps 0.6 of the thrust at 36,000 ft; an
+   F404 figure would let the F-117 be fitted like the B-52. None was found.
+6. **Takeoff and landing speeds**: the weight-scaled model is 6 to 8 percent above the weak
+   published figures; a `stall_reference_fraction` of about 1.15 would fit them, but the
+   figures are a simulator guide and an unnamed listing.
+
+## B-2 weapon bays (B2-5, 2026-11-15)
+
+Opinionated (John, 2026-11-15, decision 21: "extend the magazine to a grid; cut the belly
+with door leaves; clear the pair flag"); every number below is **fitted**, agent-authored,
+from the measurements in [B-2 bay survey](#b-2-bay-survey) and the clearance tables here.
+**The door count is fitted** (two a bay, four in all): no public source gave one (searched
+2026-11-15: the pages found say only "a rotary launcher or two bomb-rack assemblies" a bay,
+Air Force Technology and Wikipedia; the layout of the doors is not described). Earlier
+sections stay as written. This replaces the interim open pose of
+[B-2 rig (B2-3)](#b-2-rig-b2-3-2026-11-15) (four hanging plates on word `6486`) and settles
+the bay proposal in [B-2 bay survey](#b-2-bay-survey). The machinery is the F-117's
+([F-117 weapon bays](#f-117-weapon-bays-f117-5-2026-11-15)) plus the new grid
+([stores specification](../spec/stores-on-pylons.md#b-2-weapon-bays-b2-5-2026-11-15)).
+
+**The grid.** `combat::bays::GRIDS` gives a bay row a floor (usable width and length,
+feet) and a ceiling. `Rack::grid()` (carried in the rack's `tip`, which a magazine does not
+use, so checkpoints, recordings and the session carry it unchanged) turns on
+`hardpoints::grid_point`, which replaces the F-22's single lane for that row. The store's
+own size decides the cells: abreast = floor width over its pitch (its fin span, no less than
+its body plus 0.1 ft, no more than 1.3 ft), along = floor length over its length plus 0.25 ft,
+and as many tiers as the load needs, up to what fits under the ceiling
+(`grid_capacity`). The B-2's floor is 5.3 ft by 19.33 ft: a Mk 82 (7.3 ft, 1.27 ft fins) hangs
+**4 abreast, 2 long, 4 tiers = 32 a bay**; a Paveway III (13.9 ft, 5.4 ft fins) **4 abreast,
+1 long, 1 tier = 4 a bay**, as decision 21 has it. Where the stores stand: a store's lowest
+fin tip sits on the floor (the belly polygon's plane, -3.667 ft); the Paveway III rows hang
+0.9 ft lower (their fins are taller than the bay is deep over the outer columns).
+
+**Counts and fit.** The record's 64 Mk 82 and 8 Paveway III are kept (32 and 4 a bay); the
+real 80 Mk 82 (40 a bay) and 16 large stores do **not** fit and are not used. Measured with
+the doors open (feet; positive is clear, negative is how far the drawn store reaches into the
+part):
+
+| Load, one bay | Door planes | Ends (aft / fore) | Sloped roof | Top skin | Nearest store |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 32 Mk 82, 4 tiers (the default), left bay | 1.60 | 1.37 / 3.11 | 0.32 | 0.50 | 0.25 |
+| 32 Mk 82, 4 tiers, right bay | 1.60 | 1.37 / 3.11 | 0.21 | 0.16 | 0.25 |
+| 40 Mk 82, 5 tiers (the real 80), left / right bay | 1.60 | 1.37 / 3.11 | -0.98 / -1.09 | -0.80 / -1.14 | 0.25 |
+| 4 Paveway III (GBU-27), either bay | -0.65 | 1.72 / 3.71 | -0.31 | 0.04 (left), -0.15 (right) | 0.10 |
+
+The fifth tier of Mk 82 stands about a foot through the roof and the top skin over the
+outer columns (the skin there is only 5.0 ft above the belly), so the real 80 do not fit this
+grid; the record's 64 do, with 0.2 to 0.5 ft to spare. The Paveway III's 5.4 ft fins cannot stand
+four abreast in an 8.0 ft bay: its bodies do (a 1.3 ft pitch, 5.2 ft across), its fin tips stand
+0.65 ft past the door planes and its upper fin tips touch the roof by 0.3 ft: the same kind of
+clip as the F-117's GBU-27 (0.62 ft), left for John (options: carry them at a smaller
+fin span in a bay; two abreast and two tiers; one a bay). Full table, every store the rows
+offer: `.local/m3-aircraft/checks/B2-5/matrix-row5.txt` and `-row7.txt`.
+
+**Stations.** Rows 5 to 8 (location 3) are re-placed by `placed_on` as `Location::Magazine`
+stations through `bays::STATIONS`: rows 5 and 7 the left bay (x -5.333 ft), rows 6 and 8 the
+right (x +4.667 ft), release origin 6.667 ft forward, floor up -3.667 ft (the Paveway rows
+-4.567). The pair flag `0x4` is cleared on all four rows, as `F22N.PT`'s rows were corrected
+(`aircraft_stations::adjust_defaults`, flags `0x1104` to `0x1100`, a row is one bay). The
+Mk 82 row of a bay and its Paveway row are **alternatives**: `Loadout` empties one when the
+other is loaded (`bays::alternative`) and refuses a load with both.
+
+**Geometry (feet right / forward / up from the reference point).**
+
+| Part | Value |
+| --- | --- |
+| Openings | left x -9.333 to -1.333, right x 0.667 to 8.667 (8.0 ft wide, about the mesh axis x -0.333); -3.0 to +16.33 forward (19.33 ft) |
+| Belly | the one 7-vertex polygon `396d` (z -11 units), cut open over both bays while the doors are off their seat; the two painted door panels `3c84` and `3c65` (z -12 units) lie under it and become the doors |
+| Doors | two a bay, 4.0 ft wide, cut from the panel, hinged at the inner and outer edges at -4.0 ft, 90 degrees down (they hang to -8.0) |
+| Recess | one sloped ceiling plane under the top skin, 4.6 ft over the outer wall to 9.6 ft over the inner, four lined walls (the shape's own bay-plate grey, palette 147); no trapeze rail |
+| Belly skins cut | `396d` (hole) and the two panels (doors); nothing else overlaps the openings |
+
+No sky hole: the recess is a closed box (ceiling and four walls) under an intact top skin, the
+roof under the skin over the openings (the closest point is the inner wall, 0.07 ft under the survey's lowest skin there, 5.7 ft up), and the stacks stand under the roof
+(table above). Frames: `.local/m3-aircraft/frames/B2-5/` (`closed-*`, `opening-*`,
+`paveway-open-*`, `ripple/`). The shape's own open pose (four hanging plates, word `6486`) is no
+longer drawn; one of its plates is the material of the lining.
+
+**Release.** The F-22's timing: the press asks for the doors, the first bomb leaves when they
+are at 0.95 (tick 116 after the press, 0.958), the doors stay open 1 s after each release and close
+1 s after the last. Ripple order across the grid: **bottom tier first, front to back, the
+stores of a row abreast outermost first alternating sides, then the next tier up** (a place
+does not move as the others leave; a part load fills the bottom tier first), and **the bays
+alternate**: after a bomb leaves a gridded bay, the selection passes to the other bay's station
+holding the same weapon (`Ownship::sister_bay`), so one press is one bomb and presses go
+left bay, right bay, left bay. A held trigger does not repeat (no bomb record has the repeat flag).
+Each store clears the doors and the stores below it: it leaves from its own place, the stores of
+lower tiers have already gone, and the open doors stand 1.6 ft from the nearest store (table
+above). Probe `TORE_STORES_PREVIEW_PRESSES=16` (`.local/m3-aircraft/checks/B2-5/ripple.txt`):
+the first 16 presses are left, right, left, right, each bay's eight bottom-tier places, then
+the front pair of the next tier. **The AI** releases through the shared strike release, which
+chooses its own station and does not wait for doors (as the F-22's and the F-117's): an AI B-2
+empties a bay before the other and its doors stay drawn shut while its bombs leave, listed for
+John.
+
+**Signature.** `State::bay_available()` is true for every aircraft with a row in
+`bays::STATIONS`, so the B-2's `bay` fraction now moves and the open-bay term of the RCS page
+(1.5 times at full travel) applies to it; the HUD's BAY cue shows. No other radar path reads it
+(unchanged from the F-22 and F-117).
+
+**Default load.** The record's four rows (`MK82.JT` x2 and `PAVEWA3.JT` x2 in the retail
+default stores line) cannot all load once a bay holds one or the other. The default is the Mk 82
+rows full (32 a bay, 64 in all, 32,000 lb) and the two Paveway III rows empty (they keep
+their store, so Load Ordnance still offers four a bay); the retail default was all four rows full
+(64 Mk 82 and 8 GBU-27, 48,000 lb, which put the two stores types on one floor). This lightens the
+default takeoff by 16,000 lb. Update to [B-2 flight review](#b-2-flight-review-b2-8-2026-11-15):
+the scripted liftoff is 155.2 kt after 7,232 ft (was 158.1 kt after 7,987 ft) and the scripted
+approach 167.5 kt (was 166.2); the scenarios' windows (140 to 165 kt and 140 to 170 kt) hold
+and their recorded values follow (`tools/battery_scenarios/flight.py`).
+
+**What each row admits.** The retail masks, as before, less the stores that do not fit: the two
+Mk 82 rows refuse `GBU29`, `GBU29P`, `GBU30` (the Paveway rows' stores: 0.9 to 1.2 ft through the
+roof) and `MK20` (0.42 ft); the capacity of every store is cut to what fits (a GBU-38 24 a
+bay, a CBU-87 18, a Mk 84 8, a GBU-27 4). `--validate-ordnance`: weapon placements 4,784 to
+4,776 (`B2.PT` 86 to 78), every other pin unchanged. The real counts (cited above, 80 Mk 82
+and 16 large stores, up to 40,000 lb) are not reached: 64 Mk 82 is 32,000 lb.
+
+## B-52 bay, pylons and tail gun (B52-5, 2026-11-15)
+
+Opinionated and **fitted**, agent-authored (B52-5), applying John's accepted decisions
+of 2026-11-15 (the bomber batch A decision round, items 7, 8, 9, 10 and 13). Earlier
+sections stay as written; the interim bay of [B-52 rig (B52-3)](#b-52-rig-b52-3-2026-11-15)
+and the retail station table of [B-52 hardpoints](#b-52-hardpoints-record-rows) are what this
+replaces. The numbers and the clearance tables are in the
+[stores specification](../spec/stores-on-pylons.md#b-52-bay-pylons-and-tail-gun-b52-5-2026-11-15);
+this section records what the shape and the record gave and what was chosen.
+
+**Stations after B52-5.** The record's seven rows are kept and one is added (row 7, the pylon
+pair), so `B52.PT` has eight rows while it is the retail record (the same guard as the other
+station corrections, `aircraft_stations::adjust_defaults`).
+
+| Row | What it is now | Position (feet right / up / forward) | Capacity, class | Default |
+| ---: | --- | --- | --- | --- |
+| 3 | bay, forward row (was 12, class 166, 13.3 ft under the reference) | 0 / -6.0 (belly plane) / +13.87 | 9, class 70 (7,000 lb) | none |
+| 4 | M61 tail gun | 0 / +2.0 / -92.0 (was 0 / 6.7 / -73.3) | 1,242 rounds | M61, 1,242 |
+| 5 | bay, middle row | 0 / -6.0 / +5.20 | 9, class 70 | none |
+| 6 | bay, aft row | 0 / -6.0 / -3.46 | 9, class 70 | none |
+| 7 | underwing pylon pair (new, authored) | +/-17.33 / record 2.67 / +10.33 | 18 (nine a wing), class 170 | 12 AGM-84E, six a wing |
+
+**Bay (decision 7).** The retail rows hang 13.3 ft below the reference point, under the ground
+contact line (-9.3 ft). They are lifted into a fitted belly bay and drawn through the shared
+bay machinery. The opening is the 26 ft the shape's word `7a20` drew (shape y -13 to 26 units,
+8.67 ft aft to 17.33 ft forward), but 6 ft wide, the real bay's width (the drawn plates stood
+9.3 ft apart, past the 6.7 ft flat belly), centred in the flat belly panel `46ae` (x +/-5 units
+at z -9, which the bay never reaches the edge of). The belly plane is -6.0 ft. The recess is 6.0
+ft deep, so its roof is at the reference height; the fuselage top skin is 13.3 ft above the
+belly (z 11 units), so nothing opens to the sky. Two doors, each 3 ft wide, hinged on the outer
+edges, swing 90 degrees down and hang to -9.0 ft, 0.3 ft above the ground contact line. The
+real bay has three interconnected sections each side; two leaves are drawn (fitted, as the
+F-117's two). A lined box (ceiling, four walls) closes the recess; four rails hang from the
+ceiling over the lanes and eight posts stand from the floor to the ceiling at the two inner row
+boundaries, drawn only while the doors are off their seat. The interim plates are no longer
+drawn (their word is still reviewed, and one plate is the lining's material).
+
+**Layout and the shared grid.** Rows 3, 5 and 6 each own one 8.67 ft slab of the bay (the
+retail 13, 4.3 and -4.3 ft are the slab middles) and hold nine stores, the real bay's 27 bombs
+(three clips of nine). B52-5 first built its own small per-aircraft grid (3 x 3, pitch the span
+plus 0.15 ft) because B2-5's general magazine grid was not visible while it ran. At the batch A
+integration (2026-11-15) the B-52 was **folded onto B2-5's grid**: B52-5's `GRIDS`, `BayGrid`,
+`CentreBay`/`CENTRE_BAYS` and the one `if let` in `Rack::store_point` are deleted; the three rows
+are rows of the shared `bays::GRIDS` (floor 6.0 ft by 8.67 ft, the roof at 0.0 ft up of the
+reference point, flat), the opening is a row of `bays::OPENINGS` (`centre` 0, `inner` 0, `outer`
+3.0, `inner_depth` equal to `depth`) and the layout is `grid_cells` and `grid_point`. B2-5's pitch
+(span plus 0.03 ft, at most 1.3 ft) replaces the span plus 0.15 ft, so a Mk 82 row is 4 abreast, 1
+long and 3 tiers for nine (up to 4 tiers by room), not 3 x 3, and the ripple is B2-5's: bottom
+tier first, front to back, outermost first alternating sides. The mounts (13.87, 5.20 and -3.46 ft
+forward, -6.0 ft up), the 9-store and class-70 caps and the 0.87 ft Mk 82 origin offset
+(`B52_ORIGIN_AHEAD`; a `MK82.SH` bomb spans -4.52 to +2.78 ft about the origin the stores hang and
+leave from, so each mount is its slab middle plus 0.87 ft and the drawn bomb is centred) are
+unchanged. The `Location::Beam` of the pylons is separate from the grid and carries over as is.
+
+**What the bay admits (the caps).** The retail masks (`0x1100` on row 3, `0x1120` on rows 5 and
+6) admitted 71 placements in all on the record. Capacity 9 a row and 7,000 lb a row (21,000 lb
+in all) are **opinionated**, from the cited real loads (27 Mk 82 class, or 8 heavy stores, 12
+Mk 52 mines, 6 CBU-87; aircraftinformation.info) and B52-0's proposal. A bay sweep loaded each
+admitted store full in all three rows and measured the open bay; the sweep was re-run on the
+shared grid at the integration: three stores clear everything by at least 0.05 ft (`MK82`,
+`MK82P3`, `FAB250`) and 22 are refused by name (`aircraft_stations::B52_BAY_REFUSED`; B52-5's grid
+admitted five, the 1.3 ft pitch of the shared grid puts `GBU38` and `RBK250` against their
+neighbours' fins): the 10.8 ft and longer stores (Mk 84, the FAB-500 and
+FAB-1000, the GBU-27 class, the HARM, MK20), the 3 ft span missiles the `0x20` bit admits on rows
+5 and 6 (`AGM84A`, `AM39`, `AS16`), the Harpoon `AGM84E` (12.6 ft; it is a pylon store), the
+cluster bombs (`CBU87`, `CBU89`, `RBK250`, `RBK500`), the Snakeye and its pack and `AT2`, whose fins or length put them through a wall, a
+post or a neighbour. **The real "8 heavy stores" load cannot be carried**: a Mk 84 is 10.8 ft in
+an 8.67 ft slab. Options for John: keep (the bay carries the 500 lb class); a second layout for
+long stores (two lanes of four across 26 ft); per-shape centring (below). Only 500 lb class bombs without wide fins (the Mk 82 and its pack, the FAB-250) stay. The stores
+specification holds every number.
+
+**Pylons (decision 8).** Row 7 is an authored pair, not a source row: 17.3 ft out and 10.3 ft
+forward (the middle of the free span between the fuselage and the inboard pod and of the wing
+chord there, measured B52-0), store lugs 1 ft under the wing's underside (3.8 ft up there; the
+simulation reads 3.8 to 4.0 over the beam). Capacity 18 (nine a wing) and class 170 are
+opinionated. B52-0 proposed class 200; **170 is chosen**: a row's default weapon loads at its
+weight limit, and a saved load has to equal the default count (`mission.rs`), so 20,000 lb
+admitted 14 Harpoons and the load check refused the 12 default ones. Class 166 to 179 holds
+exactly 12 (1,380 lb each, the real figure too: "Harpoon 8 to 12"), and the 500 lb bombs reach
+the 18. The flags are `0x1105`: bomb-flag stores, pair, base. The wing row had the generic rack
+(two pylons a wing, three stores on a triple rack), which hangs three-foot-span missiles with
+their fins through each other; the B-52's stub pylon carries a heavy stores adapter beam, so a
+new `Location::Beam` hangs the stores from one flat beam, **three abreast** (pitch the span plus
+0.1 ft) in rows 1.05 store lengths apart, centred on the pylon (`beam_offset`). The pylon is
+drawn as that beam (0.5 ft deep, as wide and long as the rows) with a slab up to the wing's
+underside (`pylons.rs`, `beam_pylon`). Stores that touch the flap strip or the wing's
+trailing edge at capacity are refused (`B52_PYLON_REFUSED`: `AGM45`, `AGM88`, `GBU29`, `GBU29P`,
+`GBU30`, the 13.7 to 13.9 ft stores). Clearance against the inboard pods, the flaps up and down
+(the B52-3 rig, 15 degrees), the fuselage, the gear and the ground is in the stores
+specification; the default Harpoons clear the pod by 8.3 ft, the flap strip by 0.3 ft (up) and
+0.4 ft (down), the fuselage by 4.6 ft and the ground contact line by 10.6 ft.
+
+**Default load (decision 9).** 12 AGM-84E on the pylons, six a wing in two rows of three (15.3
+ft apart); the bay starts empty. Row 3 lost its default Harpoons. The three bay rows keep an
+empty `MK82.JT` selection (the retail 5 and 6 empty selections of BMB-A1 now also hold row 3;
+`live.rs`): the Harpoon and the gun are the only default weapons and the bay refuses the Harpoon.
+Bay loads come from Load Ordnance. The loadout counts stores on the pylons and in the bay
+(`total_lbs` counts every store that is not internal), so the default tank, which BMB-A2 capped to
+what the maximum take-off weight allows, now starts at 286,402 lb instead of 303,000 lb (the
+12 Harpoons, 16,588 lb with their fittings, count); the take-off weight is the same 488,000 lb. A bay load (27 Mk 82 are
+13,500 lb) needs fuel taken out in the editor.
+
+**Wing tanks (decision 10).** Stay airframe, no station (unchanged).
+
+**Tail gun (decision 13).** The M61 row (4) moves from 73.3 ft aft and 6.7 ft up to the drawn
+tail cone, 92.0 ft aft and 2.0 ft up (the cone ends at y -138 units; its centre is z 3 units),
+and carries the real 1,242 rounds (BMB-A2). What the game does with it did not change: the
+simulation does not read an aircraft hardpoint's slew heading or limits (they are decoded as
+BRF words only, `aircraft_schema::HARDPOINT`), so the gun fires along the nose from its mount,
+like every aircraft gun that is not an AC-130 gun mount; the "aft-facing, 30 degree arcs" of the
+record are not in play, before or after this move. Rounds therefore start 92 ft behind the
+reference point and travel forward past the airframe. The live-fire probe (`flight-livefire-b52-slot1`,
+`--weapon-slot 1`) fires the gun from the new mount: 24 shots, 11 hits on the practice aircraft
+ahead, ammunition 1,242 to 1,218, the Harpoons and the empty bay rows untouched; the HUD reads
+`M61 1218 READY`. The pipper and the AI's gun aim read the same mount (`Station::gun_mount`).
+Whether a real rear-facing slewed mount should be built (heading 32,760, 30 degree arcs) is a
+question for John.
+
+**Release.** Bay: doors open, release, doors close, on the F-22's timing (`State::bay` 1.0 s,
+the weapon leaves once the doors are at 0.95, tick 116 after the press with the doors at 0.958 in
+the one-press probe on each of rows 3, 5 and 6, then they stay open 1 s and close in 1 s). The
+ripple is the grid's: bottom tier first, middle lane first, one row after another in the station
+order. Pylons release from the beam with the doors shut. The AI releases through the shared
+strike release, which does not wait for doors (the F-22's and the F-117's precedent): an AI
+B-52's doors stay drawn shut while its bombs leave the bay. `State::bay_available` is true for
+the B-52 now (it has rows in `bays::STATIONS`), so `--flight-bay` works and the open-bay RCS term
+(1.5 times at full travel, `Deployment::bay`) applies by itself; it reaches only the RCS page, as
+for the F-22 and F-117 (no radar row carries the bay state).
+
+**Pins.** `--validate-ordnance` for B52-5 alone: 48 aircraft, 21 recovered stations (from 20: row 3
+is a third empty bay row), 4,746 weapon placements (from 4,784: `B52.PT` 71 to 33), 233 tank
+placements, 80 pod placements, 242 Cheat-only placements (from 240: the pylon row). **After the
+fold onto the shared grid and the merge with the B-2's bays (integration, 2026-11-15):** 4,732 weapon
+placements (`B52.PT` 71 to 27, `B2.PT` minus 8), the rest unchanged; the normal catalog is 18
+stores. See [ordnance availability](../baselines/ordnance-availability.md).
+
+**Open for John.**
+1. The bay carries 500 lb class bombs only; the real "8 heavy stores" (Mk 84) are refused for
+   fit. A second layout, or per-shape centring so the Snakeye, cluster bombs and Mk 84 fit?
+2. The tail gun fires forward from the tail cone (slew not read). Build the rear-facing mount?
+3. The pylon weight class is 170, not 200 (the saved-load rule). Accept, or widen that rule?
+4. Two door leaves are drawn; the real bay has six sections.
+
+
+## B-2 ordnance, missions, multiplayer and replay (B2-6/9, 2026-11-15)
+
+Implementation and verification mode, by an agent (Claude Sonnet). The AI work below was
+asked for by the coordinator for this slice (AGENTS.md: no AI work unless John asks; the
+bomber plan's standing decision 1 and the B2-9 brief ask for it). Earlier sections stay as
+written. Logs: `.local/m3-aircraft/checks/B2-6/`, frames `.local/m3-aircraft/frames/B2-6/`.
+
+**Fuel flow and range (opinionated, coordinator first pass, held for John).** The record's
+`fuelConsumption` 6 lb/s (the B-1B's) becomes 7 lb/s through a `CORRECTIONS` row
+(`aircraft_corrections.rs`, `B2_FUEL_LB_PER_S`): 69,200 lbf x 0.375 lb/(lbf h) / 3,600 = 7.2,
+the F118-GE-100 figure BMB-A2 and the decisions list cite. The page that gives 0.375 was not
+recorded (Wikipedia's F118 page lists thrust only, 19,000 lbf per engine); it stays a
+cited-by-the-plan figure until someone finds the source. Range, `performance_probe` with
+`PROBE_ONLY=fuel`: the trimmed cruise (65 percent of the top speed at 20,000 ft, 308 kt) burns
+2.99 lb/s, so 167,000 lb lasts 930 minutes, **4,779 nm** (5,486 nm at 6 lb/s). The published
+unrefuelled range is about 6,000 nm (Air Force fact sheet), so the model is 20 percent short,
+which is the right side to be on for a probe that flies at constant weight. Full military power
+burns 7.0 lb/s at 445 kt, 2,951 nm; Mach 0.7 at 36,000 ft burns about 6.9 lb/s (the model's drag
+rises with the square of the speed over the envelope's edge, so a fast cruise is dear).
+Pinned loosely by `the_b2_climbs_at_a_bombers_rate_and_its_speed_brake_is_a_modest_one`
+(ten seconds at full throttle burn 70 lb; the 0.4 throttle cruise gives 3,500 to 6,500 nm) and
+the record test (`fuelConsumption` reads 7). Logs: `fuel-after.txt`.
+
+**Load Ordnance (B2-5's rows, checked).** Four rows, all "Internal Bay": rows 5 and 6 the left
+and right Mk 82 bays, rows 7 and 8 the Paveway III bays. Default: 32 Mk 82 in each Mk 82 row,
+Paveway rows empty, 32,000 lb of stores, vehicle weight 357,000 of 376,000 lb (167,000 lb of
+fuel, 100 percent), the sensor note "Aircraft laser pod equipped" (frame `load-ordnance.png`).
+What the rows offer (`catalog.txt`; the Mk 82 rows 17 stores each, the Paveway rows 22): the Mk
+82 rows take `MK82` 32, `MK82HD` 32, `AT2` 32, `RBK250` 32, `FAB250` 29, `GBU38` 24, `CBU87`,
+`CBU89` and `RBK500` 18, `FAB500` 14, `MK84`, `AGM88` and `AGM45` 8, `FAB1000` 7, `MK82P3` 10,
+`MK82P` 5, `MK82AIR` 4. The Paveway rows take 4 of every store (a row is one bay's one-row
+grid), `PAVEWA3`, `GBU29`, `GBU29P` and `GBU30` among them, and `MK20`; the Mk 82 rows refuse
+those four (B2-5). A bay holds one row or the other: loading one empties its alternative
+(`bays::alternative`, `Loadout::clear_bay_alternative`, covered by the loadout audit in
+`--validate-ordnance`: "defaults and restart passed", catalog 22 normal, 83 Cheat). Pins are
+unchanged (4,776 weapon placements). An odd point worth a decision: the Paveway rows offer a Mk
+82 at only 4 (their grid is one row), so the way to carry more than 32 bombs of one kind a bay
+does not exist; 32 is the most a bay holds.
+
+**Live fire.** Every slot of `--live-fire --aircraft b2` fires (`flight-livefire-b2-slot1` to
+`slot4`, `STATIONS["b2"] = [32, 32, 0, 0]`): slot 1 leaves 31 in the left bay, slot 2 31 in the
+right, and the empty Paveway slots 3 and 4 fall through to the sister bay's Mk 82 (the F-22's
+alternation). The ripple across both bays is B2-5's `flight-bay-ripple-b2`; its places are now
+a scenario of their own, `a2g-release-origin-b2` (`--a2g-run --attack release`, 12 presses a Mk 82
+row, the human trigger): each bomb leaves where it hangs, the left bay at x -7.28, -3.38, -5.98 and
+-4.68 ft (outermost first, alternating), the front row at 10.44 ft forward then the back row at
+2.89, the bottom tier at -2.95 ft up and the next at -1.65; the right bay the same about x
++4.667; a Paveway III row at one row, 6.67 ft forward, -1.79 ft up. A GBU-27 with laser
+designation: `a2g-laser-b2` drops one from the left bay at 20,000 ft, 350 kt, on the spot of the
+B-2's own designator (the `PAVESPK.SEE` row, no pod body), it guides to within a second of the
+ground (time to impact counting down 36 s), misses the tank by 19 ft and destroys it.
+
+**Countermeasures (the retail `F18.ECM` row, decision 18).** It gives the B-2 a radar jammer, 30
+chaff and 30 flares (`capacity_chaff=30 capacity_flares=30`; five chaff and three flares leave
+25 and 27, `flight-countermeasures-b2`). The weapons window reads `25 CHAFF`, `27 FLARE` and
+`64 MK-82`; the HUD reads `LVL`, `32 MK-82` (the selected bay); the RWR page and the systems
+page draw (`cockpit-systems-after-release.png`, `external-chaff-flares.png`). Both are the
+fleet's convention, not B-2 figures (no source for a B-2 dispenser count was found).
+
+**AI: three bugs found and fixed.** The B-2 is the first aircraft in the Heavy strike class
+(BMB-A1, no override) that carries bombs of its own bay, so the Heavy rules in
+[AI strike](../spec/ai-strike.md#heavy-bombers) met a real bomber for the first time. Run:
+`--a2g-run UKR QUCOL --pilot ai --aircraft b2 --load MK82`.
+1. **It never released.** `strike.rs` held every unguided bomb to the weapon record's zone 1
+   maximum range (the Mk 82's 20,000 ft slant). A Heavy releases from its threat floor (5,000 ft
+   plus 5,000 under guns, 10,000 under missiles, John 2026-10-11); a 15,000 ft release is a slant
+   of 22,500 ft, 20,000 ft one 27,900 ft. The cue crossed the aim, `due` was true for six ticks, and the
+   pass left with the bombs on board. Fixed: a Heavy's bomb has no maximum range
+   (`heavy_bomb` in `attack()`, unit test `a_heavys_bomb_is_not_held_back_by_the_zone_maximum`;
+   a fighter's pass is still held back, the same test).
+2. **One bomb a pass.** Every pass ended at the first release, so a B-2 would have needed 32
+   passes. The spec's "stick" had no code. Now a Heavy's bombs leave as a stick: up to eight
+   (`HEAVY_STICK_BOMBS`, fitted), one every 0.25 s (the record's cadence), starting on the aim and
+   walking on beyond it; the pass is not ended by the cue passing the aim while the stick goes,
+   and exits after the last bomb (or two seconds without the next). Unit test
+   `a_heavys_bombs_leave_as_a_stick_at_the_records_cadence` (eight, three with three bombs).
+   Not centred on the aim: centring needs the aim shifted by half the stick, which is a new
+   checkpointed field; left for John (the stick walks about 900 ft past the aim at 300 kt).
+3. **It sank to the ground on the way in.** The level run flies at `SpeedRequest::Corner`,
+   the slow edge of the best G row: for the B-2 316 ft/s at 5,000 ft against a minimum level-flight
+   speed of 378 ft/s (limits 378 / 316 / 729). At 233 kt it wallowed in 50 degree banks and descended
+   to 168 ft above the ground on the way to a target 30 nm off. Now a Heavy whose corner speed is
+   under its minimum flies the run at 1.3 times that minimum (`level_speed`, `HEAVY_BELOW_MINIMUM_MARGIN`,
+   fitted); the C-130 (256 against 227 ft/s) is unchanged, which `ai-strike-heavy-level` still
+   shows (its stick of eight now lands within the circle).
+
+What an AI B-2 does now (`ai-strike-b2-stick`, `-climb`, `-paveway`, all passing; the first two print
+the new `ai-strike: ORIGIN` line, the release point against the aircraft):
+- At 20,000 ft, 12 nm out: eight Mk 82 from the **left bay's grid**, the first eight places of the human's
+  list above (the same cells, in the same order), 0.25 s apart, the doors stay shut (coordinator
+  decision), 103 to 479 ft misses, the target killed, egress, no loss.
+- From 5,000 ft, 30 nm out (5,000 ft is one of the four Quick Mission altitudes): climbs at about 300 kt to 10,057
+  ft, levels off, releases the stick at 304 kt, 595 ft closest, egress. The climb has the old wobble
+  (banks of 55 degrees for the first minutes; they settle once it is level).
+- A Paveway III: the first place of the left Paveway row (-7.28, -1.79, 6.67), kills the tank, egress.
+- The release origins are **the same** whether a human or the AI presses (B2-5's grid is shared;
+  the TOR-9 class of bug, an AI releasing from the wrong places, is absent): `a2g-release-origin-b2` and
+  `ai-strike-b2-stick` check the same cells, and the AI wing release has its own unit test (B2-5,
+  `an_ai_bomb_leaves_a_b2_bay_grid_from_its_first_place`).
+- Quick Mission strike (`--quick-wing` on `~QUFACT`): `ROLE plane=1 role=strike`, the Heavy path, a
+  stick of eight at 5,086 ft over an undefended factory, impacts 66 to 684 ft from the aim.
+- No air-to-air: the record has no gun and no air-to-air store (`rounds=0`, stations only Mk 82 and
+  GBU-27). `ai-b2-vs-su27-2v2`: against two Su-27s the B-2s fire nothing, defend, fly toward their
+  marshal and its stores read empty at the end (probably the jettison rule of John's 2026-10-20
+  revision, which drops the load to save the aircraft; not traced); `ai-b2-quick-mission-2v2` all B-2s.
+- Night rule: `NIGHT_STEALTH_AIRCRAFT = ["F117.PT", "B2.PT"]` is retail-derived data, so a friendly
+  B-2 at night turns the manned AAA into the night set as the F-117 does (F117-6/7 pinned it);
+  `--surface-dump UKR QUCOL --defenses 3 3 --surface-seed 5` shows 3 `ZSU23` by day and 10 with
+  `--night-stealth`. The rule keys on wings, not on a lobby's per-plane choice (decision kept).
+
+**AI: open, not fixed (for John and the flight slice).**
+- **The AI B-2 does not land.** An airborne B-2 sent home (`--probe-wing-order 600:bug-out`) arrives at
+  the marshal, starts its approach and flies the whole runway at 219 to 232 kt, 80 to 100 ft up, then
+  goes around and hits the ground (Mikonos 7,246 ft, Khasab 4,060 ft; Florennes never arrived in 108,000
+  ticks). Cause: `final_speed` is 1.1 times the AI's minimum level-flight speed, which the loaded-elevator
+  rule drives to 378 ft/s (224 kt) for the B-2 with its 357,000 lb (the scripted approach is 167 kt).
+  A bomber-specific cap or a loaded-elevator fit would shorten it; it changes every aircraft's law, so it
+  is not done here. Logs `ai-b2-land-home-mikonos.log`, `land-PGU.txt`, `land-FRA.txt`.
+- **The AI B-2 wingman cannot take off on its own.** Ground start at Athens (12,000 ft): rolls 55 s,
+  lifts at 156 kt, climbs to 650 ft at 154 kt and flies into the ground 10 s later (`ai-b2-land-pair.log`);
+  at Simferopol (5,532 ft) it runs off the pavement first. The player's B-2 on the autopilot climbs away
+  from the same field. Not registered as a scenario (it would fail).
+- The AI empties one bay at a time with its doors shut (unchanged, coordinator).
+- Bank wobble (up to 55 degrees) while the B-2 climbs at about 300 kt with a bomb load.
+
+**Quick Mission.** `the_b2_is_a_quick_mission_player_and_a_wing_choice` (`quick_mission.rs`): `B2.PT`
+is offered as the player's aircraft and in every AI wing field, the mission spec carries it exactly, never
+the F-117. The Load Ordnance page opens on the default above (frame `load-ordnance.png`). Lobby notes:
+`menus-snap-quick-lobby-ordnance-laser-notes-b2`: no laser warning, the pod helper shown. The strike
+mission itself works (above).
+
+**Multiplayer.** Two clients in one B-2 wing: `net-a2g-stores-b2` (the `net-a2g-stores` drive with the
+two players in B-2s): the watcher draws the bomber's stores and sees the bomber's Mk 82 station and the AI
+MiG-29s' empty as they release; the largest Stores event is 16 bytes (the grid rides in the rack the clients
+already hold). Not checked on the wire: the bay doors' drawn position (the `bay` fraction is a state field the
+snapshots carry as for the F-22; no scenario reads it) and the ripple's per-bomb cell (the clients draw the
+store count, not the cell). `tore-server` and `tore-bot` were rebuilt first (the lesson from M2K-9).
+
+**Replay.** `replay-rec-b2-2v2` (the B-2 as the player and in both wings, recorded three times, identical, and
+`--verify-render` clean) and `replay-a2g-b2-ripple` (twelve Mk 82 from the left bay, recorded with
+`--a2g-run --record --verify-render`: 6,459 ticks compared, 0 missing, 0 differing, and read back as 11
+releases and outcomes). The stores comparison already ignored nothing it should not; no replay code
+changed. The human run drives no bay doors (the door device ticks were 0), so the doors in a replay are
+covered by the B2-5 render scenarios, not here.
+
+**Provenance and open for John.** Fuel flow 7 lb/s opinionated (coordinator first pass; source page
+not recorded). The Heavy fixes and the stick are agent decisions (fitted constants: 8 bombs, 0.25 s from the
+record, 1.3 times the minimum speed). Questions: keep a stick of eight or tie it to the load; centre the stick
+(a checkpointed field); who fixes AI landing and takeoff for the heavy bombers (the B-52 will meet the
+same laws); whether the Paveway rows should offer a Mk 82 at 4 at all.
+
+## F-117A in missions, multiplayer and replay (F117-9, 2026-11-15)
+
+Implementation and verification, slice F117-9 of the F-117A port (bomber batch A), with
+the coordinator's first-pass fuel flow fit. `AircraftId::F117` was appended to every
+identity list in BMB-A1 (checkpoint code 49, `SELECTABLE` index 49, carried in the 9-bit
+wire field), the strike class is Attack with no override (John, decision 28: the retail
+level pass at 5,000 ft), and the AI wing build reads the record as it is: two engines, no
+radar, no gun, two GBU-27 in the bays (the roster probe's `models=2 radar=false ir=true
+stores=2 gun=false`). The AI itself was not changed (AI behaviour work waits for John, and
+nothing needed it); the slice adds tests and scenarios and one fit. Provenance: the fuel
+flow is **fitted** (the coordinator's first pass, 2026-11-15, to a published range); every
+test and scenario is an agent decision; no retail bytes are committed.
+
+### Fuel flow, fitted to the published range
+
+The record's `fuelConsumption` is whole pounds a second for both engines at full military
+power. `aircraft_corrections.rs` now reads it as **3 lb/s** (retail 2) while the record
+still holds its retail value (`F117_FUEL_LB_PER_S`, a `CORRECTIONS` row, labelled fitted).
+The coordinator's figure was 3.3 lb/s, which reproduces the published 930 nautical miles
+exactly; the field is a word, so 3 is the nearest value it can hold (4 would be 758
+nautical miles, 18 percent under; the F404's own cited 0.81 lb/(lbf h) is 4.86 lb/s and
+about 630). Re-measured with `performance_probe` (`PROBE_ONLY=fuel PROBE_CRUISE=36000:470`,
+18,500 lb tank, extrapolated from 600 s as F117-8 did; logs in
+`.local/m3-aircraft/checks/F117-9/fuel-after.txt`):
+
+| Measure | Retail 2 lb/s (F117-8) | 3 lb/s | Published |
+| --- | ---: | ---: | --- |
+| Implied specific fuel consumption, military | 0.333 lb/(lbf h) | 0.500 | F404 0.81 (not used) |
+| Cruise Mach 0.82 (470 kt) at 36,000 ft: burn | 1.59 lb/s | 2.39 lb/s | none |
+| Same cruise: range from the full tank | 1,516 nautical miles | **1,011** | 930 (Wikipedia, flugzeuginfo), 1,140 with payload (Aerocorner) |
+| Cruise at 65 percent of the edge, 20,000 ft (362 kt): burn, range | 0.85 lb/s, 2,186 nm | 1.28 lb/s, 1,457 nm | none |
+| Military power, full tank: endurance, range at 538 kt | 154.2 min, 1,382 nm | 102.8 min, 921 nm | none |
+
+The model is 9 percent over the published range at 3 lb/s (it was 63 percent over). The pin
+is loose on purpose: `the_f117_fuel_flow_keeps_the_cruise_range_near_the_published_930`
+keeps the range (inversely proportional to the flow) between 95 and 115 percent of 930 and
+checks that the next whole flow is further from it; `the_b52_b2_and_f117_read_their_real_figures_only_while_retail`
+reads 3 from a retail record and `the_f117_has_no_speed_brake_and_climbs_like_a_subsonic_strike_jet`
+now carries 3. Nothing else moves: thrust, weights, ceiling, the speed edges, climb, turns
+and the stealth signature do not read the flow, and the default load's take-off weight is
+unchanged (the tank starts full at 18,500 lb either way).
+
+### AI
+
+**What an AI F-117 does** (all through the retail strike machinery; measured with
+`--a2g-run UKR QUCOL --pilot ai --aircraft f117 --load PAVEWA3 --station 0`, logs in
+`.local/m3-aircraft/checks/F117-9/`):
+
+- *Strike pass.* The level pass at 5,000 ft (`PROFILE name=level`; no dive, no pop-up),
+  from 450 kt; it lases at once with its own IRADS (`LASER state=Lasing`, the bomb's
+  `spot_owner` is itself), releases the GBU-27 at 3.9 s from 21,390 ft out at 5,000 ft and
+  432 kt (`guided=Guiding`), holds the spot through a turn banked to 74 degrees (speed
+  falls to 301 kt by 30 s: the hold the shared lasing code flies for any jet), lands the bomb 3.4 ft from the tank
+  at 31.5 s (27.6 s fall), kills it, and egresses at 43.9 s without loss. As a Quick Mission
+  wingman (`--quick-wing`, factory target) it takes the Strike role (`ROLE role=strike`),
+  releases at 42 s at 5,011 ft and 323 kt, lands 36 ft from its aim point (it killed a
+  neighbouring object, the factory still stood at 100 of 100 hit points) and egresses. As a
+  wingman given "Engage my target" by a human F-117 lead, it released on the lead's laser
+  spot (`spot_owner=0`, the buddy path) at 5,005 ft and 414 kt and killed the tank.
+- *Release origin.* A bomb leaves a bay station the way a human's does, from the bay's own
+  fitted mount: the AI and the human share `Configuration::from_source` (so one `placed_on`
+  table), the shared `release_round` and the one `release_point`, and the F-117 has no state
+  that only a human's host sets (the Tornado's swivel did, TOR-9 item 3; its sweep is not
+  here). `ai_wings::f117_tests::an_ai_f117_bomb_leaves_from_each_bay_station_with_the_doors_shut`
+  loads the real record, lets both bay stations go through the AI's release, and checks each
+  bomb's starting offset against the station's release point (3.0 ft either side of the
+  centreline, 3.26 ft below the reference point, inside the bay opening and the walls, one
+  bomb a side) with the doors at 0 and neither dropped. The recording of the AI pass (below)
+  holds the same station at x -3.0 ft, location 131 (the fitted magazine), shape `GB27.SH`.
+- *Doors.* Unchanged (coordinator first pass, 2026-11-15): the AI's release waits for no
+  door, so its bay doors stay shut, recorded and drawn, while its bomb leaves. The store is
+  not drawn at all while the doors are shut (`pylons::visible`), so an AI F-117's weapons
+  never show; the bomb appears under the belly at the release.
+- *No air-to-air.* No store has the air flag (the two GBU-27 are surface stores, capability
+  `air: false`), there is no gun and no radar, so the AI never engages an aircraft.
+  `an_ai_f117_is_an_attack_class_striker_with_no_store_for_an_aircraft` pins the class
+  (Attack), the two one-round bay stations and the missing capability. In a 2 v 2 fight of
+  F-117s against F-117s nobody fires (`shots=0`, every aircraft still `rounds=2`); against
+  F-16Cs the F-117 flies its formation, defends against the missile (`activity="Defending"`)
+  and fires nothing (`rounds=2` to the end, shot down or not: in the recorded run the F-117
+  was shot down at 57 s with both bombs aboard). It has no chaff or
+  flare to use either (F117-6).
+- *Return to base.* From a ground start at Southampton (FRA airport 14, 12,000 ft) the AI
+  F-117 taxis, lines up, starts its take-off roll at 41.5 s, is in its climb-out at 67.4 s
+  (185 kt), takes the land order at 100 s, flies the gates and the final (293.6 s),
+  touches down at 314.6 s, rolls out, leaves the runway at 338.9 s and parks at 740.9 s with
+  no tick off the pavement (78,050 ground samples, 0 off) and no anomaly.
+  **It lands fast: 224 kt at the threshold** against 142 kt for an F/A-18D at the same
+  airport (the same scenario with `f18`, final-entry 217 kt, threshold 142 kt). The AI holds
+  224 kt from the second gate to touchdown; the cap on a final is 174 kt. The likely cause
+  (read from the code, not measured): the AI never plans below the aircraft's loaded minimum
+  level speed, which the flaps lower by 25 percent, and the F-117 has no flaps (F117-8), so
+  the minimum stays at 224 kt; and the retail F-117 has no speed brake (F117-8) to shed
+  energy. It stays on the runway (rollout from 223 kt stops in about 21 s and 4,300 ft of the
+  12,000) and passes, but a real F-117 touches down about 155 kt. Not changed (shared AI
+  code): see the open items.
+- *The night rule.* An F-117 in a friendly wing at night makes the surface defenses the
+  retail night set (AAA becomes ZSU-23 novice): the rule keys on the file name in any
+  friendly wing (F117-6). `the_f117_is_a_quick_mission_player_and_a_wing_choice` now also
+  checks that the draft's spec wakes it at night for an AI wing's F-117 (not the player's),
+  that three wings of F/A-18Ds do not, and that an enemy-wing F-117 does not.
+
+**Tests and scenarios added.**
+
+| Name | What it pins |
+| --- | --- |
+| `ai_wings::f117_tests::an_ai_f117_is_an_attack_class_striker_with_no_store_for_an_aircraft` (real record, skips without the install) | Attack class, no gun pods, two bay stations of one `PAVEWA3.JT` each, every store a surface store, no radar |
+| `ai_wings::f117_tests::an_ai_f117_bomb_leaves_from_each_bay_station_with_the_doors_shut` | release origin per bay station, doors shut |
+| `ai-strike-f117` (flight lane) | own pass: level, own IRADS spot, bay release, kill, egress, not lost; Quick Mission wingman takes Strike |
+| `ai-f117-quick-mission-2v2` | all F-117: no shot, both bombs aboard |
+| `ai-f117-vs-f16c-2v2` | F-117 against F-16C: the F-117 fires nothing |
+| `ai-merged-airfield-f117-wing2` | takeoff, land order, landing and parking, all on the pavement |
+| `f117_strike_problems`, `f117_unarmed_problems` and tests | the checks above (`tools/test_battery_ai_strike.py`, `tools/test_battery_ai.py`) |
+
+The roster probe (`--ai-roster-probe-ticks 3600`) flew all 49 types at four skills: 196
+PASS, no FAIL, including four `F117.PT` lines (`models=2 radar=false ir=true stores=2
+gun=false projectiles=0 dropped=0`).
+
+### Quick Mission
+
+The F-117A is in the Quick Mission aircraft list as `F117.PT` / "F-117A Nighthawk" (the
+SELECTABLE list builds both lists) and in every AI wing field; a draft carries it as the
+player's aircraft and in every wing, and it never stands in for another aircraft
+(`quick_mission::the_f117_is_a_quick_mission_player_and_a_wing_choice`). The default load
+is the record's two bay `PAVEWA3.JT` (one GBU-27 each, 4,000 lb, 52,000 of 52,500 lb, no
+tank, F117-6); a Quick Mission strike works (`ai-strike-f117`'s second run: factory
+target, the wingman F-117 takes Strike, lases and releases from the bay). The class word
+`0x4000` is the retail bomber class, the same rule that gives the A-4E the Strike role. The
+Load Ordnance page shows no laser warning and the sensor helper line `Built-in IRADS: no
+pod needed for laser ordnance.` (`menus-snap-quick-lobby-ordnance-laser-notes-f117`,
+measured, not assumed: the record has the `PAVESPK.SEE` row). No template or table carries
+a list of aircraft by name apart from the night rule's `F117.PT`/`B2.PT` pair.
+
+### Multiplayer
+
+The identity crosses the wire as index 49 of 9 bits, the checkpoint as code 49 (BMB-A1's
+round-trip tests cover every `SELECTABLE` identity; nothing moved, protocol 83). The doors
+cross as the `bay` device (the 5th of the six device levels, 1/255) every aircraft already
+carries, and the stores as the same events the client turns into poses
+(`tore_session::client::convert::stores`): `replay-stores-unfired` (below) runs that
+conversion for the F-117 and finds the drawn origins, the live vertices and the release
+origins in agreement. `net-content-missing` (46 s) and `net-window-lobby` (185.5 s) passed
+after rebuilding `tore-server` and `tore-bot` (the lesson from M2K-9: an identity change
+needs a fresh server build).
+**Not run:** an F-117 over the wire. The net scenarios take no aircraft, and `tore-bot`'s
+`bomb` role selects the Mk 82 by name; an F-117 bot needs the role to take the bomb it
+carries, a change to shared bot code that is not made here. See the open items.
+
+### Replay
+
+`replay-a2g-f117` records the F-117's laser pass through `--a2g-run --record --verify-render`
+and reads it back. Measured (`.local/m3-aircraft/checks/F117-9/replay/`): the recording
+replays tick for tick as the run drew it (`verify-render: PASS ticks=5354 missing=0
+differing=0`), the aircraft is `F117.PT` and the weapon `PAVEWA3.JT`, the one
+`weapon.release` is guided from station 0 at 16.2 s on the shooter's own spot (`own`,
+`spot_owner` 0), the left bay station is recorded at x -3.0 ft, location 131, `GB27.SH`,
+and the recorded `bay` device is 0 until about 15 s, 0.8 at 16 s, 1.0 at 17 s and 0.158 at
+18 s, shut from 19 s to the end: the doors open for the release and close after it. The
+second run of the scenario flies the AI-wingman release (the lead's spot) and checks that
+its recording replays the same way (`PASS ticks=5747`), holds one guided release from the
+AI's station 0, the bay station at the same mount, and the bay device at 0 for the whole
+flight. The HUD camera and the four Sensor Views (white hot, black hot, TV, night vision)
+are drawn twice at one tick and match byte for byte and differ from each other. The
+scenario passes as a whole (82 s). It failed twice in between with `vkCreateDevice` errors
+while another program held the card's memory (11.9 of 12.3 GB used), which is the GPU, not
+the replay.
+
+`replay-stores-unfired` now includes `F117.PT` in `--replay-stores-check`: the two bay
+stations read `hardpoint=4` and `5`, `GB27.SH`, location 131, points (-3.0, -0.478, 0.0) and
+(3.0, -0.478, 0.0), and the unfired shapes, live vertices and release origins agree at 3
+count states. `replay-rec-f117-2v2` records the identity as the player and in both wings,
+three times.
+
+The **IRADS and FLIR labels** are text in the live cockpit and in the replay's Sensor View
+(F117-7): the replay names its sight from the record the same way
+(`sight_record`: the laser row is `IRADS`, the other row `FLIR`), pinned by
+`replay::viewer::views::sight_label_tests::the_sensor_view_names_the_f117s_turret_irads_and_another_aircrafts_sight_by_its_record`
+(reads the install, skips without it; the F-16C keeps its record's own name). No text is
+read back from a drawn frame by the battery.
+
+**`replay-stores-release-f117` was not added.** `--combat-smoke` fires every station at an
+aircraft and needs a gun or an air-to-air missile on the load (`no wreck-contact weapon
+fixtures`, then `fired=1 hits=0` for the GBU-27): it is meant for the F-15, F-16C and F-22
+families and does not apply to a bomb-only jet. The bay release is covered by the two
+scenarios above.
+
+### Bugs found and fixed
+
+None in game code. The slice found no fault in the AI release, the wire or the recording
+for the F-117 (unlike TOR-9's swivel and `same_stores`). The fuel flow was the one change.
+
+### Not run
+
+The F-117 flying over the wire (see Multiplayer); an AI landing at another field; the
+`ai-fuzz`, full AI and night AI lanes (the night rule is covered by the unit tests above and
+F117-6's surface scenarios, not by an AI F-117 flying a night mission); `--smoke-test`;
+`check_assets`; the other batteries' lanes.
+
+### Checks
+
+All through `.local/m3-imports/light3.sh`, one heavy command at a time, `tore-app` rebuilt
+and the profile `.local/m3-aircraft/profile-f117` refreshed first (logs in
+`.local/m3-aircraft/checks/F117-9/`): `cargo fmt --all -- --check` clean; `cargo clippy
+--locked --workspace --all-targets -- -D warnings` clean; `cargo test --locked --workspace
+--no-fail-fast` 7,772 passed, 0 failed, 108 ignored (the first run failed one of the new
+tests, an assertion on a Quick Mission draft with a zero-aircraft wing; fixed, and
+`tore-app` rerun in full: 2,557 passed); `--validate-ordnance`: 48 aircraft, 20 recovered
+stations, 4,784 weapon, 233 tank and 80 pod placements, 240 Cheat-only, `F117.PT` 46
+placements, passed; `--replay-stores-check`: `F117.PT` agrees; the roster probe 196 PASS; the
+battery `--scenario '*f117*'` 20 of 20 (the flight, animation, bay, laser, render, AI, menus
+and replay scenarios), plus `net-content-missing`, `net-window-lobby`,
+`replay-stores-unfired`, `menus-ordnance-availability` and `a2g-catalog`; the tools unit tests
+OK (5 skipped); `tools/check_docs.py` passed (382 files).
+
+### Open for John
+
+1. **AI landing speed.** An AI F-117 lands at about 224 kt (an F/A-18D lands at 142). Cap
+   its approach and final to the real 150 to 160 kt for no-flap aircraft (a shared AI change),
+   or leave it? A fix would need the AI to read a different minimum level speed for an
+   aircraft with no flaps, or a speed brake.
+2. **Fuel flow.** 3 lb/s (1,011 nautical miles, 9 percent over the published 930) as the
+   record can hold it, or 4 (758, 18 percent under), or widen the unit of the field?
+3. **AI doors.** Still shut while an AI F-117 releases (first pass). Open them for the
+   release, as a human's do, so a replay shows the bay working? It changes every bay
+   aircraft's AI.
+4. **Net bots.** Let `tore-bot --a2g bomb` take the first bomb of its `--load` so an F-117
+   (and the B-52 and B-2) can be flown over the wire in `net-a2g-stores`?
+
 ## Bomber batch B identities (BMB-B1, 2026-11-15)
 
 Implementation, batch slice BMB-B1 (with BMB-B2 below, run together), Claude Sonnet.
@@ -9909,6 +11000,152 @@ The four specs are constants (`B1B`, `TU160`, `F111F`, `TU26`) with no identity 
 match arm there, written and commented out for each, once the aircraft has an `AircraftId`.
 `sweep_rate_dps` is `None` for all five: no source gives a rate and the drawn sweep is a pure
 function of speed. Nothing is drawn differently; the new aircraft's rigs are their own slices.
+
+## B-52 ordnance, tail gun, sensors and cockpit (B52-6/7, 2026-11-15)
+
+Slices B52-6 (ordnance, default load, countermeasures, plus the rear-facing tail gun) and B52-7
+(sensors, HUD, cockpit, instruments) ran together (implementation mode, bomber batch A). They apply
+the accepted decisions of 2026-11-15: **9** (default 12 AGM-84E on the pylons), **13** (the M61 tail
+gun), **14** (the HUD follows the record, the retail radar and jammer rows stay) and the coordinator's
+first pass: "a tail gun firing forward is a bug, build the rear-facing mount". Earlier B-52 sections
+stay as written (B11): the [B52-5 section](#b-52-bay-pylons-and-tail-gun-b52-5-2026-11-15) said the
+tail gun fires forward and asked whether to build the mount; this section is the answer. Frames are in
+`.local/m3-aircraft/frames/B52-6/`, logs in `.local/m3-aircraft/checks/B52-6/`.
+
+### The slewed gun mount (agent decision, fitted; spec in the gun sections)
+
+The record's gun row (`B52.PT` row 4) carries `slewH` 32,760 (180 degrees, astern), `slewP` 0 and arcs
+of 5,460 (30 degrees) each way. Nothing read those words: every aircraft gun fired along the nose, so
+the B-52's tail gun shot forward from the tail cone, 92 ft behind the reference point, through its own
+airframe. It is now read, in general, so any aircraft whose gun row is slewed gets it (the Tu-26's and
+Tu-95's `T23_1.JT` turrets read the same heading; neither is flyable yet).
+
+- **Data.** `aircraft::Hardpoint` gains `slew: [i32; 4]` (the four words, zero on rows the game adds).
+  `tore_sim::combat::slew::Slew` turns them into a rest direction and arcs, and `Station` carries it
+  (checkpointed; `SIMULATION_VERSION` stays 12, the integration's bump covers it). It is read only for
+  an aircraft gun on an aircraft other than the AC-130, whose trained mounts keep their own machinery.
+- **The rule.** A zero heading is a **forward gun** and is bit-for-bit what it was: the nose line,
+  whatever the pitch word says (the helicopters' chain guns read a 20 degree depression that never
+  applied and still does not). A heading makes the mount **slewed**: it fires along the rest direction in
+  the aircraft frame, from the same muzzle. Only a slewed row's pitch is honoured (the Tu-95's dorsal and
+  ventral turrets tilt 20 degrees).
+- **What follows the mount.** The round (`State::release_round`, the one release for a human's trigger and an
+  AI's; dispersion is taken around the rest direction), the human's gunsight (HUD pipper, the gunnery
+  probe, the Load Ordnance gun check: `Station::gun_view`), the networked client's drawn rounds
+  (`net::guns::gun_line`), the AI (below). The hit model, live fire and rewind read the round's own position
+  and direction and needed nothing; a replay plays the simulation's rounds as fired.
+- **Human aiming (fitted, simple).** The human fires along the mount's centre line, astern. The 30 degree arcs
+  are the AI's. The HUD reads `TAIL 1242 M61` where a forward gun reads `LCOS` (`SAFE` while unarmed) and draws no
+  pipper (the line is behind the glass). **No rear-view cue exists** (F2 Back and the other rear views draw no HUD),
+  so none was built; the tracers (every third round) show the line (frames `tail-gun-side-60`,
+  `crop2x-tail-gun-tracers-aft`, `tail-gun-rear-view-f2`).
+
+### AI tail-gun use
+
+An AI B-52 uses its gun defensively: it engages a fighter inside the mount's 30 degree arcs (measured on the
+lead point), within the weapon's range and zone, with the ordinary permissions. The barrel swings to the lead
+point at once (fitted, no slew rate), the aircraft is never turned to lay it (the controller does not hold the
+gun-tracking motion for a slewed gun), and every round of a burst leaves along the swung barrel. A slewed gun is
+no strafing gun, so an AI striker leaves it out of its stores. Forward guns keep the nose-laid rule unchanged.
+Spec: [AI gun employment](../spec/ai-gun-employment.md#slewed-guns-the-b-52s-tail-gun-b52-6-2026-11-15).
+
+Evidence: the unit tests (below); `--ai-probe-ticks 3000 --aircraft f22 --probe-enemy-aircraft b52
+--probe-geometry rear --probe-guns` (battery `flight-b52-tail-gun`): the B-52 fired 128 rounds at the F-22 closing
+from behind and 89 reached it (the same probe from the front: no gun fire at the player, as before). That hit rate is the
+exact-lead swing's; it is high for a defensive gun (open item 2).
+
+### B52-6: the load, the bay and the sights (checked)
+
+- **Default load.** 12 `AGM-84E` on the pylons (row 7), the bay empty, the gun 1,242: Load Ordnance shows the
+  Fuselage row `M61 Vulcan Cannon 1242 (max 1242)`, three empty Internal Bay rows and the Wing row `AGM-84E SLAM 12
+  loaded (max 12)`, weight 488,000 of 488,000 lb, fuel 286,412 lb (frame `load-ordnance`).
+  `--validate-ordnance` passes with no pin moved (48 aircraft, 21 recovered stations, 4,732 weapon placements, 233
+  tank placements, 80 pod placements; `B52.PT` 27 placements).
+- **Live fire.** `flight-livefire-b52-slot1` (the gun, now astern), `-slot3` to `-slot5` (the three bay rows and the
+  never-loaded slot), `flight-bay-fire-b52-row3|5|6` (bay doors, release, close) and `flight-bay-fire-b52-pylon-row7`
+  pass. **`flight-livefire-b52-slot2` (the Harpoons against the practice aircraft) now reads "TARGET TYPE / NO LOCK"
+  and fires nothing, as every other aircraft's surface missile does**: the B-52 has its radar now (below), so the Harpoon
+  wants a surface target. It is listed with the other refused slots, and the new `a2g-antiship-b52` fires it.
+- **Harpoon against a ship.** `--a2g-run UKR QUSFLT --unit 0x50000003 --attack antiship --aircraft b52 --load AGM84E
+  --station 1 --count 2` (battery `a2g-antiship-b52`): the Krivak is designated on the A-G page through the B-52's radar,
+  an AGM-84E leaves from 5,000 ft at 350 kt, the seeker goes active and the second Harpoon hits (miss 38 ft, ship 500 to
+  200 hit points).
+- **Countermeasures.** The retail `B52.ECM` (the AC-130 jammer block, `TRANSITIONAL`, strength 0.30, RF mode) works: 99
+  chaff and 99 flares (the Weapons window `99 CHAFF 99 FLARE`), the chaff and flare commands release them (98 left, two flares
+  burning and 52 chaff puffs after 60 ticks), and `--jammer-on` lights `JAM` on the RWR window (frame
+  `countermeasures-chaff-flare-jammer`, crop `systems-rwr-weapons-strip-3x-jam-chaff-flare`). The Systems window shows
+  thrust, temperature, oil, hydraulics and fuel (`286405 LBS`).
+
+### B52-7: sensors
+
+`--sensor-summary` reads `B52: radar B52R.SEE search 150 nmi 60x60 deg track 150 nmi 45x45 deg look-down 0 TRANSITIONAL;
+infrared none; visual VIS300.SEE search 10 nmi 150x120 deg track 5 nmi 150x120 deg; jammer B52.ECM TRANSITIONAL strength
+0.30; signature radar 100 infrared 200`.
+
+- **The radar was not enabled; it is now (agent decision, fitted, John to confirm).** `B52R.SEE` (the Tu-160's record
+  renamed) had no preset assignment, so it decoded as `UNREVIEWED (not enabled)` and the B-52 flew with no radar at all.
+  It is now `Preset::Transitional` (the AC-130's class: a 100 ft/s Doppler notch, burn-through 8 nmi; `sensors::profile`,
+  [radar](../radar.md#presets)). One line to revert. It also gives the AI B-52 its radar.
+- **Modes.** The shared air-to-air ones, as the B-2's: RWS search to 150 nmi and TWS with a fire-control track to 150
+  nmi (the record's 911,400 range), scope ranges 5, 10, 25, 50, 100 and 150 (`M` cycles, `Y` history), no infrared channel
+  (no IR row), 60 degree search and 45 degree track cones. There is **no ground-mapping mode** (the shared radar has none; a
+  sensor change, John's call, as for the B-2), so the strike aids are the A-G designation of the radar contact (the Harpoon above)
+  and the bomb sights. The radar window reads `RADAR OFF` until the radar is switched on, then `TWS 10 ... TRACK` (frames
+  `tail-gun-external`).
+- **RCS page.** Page 0 reads `SIG 169` closed and `SIG 254` with the bay open (frame `crop3x-rcs-closed-vs-bay-open`; the
+  record's 100 with the 12 Harpoons on the pylons, and the open-bay term of 1.5 on top, `Deployment::bay`). The oval is the
+  exposure contour. The open bay reaches only the RCS page (no radar row carries the bay state), as for the F-22, F-117 and B-2.
+
+### B52-7: HUD and cockpit
+
+- **HUD (decision 14): the record.** `BMBROH.HUD` is the AC-130 module with seven bytes changed; the instrument frame is
+  `~ac130_p`, the forward art `~AC130H.PIC` (1280 x 490), the cockpit stem `AC130`. BMB-A1 gave the B-52 the AC-130's
+  whole-picture glass polygon; it is **kept** (the retail art has one window the size of the picture). The HUD draws as the
+  AC-130's does and carries the new `TAIL` gun line (frame `cockpit-front-view`); the annunciators and the bay cue are
+  unchanged by this slice. No B-52 cockpit art exists (B52-0).
+- **Eye (fitted, measured).** `mirrors::eye_offset` gains the B-52: **9 ft up and 63 ft ahead** of the model origin (the
+  shared seat is 7 up and 10 ahead). Measured on `B52.SH` (2/3 ft a unit): the fuselage top is flat at 7.3 ft (z 11) from 31 ft
+  aft to 58.7 ft ahead of the origin; there the nose steps down, and the flight deck is the nose forward of the step: glass
+  faces at 58.7 ft (a 10.7 ft wide window, z 5 to 9 units, 3.3 to 6 ft up), a flat roof at 3.3 ft (z 5) to 66.7 ft, the nose
+  cone ending 71.3 ft ahead. The shared seat is 49 ft aft of the deck and 0.3 ft under the fuselage skin (F2 Back looked at the
+  inside of the roof). The seat is the deck's middle, 63 ft ahead, 1.7 ft above the 7.3 ft crown behind it, so F2 Back clears the
+  spine and looks down the length of the aircraft to the fin (frame `cockpit-view-back-f2`; the wings, the pylons and their
+  Harpoons show). Readers and tests are the B2-7 ones (`mirrors::tests::only_the_b2_the_f117_and_the_b52_have_their_own_pilot_eye`,
+  `flight_views::tests::back_from_a_b2_sits_at_its_own_seat`); the forward cockpit, mirrors, padlock and target camera do not read
+  the eye. The record's `viewOffset` is not used (as for the B-2 and F-117).
+
+### Tests
+
+`tore-sim`: `combat::slew::tests` (the record words, forward mount with a pitch word ignored, the aft mount, the Tu-95 dorsal tilt,
+the arcs, the muzzle in the mount's frame), `combat::live::pair_tests` (a slewed gun fires astern and a forward gun does not; a forward gun
+keeps the nose line and its sight view; a slewed gun's sight points astern from the same muzzle), `sensors::profile::tests::
+the_b52_radar_record_is_reviewed_transitional`. `tore-world`: `ai_wings::tail_gun_tests` (a fighter astern is engaged and the round leaves
+astern along the lead, ahead and 40 degrees off are not, a forward gun with a fighter behind is not, the controller asks for tail-gun
+rounds against a fighter behind it and a forward gun does not, the retail `B52.PT` row reads as a slewed tail gun and the AI spec carries it).
+`tore-app`: the eye table and the Back camera. Battery: `flight-b52-tail-gun`, `a2g-antiship-b52`, `flight-livefire-b52-slot2` (refused slot).
+
+### Open for John
+
+1. **Radar enabled.** `B52R.SEE` as Transitional (above) is the agent's decision; the alternative is a B-52 with no radar.
+2. **AI tail-gun lethality.** The swing is exact and instant, so the AI B-52 hit an F-22 behind it with 89 of 128 rounds. A fitted aim
+   error or a slew rate would soften it. Networked clients draw the AI's rounds along the rest direction, not the swung barrel.
+3. **Rear-view cue.** None exists in the game (the rear views have no HUD); building one is a HUD change.
+4. **Eye** at 9 ft up, 63 ft ahead (the deck's middle, over the crown): fitted, change in `mirrors::eye_offset`.
+
+### Checks
+
+All through `.local/m3-imports/light3.sh`, profile `.local/m3-aircraft/profile-b52` refreshed first (logs in
+`.local/m3-aircraft/checks/B52-6/`): `cargo fmt --all -- --check` clean; `cargo clippy --workspace --all-targets --locked -- -D warnings`
+clean; `cargo test --locked --workspace --no-fail-fast` 7,798 passed, 0 failed, 108 ignored; `--validate-ordnance` passed with
+no pin moved; `--aircraft b52 --headless-flight 600` 0 non-finite, 276 kt level at 5,000 ft, fuel 312,197 to 312,127 lb;
+battery `*b52*` 23 of 23, and the guns and live fire of every aircraft (`flight-livefire-*`, `a2g-gun-key`, `ai-guns-*`,
+`ai-threat-gun-*`, `ai-record-guns`, `ai-long-guns-3v3`, `replay-rec-*guns*`, `replay-rec-threat-gun`, `flight-ac130-console-gun-lock`,
+`surface-zsu23-gun`, `flight-b52-*`, `a2g-antiship*`) 130 of 130, which proves every forward gun and the AC-130's mounts unchanged;
+`python3 -B -m unittest discover -s tools` OK; `tools/check_docs.py` passed. **Not run:** the full battery, `check_assets`, the net and
+mission batteries, `--smoke-test`, a B-52 gun over the wire.
+
+Provenance: slew words spec-derived (retail records); the forward/slewed rule, the AI swing, the `TAIL` cue, the radar preset and the eye
+fitted, agent decisions 2026-11-15. No retail bytes committed.
 
 ## Bomber batch C identities (BMB-C1, 2026-11-15)
 

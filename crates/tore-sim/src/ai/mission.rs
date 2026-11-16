@@ -124,6 +124,10 @@ pub struct StationSpec {
     pub requires_sensor: bool,
     pub employment_zone: Option<tore_formats::weapons::Zone>,
     pub mount: [f64; 3],
+    /// Where a gun mount points and how far it swings: the nose line for
+    /// every store and forward gun, the record's aft heading for a tail gun
+    /// (B52-6; [`crate::combat::slew`]).
+    pub slew: crate::combat::slew::Slew,
 }
 
 impl StationSpec {
@@ -3783,8 +3787,15 @@ impl AiMission {
                     station: station.station,
                     ammunition: station.store.rounds,
                     target: gun_target.map(|t| t.id),
-                    solution: gun_target
-                        .and_then(|t| super::gunnery::solve(weapon, &launcher, station.mount, t)),
+                    solution: gun_target.and_then(|t| {
+                        super::gunnery::solve_mounted(
+                            weapon,
+                            &launcher,
+                            station.mount,
+                            station.slew,
+                            t,
+                        )
+                    }),
                     rounds: u64::from(weapon.burst.actual_rounds_per_game.max(1))
                         * u64::from(weapon.burst.game_rounds_in_burst.max(1)),
                     period_ticks: u64::from(weapon.burst.game_burst_t.max(1)) * 30,
@@ -5378,6 +5389,7 @@ impl AiActor {
                     requires_sensor: s.requires_sensor,
                     employment_zone: s.employment_zone,
                     mount: s.mount,
+                    slew: s.slew,
                     damage_vs_category: s.damage_vs_category,
                     store_speed: s.store_speed,
                     tracking_delay: s.tracking_delay,
@@ -5964,6 +5976,7 @@ pub fn simple_stations(
             requires_sensor: false,
             employment_zone: None,
             mount: [0.0; 3],
+            slew: Default::default(),
             maximum_range_ft: Some(40000.0),
             energy_target: None,
         });
@@ -5996,6 +6009,7 @@ pub fn simple_stations(
             requires_sensor: false,
             employment_zone: None,
             mount: [0.0; 3],
+            slew: Default::default(),
             maximum_range_ft: Some(6000.0),
             energy_target: None,
         });

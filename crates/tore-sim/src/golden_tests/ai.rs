@@ -785,6 +785,7 @@ fn station_view(
     mount: [f64; 3],
 ) -> StationView {
     StationView {
+        slew: Default::default(),
         station: StationId(station),
         guided: true,
         capability: StoreCapability::AIR_TO_AIR_MISSILE,
@@ -1573,6 +1574,7 @@ impl Coverage {
 fn store(station: u8, kind: SeekerClass, gun: bool, rounds: u32, radar: bool) -> StationSpec {
     if gun {
         return StationSpec {
+            slew: Default::default(),
             station: StationId(station),
             guided: false,
             capability: StoreCapability::GUN,
@@ -1600,6 +1602,7 @@ fn store(station: u8, kind: SeekerClass, gun: bool, rounds: u32, radar: bool) ->
     }
     let infrared = kind == SeekerClass::Infrared;
     StationSpec {
+        slew: Default::default(),
         station: StationId(station),
         guided: true,
         capability: StoreCapability::AIR_TO_AIR_MISSILE,

@@ -509,6 +509,17 @@ pub const B2_THRUST_LBF: i32 = 69_200;
 pub const B2_EMPTY_LB: i32 = 158_000;
 pub const B2_INTERNAL_FUEL_LB: i32 = 167_000;
 pub const B2_MAX_TAKEOFF_LB: i32 = 376_000;
+/// B-2A fuel flow (B2-6, **opinionated**, coordinator first pass 2026-11-15,
+/// held for John): the record's `fuelConsumption` 6 lb/s (whole pounds a
+/// second for all four engines at full military power,
+/// [`TORNADO_FUEL_LB_PER_S`]) is the B-1B's, not a B-2 figure. It implies 0.312
+/// lb/(lbf h) at the corrected thrust. The corrected flow is 69,200 lbf x 0.375
+/// lb/(lbf h) / 3,600 s = 7.2, so 7 lb/s (2.8 percent under): the F118-GE-100
+/// thrust-specific fuel consumption of 0.375 at 69,200 lbf that BMB-A2 and the
+/// coordinator's first pass cite (the page for that figure was not recorded,
+/// and Wikipedia's "General Electric F118" lists none). The B-2 has no
+/// afterburner, so the dry flow is the only one.
+pub const B2_FUEL_LB_PER_S: i32 = 7;
 /// B-2A ceiling (B2-8, **opinionated**, agent decision 2026-11-15; the
 /// figure is the real one): 50,000 ft. `maxAlt` carries 49,000 ft in the
 /// record. The game's own Jane's text (`B2.INF`, "Service ceiling: 15,240 m
@@ -591,6 +602,33 @@ const F117_RETAIL_TOP_FPS: f64 = 1_020.;
 const F117_RETAIL_ZERO_G_TOP_FPS: f64 = 1_090.;
 /// The altitude of the vertex the trim moves.
 const F117_TRIM_ALTITUDE_FT: f64 = 36_000.;
+/// F-117A speed brake (F117-8, **fitted**): the airbrake drag word is 0. The
+/// record carries 256 (a fighter's airbrake: the hybrid adapter turns it into
+/// a drag of weight x the brake x the speed share, 0.30 G at 295 kt and 0.66 G
+/// at 530 kt on the 48,000 lb jet), but the real jet has no speed brake, no
+/// flaps and no drag device but the landing gear and, on landing, the drag
+/// chute: a pilot's account says "there are no drag devices on the jet: no
+/// speed brakes, no flaps, nothing" (jetcareers.com forum, read 2026-11-15, an
+/// unofficial source), and the shape has no airbrake word to draw (F117-3).
+/// The record's `flapsLift` and `flapsDrag` are already 0, so this makes the
+/// brake lever agree with them: it moves the lever's state but adds no drag.
+pub const F117_AIRBRAKE_DRAG: i32 = 0;
+const F117_RETAIL_AIRBRAKE_DRAG: i32 = 256;
+/// F-117A fuel flow (F117-9, **fitted**, the coordinator's first pass,
+/// 2026-11-15): the record's `fuelConsumption` is 2 lb/s for both engines at
+/// full military power (0.333 lb/(lbf h) on the 21,600 lbf, a high-bypass
+/// figure), which flies the model's Mach 0.82 cruise at 36,000 ft for 1,516
+/// nautical miles from the 18,500 lb tank against the published 930 (F117-8,
+/// Wikipedia and flugzeuginfo; 1,140 with a full bomb load, Aerocorner). A
+/// flow of 3.3 lb/s reproduces 930 exactly, but the record keeps whole pounds
+/// a second (a word), so the nearest whole value is 3: 1,011 nautical miles,
+/// 9 percent over the published figure (4 would give 758, 18 percent under).
+/// The F404's own cited 0.81 lb/(lbf h) would be 4.86 lb/s and about 630
+/// nautical miles; that is not used (a fit to the one published range, not a
+/// thrust-specific figure for this engine). Dry only: the record has no
+/// afterburner row.
+pub const F117_FUEL_LB_PER_S: i32 = 3;
+const F117_RETAIL_FUEL_LB_PER_S: i32 = 2;
 /// The retail 0 G and 1 G rows (speed ft/s, altitude ft). The top edges are the
 /// record's ceiling (42,000 ft for 1 G; the 0 G row reaches 2,000 ft higher).
 const F117_RETAIL_ZERO_G: [[f64; 2]; 9] = [
@@ -1673,7 +1711,7 @@ pub const CORRECTIONS: &[Correction] = &[
         retail: 18,
         corrected: B52_FUEL_LB_PER_S,
     },
-    // B-2A: real thrust, weights and fuel (the flow stays, see the docs).
+    // B-2A: real thrust, weights and fuel, and the F118 flow (B2-6).
     Correction {
         id: AircraftId::B2,
         block: Block::Object,
@@ -1702,6 +1740,13 @@ pub const CORRECTIONS: &[Correction] = &[
         retail: 400_000,
         corrected: B2_MAX_TAKEOFF_LB,
     },
+    Correction {
+        id: AircraftId::B2,
+        block: Block::Plane,
+        key: "fuelConsumption",
+        retail: 6,
+        corrected: B2_FUEL_LB_PER_S,
+    },
     // B2-8: the real ceiling and a speed brake sized from the drawn plates.
     Correction {
         id: AircraftId::B2,
@@ -1716,6 +1761,38 @@ pub const CORRECTIONS: &[Correction] = &[
         key: "airBrakesDrag",
         retail: B2_RETAIL_AIRBRAKE_DRAG,
         corrected: B2_AIRBRAKE_DRAG,
+    },
+    // F-117A: the real maximum takeoff weight and ceiling, and no speed brake
+    // (F117-8).
+    Correction {
+        id: AircraftId::F117,
+        block: Block::Plane,
+        key: "maxTakeoffWeight",
+        retail: 54_000,
+        corrected: F117_MAX_TAKEOFF_LB,
+    },
+    Correction {
+        id: AircraftId::F117,
+        block: Block::Object,
+        key: "maxAlt",
+        retail: F117_RETAIL_CEILING_FT,
+        corrected: F117_CEILING_FT,
+    },
+    Correction {
+        id: AircraftId::F117,
+        block: Block::Plane,
+        key: "airBrakesDrag",
+        retail: F117_RETAIL_AIRBRAKE_DRAG,
+        corrected: F117_AIRBRAKE_DRAG,
+    },
+    // F117-9: the fuel flow fitted to the published range (whole pounds a
+    // second; 3.3 fits exactly, 3 is the nearest the record can hold).
+    Correction {
+        id: AircraftId::F117,
+        block: Block::Plane,
+        key: "fuelConsumption",
+        retail: F117_RETAIL_FUEL_LB_PER_S,
+        corrected: F117_FUEL_LB_PER_S,
     },
     // BMB-B2 (opinionated, coordinator first pass, 2026-11-15): the bomber
     // batch B records. B-1B: real maximum takeoff weight, fuel and thrust (the
@@ -1896,21 +1973,6 @@ pub const CORRECTIONS: &[Correction] = &[
         key: "thrust",
         retail: 40_755,
         corrected: SU34_THRUST_LBF,
-    },
-    // F-117A: the real maximum takeoff weight and ceiling.
-    Correction {
-        id: AircraftId::F117,
-        block: Block::Plane,
-        key: "maxTakeoffWeight",
-        retail: 54_000,
-        corrected: F117_MAX_TAKEOFF_LB,
-    },
-    Correction {
-        id: AircraftId::F117,
-        block: Block::Object,
-        key: "maxAlt",
-        retail: F117_RETAIL_CEILING_FT,
-        corrected: F117_CEILING_FT,
     },
 ];
 
@@ -3060,11 +3122,33 @@ mod tests {
         assert_eq!(clip_below(&low, 20_000.), low.to_vec());
     }
 
+    /// F117-9 (fitted): the whole-pound flow keeps the model's cruise range
+    /// near the published 930 nautical miles. The range at Mach 0.82 and
+    /// 36,000 ft is inversely proportional to the flow, 1,516 nautical miles at
+    /// the retail 2 lb/s (measured, F117-8), so 3 lb/s is 1,011. Pinned loosely
+    /// (within 15 percent above and 5 percent below the published figure): the
+    /// flow is a fit to one published range, not a thrust-specific figure.
+    #[test]
+    fn the_f117_fuel_flow_keeps_the_cruise_range_near_the_published_930() {
+        let range = |flow: i32| 1_516. * f64::from(F117_RETAIL_FUEL_LB_PER_S) / f64::from(flow);
+        assert!((range(F117_RETAIL_FUEL_LB_PER_S) - 1_516.).abs() < 1e-9);
+        let corrected = range(F117_FUEL_LB_PER_S);
+        assert!(
+            (0.95 * 930. ..=1.15 * 930.).contains(&corrected),
+            "{corrected} nmi"
+        );
+        // The record's whole pounds: the next whole flow is further from 930.
+        assert!(
+            (range(F117_FUEL_LB_PER_S + 1) - 930.).abs() > (corrected - 930.).abs(),
+            "3.3 lb/s rounds to {F117_FUEL_LB_PER_S}"
+        );
+    }
+
     #[test]
     fn the_batch_fuel_flows_are_the_corrected_thrust_times_the_cited_sfc_to_the_whole_pound() {
         // (flow, thrust lbf, SFC lb/(lbf h)), each within the rounding of one
         // whole pound a second, which is the record's unit.
-        let rows: [(i32, i32, f64); 8] = [
+        let rows: [(i32, i32, f64); 10] = [
             (F15E_FUEL_LB_PER_S, 32_558, 0.73),
             (F15E_AB_FUEL_LB_PER_S, 47_860, 1.94),
             (GRIPEN_FUEL_LB_PER_S, 12_140, 0.844),
@@ -3073,6 +3157,8 @@ mod tests {
             (TORNADO_FUEL_LB_PER_S, TORNADO_THRUST_LBF, 0.598),
             (TORNADO_AB_FUEL_LB_PER_S, TORNADO_AFT_THRUST_LBF, 2.5),
             (F5E_AB_FUEL_LB_PER_S, 10_000, 2.13),
+            (B52_FUEL_LB_PER_S, B52_THRUST_LBF, 0.52),
+            (B2_FUEL_LB_PER_S, B2_THRUST_LBF, 0.375),
         ];
         for (flow, thrust, sfc) in rows {
             let exact = f64::from(thrust) * sfc / 3600.;
