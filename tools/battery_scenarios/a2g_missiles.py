@@ -239,6 +239,28 @@ def antiship_b52_problems(output: str) -> list[str]:
     return problems
 
 
+def antiship_tu160_problems(output: str) -> list[str]:
+    """T160-6 (2026-11-16): an AS-16 from the Tu-160's forward bay (station 0 of the run, six loaded) at the
+    Krivak: designated on the A-G page through its radar, launched in CUED, midcourse, the seeker active
+    on the ship, the ship hit."""
+    parts = runs(output)
+    if len(parts) != 1:
+        return [f"{len(parts)} runs finished, want 1"]
+    run, label, problems = parts[0], "Tu-160 AS-16", []
+    designated = DESIGNATED.search(run)
+    if designated is None or designated.group(1) != KRIVAK:
+        problems.append(f"{label}: the Krivak was not designated on the A-G page")
+    launch = _launch(run, label, problems)
+    if launch and (launch.group(3) != KRIVAK or launch.group(5) != "Midcourse"):
+        problems.append(f"{label}: launched at {launch.group(3)} seeker {launch.group(5)}, want the Krivak midcourse")
+    if not any(f[1] == "Pitbull" and f[2] == KRIVAK for f in FLIGHT.findall(run)):
+        problems.append(f"{label}: the seeker never went active on the Krivak")
+    end = _end(run, label, problems)
+    if end and int(end.group(3)) >= int(end.group(4)):
+        problems.append(f"{label}: the Krivak was not hit ({end.group(3)}/{end.group(4)})")
+    return problems
+
+
 def sarh_problems(output: str) -> list[str]:
     parts = runs(output)
     if len(parts) != 2:
@@ -464,6 +486,17 @@ def scenarios() -> list[Scenario]:
             timeout=300,
             check=antiship_b52_problems,
             notes="B52-6: two AGM-84E from the B-52's underwing pylons at the Krivak, designated through the B-52's radar.",
+        ),
+        Scenario(
+            name="a2g-antiship-tu160", lane="flight",
+            # The AS-16 reaches 6.58 nmi: the run starts 6 nmi out (the Su-25's and Su-35's pass).
+            args=run + ["UKR", "QUSFLT", "--unit", KRIVAK, "--attack", "antiship", "--from", "6", "--altitude", "5000",
+                        "--speed", "450", "--seconds", "180", "--aircraft", "tu160", "--load", "AS16",
+                        "--station", "0", "--count", "6"],
+            timeout=300,
+            check=antiship_tu160_problems,
+            notes="T160-6: an AS-16 (Kh-15) from the Tu-160's forward bay at the Krivak, designated through the "
+                  "Tu-160's radar (now enabled, Transitional), launched CUED, active on the ship, hit.",
         ),
         Scenario(
             name="a2g-sarh", lane="flight",

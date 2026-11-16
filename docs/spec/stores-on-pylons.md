@@ -3873,3 +3873,57 @@ Tests: `bays.rs` (`the_b1b_has_three_centred_bays_a_grid_each_and_the_forward_on
 (`an_ai_bomb_leaves_each_b1b_bay_grid_inside_its_own_opening`), `bomber_batch_b.rs` (retail rows).
 Provenance: bays, grid, roof, doors, mounts and refusals fitted (agent, 2026-11-16); the 1 s travel, the
 0.95 gate and the hold are the F-22's; the record's counts and masks are retail's.
+
+## Tu-160 weapon bays (T160-5, 2026-11-16)
+
+Implementation specification, **opinionated** (the coordinator's first pass, 2026-11-15, "Tu-160
+Blackjack" item 5: two magazine bays on the shared grid, 42 ft each, six AS-16 each; geometry, depth,
+width, door count and the refusals **fitted**, agent-authored, T160-5). The research and the
+measurements are in
+[Tu-160 stations, bays and pylons](../formats/aircraft-variety.md#tu-160-stations-bays-and-pylons-t160-5-2026-11-16).
+Update to [B-52 bay, pylons and tail gun](#b-52-bay-pylons-and-tail-gun-b52-5-2026-11-15): the same
+centred bay and door helper, twice, in tandem.
+
+**Stations.** `TU160.PT` rows 4 and 5 (the retail internal bay rows; flags `0x1180` once the pair flag
+is cleared, `aircraft_stations::adjust_defaults`) are `Location::Magazine` stations through
+`bays::STATIONS`:
+
+| Row | Role | Mount (right / floor up / forward), feet | Opening (forward, feet) | Belly plane, roof |
+| --- | --- | --- | --- | --- |
+| 4 | forward bay | 0 / -2.667 / 30.63 | 14.0 to 56.0 | -2.667 ft, 3.333 ft |
+| 5 | aft bay | 0 / 0.0 / -20.70 | -37.33 to 4.67 | 0.0 ft, 6.0 ft |
+
+The mount is the opening's middle minus 4.37 ft (`TU160_ORIGIN_AHEAD`: the `KIKBK.SH` origin is 4.37 ft
+behind the missile's middle), so the two Kh-15 along a bay stand centred with 5.17 ft clear at each
+end. Each row is one whole bay of six, class 180 (18,000 lb); the two rows are separate bays, not
+alternatives (`bays::alternative` is `None`), and each holds one type of store.
+
+**The grid** (`bays::GRIDS`, the shared `grid_cells`, `grid_point`, `grid_capacity`): floor 6.0 ft by
+42.0 ft, ceiling 6.0 ft over the row's belly plane. A Kh-15 (15.7 ft long, 1.49 ft body, 3.0 ft fins):
+pitch 1.59 ft, three abreast, two long, up to two tiers by room (`grid_capacity` 12); the record's six
+is the cap. A Mk 82 (7.3 ft, 1.3 ft pitch): four abreast and five long, so twenty a tier. Release order is the shared grid's: bottom tier first, front to back, outermost column first
+alternating sides. Both bays are on the centre line, so `Ownship::sister_bay` finds no partner: one
+press is one missile from the selected bay, and the player selects the other bay.
+
+**Doors and cut.** The eleven belly skin faces under the openings (every face in the band z -1 to 0
+units whose plan overlaps an opening; the loader refuses the shape unless they cover both plans) are
+cut into two leaves a bay while the doors are off their seat (`tu160_animation::Rig::faces`), each half
+the 7.6 ft opening, hinged on its outer edge and swung 90 degrees down; a leaf flattens onto its bay's
+belly plane over the first sixth of the travel. A lined box and a rail (20 faces) draw only while the
+doors are open; the ventral keel plates are not drawn then. Timing, hold and closing are the F-22's, and
+the AI's doors stay shut while its missiles leave. `Opening` gained no field: `bays::openings(id)` lists
+an aircraft's openings in row order.
+
+**Clearances, feet, doors open** (`TORE_STORES_PREVIEW_TU160CLEAR=1`, scenario
+`render-tu160-clearance`; positive is clear). The default 12 AS-16, worst of either bay: side wall 1.15,
+door leaf 1.26, ends 5.17 and 5.18, roof 3.36, above the belly plane 0.52, rail 2.78. The nearest store is
+0.00 (the Kh-15's 3.0 ft fins cross their neighbours' on the 1.59 ft pitch, as the B-2's Paveway III
+do): this aircraft does not test store to store.
+
+**Refused for fit.** Both rows refuse `AT12.JT`, `GBU29.JT`, `GBU29P.JT`, `GBU30.JT` and `PAVEWA3.JT`
+(`aircraft_stations::TU160_BAY_REFUSED`, the 0.05 ft rule on every wall, leaf, end, roof, floor and rail:
+the AT-12 hangs 0.41 ft below the belly plane, the GBU-27 class stands 0.85 ft through the side walls).
+The mask refuses air-to-air missiles and `AS15.JT` (the Kh-55, no `0x40`). The other 30 admitted
+records clear by at least 0.08 ft. Provenance: bay count, length and the six-missile default are the
+record and `TU160.INF`; opening, planes, depth, width, door count, mounts and the refusals fitted (agent,
+2026-11-16).

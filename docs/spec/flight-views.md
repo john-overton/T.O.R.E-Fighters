@@ -346,6 +346,17 @@ spine and wings (frame `cockpit-view-back-f2`). The replay's Back, cockpit and H
 cameras and the listening seat use the same table; the mirror rear feed stays on the
 shared seat (the B-2 art has no mirrors). Evidence in [the B-2 section](../formats/aircraft-variety.md#b-2-sensors-hud-and-cockpit-b2-7-2026-11-15).
 
+## Pilot's eye on the Tu-160 (2026-11-16, T160-7)
+
+The per-identity Back eye table (`mirrors::eye_offset`) gains the Tu-160: 12 feet up and 71 feet
+ahead of the model origin (fitted, agent decision). The record's own eye (0, 35, 60) is the Tu-26's
+copy, 20 feet ahead and inside the fuselage. Measured on `TU160.SH` (8/3 ft a unit), the crown on the
+centre line is flat at 10.67 feet from 45 to 72 feet ahead, the glass runs from 72 to 80 feet and the nose
+cone to the tip at 101 feet; the seat is 1 foot behind the glass's foot and 1.33 feet over the crown, so
+Back looks over the fuselage and down its length (frame `cockpit-view-back-f2`). The replay's Back,
+cockpit and HUD cameras and the listening seat use the same table; the mirror rear feed stays on the
+shared seat. Evidence in [the Tu-160 section](../formats/aircraft-variety.md#tu-160-ordnance-sensors-hud-and-cockpit-t160-67-2026-11-16).
+
 ## Pilot's eye on the F-117 (2026-11-15, F117-7)
 
 The per-identity Back eye table (`mirrors::eye_offset`, B2-7) gains the F-117: 6 feet up and 14

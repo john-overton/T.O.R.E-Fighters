@@ -16,6 +16,7 @@ fn at2(rounds: u32) -> Store {
         rounds,
         cadence_ticks: 30,
         fire_range_ft: 10_000.,
+        look_deg: 180.,
         minimum_range_ft: 500.,
         maximum_range_ft: 18_000.,
         round_speed_fps: None,

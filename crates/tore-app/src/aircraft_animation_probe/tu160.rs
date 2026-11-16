@@ -36,6 +36,8 @@ const CAPS: [usize; 8] = [
 ];
 /// Feet a shape unit is (the header scale).
 const FEET: f32 = 8. / 3.;
+/// The fixed glove plates the rig adds (T160-5), restated.
+const GLOVE: [usize; 4] = [0x8118, 0x8119, 0x811a, 0x811b];
 /// The wing pivots (shape units), restated from the fitted spans.
 const PIVOT_R: [f32; 2] = [4.8, 0.];
 const PIVOT_L: [f32; 2] = [-4.8, 0.];
@@ -520,6 +522,94 @@ fn gear(value: f64, reference: &[Face], pose: &[Face], scale: f32, m: &mut Metri
     }
 }
 
+/// The first lining address and one bay's lining faces (a ceiling, four walls and
+/// the five faces of its rail), restated from the rig.
+const LINING_BASE: usize = 0x8200;
+const LINING: usize = 2 * 10;
+/// The fitted bays, restated: forward bay then aft, feet forward (aft end, fore
+/// end) and the belly plane's height in shape units (the keel skin at -1, the
+/// flat belly at 0), half-width 3.8 ft.
+const BAYS: [([f32; 2], f32); 2] = [([14., 56.], -1.), ([-112. / 3., 14. / 3.], 0.)];
+const BAY_HALF_FT: f32 = 3.8;
+
+/// The fitted bays: shut (0) the belly is the shape's own and no lining draws;
+/// open (above 0) the lining draws (two bays of ten faces) and, from a sixth of the
+/// travel on (the leaves have flattened), the lowest vertex over each bay is the
+/// free edge of a door leaf, `3.8 ft * sin(90 degrees * value)` under the bay's
+/// belly plane; fully open every vertex of every leaf hangs on a hinge line
+/// (x +/-3.8 ft) within the leaf's own width.
+fn bay(value: f64, _reference: &[Face], pose: &[Face], scale: f32, m: &mut Metrics) {
+    let lining = pose
+        .iter()
+        .filter(|f| (LINING_BASE..LINING_BASE + 0x80).contains(&f.address))
+        .count();
+    if value == 0. {
+        // Shut: no lining, and no face hangs below a bay's belly plane over it
+        // (the reference of this control is the open pose, so the shut skin is
+        // checked on its own).
+        let hanging = BAYS.iter().any(|&(feet, belly)| {
+            pose.iter().any(|f| {
+                !(LINING_BASE..LINING_BASE + 0x80).contains(&f.address)
+                    && f.positions.iter().all(|p| {
+                        p[0].abs() <= BAY_HALF_FT / scale
+                            && p[1] >= feet[0] / scale
+                            && p[1] <= feet[1] / scale
+                    })
+                    && f.positions.iter().any(|p| p[2] < belly - 1e-3)
+            })
+        });
+        m.reviewed_neutral_mismatch |= lining != 0 || hanging;
+        return;
+    }
+    m.reviewed_direction_failures += usize::from(lining != LINING);
+    let half = BAY_HALF_FT / scale;
+    for (feet, belly) in BAYS {
+        let (aft, fore) = (feet[0] / scale, feet[1] / scale);
+        // The faces over this bay: every drawn face inside its plan box except
+        // the lining and the fixed glove plates; the leaves are the ones the rig
+        // moved, which hang at the hinge lines.
+        let over = |f: &&Face| {
+            !(LINING_BASE..LINING_BASE + 0x80).contains(&f.address)
+                && f.positions
+                    .iter()
+                    .all(|p| p[0].abs() <= half + 1e-3 && p[1] >= aft - 1e-3 && p[1] <= fore + 1e-3)
+        };
+        let faces: Vec<&Face> = pose.iter().filter(over).collect();
+        // A vertex stays on each hinge line at the belly plane.
+        for side in [-half, half] {
+            let held = faces.iter().flat_map(|f| f.positions.iter()).any(|p| {
+                (p[0] - side).abs() < 1e-3
+                    && (p[2] - belly).abs() < 1e-3
+                    && p[1] > aft
+                    && p[1] < fore
+            });
+            m.reviewed_anchor_missing |= !held;
+        }
+        let lowest = faces
+            .iter()
+            .flat_map(|f| f.positions.iter())
+            .map(|p| p[2])
+            .fold(f32::MAX, f32::min);
+        if value >= 1. / 6. {
+            let hang = half * (value as f32 * std::f32::consts::FRAC_PI_2).sin();
+            m.reviewed_direction_failures += usize::from((belly - lowest - hang).abs() > 2e-3);
+        }
+        if value >= 1. {
+            // Fully open: the hung leaves are two or more faces on the hinge
+            // lines, no leaf vertex off them.
+            let hung: Vec<&&Face> = faces
+                .iter()
+                .filter(|f| f.positions.iter().any(|p| p[2] < belly - 0.5))
+                .collect();
+            m.reviewed_direction_failures += usize::from(hung.len() < 2);
+            for f in hung {
+                m.reviewed_direction_failures +=
+                    usize::from(f.positions.iter().any(|p| (p[0].abs() - half).abs() > 2e-3));
+            }
+        }
+    }
+}
+
 pub(super) fn check(
     c: Control,
     value: f64,
@@ -565,6 +655,7 @@ pub(super) fn check(
         Control::Gear => gear(value, reference, pose, scale, m),
         Control::Brake => keel(value, pose, reference, scale, m),
         Control::Exhaust => exhaust(value, pose, m),
+        Control::Bay => bay(value, reference, pose, scale, m),
         _ => {}
     }
 }
@@ -889,6 +980,13 @@ fn dense_gear(
     let mut endpoint = neutral.clone();
     Control::Gear.apply(&mut endpoint, 1.);
     let reference = airframe.animation_faces(&endpoint);
+    // The hull the legs stow into is the shape's own skin: the fixed glove plates
+    // (T160-5) are the rig's addition and are not part of it.
+    let skin: Vec<Face> = original
+        .iter()
+        .filter(|f| !GLOVE.contains(&f.address))
+        .cloned()
+        .collect();
     let mut csv = String::from("value,rigidity_ft,crossings,hull_overshoot_ft,checks_passed\n");
     let mut values: Vec<_> = std::iter::once(1e-6)
         .chain((0..=200).map(|i| f64::from(i) / 200.))
@@ -909,7 +1007,7 @@ fn dense_gear(
             &mut m,
         );
         let overshoot = if value > 0. && value < 0.2 {
-            hull_overshoot(original, &pose, &GEAR) * FEET
+            hull_overshoot(&skin, &pose, &GEAR) * FEET
         } else {
             0.
         };

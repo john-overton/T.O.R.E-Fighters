@@ -171,12 +171,23 @@ const DEFAULT_EYE: [f64; 2] = [7., 10.];
 /// inside), so the seat is the deck's middle in plan, 66 ft ahead, and 11.3
 /// ft up: 0.6 ft over the 10.7 ft crown behind it, so the back view clears
 /// the spine and looks down the length of the jet to the fins.
+///
+/// Tu-160 (T160-7, 2026-11-16, fitted from the shape: `TU160.SH` at 8/3 ft a
+/// unit, the surface on the centre line): the fuselage crown is flat at 10.7 ft
+/// (4 units) from 16 ft aft of the origin to 72 ft ahead of it; the glass is the
+/// four faces from 72 to 80 ft, falling to 5.3 ft, and the nose cone runs on
+/// down to the tip at 101 ft. The record's own eye (`viewOffset` 0, 35, 60:
+/// 11.7 ft up, 20 ft ahead) is the Tu-26's copy, 52 ft aft of the glass and
+/// inside the skin. The seat is the flight deck behind the windscreen, 71 ft
+/// ahead, and 12 ft up, 1.3 ft over the crown behind it, so the back view
+/// clears the fuselage and looks down its length to the fin and the tail.
 pub(crate) fn eye_offset(id: Option<AircraftId>) -> [f64; 2] {
     match id {
         Some(AircraftId::B2) => [10., 20.],
         Some(AircraftId::F117) => [6., 14.],
         Some(AircraftId::B52) => [9., 63.],
         Some(AircraftId::B1b) => [11.3, 66.],
+        Some(AircraftId::Tu160) => [12., 71.],
         _ => DEFAULT_EYE,
     }
 }
@@ -507,13 +518,14 @@ mod tests {
     /// every other aircraft, and an unknown type, keeps the shared one (7 ft
     /// up, 10 ft ahead).
     #[test]
-    fn only_the_b2_the_f117_and_the_b52_have_their_own_pilot_eye() {
+    fn only_the_b2_the_f117_the_b52_and_the_tu160_have_their_own_pilot_eye() {
         for id in AircraftId::ALL {
             let want = match id {
                 AircraftId::B2 => [10., 20.],
                 AircraftId::F117 => [6., 14.],
                 AircraftId::B52 => [9., 63.],
                 AircraftId::B1b => [11.3, 66.],
+                AircraftId::Tu160 => [12., 71.],
                 _ => [7., 10.],
             };
             assert_eq!(eye_offset(Some(id)), want, "{id:?}");
@@ -550,6 +562,13 @@ mod tests {
         let b1b = at(Some(AircraftId::B1b));
         for i in 0..3 {
             let moved = (b1b[i] - shared[i]) - (up[i] * 4.3 + forward[i] * 56.);
+            assert!(moved.abs() < 1e-9, "axis {i}");
+        }
+        // The Tu-160: 5 ft higher and 61 ft further forward (the drawn flight
+        // deck behind the windscreen).
+        let tu160 = at(Some(AircraftId::Tu160));
+        for i in 0..3 {
+            let moved = (tu160[i] - shared[i]) - (up[i] * 5. + forward[i] * 61.);
             assert!(moved.abs() < 1e-9, "axis {i}");
         }
     }

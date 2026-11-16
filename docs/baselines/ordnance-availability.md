@@ -1175,3 +1175,29 @@ ordnance audit: 2 novelty records, 278 Cheat-only placements, refused without Ch
 The `menus-ordnance-availability` expected line reads 5,344 weapon placements; `a2g-catalog` and
 `test_battery_a2g.py` carry no weapon-placement total, so they are unchanged. Earlier sections
 quoting 5,395 stay as written for their own states.
+
+## Tu-160 weapon bays: five refusals (T160-5, 2026-11-16)
+
+The Tu-160's two bay rows (`TU160.PT` rows 4 and 5, flags `0x1180` once the pair flag is cleared)
+refuse five stores that do not fit the fitted 7.6 ft wide, 6 ft deep, 42 ft long bays with the doors
+open (`aircraft_stations::TU160_BAY_REFUSED`: `AT12.JT`, `GBU29.JT`, `GBU29P.JT`, `GBU30.JT`,
+`PAVEWA3.JT`; measured with the bay clearance sweep, see
+[Tu-160 stations, bays and pylons](../formats/aircraft-variety.md#tu-160-stations-bays-and-pylons-t160-5-2026-11-16)),
+so `TU160.PT` goes from 70 to 60 placements (35 admitted records a row, 30 after the refusals).
+Measured by `--validate-ordnance` on `m3-tu160` with the profile refreshed:
+
+| Pin | Before | After | Why |
+| --- | ---: | ---: | --- |
+| Aircraft | 54 | 54 | |
+| Weapon placements | 5,395 | 5,385 | `TU160.PT` 70 to 60 (two rows, five stores each) |
+| Tank placements | 257 | 257 | |
+| Recovered weapon stations | 23 | 23 | the Tu-160's rows were already recovered |
+| Cheat-only placements | 278 | 278 | |
+| Designator pod placements | 82 | 82 | the bay rows never carried the designator bit |
+| Weapon and tank records | 82 / 9 | 82 / 9 | |
+
+The bays' grid caps no store below its record count (the Kh-15 holds 12 by room, six by record). The
+pin is this slice's alone: batch B's other aircraft and the merged batches are not touched, so the
+coordinator's integration total moves by minus 10 only. The `menus-ordnance-availability` expected line
+reads 54 aircraft, 23 recovered stations, 5,385 weapon and 257 tank placements. Earlier sections
+quoting 5,395 weapon placements stay as written for their own state.

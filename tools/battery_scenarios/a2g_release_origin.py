@@ -510,6 +510,46 @@ def b1b_origin_problems(output: str) -> list[str]:
     return problems
 
 
+# The Tu-160's bays (T160-6, 2026-11-16; T160-5's grid, `hardpoints::grid_point`): per run, (station, store,
+# presses, columns, rows forward ft, up ft of the first tier). The six AS-16 of a bay hang three abreast and
+# two long (the rotary launcher's stand-in): columns -1.59, +1.59, 0 (outermost first, alternating, then the
+# middle), the forward row first. A four abreast Mk 82 row is the B-2's (-1.95, +1.95, -0.65, +0.65).
+# The AI's release uses the same places (`ai-strike-tu160-stick`).
+TU160_AS16_COLUMNS = (-1.59, 1.59, 0.0)
+TU160_MK82_COLUMNS = (-1.95, 1.95, -0.65, 0.65)
+TU160_RUNS = [
+    (0, "AS16", 6, TU160_AS16_COLUMNS, (38.61, 22.66), -1.09),
+    (1, "AS16", 6, TU160_AS16_COLUMNS, (-12.73, -28.68), 1.58),
+    (0, "MK82", 6, TU160_MK82_COLUMNS, (45.73, 38.18), -1.95),
+]
+
+
+def tu160_args(station: int, load: str, presses: int) -> list[str]:
+    return ["--a2g-run", "UKR", "QUCOL", "--attack", "release", "--from", "1", "--altitude", "20000",
+            "--speed", "300", "--repeat", str(presses + 2), "--gap", "0.5", "--aircraft", "tu160", "--station",
+            str(station), "--load", load, "--count", str(presses)]
+
+
+def tu160_origin_problems(output: str) -> list[str]:
+    parts = runs(output)
+    if len(parts) != len(TU160_RUNS):
+        return [f"{len(parts)} runs finished, want {len(TU160_RUNS)}"]
+    problems: list[str] = []
+    for part, (station, load, presses, columns, rows, up) in zip(parts, TU160_RUNS):
+        label = f"Tu-160 station {station} {load}"
+        found = ORIGIN.findall(part)
+        if len(found) < presses:
+            problems.append(f"{label}: {len(found)} releases, want at least {presses}")
+        for n, (_, r, u, f, _station, _after, hr, hu, hf, _depth) in enumerate(found[:presses]):
+            r, u, f, hr, hu, hf = (float(v) for v in (r, u, f, hr, hu, hf))
+            want_r, want_f = columns[n % len(columns)], rows[(n // len(columns)) % len(rows)]
+            if abs(r - hr) > 0.05 or abs(u - hu) > 0.05 or abs(f - hf) > 0.5:
+                problems.append(f"{label}: release {n} left from {r:.2f} {u:.2f} {f:.2f}, hung at {hr:.2f} {hu:.2f} {hf:.2f}")
+            if abs(r - want_r) > 0.05 or abs(u - up) > 0.06 or abs(f - want_f) > 0.5:
+                problems.append(f"{label}: release {n} at {r:.2f} {u:.2f} {f:.2f}, want {want_r:.2f} {up:.2f} {want_f:.2f}")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     base = ["--a2g-run", "UKR", "QUCOL", "--attack", "release", "--from", "1", "--altitude", "3000",
             "--speed", "420"]
@@ -640,6 +680,16 @@ def scenarios() -> list[Scenario]:
                   "grid's own places (4 abreast, outermost first, alternating sides, then the next tier up, 1.3 ft each) and "
                   "each bay's default seven-pack row leaves four packs of seven from the hung place, each bomb staggered by "
                   "the retail pack offset, all from where it hangs.",
+        ),
+        Scenario(
+            name="a2g-release-origin-tu160", lane="flight",
+            args=tu160_args(*TU160_RUNS[0][:3]),
+            timeout=300,
+            then=[Step(tu160_args(*r[:3]), timeout=300) for r in TU160_RUNS[1:]],
+            check=tu160_origin_problems,
+            notes="The Tu-160's bay grids (T160-5, T160-6): the forward and aft bays' six AS-16 leave from the grid's own "
+                  "places (the forward row first, outermost first, alternating sides, then the middle), and the forward "
+                  "bay's Mk 82 row from its four abreast places, each from where it hangs.",
         ),
         Scenario(
             name="a2g-release-origin-tornado-rail", lane="flight",

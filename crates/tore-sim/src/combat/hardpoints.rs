@@ -2256,6 +2256,67 @@ mod tests {
     }
 
     #[test]
+    fn the_tu160_bay_rows_hang_six_kh15_in_a_grid_each_and_release_bottom_first() {
+        use super::super::bays::{TU160_BELLY, openings};
+        let size = StoreSize::of_shape(Some("KIKBK.SH"));
+        let mut h = hardpoint(3, 0x1180);
+        h.count = 6;
+        for (k, (row, o)) in [
+            (4, openings(AircraftId::Tu160)[0]),
+            (5, openings(AircraftId::Tu160)[1]),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let (mount, rack) = placed_on(AircraftId::Tu160, row, &h, None);
+            assert_eq!(rack.location(), Location::Magazine);
+            assert!(rack.location().drawn() && rack.location().bay());
+            assert_eq!((mount[0], mount[1]), (0., TU160_BELLY[k]));
+            // 3 abreast and 2 long on one tier at the grid's pitch; the 12 of two
+            // tiers also fit under the roof, the record's six are the cap.
+            let floor = rack.grid().unwrap();
+            let ([abreast, along], pitch) = grid_cells(size, floor);
+            assert_eq!((abreast, along), (3, 2));
+            assert_eq!(
+                grid_capacity(size, floor, rack.grid_ceiling().unwrap() - mount[1]),
+                12
+            );
+            let mut places = Vec::new();
+            for slot in 0..6 {
+                let at = rack.store_point(mount, 6, 0, slot, size);
+                assert_eq!(
+                    at,
+                    rack.release_point(mount, 6, u32::from(slot), slot, size)
+                );
+                // Inside the opening: its walls, ends, roof and belly plane.
+                assert!(at[0].abs() + size.width / 2. < o.outer + 1e-9, "{at:?}");
+                assert!(
+                    at[1] - size.width / 2. > o.belly
+                        && at[1] + size.width / 2. < o.belly + o.depth
+                );
+                assert!(
+                    at[2] - size.length / 2. > o.aft && at[2] + size.length / 2. < o.fore,
+                    "{at:?}"
+                );
+                places.push(at);
+            }
+            places.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            places.dedup();
+            assert_eq!(places.len(), 6);
+            // One tier: all at one height, the columns a pitch apart.
+            assert!(places.iter().all(|p| p[1] == places[0][1]));
+            let mut columns: Vec<f64> = places.iter().map(|p| p[0]).collect();
+            columns.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            columns.dedup();
+            assert_eq!(columns.len(), 3);
+            assert!((columns[1] - columns[0] - pitch).abs() < 1e-9);
+            // The first to leave (the highest slot) is the front outer column.
+            let first = rack.release_point(mount, 6, 0, 5, size);
+            assert!(first[0] < 0. && first[2] > mount[2]);
+        }
+    }
+
+    #[test]
     fn the_b52_pylon_pair_stands_where_measured_and_hangs_its_stores_from_one_beam() {
         // The wing's underside 3.8 ft above the reference point, flat over the
         // pair (the measured wing, B52-0): 11.4 units at 1/3 ft a unit.

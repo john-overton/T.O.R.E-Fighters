@@ -146,6 +146,15 @@ pub const CUE_TRIM_LIMIT_FT: f64 = 1_000.;
 /// pass and put it 44 ft off at the release, outside the gate; the pointing
 /// is one first-order loop on the miss itself and settles inside 4 s.
 pub const CUE_POINT_GAIN: f64 = 0.6;
+/// A heavy's cue pointing (fitted, agent, T160-9, 2026-11-16): a heavy's body
+/// heading answers the pointing slowly, so the gain of [`CUE_POINT_GAIN`] and
+/// the one second of damping let the cue swing past the aim after the aim
+/// shifts a few hundred feet (the Tu-160 on the moving column from 12 nm, and
+/// on the Quick Mission factory, missed its circle by 10 to 80 ft and left
+/// without bombing). A smaller gain with three seconds of damping settles the
+/// same shift inside the circle. Only [`StrikeClass::Heavy`] level runs.
+pub const HEAVY_CUE_POINT_GAIN: f64 = 0.4;
+pub const HEAVY_CUE_DAMPING_S: f64 = 3.;
 /// Fitted damping horizon for a velocity-based bomb cue, seconds.
 pub const BOMB_CUE_DAMPING_S: f64 = 1.;
 /// Fitted cue tracking gain for rolled bomb runs.
@@ -482,6 +491,12 @@ pub struct Store {
     pub cadence_ticks: u64,
     /// The farthest the AI fires it (a seeker: retail's guided rule), feet.
     pub fire_range_ft: f64,
+    /// How far below its nose a seeker looks, degrees (its zone-1 pitch
+    /// half-angle; 180 where the record sets none, and for every other
+    /// store). A seeker that looks only so far down cannot lock a target far
+    /// below a high flier inside [`Self::fire_range_ft`]: see
+    /// [`Self::fire_range_from`] (T160-9, 2026-11-16).
+    pub look_deg: f64,
     /// Its zone-1 minimum and maximum ranges, feet: an unguided round is
     /// released only with its cue inside them (retail zone 1).
     pub minimum_range_ft: f64,
@@ -512,6 +527,24 @@ pub struct Store {
 }
 
 impl Store {
+    /// The farthest the AI fires a seeker from `height_ft` over its target:
+    /// [`Self::fire_range_ft`], unless the target would stand beyond the
+    /// seeker's look-down limit there, which happens from high up (an AS-16
+    /// from 20,000 ft, its zone-1 pitch limit 45 degrees and half of its
+    /// 40,000 ft maximum the fire range: it could never lock, and the AI
+    /// overflew its target without a shot). Then the fire range is where the
+    /// target sits [`reach::LOOK_DOWN_SHARE`] of the limit below the nose,
+    /// at most [`reach::REACH_SHARE`] of the zone's maximum (fitted, agent,
+    /// 2026-11-16). Unchanged wherever the old range could lock.
+    pub fn fire_range_from(&self, height_ft: f64) -> f64 {
+        reach::seeker_fire_range(
+            self.fire_range_ft,
+            self.maximum_range_ft,
+            self.look_deg,
+            height_ft,
+        )
+    }
+
     /// A drag (retarded) bomb: its retarder slows it after release.
     pub fn retarded(&self) -> bool {
         self.kind == StoreKind::Bomb && self.release_speed_share < 0.95
@@ -2521,7 +2554,7 @@ impl Strike {
             let length = to[0].hypot(to[1]).max(1.);
             let closing = (cx.velocity[0] * to[0] + cx.velocity[2] * to[1]) / length;
             Some(over(
-                slant(own.position, target) - store.fire_range_ft,
+                slant(own.position, target) - store.fire_range_from(own.position[1] - target[1]),
                 closing,
             ))
         };
@@ -2610,7 +2643,16 @@ impl Strike {
             } else {
                 0.
             };
-            let turn = gain * (cross.atan2(range).to_degrees() + BOMB_CUE_DAMPING_S * rate);
+            // A heavy's heading answers its controls slowly, so the cue's
+            // pointing swings past the line at the stronger, shorter-memory
+            // gains and misses the circle (T160-9).
+            let heavy = cx.inputs.class == StrikeClass::Heavy;
+            let (gain, damping) = if heavy && !(velocity_bomb && on_track) {
+                (HEAVY_CUE_POINT_GAIN, HEAVY_CUE_DAMPING_S)
+            } else {
+                (gain, BOMB_CUE_DAMPING_S)
+            };
+            let turn = gain * (cross.atan2(range).to_degrees() + damping * rate);
             let base = if velocity_bomb || on_track {
                 track
             } else {

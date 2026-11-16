@@ -1439,6 +1439,58 @@ class B52Tests(unittest.TestCase):
         self.assertTrue(any("doors moved" in p for p in s.b52_antiship_problems(harpoon(bay=True))))
 
 
+class Tu160Tests(unittest.TestCase):
+    """The Tu-160 strike checks (slice T160-9)."""
+
+    def aft(self, **kwargs):
+        cells = [(c, 0.72, f) for f in s.TU160_AFT_ROWS for c in s.TU160_AFT_COLUMNS][:6]
+        return b2_run(cells, station=1, **kwargs).replace("aircraft=B2", "aircraft=Tu160")
+
+    def as16(self, target="0x50000003", hp="150/500", kills=0, rights=(-1.59,), bay="1.00", range_ft=27509):
+        lines = [
+            f"ai-strike: setup aircraft=Tu160 load=AS16.JT station=0 count=6 rounds=6 target={target} name=Krivak "
+            "target_at=1,2,3 hp=500 skill=1 profile=none handback=none order=none mode=none",
+            "ai-strike: PROFILE t=0.000 name=none requested=none note=chosen",
+            "ai-strike: start t=0.000 plane=0 range_ft=91140 alt_ft=20000 speed_kt=450",
+            "ai-strike: BAY t=92.008 state=open bay=0.96",
+        ]
+        for n, right in enumerate(rights, 1):
+            lines.append(f"ai-strike: ORIGIN t=92.850 n={n} station=0 right={right} up=-1.09 forward=38.61")
+            lines.append(f"ai-strike: RELEASE t=92.850 n={n} weapon=AS16.JT station=0 alt_ft=20000 speed_kt=366 "
+                         f"range_ft={range_ft} pass=1 aim_ft=0 inside=yes lead_ft=0 dive_deg=-0 bay={bay}")
+        lines.append("ai-strike: BAY t=94.800 state=shut bay=0.04")
+        lines.append("ai-strike: IMPACT t=109.025 n=1 miss_ft=47.3 at=1,2,3")
+        if kills:
+            lines.append(f"ai-strike: KILL t=109.025 victim={target} category=0x2000 target=yes")
+        lines.append(f"ai-strike: summary t=115.000 ran_s=115.0 profile=level releases={len(rights)} impacts=1 kills={kills} "
+                     f"egress=no lost=no activity=Defending target_hp={hp} closest_ft=14198 store_rounds_left=5 min_agl_ft=19142")
+        lines.append("ai-strike: done")
+        return "\n".join(lines)
+
+    def test_the_scenarios_exist(self):
+        names = {sc.name for sc in s.scenarios()}
+        for name in ("ai-strike-tu160-stick", "ai-strike-tu160-stick-12nm", "ai-strike-tu160-stick-12nm-factory", "ai-strike-tu160-aft", "ai-strike-tu160-quick-wing",
+                     "ai-strike-tu160-as16-tank", "ai-strike-tu160-antiship"):
+            self.assertIn(name, names)
+            self.assertTrue(bs.family_matches("ai-strike", name))
+
+    def test_the_aft_row_wants_its_own_places_and_station(self):
+        self.assertEqual(s.tu160_aft_problems(self.aft()), [])
+        self.assertTrue(any("row 1" in p for p in s.tu160_aft_problems(self.aft().replace("station=1 right", "station=0 right"))))
+        wrong = self.aft().replace("up=0.72", "up=-1.95", 1)
+        self.assertTrue(any("grid's place" in p for p in s.tu160_aft_problems(wrong)))
+
+    def test_the_as16_shot_wants_one_missile_a_stand_off_range_and_a_hurt_target(self):
+        self.assertEqual(s.tu160_antiship_problems(self.as16()), [])
+        self.assertTrue(any("unhurt" in p for p in s.tu160_antiship_problems(self.as16(hp="500/500"))))
+        self.assertTrue(any("one AS16.JT" in p for p in s.tu160_antiship_problems(self.as16(rights=(-1.59, 1.59)))))
+        self.assertTrue(any("stand-off" in p for p in s.tu160_antiship_problems(self.as16(range_ft=9000))))
+        self.assertTrue(any("doors" in p for p in s.tu160_antiship_problems(self.as16(bay="0.20"))))
+        tank = self.as16(target="0x50000001", hp="0/200", kills=1)
+        self.assertEqual(s.tu160_as16_tank_problems(tank), [])
+        self.assertTrue(any("not destroyed" in p for p in s.tu160_as16_tank_problems(self.as16(target="0x50000001", hp="1/200"))))
+
+
 if __name__ == "__main__":
     unittest.main()
 

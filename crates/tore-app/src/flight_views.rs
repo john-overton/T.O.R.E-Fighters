@@ -1336,6 +1336,14 @@ mod tests {
             crate::mirrors::pilot_eye_of(Some(AircraftId::B52), [0., 1000., 0.], level)
         );
         assert_ne!(deck, shared);
+        // T160-7: the Tu-160's seat is the drawn flight deck, 71 ft ahead.
+        body.aircraft = Some(AircraftId::Tu160);
+        let deck = body_camera(body, 3).position;
+        assert_eq!(
+            deck,
+            crate::mirrors::pilot_eye_of(Some(AircraftId::Tu160), [0., 1000., 0.], level)
+        );
+        assert_ne!(deck, shared);
     }
     #[test]
     fn back_from_another_aircraft_sits_at_its_pilot_eye_and_shows_it() {

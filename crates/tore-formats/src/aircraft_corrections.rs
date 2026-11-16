@@ -783,6 +783,72 @@ pub const T160_EMPTY_LB: i32 = 242_500;
 pub const T160_INTERNAL_FUEL_LB: i32 = 326_285;
 pub const T160_THRUST_LBF: i32 = 123_600;
 pub const T160_AFT_THRUST_LBF: i32 = 220_400;
+/// Tu-160 fuel flows (T160-8, **fitted** to the cited NK-32 specific fuel
+/// consumption, 2026-11-16, the coordinator's BMB-B1/B2 note "afterburner about
+/// 104 lb/s"). The record's 26 and 174 lb/s (whole pounds a second for the four
+/// engines, [`TORNADO_FUEL_LB_PER_S`]) are the Tu-26's flows scaled up: 0.757
+/// and 2.84 lb/(lbf h) at the real thrust. Wikipedia "Kuznetsov NK-32" (read
+/// 2026-11-16) gives 0.72 to 0.73 kg/(kgf h) subsonic and 1.70 supersonic
+/// (the same figure in lb/(lbf h)): dry 123,600 lbf x 0.725 / 3,600 s = 24.9, so
+/// 25 lb/s; afterburning 220,400 lbf x 1.70 / 3,600 = 104.1, so 104 lb/s. The
+/// burner flow was 67 percent high, so the 31 minutes of afterburner the tank
+/// allowed become 52.
+pub const T160_FUEL_LB_PER_S: i32 = 25;
+pub const T160_AB_FUEL_LB_PER_S: i32 = 104;
+const T160_RETAIL_FUEL_LB_PER_S: i32 = 26;
+const T160_RETAIL_AB_FUEL_LB_PER_S: i32 = 174;
+/// Tu-160 top-speed edges (T160-8, **fitted** from real figures, 2026-11-16,
+/// the coordinator's "revisit the 1,270 kt edge"). The record's 1 G fast edge is
+/// 2,030 ft/s (1,203 kt, Mach 1.82) at sea level and 2,143 ft/s (1,270 kt, Mach
+/// 2.21) at 36,000 ft. Real: Mach 2.05, 2,220 km/h (1,200 kt) at 12,200 m
+/// (40,000 ft) and 1,030 km/h (556 kt, 640 mph) at sea level (Wikipedia
+/// "Tupolev Tu-160", aerospaceweb.org "Tu-160" and the Russian Wikipedia article,
+/// read 2026-11-16; the game's own Jane's text `TU160.INF` gives Mach 2.05 and
+/// 1,200 kt). The two figures are a dynamic-pressure limit low down and a Mach
+/// limit up high, so the edge follows a calibrated airspeed of 556 kt at sea
+/// level rising to 595 kt at 40,000 ft, where it is 1,200 kt (2,025 ft/s):
+/// `TAS = EAS / sqrt(density ratio)` in the standard atmosphere at 0, 10,000,
+/// 20,000, 30,000 and 36,000 ft. The 0 G polygon keeps its 100 ft/s step over
+/// the 1 G edge (2,244 against 2,143 at 36,000 ft, 2,130 against 2,030 at sea
+/// level); every other row's fast side is held to the new edge
+/// ([`hold_to_one_g`]). Above 40,000 ft the record's own edge is under the new
+/// cap and stays. The ceiling (50,000 ft) is real within 2 percent and stays.
+const T160_ONE_G_FAST_EDGE: [[f64; 2]; 6] = [
+    [2_025., 40_000.],
+    [1_827., 36_000.],
+    [1_615., 30_000.],
+    [1_331., 20_000.],
+    [1_111., 10_000.],
+    [938., 0.],
+];
+const T160_ZERO_G_STEP_FPS: f64 = 100.;
+/// The 0 G row's vertex above the 40,000 ft one: the record's own 41,000 ft one
+/// with the step added to the 1 G edge there.
+const T160_ZERO_G_UPPER_ALTITUDE_FT: f64 = 41_000.;
+const T160_RETAIL_ZERO_G: [[f64; 2]; 10] = [
+    [150., 0.],
+    [205., 18_000.],
+    [313., 37_000.],
+    [511., 47_000.],
+    [870., 53_000.],
+    [1_312., 53_000.],
+    [1_838., 50_000.],
+    [2_234., 41_000.],
+    [2_244., 36_000.],
+    [2_130., 0.],
+];
+const T160_RETAIL_ONE_G: [[f64; 2]; 10] = [
+    [245., 0.],
+    [299., 17_500.],
+    [413., 36_000.],
+    [601., 45_000.],
+    [870., 50_000.],
+    [1_302., 50_000.],
+    [1_787., 47_000.],
+    [2_133., 40_000.],
+    [2_143., 36_000.],
+    [2_030., 0.],
+];
 
 /// F-111F Aardvark (BMB-B2, **opinionated**, coordinator first pass
 /// 2026-11-15, BOMBERS-DECISIONS-B F-111F item 1, pending John). `F111.PT` is
@@ -1293,6 +1359,37 @@ pub(crate) fn fit_envelopes(
                     }
                 }
             }
+            hold_to_one_g(envelopes);
+            true
+        }
+        AircraftId::Tu160 => {
+            // T160-8: the top-speed edges follow the corrected `thrust` (the
+            // signal that the corrections ran) and need the retail 0 G and 1 G
+            // polygons, like the B-1B's.
+            let corrected =
+                plane.get("thrust").and_then(|t| t.number().ok()) == Some(T160_THRUST_LBF);
+            let zero = envelopes.iter().position(|e| e.g == 0);
+            let one = envelopes.iter().position(|e| e.g == 1);
+            let (Some(zero), Some(one)) = (zero, one) else {
+                return false;
+            };
+            if !corrected
+                || envelopes[zero].points != T160_RETAIL_ZERO_G
+                || envelopes[one].points != T160_RETAIL_ONE_G
+            {
+                return false;
+            }
+            // The slow side and the top of each row stay; the fast side below
+            // the record's 47,000 ft (1 G) and 50,000 ft (0 G) vertices is the
+            // new edge.
+            let top = top_index(&envelopes[one].points);
+            envelopes[one].points.truncate(top + 3);
+            envelopes[one].points.extend(T160_ONE_G_FAST_EDGE);
+            let top = top_index(&envelopes[zero].points);
+            envelopes[zero].points.truncate(top + 3);
+            let mut zero_edge = T160_ONE_G_FAST_EDGE.map(|[v, h]| [v + T160_ZERO_G_STEP_FPS, h]);
+            zero_edge[0][1] = T160_ZERO_G_UPPER_ALTITUDE_FT;
+            envelopes[zero].points.extend(zero_edge);
             hold_to_one_g(envelopes);
             true
         }
@@ -1926,6 +2023,22 @@ pub const CORRECTIONS: &[Correction] = &[
         key: "aftThrust",
         retail: 232_398,
         corrected: T160_AFT_THRUST_LBF,
+    },
+    // T160-8 (fitted): the NK-32 flows (the T160-0 record flows are the Tu-26's
+    // scaled up).
+    Correction {
+        id: AircraftId::Tu160,
+        block: Block::Plane,
+        key: "fuelConsumption",
+        retail: T160_RETAIL_FUEL_LB_PER_S,
+        corrected: T160_FUEL_LB_PER_S,
+    },
+    Correction {
+        id: AircraftId::Tu160,
+        block: Block::Plane,
+        key: "aftFuelConsumption",
+        retail: T160_RETAIL_AB_FUEL_LB_PER_S,
+        corrected: T160_AB_FUEL_LB_PER_S,
     },
     // F-111F: fuel in pounds (the record's figure is gallons), TF30-P-100
     // thrust and the flows that go with it.
@@ -3221,7 +3334,7 @@ mod tests {
     fn the_batch_fuel_flows_are_the_corrected_thrust_times_the_cited_sfc_to_the_whole_pound() {
         // (flow, thrust lbf, SFC lb/(lbf h)), each within the rounding of one
         // whole pound a second, which is the record's unit.
-        let rows: [(i32, i32, f64); 12] = [
+        let rows: [(i32, i32, f64); 14] = [
             (F15E_FUEL_LB_PER_S, 32_558, 0.73),
             (F15E_AB_FUEL_LB_PER_S, 47_860, 1.94),
             (GRIPEN_FUEL_LB_PER_S, 12_140, 0.844),
@@ -3234,11 +3347,131 @@ mod tests {
             (B2_FUEL_LB_PER_S, B2_THRUST_LBF, 0.375),
             (B1B_FUEL_LB_PER_S, B1B_THRUST_LBF, 0.562),
             (B1B_AB_FUEL_LB_PER_S, B1B_AFT_THRUST_LBF, 2.46),
+            // T160-8: the NK-32's subsonic (0.72 to 0.73) and supersonic
+            // (1.70) consumption.
+            (T160_FUEL_LB_PER_S, T160_THRUST_LBF, 0.725),
+            (T160_AB_FUEL_LB_PER_S, T160_AFT_THRUST_LBF, 1.70),
         ];
         for (flow, thrust, sfc) in rows {
             let exact = f64::from(thrust) * sfc / 3600.;
             assert_eq!(flow, exact.round() as i32, "{thrust} lbf at {sfc}");
             assert!((f64::from(flow) - exact).abs() <= 0.5);
         }
+    }
+    fn tu160_record() -> (BTreeMap<String, Token>, Vec<Envelope>) {
+        let plane = BTreeMap::from([("thrust".to_string(), token(T160_THRUST_LBF))]);
+        let rows = vec![
+            Envelope {
+                g: 0,
+                points: T160_RETAIL_ZERO_G.to_vec(),
+            },
+            Envelope {
+                g: 1,
+                points: T160_RETAIL_ONE_G.to_vec(),
+            },
+            Envelope {
+                g: 3,
+                points: vec![
+                    [395., 0.],
+                    [472., 15_000.],
+                    [621., 20_500.],
+                    [860., 23_000.],
+                    [1_125., 23_000.],
+                    [1_328., 18_500.],
+                    [1_422., 13_000.],
+                    [1_380., 0.],
+                ],
+            },
+        ];
+        (plane, rows)
+    }
+
+    /// T160-8 (fitted): the 1 G fast edge is the real 556 kt at sea level and
+    /// 1,200 kt at 40,000 ft with a constant-calibrated-airspeed climb between
+    /// (the standard atmosphere: 556 kt at sea level, 595 kt at 40,000 ft), the
+    /// slow side and the ceiling are the record's, and no other row reaches past
+    /// the new edge.
+    #[test]
+    fn the_tu160_top_speed_edges_are_the_real_556_kt_at_sea_level_and_1200_kt_up_high() {
+        let object = BTreeMap::new();
+        let (mut plane, mut rows) = tu160_record();
+        assert!(fit_envelopes(
+            AircraftId::Tu160,
+            &object,
+            &mut plane,
+            &mut rows
+        ));
+        let kt = 1.687_81;
+        let edge = |g: i32, alt: f64| {
+            rows.iter()
+                .find(|e| e.g == g)
+                .and_then(|e| e.speeds(alt))
+                .unwrap()
+        };
+        // The slow edge and the ceiling are the record's.
+        assert_eq!(edge(1, 0.).0, 245.);
+        assert_eq!(edge(1, 36_000.).0, 413.);
+        assert_eq!(top_altitude(&rows[1]), 50_000.);
+        assert_eq!(top_altitude(&rows[0]), 53_000.);
+        // 640 mph at sea level, 1,200 kt (2,220 km/h) at 40,000 ft.
+        assert!(
+            (edge(1, 0.).1 / kt - 556.).abs() < 1.,
+            "{}",
+            edge(1, 0.).1 / kt
+        );
+        assert!((edge(1, 40_000.).1 / kt - 1_200.).abs() < 1.);
+        // Never above Mach 2.05 at the tropopause or higher (968 ft/s sound).
+        assert!(edge(1, 40_000.).1 <= 2.1 * 968.);
+        assert!(edge(1, 45_000.).1 <= 2_025.);
+        // Calibrated airspeed between 556 and 595 kt over the whole climb: the
+        // true speed over the square root of the density ratio stays inside.
+        for (alt, sigma) in [
+            (10_000., 0.7385),
+            (20_000., 0.5328),
+            (30_000., 0.3741),
+            (36_000., 0.2981),
+        ] {
+            let eas = edge(1, alt).1 / kt * f64::sqrt(sigma);
+            assert!((550. ..=600.).contains(&eas), "{alt} ft {eas} kt");
+        }
+        // The 0 G row keeps its 100 ft/s step, and the 3 G row is held to it.
+        for alt in [0., 20_000., 36_000.] {
+            assert!((edge(0, alt).1 - edge(1, alt).1 - 100.).abs() < 1.);
+        }
+        assert!(edge(3, 0.).1 <= edge(1, 0.).1);
+        assert!(edge(3, 13_000.).1 <= edge(1, 13_000.).1);
+    }
+
+    #[test]
+    fn the_tu160_top_speed_trim_needs_the_corrected_record_and_the_retail_rows() {
+        let object = BTreeMap::new();
+        // The retail thrust: the corrections did not run.
+        let (mut plane, mut rows) = tu160_record();
+        plane.get_mut("thrust").unwrap().value = "158092".into();
+        assert!(!fit_envelopes(
+            AircraftId::Tu160,
+            &object,
+            &mut plane,
+            &mut rows
+        ));
+        assert_eq!(rows[1].points, T160_RETAIL_ONE_G);
+        // An authored row is left alone.
+        let (mut plane, mut rows) = tu160_record();
+        rows[1].points[8][0] += 1.;
+        assert!(!fit_envelopes(
+            AircraftId::Tu160,
+            &object,
+            &mut plane,
+            &mut rows
+        ));
+        // No other aircraft takes it.
+        let (mut plane, mut rows) = tu160_record();
+        assert!(!fit_envelopes(
+            AircraftId::Tu26,
+            &object,
+            &mut plane,
+            &mut rows
+        ));
+        assert_eq!(rows[1].points, T160_RETAIL_ONE_G);
     }
 }

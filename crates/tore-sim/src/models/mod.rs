@@ -128,7 +128,7 @@ impl AircraftModel {
     /// and read the same for the player and every AI aircraft.
     pub fn stall_reference_fraction(&self) -> f64 {
         if let Self::Variety(m) = self {
-            // 1 for every variety aircraft but the B-52 (B52-8).
+            // 1 for every variety aircraft but the B-52 (B52-8) and the Tu-160 (T160-8).
             return variety::stall_reference_fraction(m.id);
         }
         STALL_REFERENCE_FRACTIONS[match self {

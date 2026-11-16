@@ -313,3 +313,13 @@ The B-1B flies the B-2's cockpit family by its record (`bmbrcc.HUD`, stem `B2`, 
 seeds and `--cockpit-sheet OUT_DIR b1b` prints `b1b NO MIRRORS FITTED`, as for the B-2. The rear feed camera (`mirrors::camera`) stays on the shared seat for every
 aircraft; only the Back view and the replay cameras take the per-aircraft eye (`mirrors::eye_offset`), which gives the B-1B 11.3 feet up and 66 feet ahead. See [the B-1B
 section](../formats/aircraft-variety.md#b-1b-lancer-ordnance-sensors-hud-and-cockpit-b1b-67-2026-11-16). Frames are under `.local/m3-aircraft/frames/B1B-6/`.
+
+## 2026-11-16 Tu-160 cockpit: no mirrors, its own eye (T160-7)
+
+The Tu-160 flies the B-2's retail cockpit family (`b2.HUD`, stem `B2`, `~B2H.PIC`, 1394 x 508), by its
+record's HUD name. The picture has no flat mirror fill, so `mirrors::seeds` has no `B2` row and
+`--cockpit-sheet OUT_DIR tu160` prints `tu160 NO MIRRORS FITTED`, as for the B-2. The rear feed stays on
+the shared seat; the Back view and the replay cameras take the per-aircraft eye (`mirrors::eye_offset`),
+which gives the Tu-160 12 feet up and 71 feet ahead (the record's eye is the Tu-26's copy). See [the
+Tu-160 section](../formats/aircraft-variety.md#tu-160-ordnance-sensors-hud-and-cockpit-t160-67-2026-11-16).
+Frames are under `.local/m3-aircraft/frames/T160-6/`.

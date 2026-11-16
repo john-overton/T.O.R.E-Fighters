@@ -16623,3 +16623,675 @@ were rerun, 2 of 2). The first run of the new scenarios also found two check bug
 "In formation", and the ripple's one-tick presses (above). **Not run:** the rest of the AI lane, `--smoke-test`,
 `tools/check_assets.py`, a before and after comparison of the other aircraft's airfield logs (no sim code changed
 since B52-9's merge, whose own comparison, 128 of 129 identical, stands).
+
+## Tu-160 stations, bays and pylons (T160-5, 2026-11-16)
+
+Implementation mode, slice T160-5 (bomber batch B), Claude Sonnet, in `T.O.R.E-Fighters-m3-tu160`
+on `m3-tu160` from `bb90005c` (round 4 integration). The coordinator's first pass
+(`BOMBERS-DECISIONS-B.md`, "Tu-160 Blackjack" items 5, 6 and 7 and "Tu-160 rig") is applied:
+two magazine bays on the shared grid, fitted at 42 ft each, six AS-16 (Kh-15) each, the
+retail AS-16 the default, two door leaves a bay cut from the flat belly, the pair flag cleared,
+the Kh-55 (`AS15.JT`) refused, `SU37L.SEE` a fixed row with no pod, and a fitted glove plate over
+the 65 degree root gap. Earlier sections stay as written: the [bay survey](#tu-160-bay-survey) is
+the evidence, [Tu-160 shape and rig](#tu-160-shape-and-rig-t160-23-2026-11-15) is the rig this
+adds to. The numbers and the clearance table are in the
+[stores specification](../spec/stores-on-pylons.md#tu-160-weapon-bays-t160-5-2026-11-16). The
+Tu-160 has **no pylon and no rail**: the real aircraft carries nothing outside (`TU160.INF`: no
+external pylons in the standard fit) and no sensor pod (B7), so there is nothing to place there.
+Frames: `.local/m3-aircraft/frames/T160-5/` (local only).
+
+**Stations after T160-5.** The record is unchanged except the pair flag; its six rows stay.
+
+| Row | What it is | Position (feet right / up / forward) | Capacity, class | Default |
+| ---: | --- | --- | --- | --- |
+| 0 to 3 | fixed sensors (`VIS300`, `TU160R`, `TU160.ECM`, `SU37L`) | 0 / 0 / 0 (ECM -16.7 ft aft) | 1 | the sensor |
+| 4 | forward bay, `Location::Magazine` | 0 / -2.667 (keel plane) / +30.63 (origin; the bay is 14 to 56 ft forward) | 6, class 180 (18,000 lb) | 6 `AS16.JT` |
+| 5 | aft bay, `Location::Magazine` | 0 / 0.0 (belly plane) / -20.70 (the bay is -37.33 to +4.67 ft) | 6, class 180 | 6 `AS16.JT` |
+
+The retail rows 4 and 5 sat on one point 14 ft under the belly (`0 / -16.7 / +30.3`), the same
+sentence as the B-2's: the placement code, not the record, puts the stores. The flags go from
+`0x1184` to `0x1180` (`adjust_defaults`, guarded on the whole retail table, which now has a
+`default_signature` entry for the Tu-160): the pair flag `0x4` mirrored a store at x 0 onto itself and
+alternated "sides" that are one point. No designator bit was ever set and the active-radar bit
+(`0x20`) stays clear.
+
+**Bays (coordinator item 5; geometry fitted, agent decision).** Both bays are on the centre line, one
+behind the other, 42 ft long each (`TU160.INF`, the game's own Jane's: "a rotary launcher can be
+installed in each of two 12.80 m (42 ft) long weapon bays"), with a 9.33 ft divider (the wing
+carry-through box, not measured). The T160-0 survey put them at shape y 3.5 to 19.3 and -15.7 to 0.0
+units; measured against the skin, **both are moved 1.5 units (4 ft) forward** (forward bay y 5.25 to
+21 units, 14 to 56 ft; aft bay y -14 to 1.75 units, -37.33 to +4.67 ft) so that the aft bay ends on the
+belly skin's last edge (y -14) and the forward bay stays on the keel skin, which narrows past y 20.
+The skin is not one polygon, so two belly planes are used: the keel skin (`2019`, `27f7`, `2f1f`,
+`2ed1`, `2f05`, `24d7`, `2ab5`, `2acd`; z -1 unit, -2.667 ft, falling in from z 0 over y 5 to 8) under
+the forward bay and the flat belly (`1ff7`, `203c`, `27e2`; z 0) under the aft one. Each opening is
+**7.6 ft wide** (x +/-3.8 ft, 1.43 units) in a skin 10.7 ft wide, under a **flat roof 6.0 ft over its
+belly plane** (3.33 ft over the reference point forward, 6.0 aft; the fuselage top skin is 10.7 ft up).
+Width and depth are fitted: 3.8 ft is the narrowest half-width at which the laser Paveway family and
+the 3 ft span missiles clear the walls, 6.0 ft holds two tiers of Kh-15. Mounts, grid floors and
+ceilings are rows of the shared `bays::STATIONS`, `GRIDS` and `OPENINGS` (new `bays::openings(id)`
+returns both openings, forward bay first; `opening(id)` is the first). `Opening`, the grid, the door
+helper and the lining are the B-52's centred bay applied twice; no second grid, no new mechanism in the
+sim.
+
+**Layout.** Floor 6.0 ft by 42.0 ft a bay. A Kh-15 (15.7 ft, 1.49 ft body, 3.0 ft fin span) stands at
+the grid's pitch of 1.59 ft (twice its body radius plus 0.1 ft, the shared rule), so **three abreast and
+two long on one tier is six, the record's count**; two tiers (12) also fit under the roof
+(`grid_capacity` 12), so the record's six is the cap, not the room. The coordinator asked for "a
+rotary-launcher-like column arrangement fitted to the grid"; the shared grid is the fit, and the three
+columns on the centre line with a missile ahead of and behind each are the nearest it comes. The shape of
+`KIKBK.SH` has its origin 4.37 ft behind the missile's middle (measured), so each mount is its
+opening's middle minus 4.37 ft (`TU160_ORIGIN_AHEAD`) and the pair stands centred in the 42 ft with 5.17
+ft clear at each end. The fins of neighbouring Kh-15 interleave (3.0 ft span at 1.59 ft pitch), the same
+overlap as the B-2's Paveway III on the shared grid; a real rotary launcher holds them folded.
+
+**Doors and cut.** The belly skin faces (eleven, listed above) are found by the loader (every face in the
+band z -1 to 0 whose plan overlaps an opening) and must cover both openings' plans on a quarter-unit grid
+or the shape is refused ("unreviewed TU160.SH belly skin"). While the doors are off their seat
+(`State::bay` above 0, 1 s travel, the F-22's timing) each face is cut into two leaves a bay, each half
+the width, hinged on its outer edge and swung 90 degrees down (`tu160_animation::Rig::faces`, over
+`roster_animation::cut_door_parts`); the rest of the skin stays whole. A leaf is first flattened onto its
+bay's belly plane over the first sixth of the travel (the forward skin is not level where it starts), so
+nothing jumps on the first tick. A lined box (ceiling, four walls) and one rail down the centre line
+close each recess; they draw only while the doors are open (`tu160_animation` lining at address `0x8200`
+on, 20 faces, taking the colour-only look of the nacelle wall `207d`). The leaves hang to -6.5 ft
+forward and -3.8 ft aft. **The ventral keel plates (word `7ffc`, drawn with the brake lever) stand at x
++/-1 unit, inside the forward opening: they are not drawn while the doors are open.** Two leaves a bay is
+fitted (no door count is cited).
+
+**What the bays admit and refuse.** The retail mask `0x1180` admits the default `AS16.JT` and 34 other
+records (bombs, laser bombs, air-to-ground missiles and the two passive-emitter records; `AS15.JT`
+and every air-to-air missile stay refused, the Kh-55 because the mask lacks `0x40` and the retail record
+is a 220 lb, 9.87 nmi stand-in). A bay sweep loaded each admitted store at its full count (at most six)
+in both bays and measured the open bay (`TORE_STORES_PREVIEW_TU160CLEAR`, log
+`.local/m3-aircraft/checks/T160-5/bay-sweep.txt`). **Five are refused for fit**
+(`aircraft_stations::TU160_BAY_REFUSED`, named for the aircraft as the B-52's list is): `AT12.JT` (0.41
+ft below the belly plane, out of the shut skin) and the GBU-27 class, `GBU29.JT`, `GBU29P.JT`,
+`GBU30.JT` and `PAVEWA3.JT` (5.4 ft fins stand 0.85 ft through the side walls). The rule is the B-52's
+0.05 ft on every wall, leaf, end, roof, floor and rail; store to store is not a test here because the
+default Kh-15's own fins cross their neighbours'. The other 30 admitted stores clear by at least 0.08 ft
+(the Mk 82 family hangs 0.08 to 0.26 ft above the belly plane). `SU37L.SEE` stays a fixed row with no
+pod (coordinator item 7): it is what lets the laser bombs the bay admits work. Real "free-fall weapons"
+and "none have been integrated" (aerospaceweb): nothing here is claimed as the real load.
+
+**Release and AI.** Bay release is the shared machinery: doors open, the weapon leaves once they are at
+0.95, they stay open 1 s and close in 1 s; `State::bay_available` is true for the Tu-160 (it has rows in
+`bays::STATIONS`), so `--flight-bay`, `--stores-preview` bay poses and the open-bay RCS term apply by
+themselves. The ripple is the grid's (bottom tier first, front to back, outermost column first
+alternating sides); the Tu-160's two bays are both on the centre line, so `Ownship::sister_bay` finds no
+partner and the player selects the other bay with the weapon-select key. The AI releases through the
+shared strike release, which does not wait for doors: an AI Tu-160's doors stay drawn shut while its
+missiles leave (the F-22's and F-117's precedent); the test `an_ai_store_leaves_either_tu160_bay_inside_its_own_opening`
+pins both openings.
+
+**Default load and weight.** Unchanged: six `AS16.JT` in each bay, the record's 12 (31,680 lb of
+2,640 lb missiles), under the cited 36,000 lb payload. Empty 242,500 lb plus 31,680 lb of missiles plus
+the 326,285 lb tank is 600,465 lb, 5,795 lb under the 606,260 lb maximum, so the default load with a full
+tank starts (the start-fuel fix of round 4 is not needed here).
+
+**Glove plate (coordinator, "Tu-160 rig", 2026-11-15; the Tornado's TOR-5b and the F-111F's F111-3
+precedent).** At 65 degrees the swept panel's leading root corner (9, 4) lands at (10.6, -0.14), 7 ft off
+the glove, and the root edge shows the ground between the glove's outer wall and itself as far aft as the
+nacelle (frames `seam-65-before`, `top-65-before`, from T160-2). Four new faces (`0x8118` to `0x811b`, a
+plate a side in both windings, past the module's code) fill it: an eight-vertex plate at z -0.5, inside
+the wing's own thickness (z -1 to 0) so the spread wing hides most of it, from the glove's front corner
+(10, 5; the left glove is one unit narrower, (-9, 5), and its root vertex is (-8, 1)) to the swept
+leading corner, along the swept images of the root vertices (right (8.48, -0.85), (7.06, -5.09), (5.65,
+-7.92); left (-7.77, -1.56) and the mirror) and back into the nacelle and the glove. Fixed, not swept:
+fitted to the 65 degree pose. The look is the glove's own top triangle (`2322`, `36cb`: its colours and
+texture coordinate, so a flat patch of skin white). Result: at 65 degrees the gap is closed on both sides
+(`seam-65`, `top-65`); at 35 degrees the plate shows as a thin strip ahead of the root; at 20 degrees it
+shortens the sliver the source already left at the spread root (`seam-20` against `seam-20-before`) but
+does not close it (the rest is the source's, not this slice's). The probe's stowed-gear hull check
+measures against the shape's own skin and ignores the plates.
+
+**Pins.** `--validate-ordnance`: 54 aircraft, 23 recovered stations, **5,385 weapon placements (from
+5,395: `TU160.PT` 70 to 60)**, 257 tank, 278 Cheat-only and 82 designator-pod placements unchanged. The
+grid caps no store (every admitted store's count under the grid is its record count or fewer). See
+[ordnance availability](../baselines/ordnance-availability.md).
+
+**Findings.**
+1. The shape's main gear plates (words `8002`) stand at x 0 to +/-2 units, y -4 to 2, on the centre line,
+   inside the aft bay's footprint, so with the gear down and the bay open the leg plates cross the
+   forward Kh-15 of the aft bay (`.local/m3-aircraft/frames/T160-5/stores-bay-gear/tu160-loaded-below.png`).
+   Only a gear-down pass with the doors open shows it; a release is never flown that way by the AI, and the
+   gear and doors do not share a lock. Not changed (moving the legs is a rig decision).
+2. The keel plates would pass through the forward bay: hidden while the doors are open (above).
+3. `--ground-start` cannot be combined with `--flight-bay`, so a ground frame of the open bay is not
+   capturable (the stores preview with the gear and bay poses stands in for it).
+4. The clearance report's "nearest store" is 0.00 for the default Kh-15 (fins cross by design) and 0.25 ft
+   for the Mk 82; it is informational for this aircraft.
+
+**Open for John.**
+1. The grid's three-abreast column stands for the rotary launcher; the missiles' fins interleave. A
+   launcher body (a drum with six cells) is a drawing decision.
+2. The opening is 7.6 ft wide, fitted. If a narrower bay (6.4 ft) is wanted, the five refusals become
+   fourteen (the laser Paveway family and the 3 ft missiles).
+3. The bays moved 4 ft forward of the T160-0 survey. Both bays on the flat skin would need the keel
+   shape to change.
+4. Two door leaves a bay (the real count is not cited). The real 24 Kh-15 (63,500 lb, over the cited
+   36,000 lb payload) stay at the record's 12.
+5. The gear plates cross the aft bay's stores with the gear down and the doors open (finding 1).
+6. The glove plate is a fixed fit to the 65 degree pose; a plate that follows the sweep would also close
+   the spread sliver.
+
+## Tu-160 ordnance, sensors, HUD and cockpit (T160-6/7, 2026-11-16)
+
+Implementation mode, slices T160-6 and T160-7 run together (bomber batch B). The coordinator's first pass
+(`BOMBERS-DECISIONS-B.md`, "Tu-160 Blackjack" items 7 and 8, "Tu-160 stations") applies: the default is
+the record's 12 AS-16 (Kh-15) in the two bays, `AS15.JT` (Kh-55) stays refused, `SU37L.SEE` stays a
+fixed laser row with no pod, the HUD follows the record (`b2.HUD`, stem `B2`), the pilot's eye is fitted
+at the drawn flight deck. Provenance: sensor rows, HUD module, panel names and art spec-derived (retail);
+bindings opinionated (coordinator first pass, John's review pending); the two radar and jammer
+assignments, the glass (the B-2's measured polygon) and the eye fitted (agent decisions, 2026-11-16).
+
+**Load Ordnance page.** Two `Internal Bay` rows, `AS-16 Kickback`, `6 loaded (max 6)` each: weight
+current 600,532 of 606,260 lb maximum (5,728 lb available), fuel 326,285 lb, 100 percent. The sensor line
+reads `Built-in laser designator: no pod needed for laser ordnance.` (the shared text; the page's message
+bar cuts it at the edge, as for every aircraft with that line). Frame `load-ordnance`. No pod row exists:
+the audit lists `TU160.PT` with 2 source rows (the bays) and no designator pod.
+`--validate-ordnance` reports no pin moved: 54 aircraft, 23 recovered stations, 5,385 weapon, 257 tank
+and 82 pod placements, 278 Cheat-only; `TU160.PT` 2 source rows, 60 placements, catalog 30 normal, 83 Cheat.
+
+**Live fire, jettison and a guided shot.** Before this slice the Tu-160 had no radar, so the AS-16 fired
+at the practice aircraft. The radar is now on (below), so the AS-16, an active-radar surface missile like
+the Su-25's and the B-52's Harpoon, is refused against an aircraft: `flight-livefire-tu160-slot1` and
+`-slot2` are refused slots (`REFUSED_SLOTS`, no shot, nothing spent), and `flight-jettison-tu160-slot2`
+still passes (a bay station is not jettisoned; the load is unchanged). The firing itself is the guided
+shot, `a2g-antiship-tu160` (`--a2g-run UKR QUSFLT --attack antiship --from 6 --aircraft tu160 --load AS16
+--station 0 --count 6`): the Krivak designated on the A-G page through the Tu-160's radar, launched in
+CUED (rounds 6 to 5), seeker Midcourse then Pitbull on the ship, ship at 150 of 500 (end 99 ft from the
+target at 22 s; the Su-25's and Su-35's AS-16 leave it at 150 as well). The HUD of that run reads
+`6 AS-16`, `R 5.7` and `LSR RDY` (frame `as16-guided-hud`). `flight-bay-fire-tu160-row4` and `-row5`
+(T160-5) still release an AS-16 through each bay's open doors. `SHOTS_PER_ROUND` is unchanged (the
+AS-16 is not a pack).
+
+**Release origin, the human's and the AI's cells.** `a2g-release-origin-tu160` (the human trigger,
+`--a2g-run --attack release`, 20,000 ft, 300 kt): the six AS-16 of the forward bay leave from three
+abreast and two long, x -1.59, +1.59 and 0 (outermost first, alternating, then the middle), the forward
+row at 38.61 ft ahead of the aircraft's origin then the back row at 22.66, -1.09 ft up; the aft bay the
+same columns at -12.73 and -28.68 ft, 1.58 ft up (the aft bay's belly plane is the flat one, 2.667 ft
+higher); a Mk 82 row of the forward bay from four abreast, -1.95, +1.95, -0.65, +0.65 at 45.73 then
+38.18 ft, -1.95 ft up. Every release's origin equals the point it hung at. The AI's cells are the same:
+`ai-strike-tu160-stick` (an AI Tu-160 on the column at 20,000 ft, 12 nm out, six Mk 82) prints six
+`ORIGIN` lines at the same places, doors open (bay 0.96 at the first, shut 1.9 s after the last), six
+impacts, egress, not lost. **The AI does not release the AS-16** (`--pilot ai --load AS16`: the strike
+driver picks `kind=RadarAgm` and the AI flies the pass and the egress with `no release`, against the T-90
+and against the Kiev, where it is lost to the defences): AI behaviour is T160-9's, noted open.
+
+**Countermeasures.** The record's `TU160.ECM` row (retail): 99 chaff and 99 flares and a jammer. The
+weapons window reads `99 CHAFF`, `99 FLARE`; `flight-countermeasures-tu160` (five chaff and three flare
+releases, jammer on) reads capacity 99 and carried 94 and 96; after the three flares and three chaff of
+the external frame `96 CHAFF`, `96 FLARE`, `JAM` on the RWR page, six flares burning. The jammer is now
+live: `TU160.ECM` was `UNREVIEWED (not enabled)`; it is the record `B52.ECM` and `AC130.ECM` with 16 bytes
+changed, so `Generation::for_record` gives it **Transitional** (fitted), strength 0.30. The devices leave
+the shared outlet (15 ft aft and 2 ft below the model origin), which for a 178 ft aircraft is under the
+middle of the fuselage, not the tail (77 ft aft); the same for the B-52. A per-aircraft outlet exists only
+for the Tornado's pod (`Release::from_outlet`); fitting one for the bombers is open (see below). Frames
+`countermeasures-chaff-flare-jammer`, `countermeasures-external`.
+
+**Sensors, row by row against the real aircraft.**
+
+| Row | Record | Real Tu-160 | In TORE |
+| --- | --- | --- | --- |
+| 0 | `VIS300.SEE` | the crew's eyes | visual channel, 10 nmi search, no body |
+| 1 | `TU160R.SEE` | nose radar | **enabled, `Preset::Transitional`** (below) |
+| 2 | `TU160.ECM` | active jamming system | **enabled, `Generation::Transitional`**, jammer toggles on J |
+| 3 | `SU37L.SEE` | none (no laser-guided stores; a forward video camera for aiming) | the built-in laser designator the record gives, a fixed row at (0, 0, 0), **no pod body, no station**; Paveway and Maverick class stores in the bay need it (kept, coordinator first pass) |
+
+The radar `TU160R.SEE` (150 nmi search, 60 by 60 degrees, track 45 by 45) is the record `B52R.SEE` is a
+rename of (T160-0, B52-7), so it takes the same class as the B-52's: `Preset::for_record` returns
+**Transitional** (fitted, agent decision; notch half-width 100 ft/s, centre factor 0.20, burn-through 8
+nmi). `--sensor-summary` now reads `Tu160: radar TU160R.SEE search 150 nmi 60x60 deg track 150 nmi 45x45
+deg look-down 0 TRANSITIONAL; infrared none; visual VIS300.SEE ...; jammer TU160.ECM TRANSITIONAL strength
+0.30; signature radar 100 infrared 100` (it was `UNREVIEWED (not enabled)` twice). The radar window now
+reads `RADAR OFF` until switched on, then `TWS 10 ... TRACK`; there is no ground-mapping mode (shared
+radar: the Tu-160's strike aid is the A-G designation of a radar contact, as the B-52's). The Tu-26 and
+Tu-95 radars and jammers stay unreviewed (their slices). No pod body hangs anywhere: the Tu-160 has no pod
+station, and the audit's one designator pod is another aircraft's. The real forward video camera has no row
+and no geometry (T160-0): not added.
+
+**HUD and cockpit.** `b2.HUD` and the B-2's stem `B2` (`~B2H.PIC`, 1394 by 508; no Tu-160 art exists in
+either archive, pinned by `tu160_cockpit.rs`): the shared HUD draws in the main window with the weapon
+and count (`ARM`, `6 AS-16`), the `LSR RDY` box and, with the bay open, `BAY` (frames `cockpit-front-view`,
+`cockpit-look-left-45`, `cockpit-view-up-f3`). **The glass aperture is measured, not closed**: the B-1B and
+the Tu-160 fly the very picture B2-7 measured, so the polygon (20 vertices, 246,986 of the main window's
+247,572 transparent pixels, no opaque pixel) is theirs; `the_b2_glass_is_measured_for_its_1394_picture`
+now checks both masks equal the B-2's pixel for pixel and fail closed on any other size, and the
+retail-reading `the_b2_glass_is_the_main_window_of_the_imported_art` checks each covers 246,986 pixels of
+the install's art.
+
+**The pilot's eye (`mirrors::eye_offset`).** The record's `viewOffset` (0, 35, 60) is the Tu-26's copy, 20
+ft ahead at this scale (the T160-0 reading), 52 ft behind the drawn glass and inside the fuselage. Measured
+from `TU160.SH` at 8/3 ft a unit, the skin on the centre line: the crown is flat at 4 units (10.67 ft)
+from 17 units (45 ft) to 27 (72 ft) ahead of the origin, the glass faces run 27 to 30 units (72 to 80 ft)
+falling to 5.3 ft, the nose cone to the tip at 38 (101 ft). The seat is **12 ft up and 71 ft ahead**: 1 ft
+behind the glass's foot, on the flight deck, 1.33 ft over the crown (the B-52 is 1.7 ft, the B-2 2.7 ft,
+the F-117 1.4 ft). The front view looks out of the B-2's main window over the nose; the back view (F2)
+clears the fuselage and looks down its length with the spread wings either side (frame
+`cockpit-view-back-f2`); a 45 degree look to the left shows the strut and the console, no skin (frame
+`cockpit-look-left-45`). The rear-mirror feed camera stays on the shared seat for every aircraft (the B-2
+art has no mirrors). Pinned by `the_fitted_seat_sits_over_the_crown_behind_the_windscreen` (retail-reading)
+and the `mirrors.rs` and `flight_views.rs` unit tests (the recorded Back view takes the seat too).
+
+**The RCS page.** Page 0 reads `SIG 100` with the bay closed and `SIG 150` with it open (the record's
+signature 100 and the open-bay term of 1.5, `Deployment::bay`; the oval is the exposure contour; frame
+`crop3x-rcs-closed-vs-bay-open`). The open bay reaches only this page, as for the B-52, B-2 and F-117.
+
+**Rear view.** There is no rear-view HUD cue (B-52 finding); the F2 Back view is the rear view (above).
+
+**Checks (all through `light3.sh`, profile `.local/m3-aircraft/profile-tu160` refreshed first; logs in
+`.local/m3-aircraft/checks/T160-6/`).** See the plan entry for the counts. New tests: the profile test
+(`the_tu160_radar_and_jammer_are_reviewed_transitional`), the eye and Back-view tests, the aperture
+checks, `tu160_cockpit.rs` (two retail-reading tests). New scenarios: `a2g-antiship-tu160`,
+`a2g-release-origin-tu160`, `ai-strike-tu160-stick`, `flight-countermeasures-tu160`.
+
+**Not changed, open for John.**
+1. The radar and jammer classes (Transitional, the B-52's) are fitted; Late-Cold-War for the jammer would
+   follow the year 2010 on the record, not the B-52 sibling.
+2. Flares and chaff leave the shared outlet, not the tail: a fitted outlet for the bombers (the Tornado
+   pod's `from_outlet` mechanism) is a shared-code choice.
+3. The AI does not fire the AS-16 (T160-9).
+4. The Kh-55 stays refused (decision 6); the real 24 Kh-15 stay at the record's 12.
+5. The glass is the main window only (the side panes stay out), as the B-2's; the whole picture (the
+   AC-130 choice) is a one-line change.
+6. No ground-mapping radar mode for a bomber (a sensor change, John's call).
+
+
+## Tu-160 flight review (T160-8, 2026-11-16)
+
+Implementation mode, slice T160-8 (bomber batch B), Claude Sonnet (sonnet-high), the same questions as
+[B-52](#b-52-flight-review-b52-8-2026-11-15), [B-2](#b-2-flight-review-b2-8-2026-11-15) and
+[F-117](#f-117-flight-review-f117-8-2026-11-15). The Tu-160 flies the hybrid adapter's `variety`
+configuration built from `TU160.PT` with BMB-B2's real thrust (123,600 / 220,400 lbf), empty weight
+(242,500 lb), tank (326,285 lb) and the record's own 606,260 lb maximum takeoff, G rows (+3 at the empty
+weight, 2.1 G at a typical load) and slow edges. What changed is the fast edge of the speed envelope, the two
+fuel flows, and the shared large-aircraft flight tuning for this aircraft only (a `DragShape`, a stall
+reference, a wheel brake and the ground alignment, the B-52's hooks with the Tu-160's own values). Every term
+below is **fitted** or **opinionated**, an agent decision of 2026-11-16 (the first two follow the coordinator's
+BMB-B1/B2 notes); none is retail behaviour. Raw output is local: `.local/m3-aircraft/checks/T160-8/`
+(`before/`, `after/`, `stepA/` to `stepC/` for the two intermediate states, `run_probes.sh`,
+`run_ground.sh`, `grid.sh`, the battery and check logs).
+
+### Real figures (all read 2026-11-16)
+
+| Figure | Value | Source |
+| --- | --- | --- |
+| Top speed at altitude | Mach 2.05, 1,200 kt (2,220 km/h, 1,380 mph) at 40,000 ft | the game's own Jane's text `TU160.INF`, Wikipedia "Tupolev Tu-160", aerospaceweb.org "Tu-160"; the Russian Wikipedia article lists 2,000 km/h (Mach 1.64), the odd one out |
+| Top speed at sea level | 640 mph, 556 kt (1,030 km/h, Mach 0.84 to 0.86) | aerospaceweb.org, Russian Wikipedia; Jane's has none |
+| Cruise | Mach 0.9, 518 kt at 45,000 ft | `TU160.INF` |
+| Max rate of climb at sea level | 13,780 ft/min (4,200 m/min) | `TU160.INF`, aerospaceweb.org; Wikipedia 14,000 ft/min (70 m/s); Russian Wikipedia 4,400 m/min |
+| Service ceiling | 49,200 ft (15,000 m) | `TU160.INF`; Wikipedia 52,000 ft (16,000 m), aerospaceweb.org 52,495 ft |
+| Range | 6,640 nautical miles (12,300 km) unrefuelled | `TU160.INF`, aerospaceweb.org; Wikipedia 6,600 nautical miles at Mach 0.77 with reserves |
+| Takeoff and landing | takeoff distance 2,200 m (7,218 ft), landing distance 1,600 m (5,250 ft), weights not stated | Aerocorner, globalmilitary.net; the Russian Wikipedia gives one 900 m "run / rollout" figure; no takeoff, approach or landing speed in any source read |
+| Maximum landing weight | 341,710 lb (155,000 kg) | `TU160.INF` |
+| G limit | 2 | `TU160.INF` ("g limit: 2") |
+| Wing | 4,306 sq ft (400 sq m), swept 20 / 35 / 65 degrees, 20 for takeoff and landing | Wikipedia, aerospaceweb.org (area from the same, not re-checked) |
+| NK-32 fuel consumption | 0.72 to 0.73 subsonic, 1.70 supersonic (kg/kgf h) | Wikipedia "Kuznetsov NK-32" |
+| Roll rate | none found | |
+
+### Causes
+
+1. **The top-speed edge was the Tu-26's authored one.** The record's 1 G fast edge was 2,030 ft/s (1,203 kt,
+   Mach 1.82) at sea level and 2,143 ft/s (1,270 kt, Mach 2.21) at 36,000 ft. The shared drag law ties the
+   clean drag to the thrust at that edge, so the aircraft reached 969 kt at sea level in afterburner (real:
+   556 kt), and with the edge corrected the drag law and the climb had to be refitted with it (cause 3).
+2. **The fuel flows were the Tu-26's scaled up.** 26 and 174 lb/s: specific consumptions of 0.757 and 2.84
+   lb/(lbf h) at the real thrust. The NK-32's are 0.72 to 0.73 and 1.70, so 25 and 104 lb/s. The 31 minutes of
+   afterburner the tank allowed are 52.
+3. **The drag law, as for the B-52.** With the sea-level edge at 556 kt the shared square law gave a climb of
+   5,000 ft/min in the 5,000 ft band (11,400 before the edge change) and a sea-level afterburner top speed of
+   448 kt (`stepA/`). A real jet reaches its 556 kt limit on a fraction of its thrust, so the Tu-160 needs the B-52's
+   two-term drag.
+4. **No ground handling for 600,000 lb.** With the real empty weight the shared stall scale is
+   sqrt(600,532 / 242,500) = 1.574 on the 145 kt 1 G minimum: a flapped stall of 171 kt, a **liftoff at 252
+   kt after 8,721 ft, and an approach that could not fly the 166 kt it was given and crashed at 207 kt with a
+   100 ft/s sink** (`before/approach-UKR.txt`). The wheel brake (18 ft/s squared) stopped the 270 t aircraft in
+   573 m.
+5. **The sustained turns at 36,000 ft are thrust-limited**, with and without the fit: none above 8 degrees at
+   400 kt, 30 degrees (1.16 G) at 500 kt with the full tank. At a typical load the full-stick pull is 2.1 G
+   (the record's +3 row over the loading divisor), against Jane's "g limit: 2"; at the full tank it is 1.8 G.
+   Both are unchanged. What the stall fit does change is the slow side: at 300 kt and 1,000 ft the full tank
+   now holds 54 degrees (1.70 G, 5.2 deg/s) where it held 48 degrees (1.47 G, 4.1 deg/s), and a typical load
+   holds 60 degrees (2.0 G) at 250 kt where it held 42 degrees.
+
+### The fitted terms
+
+| Term | Shared value | Tu-160 | Fitted against |
+| --- | --- | --- | --- |
+| 1 G and 0 G fast edge (`fit_envelopes`, `aircraft_corrections.rs`) | 2,030 ft/s at sea level, 2,143 at 36,000 ft, 2,133 at 40,000 | 938 ft/s (556 kt) at sea level; a constant calibrated airspeed of 556 kt rising to 595 kt at 40,000 ft (1,111 at 10,000, 1,331 at 20,000, 1,615 at 30,000, 1,827 at 36,000 ft); 2,025 ft/s (1,200 kt) at 40,000 ft; the record's own edge above | The two real top speeds: a dynamic-pressure limit low down, a Mach limit up high. The 0 G row keeps its 100 ft/s step (2,125 at 41,000 ft), the other rows are held to the new edge. Slow edges, the 50,000 ft ceiling and the record's 47,000 ft vertex stay |
+| Fuel flow (record words `fuelConsumption`, `aftFuelConsumption`) | 26, 174 lb/s | 25, 104 lb/s | The NK-32's cited consumption times the real thrust: 123,600 x 0.725 / 3,600 = 24.9; 220,400 x 1.70 / 3,600 = 104.1. The batch's flow rule (whole pounds a second), pinned in `the_batch_fuel_flows_are_the_corrected_thrust_times_the_cited_sfc_to_the_whole_pound` |
+| Clean-drag shape (`DragShape`: 0.40 of the reference drag on the square law, the rest on the 12th power of speed over the edge) | square law | 0.40 / 12 | The published 13,780 ft/min at sea level and the 6,640 nautical mile range at Mach 0.9. 1 at the edge, so the top speed does not move. 0.27 of the afterburner thrust at 0.77 of the edge (430 kt at sea level), 0.07 at 0.41 of it (Mach 0.77 at 36,000 ft). Tried with `grid.sh` (the share, then the exponent): 0.35 / 12 gives 8,361 nautical miles at Mach 0.9 and 45,000 ft and a sea-level peak excess power of 189 ft/s at the full tank; 0.40 / 12 (chosen) 7,388 and 180; 0.45 / 12 6,609 (the published 6,640) and 171; 0.25 / 8 10,988 and 197 |
+| Stall reference fraction | 1 (the B-52H 1.09) | 2.3 | The reference weight of the weight-scaled stall is the empty weight times it: 558,000 lb. A 4,306 sq ft wing carrying 600,000 lb at a flapped lift coefficient near 2.2 stalls at 137 kt; the fit gives a liftoff at 168 kt (1.23 times that) and a flapped stall of 113 kt at 600,532 lb. At the 341,710 lb landing weight the approach is 110.8 kt (a 1.3 times figure would be 134 kt: the model is low at light weights, the cost of one fraction for the whole range) |
+| Wheel brake deceleration | 18 ft/s squared | 4.5 | The published 1,600 m (5,250 ft) landing distance, which the model reaches within 22 percent (rollout 1,250 m at 486,000 lb). 18 stopped it in 573 m, 0.56 G, which no 270 t aircraft does without braking heat |
+| Ground alignment rate | 0.7 | 0.4 | The transports' and the B-52's value for a heavy |
+
+Code: `crates/tore-sim/src/models/variety/tu160.rs` (the terms and their notes, a sibling of `b52.rs`),
+`models/variety.rs` and `models/mod.rs` (the hooks), `tore-formats` `aircraft_corrections.rs` (the flows
+and the edge, `T160_*`; a `CORRECTIONS` row pair and a `fit_envelopes` arm, applied only while the record
+still holds its retail values). Not touched: the shared drag law, the shared stall and the thrust lapse (the
+Tu-160 keeps 70,000 ft). The shared drag shape and stall reference were already per-aircraft hooks; one test
+(`the_b52_flies_its_fitted_terms_and_no_other_aircraft_does`, extended) pins that no other aircraft has any
+of them.
+
+**Rolling deceleration (takeoff run) was not fitted.** The published takeoff distance (2,200 m, weight and
+obstacle unstated) is 1.8 times the model's 1,241 m ground run (4,072 ft), but a thrust-to-weight of 0.37
+puts a full-afterburner run to 168 kt near 4,000 ft by physics, and the Russian Wikipedia gives 900 m for one
+"run / rollout" figure. The two sources disagree by more than the gap, so the
+shared 0.8 ft/s squared stays and the run is reported (below, open for John).
+
+### Before, after and real
+
+Weights: full is the free-flight and `--headless-flight` start (242,500 + 326,285 = 568,785 lb), max is the
+default load with the full tank (600,532 lb: 12 AS-16, 31,747 lb), typical is 450,000 lb (fuel 207,500).
+Takeoff and approach are `--ground-start 1` with the default load. Probe: `performance_probe`
+(`run_probes.sh before|after`); logs `.local/m3-aircraft/checks/T160-8/{before,after}/`.
+
+| Figure | Before | After | Real (source) |
+| --- | --- | --- | --- |
+| Level top speed at sea level (afterburner), 1 G edge | 969 kt (Mach 1.47), edge 1,203 kt | 524 kt (Mach 0.79) at 568,785 lb, 534 kt at 450,000 lb; edge 556 kt | 556 kt (aerospaceweb, Russian Wikipedia) |
+| Level top speed at 36,000 ft / 40,000 ft (afterburner) | 1,023 kt (drifting up 13,000 ft) / 1,018 kt (drifting up 22,700 ft), edge 1,270 kt | 1,020 kt (1,739 ft drift) / 1,130 kt, edge 1,200 kt at 40,000 ft | Mach 2.05, 1,200 kt at 40,000 ft (Jane's, Wikipedia) |
+| Military-power top speed at sea level / 36,000 ft | 726 kt / 764 kt | 469 kt / 930 kt (Mach 1.62) | none found (the model still lets a dry Tu-160 reach Mach 1.6 at 36,000 ft, the drag shape's price; reported) |
+| Peak specific excess power at sea level, afterburner: full / max / typical | 249 / 232 / 339 ft/s (14,900 / 13,900 / 20,300 ft/min) | 180 / 168 / 243 ft/s (10,800 / 10,100 / 14,600 ft/min) | max rate of climb at sea level 13,780 ft/min (Jane's, weight not stated): the typical load is 6 percent over, the full tank 22 percent under |
+| First rate in the 5,000 to 10,000 ft band, 350 KEAS then Mach 0.9, full thrust: full / typical | 11,381 / 14,911 ft/min | 10,183 / 12,436 ft/min | as above |
+| Time to 5,000 / 36,000 / 40,000 ft, same, full / typical | 38 / 241 / 262 s; 32 / 181 / 199 s | 43 / 247 / 265 s; 35 / 187 / 203 s | none found |
+| Highest altitude on the bomber schedule (military power, 300 KCAS then Mach 0.77), full / typical | 52,819 / 57,431 ft | 49,981 / 52,930 ft | 49,200 ft (Jane's) to 52,495 ft; record ceiling 50,000 ft (unchanged) |
+| Cruise at 36,000 ft, 500 kt / 518 kt, trimmed, from the full tank | 11.2 lb/s, 4,037 nm / 12.0 lb/s, 3,900 nm | 6.2 lb/s, 7,360 nm / 6.6 lb/s, 7,119 nm (at Jane's 45,000 ft and 518 kt: 7,388 nm) | 6,640 nm unrefuelled (Jane's); 6,600 nm at Mach 0.77 (Wikipedia). The probe takes the full-weight flow for the whole range, so it understates it; the model is 7 to 11 percent over the published figure |
+| Fuel at military / afterburner power | 26 / 174 lb/s (209 / 31 min) | 25 / 104 lb/s (218 / 52 min) | NK-32 0.72 to 0.73 and 1.70 kg/kgf h: 24.9 and 104.1 lb/s |
+| Takeoff, 600,532 lb: rotation, liftoff, ground run | 186.7 kt, 251.6 kt, 8,721 ft (UKR 1), 8,524 ft (GRE 1) | 146.2 kt, 167.7 kt, 4,072 ft (UKR 1), 3,886 ft (GRE 1) | no speed published; stall estimate 137 kt flapped, so 157 to 178 kt for 1.15 to 1.3 times; takeoff distance 2,200 m (7,218 ft), weight unstated (not fitted) |
+| Takeoff: ticks to 100 ft, speed there | 5,993 ticks, 283.6 kt | 4,336 ticks, 190.9 kt | |
+| Approach, 65 percent fuel (212,085 lb, 486,000 lb gross), scripted | crashed: 207 kt at touchdown, 100 ft/s sink (approach cap 166.2 kt not flown) | 143.6 kt approach, touchdown 134.2 kt (GRE 1), sink 6.7 ft/s, rollout 4,100 ft | landing distance 1,600 m (5,250 ft), weight unstated |
+| Approach at the 341,710 lb maximum landing weight (67,463 lb of fuel), GRE 1 | not flown | 110.8 kt, touchdown 104.8 kt, rollout 2,813 ft (857 m) | maximum landing weight 341,710 lb (Jane's); no speed published |
+| Sustained turn, held speed, typical load: 250 kt at 1,000 ft / 300 kt at 1,000 ft / 400 kt at 15,000 ft | 42 degrees (1.36 G), 4.0 deg/s / 60 degrees (2.0 G), 6.5 deg/s / 60 degrees, 4.8 deg/s | 60 degrees (1.99 G), 7.9 deg/s / 60 degrees (2.0 G), 6.4 deg/s / 60 degrees, 4.7 deg/s | g limit 2 (Jane's) |
+| Sustained turn, held speed, full tank: 300 kt at 1,000 ft / 250 kt | 48 degrees (1.47 G), 4.1 deg/s / 12 degrees (1.00 G) | 54 degrees (1.70 G), 5.2 deg/s / 54 degrees (1.71 G), 6.2 deg/s | none found |
+| Instantaneous pull at 400 kt, typical load / full tank | 2.1 G / 1.8 G | 2.1 G / 1.8 G | g limit 2 (Jane's) |
+| Roll rate (full stick) | no figure measured | unchanged | none found |
+
+### Notes on the figures
+
+- **Top speed.** The old record allowed the thrust to carry the aircraft to 969 kt at sea level. The new edge
+  caps it at the placard (556 kt) and the aircraft reaches 94 percent of it in afterburner (524 kt at the
+  full tank, loaded drag included); 36,000 ft and 40,000 ft settle at 1,020 and 1,130 kt, 94 percent of the
+  edge. The probe's "drift 1,725 ft" at 36,000 ft is the aircraft being more powerful than the altitude hold
+  can fly: it climbs a little. A dry Tu-160 reaching Mach 1.62 at 36,000 ft (military power) is the price of
+  the 12th-power wall: the drag stays low until about 0.85 of the edge, then rises steeply, so the extra
+  thrust of the afterburner buys only 90 kt. The B-52 has the same property (515 kt both ways). Reported,
+  not changed.
+- **Level 1,200 kt.** The game's own Jane's text and Wikipedia agree on 1,200 kt (2,220 km/h) at 40,000 ft,
+  which is Mach 2.09 in the standard atmosphere; "Mach 2.05" would be 1,176 kt. The edge takes 1,200 kt (the
+  figure the player reads in the encyclopedia, `TU160.INF`); Mach 2.05 is a 24 kt (2 percent) trim, one
+  vertex, if John prefers it.
+- **Climb.** The published 13,780 ft/min is a sea-level maximum at an unstated weight. The model's peak
+  specific excess power at sea level is 243 ft/s (14,600 ft/min) at a typical 450,000 lb, 168 ft/s (10,100
+  ft/min) at the 600,532 lb default load. A 0.45 quadratic share would put the range at the published figure
+  exactly (6,609 nautical miles, `stepB`) at a cost of 5 percent of the climb; 0.40 splits the two.
+- **Dry flow.** 25 lb/s, not 26: the cited 0.72 to 0.73 subsonic consumption at 123,600 lbf is 24.7 to 25.1.
+  The change is small (4 percent); it follows the batch's rule that the flows are the thrust times the cited
+  consumption to the whole pound.
+- **The ceiling** is 50,000 ft on the record (real 49,200 to 52,495 ft): left. On the bomber climb schedule
+  the aircraft now tops out at 49,981 ft (full tank) and 52,930 ft (typical), where the old edge let it zoom
+  to 52,819 and 57,431 ft.
+
+### The three-position sweep schedule
+
+The wing is the speed law of T160-3 (20 degrees up to 250 kt, 35 degrees from 320 to 520 kt, 65 degrees from
+600 kt, smoothstep between; flaps hold 20), unchanged. Checked against the fitted speeds:
+
+| Phase | Speed | Wing |
+| --- | --- | --- |
+| Takeoff roll and liftoff | rotation 146 kt, liftoff 168 kt | 20 degrees (real: 20 for takeoff) |
+| Climb-out | 191 kt at 100 ft | 20 degrees until 250 kt, 35 from 320 kt |
+| Approach and landing | 143.6 kt at 486,000 lb, 110.8 kt at the maximum landing weight | 20 degrees (flaps and gear hold it spread) |
+| Subsonic cruise | Mach 0.77 to 0.9 (441 to 518 kt at 36,000 ft) | 35 degrees to 520 kt (real: 35 for transonic cruise) |
+| Supersonic dash | 600 kt and up, from about 5,000 ft (where the edge is 607 kt) | 65 degrees (real: 65 for supersonic) |
+| Low-level top speed | 524 kt in afterburner at sea level, the edge 556 kt | **35 degrees at 524 kt, 48 degrees at the 556 kt edge** |
+
+At sea level the fully swept 65 degree position is never reached: the new top speed (556 kt) is under the
+600 kt the schedule needs. The real low-level dash is flown swept (aerospaceweb gives 65 degrees for "high
+speed"; no source says what a real crew sets at 1,030 km/h at sea level). The schedule is the coordinator's
+(opinionated) and was not changed: moving its 65 degree point to 520 kt would move the animation probe's
+neutral speeds and every `top-65` and `seam-65` frame of T160-2/3 and T160-5. The question is open for John.
+
+### AI heavy-class laws (BMB-AI)
+
+BMB-AI's flaps law (`max(200 kt, 1.05 x flaps-up minimum)`) and climb-out wait apply to an aircraft whose
+flaps-up minimum is above 190.5 kt. That table (BMB-AI section above) lists the Tu-160 at 268 kt at the full
+tank, because the shared stall scale put it there. **After the stall fit it is 151 kt at the 600,532 lb
+default load (145.2 x 1.038), under 190.5 kt, so the heavy-class laws no longer apply to it** (its flaps
+come down at 200 kt as for any other aircraft, and its climb-out gear and flap rules are the shared ones).
+The two scenarios added pass cleanly:
+
+- `ai-heavy-takeoff-tu160-gre-a1`: from Athens (12,000 ft) at the full weight: Waiting at 0 s, Taxi 30 s,
+  LineUp 42.8 s, TakeoffRoll 56 s, ClimbOut 108.2 s, Airborne 143.1 s, and it flies on.
+- `ai-heavy-land-tu160-ukr-a2`: sent home to Simferopol (5,532 ft) from the air with 67,000 lb of fuel (the
+  341,710 lb maximum landing weight): Final 227.5 s, Rollout 264.2 s at 103 kt (limit 125 kt), TaxiClear
+  293.5 s, Parked 546 s, 40,293 ground samples and none off the pavement.
+
+The scripted player's own landing on the 5,532 ft Simferopol runway at 486,000 lb is another matter: it
+touches down 1,458 ft past the threshold and stops 366 ft past the end of the runway (`approach-UKR.txt`).
+Its scenario therefore starts from Athens (`THEATER_FOR["tu160"] = "GRE"`, 12,000 ft), like the B-52H's.
+
+### The AI strike and the lower corner speed
+
+The first battery run after the fit failed one older scenario, `ai-strike-tu160-stick` (T160-6): the AI Tu-160
+at 20,000 ft, 12 nm from the column, never released. **Cause: the stall fit, not the edge or the drag.** With
+the stall fraction back at 1 the same run released all six (checked). The AI's level run flies the corner
+speed (the slow edge of the 3 G row, `level_speed` in `ai/strike.rs`); the fit lowered that edge, so the
+bomber now bleeds speed from 756 ft/s to 654 ft/s over the 60 s run-in instead of holding 783. The bay doors
+open when the release is 1.5 s away (`BAY_LEAD_S`) and take a second; in this one run the opening came 5.5 s
+after the commit, the release point passed with the doors still moving, and the pass exited with 6 Mk 82
+unreleased. The same pass from 8, 10, 14 and 16 nm drops all six and kills the T-90 or hurts it
+(`closest_ft` 76 to 774). The scenario now starts 10 nm out. The timing edge itself, in the AI heavy
+strike's bay lead and its release plan, is T160-9's (open for John, item 9 below).
+
+### Battery
+
+`flight.py`: `tu160` joins `VARIETY_AIRCRAFT`, `LIFTOFF_AIRCRAFT` (liftoff, retail-stall and approach
+scenarios) and `HEAVY_AIRCRAFT` (`flight-variety-gcurve-tu160`, with a 1.15 G floor, the B-52's, because the
+sweep's 100 to 750 kt at 5,000 ft now runs past the 607 kt edge where the limit settles at 1.20 G), with
+fitted windows (liftoff 155 to 185 kt, recorded 167.8; approach 130 to 160 kt, recorded 143.6), the internal
+fuel table (326,285 lb; the approach flies 65 percent, 212,085 lb), a takeoff tick limit of 6,000 (the run
+takes 4,336 ticks to 100 ft) and Athens as the field. `ai.py` adds the two scenarios above.
+
+### Open for John
+
+1. **The sea-level edge.** The record's 1,203 kt at sea level (the aircraft reached 969 kt in afterburner)
+   became the real 556 kt, with a constant-calibrated-airspeed edge up to 1,200 kt at 40,000 ft. This is
+   more than the coordinator's note ("revisit the 1,270 kt edge") asked, and it needed the drag shape and a
+   climb refit. The alternative is to trim only the altitude vertices (the B-1B's way, keeping the sea-level
+   edge) and leave a bomber that flies Mach 1.47 at the deck.
+2. **1,200 kt or Mach 2.05.** The edge takes the encyclopedia's 1,200 kt (Mach 2.09 at the tropopause);
+   Mach 2.05 is 1,176 kt.
+3. **Takeoff run.** 1,241 m (4,072 ft, UKR 1; 1,184 m on GRE 1) at 600,532 lb in full afterburner, against a
+   published takeoff distance of 2,200 m of unknown weight and obstacle height, and 900 m in one other source.
+   Not fitted. A rolling deceleration of about 3.7 ft/s squared (the B-52's fit is 4.8) would give the 2,200 m
+   (worked out as v squared over twice the distance, not run).
+4. **Liftoff and approach speeds.** No source gives one. The stall fraction is an estimate from the wing area
+   and an assumed flapped lift coefficient of 2.2; the approach at the maximum landing weight (110.8 kt) is
+   low against a 1.3 times stall estimate of 134 kt. A fraction of about 1.9 would put the landing weight
+   at about 122 kt and the liftoff at about 185 kt (scaled from the measured values, not run).
+5. **The dash wing at sea level** (above): 35 to 48 degrees where the real aircraft is probably swept.
+6. **Climb and range.** The full-tank climb (10,800 ft/min at sea level) is 22 percent under the published
+   13,780 and the typical load (14,600) 6 percent over; the range (7,100 to 7,400 nm) is 7 to 11 percent over.
+   A quadratic share of 0.45 gives the range exactly (6,609 nm at Mach 0.9 and 45,000 ft) and a climb 5
+   percent lower; 0.35 a climb 5 percent higher and a range of 8,361 nm.
+7. **Military power at 36,000 ft** reaches Mach 1.62 (above).
+8. **Roll rate and the 2 G limit.** No roll rate was found (the record's limit stands). The pull is the
+   record's +3 row over the loading divisor (1.8 G at the full tank, 2.1 G typical) against Jane's "g limit:
+   2": unchanged.
+
+9. **The AI heavy strike's bay timing** (above): at the new corner speed the AI Tu-160's pass from 12 nm
+    exits with the doors opening late. A rule that opens the bay by distance as well as by time, or a
+    speed hold at the run-in speed, would close it; T160-9.
+
+### Checks
+
+All through `.local/m3-imports/light3.sh`, profile `.local/m3-aircraft/profile-tu160` refreshed first (logs in
+`.local/m3-aircraft/checks/T160-8/`). See the plan entry for the counts. New tests:
+`the_tu160_top_speed_edges_are_the_real_556_kt_at_sea_level_and_1200_kt_up_high`,
+`the_tu160_top_speed_trim_needs_the_corrected_record_and_the_retail_rows`, `the_tu160_flies_its_fitted_terms`,
+the extended `the_b1b_tu160_and_f111_read_their_real_figures_only_while_retail`, `the_batch_fuel_flows_are_the_corrected_thrust_times_the_cited_sfc_to_the_whole_pound`
+and the extended retail-reading `the_corrected_records_carry_the_real_figures_and_station_flags`.
+
+Provenance: the real figures are public pages and the game's own Jane's text, for comparison only; the edges
+are real figures given a fitted shape (agent decision 2026-11-16); the flows are cited figures to the whole
+pound (agent decision following the coordinator's 104 lb/s note); the drag shape, stall fraction, brake
+deceleration and alignment are fitted (agent decisions); the battery windows are fitted. No retail bytes
+committed.
+
+## Tu-160 AI, missions, multiplayer and replay (T160-9, 2026-11-16)
+
+Implementation and verification mode, slice T160-9 (the Tu-160's counterpart of B52-9, B2-9 and F117-9). The
+AI work was asked for by John through the bomber program (AGENTS.md: no AI work unless John asks). Everything
+here is `fitted`, agent decisions of 2026-11-16, except where a number is a record's. The Tu-160 has two bay
+rows (the forward row, station 0, and the aft row, station 1) and no pylon, rail, gun or air-to-air store, so
+there is no pylon strike or air-to-air fight to fly; its default load is the twelve AS-16 of T160-6.
+
+### The AI never fired the AS-16 (fixed)
+
+`--pilot ai --load AS16` picked `kind=RadarAgm` and then logged `no release` against the T-90 and over the
+Kiev. The cause was not the missile or the target, it was the AI's fire range. A seeker store is fired inside
+`max(10,000 ft, half its zone-1 maximum)` of its target, and the lock needs the target inside the zone's
+look-down limit. The AS-16's zone 1 is 500 to 40,000 ft with a 45 degree limit above and below the nose, so
+its fire range is 20,000 ft, and from the 20,000 ft the strike flew at, a target 20,000 ft below can stand
+inside 20,000 ft only straight underneath, where the elevation is 90 degrees, outside the limit. The two
+conditions had no common point: the lock never held inside the fire range and the AI overflew the target
+(closest approach 154 ft, `releases=0`). Any seeker fired from higher than 0.7 times its fire range (14,100 ft
+for the AS-16) had the same hole. A Mk 82 or a laser store is not a seeker and never read it.
+
+The fix is general and small (`tore_sim::ai::strike::reach::seeker_fire_range`, used by the host's lock test in
+`tore_world::ai_wings::strike`, the release estimate and the stand-off planner): `Store::fire_range_from(height)`
+returns the usual fire range wherever the target stands inside the look-down limit at it (height at most the fire
+range times the limit's sine), exactly as before, and from higher up the range where the target stands 80 percent
+of the limit below the nose (36 degrees for the AS-16: 34,000 ft slant from 20,000 ft), at most 95 percent of the
+zone's maximum. A new `Store::look_deg` carries the limit (180 for every non-seeker store, so every laser, bomb,
+rocket and gun is unchanged). It applies to any aircraft with an active radar surface missile (or any other
+seeker) flying a strike above 0.7 times its fire range.
+
+| Run (`--a2g-run UKR ... --pilot ai --aircraft tu160 --load AS16 --altitude 20000`) | Before | After |
+| --- | --- | --- |
+| `QUCOL`, T-90, 10 nm | doors open at 74.2 s, pass exits at 79.7 s, `releases=0` | doors open at 42.6 s, release at 43.3 s from 27,537 ft slant (forward bay, right -1.59 ft), impact 6 ft from the aim at 59.0 s, T-90 killed |
+| `QUSFLT --unit Krivak`, 15 nm | `no release` (T160-6) | release at 92.85 s from 27,509 ft, impact 47 ft from the ship at 109.0 s, Krivak left with 150 of 500 (the human's shot in T160-6 left 150 too) |
+
+`ai-strike-tu160-antiship` and `ai-strike-tu160-as16-tank` hold both. After the shot the Tu-160 defends
+(`Defend` at 92.9 s) and the fleet shoots it down at 119.4 s (it jettisons its load first), so the anti-ship
+run stops at 115 s; the missile hits at 109 s. A second AS-16 never leaves in the same pass (`first &&`: one
+seeker round a pass, the helicopter and fighter rule), so the Krivak is not sunk by one AI pass.
+
+### The AI strike from 12 nm
+
+T160-8 moved `ai-strike-tu160-stick` to 10 nm because "from 12 nm the bay doors open a second late and the pass
+leaves without bombing". **The doors are not the cause.** Traced with a per-tick log of the release test (the
+cue's closest approach, the bay demand and the door travel):
+
+- The doors ask 1.5 s before the estimated release (`BAY_LEAD_S`) and take 1.14 s to read 0.95, so they are
+  open about 0.4 s ahead; at 12 nm they read 1.00 at 65.9 s and the estimate reaches 0 at 66.2 s. From 10 nm
+  they open at 46.7 s and the first bomb leaves at 47.2 s.
+- No release was ever due at 12 nm (`fire`, `due` and `passing` are false on every tick). The cue's closest pass
+  lay 207 ft from the aim against a circle of 197 ft, and 331 ft from the led target.
+- The reason is the target. The `QUCOL` column is moving and turns a corner at about 60.5 s: its velocity
+  changes from (0.5, -50) to (35, -36) ft/s, and the led aim jumps 320 ft sideways 5 s before the 12 nm pass
+  releases. The 10 nm pass drops at 47 s, before the corner. The same pass over the standing Ukraine factory
+  (`QUFACT`) from 12 nm bombs with the unchanged binary (six releases, doors open 0.5 s ahead of the first),
+  and with a 4 s door lead the 12 nm column pass still did not bomb.
+- A heavy's heading answers slowly, so the cue pointing (gain 0.6, one second of damping on the cue's
+  lateral rate) swung 207 ft past the aim after the shift. A smaller gain with more damping settles it.
+
+Two changes, both fitted:
+
+1. **Heavy cue pointing** (`HEAVY_CUE_POINT_GAIN` 0.4, `HEAVY_CUE_DAMPING_S` 3.0, `strike.rs`): a
+   `StrikeClass::Heavy` level run points its cue with the smaller gain and the longer damping; every other class
+   keeps 0.6 and one second. A sweep of five gain and damping pairs on the 12 nm column and the Quick Mission
+   wing found 0.4 and 3 the one that bombs both (the neighbours 0.4 and 2, 0.3 and 2 each lost one of the two),
+   so it is a tuning of one point; it also bombed the column from 8, 10 and 14 nm, the aft row, the factory
+   from 12 nm and the B-2 and B-52 stick, pylon and Quick Mission passes (all in the final battery run).
+2. **The bay lead is unchanged.** Scaling it with the time to release would not have helped: no due release was
+   ever lost to the doors in this trace. (A release that comes due with the doors shut still waits for them, but a
+   `passing` release is a single-tick event, so a doors-late pass can still leave without bombing; holding it
+   would need a checkpointed field. Open.)
+
+`ai-strike-tu160-stick` stays at 10 nm (T160-6's, as T160-8 left it). The 12 nm column pass is back as
+`ai-strike-tu160-stick-12nm`: the doors read 0.96 at 65.8 s, the first Mk 82 leaves at 66.3 s (0.5 s later) and
+the six land, where it used to leave without bombing. `ai-strike-tu160-stick-12nm-factory` is the same pass over
+the standing factory, which bombed before the pointing changed (doors open 72.7 s, first release 73.2 s).
+
+### The AI strike from the bay
+
+| Run | What the log shows |
+| --- | --- |
+| `ai-strike-tu160-stick` (T160-6, 10 nm), forward bay row | six Mk 82 from the grid's places (four abreast then two), doors open before the first, impacts, egress |
+| `ai-strike-tu160-stick-12nm`, column, 12 nm | doors 0.96 at 65.8 s, six releases from 66.3 s from the same places, impacts, egress |
+| `ai-strike-tu160-stick-12nm-factory`, Ukraine factory, 12 nm | doors open at 72.7 s, six releases 73.2 to 74.5 s from the same places, factory destroyed, egress |
+| `ai-strike-tu160-aft`, aft row (`--station 1 --count 6`) | six Mk 82 from right -1.95, 1.95, -0.65, 0.65 then -1.95, 1.95, up 0.72 (the flat belly; the forward row's keel plane is -1.95), forward -5.60 then -13.15, doors open for them, egress |
+| `ai-strike-tu160-quick-wing` (`--quick-wing`, factory) | `ROLE strike`; the wing starts 7.5 nm out at 5,000 ft and about 570 kt, too fast to line up in that distance, so the first passes (a `Defend` at 43.6 s, an exit at 58.9 s) leave without bombing; the third attack (206.7 s) drops the forward row's six at 5,054 ft (the 5,000 ft heavy floor) at 324.2 s, 253 kt, then egress. With the unchanged cue pointing it flew three passes in 560 s without a release |
+| `ai-strike-tu160-as16-tank`, `ai-strike-tu160-antiship` | above |
+
+### Quick Mission
+
+`quick_mission::tests::the_tu160_is_a_quick_mission_player_and_a_wing_choice`: `TU160.PT` is offered as the
+player's aircraft and in every AI wing field, a draft carries it as the player and in every wing, and the night
+stealth rule (the B-2 and the F-117) does not take it. The strike is `ai-strike-tu160-quick-wing`. Two 2 v 2
+probes: `ai-tu160-quick-mission-2v2` (all Tu-160: nobody fires, the probe's usual checks hold, every Tu-160
+holds its twelve AS-16 and no gun) and `ai-tu160-vs-su27-2v2` (the same against Su-27s: the AS-16 is refused
+against an aircraft).
+
+### The airfield
+
+No airfield law changed and none is gated: the Tu-160 is outside the BMB-AI heavy class (flaps-up minimum 151
+kt), so the B-52's two laws (`Situation::taxi_throttle_floor` above zero) do not reach it, and it needs
+neither: `ai-merged-airfield-tu160-wing2` (Southampton, 100,000 lb of fuel, the land order at 167 s) takes off
+at 52 s, is airborne at 105 s, lands at 486.7 s at 107 kt, clears at 517.6 s and parks at 976.4 s, 100,277 ground
+samples and none off the pavement. `ai-heavy-takeoff-tu160-gre-a1` and `ai-heavy-land-tu160-ukr-a2` (T160-8)
+still pass. No airfield file changed, so the BMB-AI baseline comparison (129 airfield logs on the binary before
+and after) was not needed.
+
+**Open (BMB-AI item 3, the AI has no fuel shedding):** at its full takeoff weight (600,532 lb, about 570,000 lb at
+the land order) the AI cannot land it. Sent home at 300 s from Southampton it reaches the marshal at 529 s,
+approaches at 228 kt and flies into the ground 10,800 ft short of the runway at 806 s. `--probe-fuel` is
+capped at 100,000 lb, so the scenario uses that; a landing at the real maximum landing weight (341,710 lb) is
+within it.
+
+### Multiplayer
+
+`net-a2g-stores-tu160`: both players in Tu-160s (`TU160_STORES_MISSION`, one wing of two). `tore-bot --load
+MK82.JT --a2g bomb` hangs two Mk 82 in the forward row (the bot loads the first station that takes them; the
+Tu-160 has no pylon). The watching client draws the bomber's stores (16 Stores events, 220 bytes, 16 at most),
+sees a Mk 82 leave plane 0 (`saw MK82.JT 0 from plane 0`) and the bomber's emptied stations (0 2 3: the Mk 82 row
+and the AI's), and reads plane 0's bay doors at 1.00 on its screen.
+
+### Replay
+
+`replay-rec-tu160-2v2`: the Tu-160 as the player and in both wings, a 2 v 2 recorded three times;
+`--verify-render` passes (2,401 ticks, none missing or differing) and two runs record the same, so the `TU160.PT`
+identity round-trips. `replay-a2g-tu160-ripple`: a human ripple of six presses from the forward bay row,
+recorded and replayed with `--verify-render` (6,156 ticks, none missing or differing), read back as five releases
+and five outcomes of the six presses (the B-2's and B-52's give 11 of 12 and 7 of 8; not traced), the recorded bay
+device shut at the start and the end and at 0.95 or more at every release.
+
+### Open for John
+
+1. The heavy cue pointing (0.4 and 3 s) is a tuning found by a sweep of two scenarios; it changes the B-2, B-52
+   and any other Heavy strike (their scenarios pass). The standing question is whether a heavy's pointing should
+   instead follow its measured heading response.
+2. The AI Tu-160 cannot land at its full takeoff weight (above); fuel shedding or a longer final is BMB-AI item 3.
+3. The quick-wing Tu-160 needs three passes (the first starts 7.5 nm out at 570 kt): the 570 kt run-in at 5,000
+   ft is the fitted flight model's corner speed (T160-8), not an AI choice.
+4. One AS-16 leaves a pass (the seeker rule): the Krivak is hurt, not sunk, by one AI pass; the fleet then shoots
+   the Tu-160 down at 119 s. A second pass is not flown inside the run.
+5. A doors-late release is still lost when the due test is a single-tick `passing` event (no case seen).
+6. The 12 nm column pass depends on where the column's corner falls against the release time: it bombs
+   from 8, 10, 12 and 14 nm with the new pointing, and was not run from other distances.
+
+### Checks
+
+All through `.local/m3-imports/light3.sh`, own profile `.local/m3-aircraft/profile-tu160`; logs in
+`.local/m3-aircraft/checks/T160-9/`: `cargo fmt` clean, clippy `-D warnings` clean, `cargo test --locked --workspace
+--no-fail-fast` 7,884 passed, 0 failed, 108 ignored (7,878 before), `--validate-ordnance` passed, `python3 -B -m
+unittest discover -s tools` 597 OK (skipped 5), `tools/check_docs.py` passed (382 files), and the battery
+(`--jobs 2 --windows 1`) 91 of 91: every `*tu160*`, `ai-heavy-*`, `ai-strike-*`, `ai-merged-airfield-*`,
+`net-a2g-*`, `net-ai-strike-*` and `replay-a2g*` scenario. New tests: `Tu160Tests` in
+`tools/test_battery_ai_strike.py`, `the_tu160_mission_scenarios_exist_and_the_fight_check_reads_guns_stores_and_shots`,
+the two `seeker_range_tests` in `strike_reach.rs`, and `the_tu160_is_a_quick_mission_player_and_a_wing_choice`.
+Provenance: the zone numbers are the retail record's, read by the code; the fire-range rule, the cue pointing
+gains, the scenarios and the fuel and order of the airfield cycle are fitted (agent decisions 2026-11-16). No
+retail bytes committed.

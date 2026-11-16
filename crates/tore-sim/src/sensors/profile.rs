@@ -148,6 +148,11 @@ impl Preset {
             // AC-130's class (Transitional). Without it the record decodes
             // as unreviewed and the B-52 flew with no radar at all.
             "B52R.SEE" => Some(Self::Transitional),
+            // The Tu-160's own radar (T160-6/7, 2026-11-16, fitted, agent
+            // decision): the record `B52R.SEE` is a copy of, the same long-range
+            // search set, so the same class. Without it the record decodes as
+            // unreviewed and the Tu-160 flew with no radar at all.
+            "TU160R.SEE" => Some(Self::Transitional),
             "F18R.SEE" | "MIG29R.SEE" | "SU24R.SEE" | "SU27R.SEE" | "F22R.SEE" | "F15R.SEE"
             | "E3R.SEE" | "E2R.SEE" | "MIG31R.SEE" => Some(Self::Advanced),
             _ => None,
@@ -254,9 +259,11 @@ impl Generation {
         match record.to_ascii_uppercase().as_str() {
             "F4.ECM" | "MIG21.ECM" | "AV8.ECM" | "YAK141.ECM" | "KA50.ECM" | "A7.ECM"
             | "F104.ECM" => Some(Self::Early),
-            "F14.ECM" | "MIG29.ECM" | "SU24.ECM" | "AC130.ECM" | "B52.ECM" | "A10.ECM" => {
-                Some(Self::Transitional)
-            }
+            // `TU160.ECM` (T160-6/7, 2026-11-16, fitted, agent decision): the
+            // record is `B52.ECM` and `AC130.ECM` with 16 bytes changed, so it
+            // takes their generation.
+            "F14.ECM" | "MIG29.ECM" | "SU24.ECM" | "AC130.ECM" | "B52.ECM" | "TU160.ECM"
+            | "A10.ECM" => Some(Self::Transitional),
             "F18.ECM" | "SU27.ECM" | "F22.ECM" | "F15.ECM" | "MIG31.ECM" => Some(Self::LateColdWar),
             _ => None,
         }
@@ -833,8 +840,21 @@ mod tests {
     fn the_b52_radar_record_is_reviewed_transitional() {
         assert_eq!(Preset::for_record("B52R.SEE"), Some(Preset::Transitional));
         assert_eq!(Preset::for_record("b52r.see"), Some(Preset::Transitional));
-        // The Tu-160's record it renames stays unreviewed until its own slice.
-        assert_eq!(Preset::for_record("TU160R.SEE"), None);
+    }
+
+    /// T160-6/7: the Tu-160's radar (the record the B-52's renames) and its
+    /// jammer (the B-52's and AC-130's record with 16 bytes changed) are
+    /// reviewed in the same classes. The Tu-26's and Tu-95's stay unreviewed.
+    #[test]
+    fn the_tu160_radar_and_jammer_are_reviewed_transitional() {
+        assert_eq!(Preset::for_record("TU160R.SEE"), Some(Preset::Transitional));
+        assert_eq!(Preset::for_record("tu160r.see"), Some(Preset::Transitional));
+        assert_eq!(
+            Generation::for_record("TU160.ECM"),
+            Some(Generation::Transitional)
+        );
+        assert_eq!(Preset::for_record("TU26R.SEE"), None);
+        assert_eq!(Generation::for_record("TU26.ECM"), None);
     }
 
     /// B1B-7: the B-1B's five rows keep the retail records; its radar row is

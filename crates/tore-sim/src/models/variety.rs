@@ -9,6 +9,7 @@ use tore_formats::aircraft::{Aircraft, AircraftId};
 mod b1b;
 mod b52;
 mod lift;
+mod tu160;
 pub use lift::{
     BodyParameters, CorridorPoint, HandlingTargets, JetParameters, LiftEngines, LiftKind,
     PoweredLift, RotorLayout, RotorParameters, RotorRotation, TiltrotorParameters,
@@ -86,8 +87,9 @@ impl VarietyFlightModel {
         }
         use AircraftId::*;
         let alignment_rate = match a.id.source() {
-            // The B-52 takes the transports' 0.4, not the fighters' 0.7 (B52-8).
-            C130 | Ac130 | E3 | Il76 | E2 | B52 => 0.4,
+            // The B-52 takes the transports' 0.4, not the fighters' 0.7 (B52-8);
+            // so does the Tu-160 (T160-8).
+            C130 | Ac130 | E3 | Il76 | E2 | B52 | Tu160 => 0.4,
             B747 | A310 => 0.3,
             _ => 0.7,
         };
@@ -202,6 +204,9 @@ impl VarietyFlightModel {
         if a.id.source() == B1b {
             b1b::fit(&mut configuration);
         }
+        if a.id.source() == Tu160 {
+            tu160::fit(&mut tuning, &mut configuration);
+        }
         // Transports and airliners: a little more drag, so full power in
         // level flight settles at 96 percent of the top speed, just under
         // the overspeed shake (John, 2026-10-08; the value is an agent fit).
@@ -228,6 +233,7 @@ impl VarietyFlightModel {
 pub fn stall_reference_fraction(id: AircraftId) -> f64 {
     match id.source() {
         AircraftId::B52 => b52::STALL_REFERENCE_FRACTION,
+        AircraftId::Tu160 => tu160::STALL_REFERENCE_FRACTION,
         _ => 1.,
     }
 }
@@ -906,13 +912,16 @@ pub(crate) mod tests {
             let model = AircraftModel::for_aircraft(&synthetic(id)).unwrap();
             let c = model.configuration();
             let b52 = id.source() == AircraftId::B52;
-            // The B-52's and the B-1B's drag shapes are the only two (B52-8,
-            // B1B-8); the B-1B keeps every other term of the shared family.
-            let shaped = b52 || id.source() == AircraftId::B1b;
+            // The B-52's, the B-1B's and the Tu-160's drag shapes are the only three (B52-8,
+            // B1B-8, T160-8); the B-1B keeps every other term of the shared family. The
+            // Tu-160 shares the stall fraction idea (T160-8) with its own values; the lapse
+            // is the B-52's alone.
+            let shaped = b52 || id.source() == AircraftId::B1b || id.source() == AircraftId::Tu160;
+            let fitted = b52 || id.source() == AircraftId::Tu160;
             assert_eq!(c.aerodynamics.drag_shape.is_some(), shaped, "{id:?}");
-            assert_eq!(model.stall_reference_fraction() != 1., b52, "{id:?}");
+            assert_eq!(model.stall_reference_fraction() != 1., fitted, "{id:?}");
             assert_eq!(c.tuning.thrust_lapse_feet != 70_000., b52, "{id:?}");
-            // The transports and the B-52 turn their noses at 0.4 a second.
+            // The transports, the B-52 and the Tu-160 turn their noses at 0.4 a second.
             assert_eq!(
                 c.tuning.alignment_rate == 0.4,
                 matches!(
@@ -923,6 +932,7 @@ pub(crate) mod tests {
                         | AircraftId::Il76
                         | AircraftId::E2
                         | AircraftId::B52
+                        | AircraftId::Tu160
                 ),
                 "{id:?}"
             );
@@ -1105,6 +1115,46 @@ pub(crate) mod tests {
         let (braked, _) = drag(1.);
         let extra = (braked - clean) / weight;
         assert!((0.03..0.12).contains(&extra), "{extra} G");
+    }
+    /// T160-8 (fitted): the Tu-160's drag shape is 1 at the edge like the
+    /// square law and under it below, its stall reference sits well above the
+    /// empty weight (the real 242,500 lb empty carries 600,000 lb), and its
+    /// landing brake is the 4.5 ft/s squared of a heavy bomber with a chute,
+    /// not the 18 of the shared law. No other aircraft but the B-52 has a shape.
+    #[test]
+    fn the_tu160_flies_its_fitted_terms() {
+        let model = AircraftModel::for_aircraft(&synthetic(AircraftId::Tu160)).unwrap();
+        let c = model.configuration();
+        let a = &c.aerodynamics;
+        assert!((a.drag_ratio(1.) - 1.).abs() < 1e-12);
+        // 430 kt at sea level against the 556 kt edge (0.774): about a fifth
+        // of the thrust where the square law would give 0.6.
+        assert!(
+            (0.15..0.35).contains(&a.drag_ratio(0.774)),
+            "{}",
+            a.drag_ratio(0.774)
+        );
+        assert!(a.drag_ratio(0.774) < 0.774 * 0.774);
+        assert_eq!(
+            model.stall_reference_fraction(),
+            tu160::STALL_REFERENCE_FRACTION
+        );
+        assert!((2. ..3.).contains(&model.stall_reference_fraction()));
+        assert_eq!(c.tuning.brake_deceleration, tu160::BRAKE_DECELERATION);
+        assert!((3. ..8.).contains(&c.tuning.brake_deceleration));
+        // The takeoff run is the shared one (not fitted, see the review).
+        assert_eq!(c.tuning.rolling_deceleration, 0.8);
+        assert_eq!(c.tuning.alignment_rate, 0.4);
+        // The B-52's own terms are untouched by it.
+        let b52 = AircraftModel::for_aircraft(&synthetic(AircraftId::B52)).unwrap();
+        assert_eq!(
+            b52.stall_reference_fraction(),
+            b52::STALL_REFERENCE_FRACTION
+        );
+        assert_eq!(
+            b52.configuration().tuning.brake_deceleration,
+            b52::BRAKE_DECELERATION
+        );
     }
     #[test]
     fn the_mirage_f1_gear_low_point_scales_with_its_shape_height() {

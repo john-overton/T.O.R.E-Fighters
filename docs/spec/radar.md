@@ -249,6 +249,7 @@ deception chance.
 | F18.ECM | 0x1F0 | 30 | F/A-18D, Rafale C, X-31 |
 | SU27.ECM | 0x1F0 | 30 | Su-27, Su-35 |
 | F22.ECM | 0x1F0 | 50 | F-22A |
+| TU160.ECM (T160-6, 2026-11-16) | 0x1F0 | 30 | Tu-160 (`B52.ECM`'s and `AC130.ECM`'s record with 16 bytes changed) |
 
 F4.ECM and MIG21.ECM carry neither the radar-deception mode flag nor a nonzero
 chance, so the A-4E, MiG-21 and MiG-23 have no radar-deception capability in

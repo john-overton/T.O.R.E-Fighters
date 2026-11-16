@@ -567,3 +567,13 @@ whole Southampton cycle (`ai-merged-airfield-b1b-wing2`) and the Athens takeoff 
 B-52-style 3,000 ft lookahead is therefore not applied to the B-1B, and no baseline comparison of the other
 aircraft was needed (nothing in the sim changed since B52-9). Evidence:
 [aircraft variety](../formats/aircraft-variety.md#b-1b-lancer-ai-missions-multiplayer-and-replay-b1b-9-2026-11-16).
+
+**Update (T160-9, 2026-11-16): the Tu-160 and the airfield laws.** **Fitted**, agent decisions. No airfield law
+changed. The Tu-160 is outside the BMB-AI heavy class (flaps-up minimum 151 kt after T160-8), so the B-52's
+final and taxi-in laws (gated on `Situation::taxi_throttle_floor` above zero) do not reach it, and it needs neither:
+the Southampton cycle at 100,000 lb of fuel (takeoff at 52 s, landing at 486.7 s at 107 kt, parked at 976.4 s,
+100,277 ground samples, none off the pavement) and the Athens takeoff and Simferopol landing of T160-8 are on the
+pavement. **Open:** at its full takeoff weight (about 570,000 lb at the land order) the AI cannot land it: it
+approaches at 228 kt and flies into the ground 10,800 ft short of the runway (the AI has no fuel shedding, BMB-AI
+item 3). Evidence in the [aircraft variety](../formats/aircraft-variety.md#tu-160-ai-missions-multiplayer-and-replay-t160-9-2026-11-16)
+T160-9 section.

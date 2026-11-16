@@ -365,6 +365,39 @@ def b1b_no_air_to_air_checker(nobody_shoots: bool = True) -> Callable[[str], lis
     return check
 
 
+TU160_ACTOR = re.compile(r"^actor=(\d+) (\S+ [\d-]+) Tu160 activity=\S+ alive=\w+ rounds=(\d+) ", re.M)
+
+
+def tu160_no_air_to_air_checker() -> Callable[[str], list[str]]:
+    """The Tu-160 wing in a fight (slice T160-9): the probe's usual checks, and the Tu-160s carry no gun (rounds=0)
+    and nothing but AS-16 and Mk 82 on their stations: the AS-16 is an active radar surface missile, refused
+    against an aircraft, so no Tu-160 fires an air-to-air shot, and the player's own run (also a Tu-160)
+    fires no missile or gun burst either."""
+    base = checker()
+
+    def check(output: str) -> list[str]:
+        problems = base(output)
+        ids = {m.group(1) for m in TU160_ACTOR.finditer(output)}
+        if not ids:
+            problems.append("no Tu-160 actor in the probe")
+        for m in TU160_ACTOR.finditer(output):
+            # `rounds` counts every store round: the twelve AS-16 and no gun.
+            if int(m.group(3)) > 12:
+                problems.append(f"{m.group(2)} (Tu-160) holds {m.group(3)} rounds, more than its twelve AS-16: a gun?")
+        for m in STORES_LINE.finditer(output):
+            if m.group(1) in ids:
+                names = re.findall(r"([A-Z0-9-]+) x\d+", m.group(2))
+                other = [n for n in names if n not in ("AS-16", "MK-82")]
+                if other:
+                    problems.append(f"Tu-160 actor {m.group(1)} carries {other}")
+        shots = SHOT_AT_STATION.search(output)
+        if shots and (int(shots.group(1)), int(shots.group(2)), int(shots.group(3))) != (0, 0, 0):
+            problems.append(f"the Tu-160 player fired {shots.groups()} (missiles, gun bursts, gun rounds)")
+        return problems
+
+    return check
+
+
 DATALINK_LINE = re.compile(r"^t=(\d+) data link: (member|lock|unlock) plane=(\d+)(?: radar=(true|false)| target=(\d+))$", re.M)
 
 
@@ -1757,10 +1790,26 @@ def scenarios() -> list[Scenario]:
             notes=f"An AI {aircraft.upper()} at Southampton at its full weight: it taxis, takes off, climbs out with its "
                   "flaps down until it can raise them, lands on the order at 175 kt or slower and parks, all on the "
                   "pavement (B52-9: the B-52's taxi-in used to leave it for six seconds at a corner)."))
+    # T160-9 (2026-11-16): the Tu-160 flies the same full cycle at Southampton. It is no longer in the BMB-AI heavy class
+    # (flaps-up minimum 151 kt after T160-8), so none of the heavy laws apply to it. It takes off with 100,000 lb of fuel
+    # (`--probe-fuel` takes at most that; about 374,000 lb gross, near its 341,710 lb landing weight) and takes the land
+    # order at 167 s: at its full takeoff weight (about 570,000 lb with the default load) the AI cannot land it (it
+    # undershoots the runway by 10,800 ft at 228 kt and crashes at 806 s; the AI has no fuel shedding, BMB-AI item 3).
+    out.append(probe("merged-airfield-tu160-wing2", [
+        "--theater", "FRA", "--ground-start", "14",
+        "--aircraft", "tu160", "--probe-friendly-aircraft", "tu160",
+        "--probe-wing-size", "2", "--maneuver", "takeoff", "--probe-fuel", "100000",
+        "--probe-wing-order", "20000:land-selected", "--separation", "200",
+        "--probe-wing-only", "--probe-pavement"],
+        ticks=150000, timeout=3000,
+        check=heavy_cycle(125, taxi_in=True),
+        notes="An AI Tu-160 at Southampton with 100,000 lb of fuel: it taxis, takes off, climbs out, lands on the order at "
+              "125 kt or slower and parks, all on the pavement (T160-9). At its full takeoff weight it crashes on the "
+              "approach (open)."))
     # Takeoff alone: the B-2 and B-52 from Athens (GRE 1, 12,000 ft; at their full weights they need about
     # 7,200 ft and the scripted player's own B-2 runs off the end of Mikonos' 7,246 ft), the F-117 from
     # Mikonos (GRE 2, 7,246 ft). Each leaves the ground, climbs out and flies on.
-    for aircraft, field in (("b2", 1), ("b52", 1), ("f117", 2), ("b1b", 1)):
+    for aircraft, field in (("b2", 1), ("b52", 1), ("f117", 2), ("b1b", 1), ("tu160", 1)):
         out.append(probe(f"heavy-takeoff-{aircraft}-gre-a{field}", [
             "--theater", "GRE", "--ground-start", str(field),
             "--aircraft", aircraft, "--probe-friendly-aircraft", aircraft,
@@ -1768,8 +1817,13 @@ def scenarios() -> list[Scenario]:
             ticks=42000, timeout=1800, check=heavy_takeoff,
             notes="BMB-AI: the heavy takeoff (flaps and gear kept until the speed is there) at its full weight."))
     # Landing at Simferopol (UKR 2, 5,532 ft, the Ukraine's default field), sent home from the air, at a
-    # landing weight: B-2 60,000 lb of fuel, B-52 80,000 lb, F-117 7,000 lb.
-    for aircraft, fuel, kt in (("b2", 60000, 150), ("b52", 80000, 145), ("f117", 7000, 190), ("b1b", 80000, 175)):
+    # landing weight: B-2 60,000 lb of fuel, B-52 80,000 lb, F-117 7,000 lb, B-1B 80,000 lb (B1B-8). T160-8
+    # (2026-11-16): the Tu-160 with 67,000 lb, which is its maximum landing weight (`TU160.INF`, 341,710 lb:
+    # 242,500 empty plus the 31,747 lb of default load); it enters the rollout at 103 kt and parks on the
+    # pavement. Its takeoff from Athens (the full 600,532 lb) climbs out and flies on. Neither needs the BMB-AI
+    # heavy flaps law (its flaps-up minimum is 151 kt at the takeoff weight, under 190.5 kt).
+    for aircraft, fuel, kt in (("b2", 60000, 150), ("b52", 80000, 145), ("f117", 7000, 190), ("b1b", 80000, 175),
+                               ("tu160", 67000, 125)):
         out.append(probe(f"heavy-land-{aircraft}-ukr-a2", [
             "--theater", "UKR", "--aircraft", aircraft, "--probe-friendly-aircraft", aircraft,
             "--probe-wing-size", "2", "--probe-wing-order", "600:bug-out", "--probe-fuel", str(fuel),
@@ -2180,6 +2234,24 @@ def scenarios() -> list[Scenario]:
                                                "--separation", "5", *attack), ticks=7200,
                      check=b1b_no_air_to_air_checker(nobody_shoots=False),
                      notes="The B-1B wing against Su-27s: the B-1Bs fire nothing (no air-to-air store, no gun)."))
+    # 13l. The Tu-160 Blackjack in a mission (slice T160-9, 2026-11-16): the strike class is Heavy, the record has no
+    # gun and no air-to-air store, and the AS-16 is refused against an aircraft, so a Tu-160 wing fires nothing in a
+    # fight and the probe's usual checks (no crash into the ground, no stall) must hold. The strike itself is
+    # `ai-strike-tu160-*` (ai_strike.py).
+    out.append(probe("tu160-quick-mission-2v2", fight(2, 2, "--aircraft", "tu160",
+                                                      "--probe-friendly-aircraft", "tu160",
+                                                      "--probe-enemy-aircraft", "tu160",
+                                                      "--separation", "5", *attack), ticks=7200,
+                     check=tu160_no_air_to_air_checker(),
+                     notes="All Tu-160: the player's wing and the enemy wing fly the TU160.PT identity (four NK-32 "
+                           "class engines, twelve AS-16 in two bay rows, no gun, no air-to-air store) in a 2 v 2."))
+    out.append(probe("tu160-vs-su27-2v2", fight(2, 2, "--aircraft", "tu160",
+                                                "--probe-friendly-aircraft", "tu160",
+                                                "--probe-enemy-aircraft", "su27",
+                                                "--separation", "5", *attack), ticks=7200,
+                     check=tu160_no_air_to_air_checker(),
+                     notes="The Tu-160 wing against Su-27s: the Tu-160s fire nothing (no gun, the AS-16 refused "
+                           "against aircraft)."))
     # 14. The fixed acceptance probes.
     out.append(Scenario(name="ai-roster-probe", lane="ai", args=["--ai-roster-probe-ticks", "3600", "--no-audio"], timeout=1800))
     out.append(Scenario(name="ai-probe-matrix", lane="ai",

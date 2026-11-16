@@ -381,3 +381,17 @@ CHAFF 27 FLARE` of 30 and 30 (battery `flight-countermeasures-b1b`), and `--jamm
 and `SIG 60` with the bays open (`--flight-bay 1`). The radar gives the bomber the shared air-to-air modes only (no ground-mapping mode), as for the B-2
 and B-52. Not run: an RWR with a plotted emitter (no scripted path exists). See [the B-1B
 section](../formats/aircraft-variety.md#b-1b-lancer-ordnance-sensors-hud-and-cockpit-b1b-67-2026-11-16).
+
+## Tu-160 radar, jammer and the laser row, 2026-11-16 (T160-6, T160-7)
+
+`TU160R.SEE` (the record `B52R.SEE` renames) is reviewed `Preset::Transitional` and `TU160.ECM` (the
+`B52.ECM` and `AC130.ECM` record with 16 bytes changed) `Generation::Transitional`, strength 0.30
+(`sensors/profile.rs`, fitted). `--sensor-summary` reads: `Tu160: radar TU160R.SEE search 150 nmi 60x60
+deg track 150 nmi 45x45 deg look-down 0 TRANSITIONAL; infrared none; visual VIS300.SEE search 10 nmi
+150x120 deg track 5 nmi 150x120 deg; jammer TU160.ECM TRANSITIONAL strength 0.30; signature radar 100
+infrared 100` (both were `UNREVIEWED (not enabled)`). The radar window reads `RADAR OFF`, then `TWS 10
+... TRACK` on a contact; the weapons window `99 CHAFF`, `99 FLARE`, the RWR page `JAM` with the jammer on;
+the RCS page `SIG 100` closed and `SIG 150` with the bay open. `SU37L.SEE` is the built-in laser (the
+HUD box reads `LSR RDY` with an AS-16 selected), a fixed row with no pod body. The AS-16 now wants a
+surface target, so `a2g-antiship-tu160` flies it at the Krivak (150 of 500 left). See [the Tu-160
+section](../formats/aircraft-variety.md#tu-160-ordnance-sensors-hud-and-cockpit-t160-67-2026-11-16).

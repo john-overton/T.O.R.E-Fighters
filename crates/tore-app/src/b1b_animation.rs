@@ -555,7 +555,7 @@ impl Rig {
         // The belly polygons the fitted bays are cut from: whole, flat at the
         // belly plane and facing down, and between them they cover every corner
         // of the three openings.
-        let bays: Vec<Opening> = tore_sim::combat::bays::openings(ID).collect();
+        let bays: Vec<Opening> = tore_sim::combat::bays::openings(ID);
         if bays.len() != 3 {
             return Err("B1B bay openings missing".into());
         }
@@ -876,7 +876,7 @@ mod tests {
             std::array::from_fn(|k| p[k] - f64::from(RUDDER_HINGE[0][k]))
         };
         Rig {
-            bays: tore_sim::combat::bays::openings(ID).collect(),
+            bays: tore_sim::combat::bays::openings(ID),
             rudder: hinge_of(
                 RUDDER_HINGE[0],
                 RUDDER_HINGE[1],
