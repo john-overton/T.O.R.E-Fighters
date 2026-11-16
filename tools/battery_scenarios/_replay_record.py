@@ -611,6 +611,21 @@ def scenarios() -> list[Scenario]:
         )
     )
 
+    # The B-52 Stratofortress as the player and in both wings (slice B52-9): a 2 v 2 recorded three times, so the
+    # B52.PT identity (checkpoint code 47, eight engines, the bay and the slewed tail gun, 12 Harpoons on the
+    # pylons) round-trips through the recording, plays back with nothing missing and records the same twice. The
+    # tail guns fire in an all-B-52 fight, so the slewed rounds are in the recording too. Its bay-release
+    # recording is `replay-a2g-b52-ripple`.
+    out.append(
+        record_scenario(
+            "replay-rec-b52-2v2",
+            ["--ai-probe-ticks", "2400", "--aircraft", "b52", "--probe-friendly-aircraft", "b52",
+             "--probe-enemy-aircraft", "b52", "--probe-fight", "2:2", "--separation", "5",
+             "--probe-attack", "300:10"],
+            timeout=500,
+        )
+    )
+
     # Every imported aircraft as the enemy and as the player.
     for ac in AIRCRAFT:
         out.append(
