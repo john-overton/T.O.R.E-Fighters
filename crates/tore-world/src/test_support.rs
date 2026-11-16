@@ -367,6 +367,7 @@ pub fn combat_fixture(guided: bool) -> live::State {
             aircraft: AircraftId::F18,
             strike_class: tore_sim::models::strike_class::StrikeClass::Fighter,
             stations: vec![Station {
+                slew: Default::default(),
                 weapon: w,
                 mount: [0.; 3],
                 count: 11,

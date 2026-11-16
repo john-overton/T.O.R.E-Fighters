@@ -67,6 +67,7 @@ fn carrying_as(weapon: Weapon, count: u16, class: StrikeClass) -> State {
     config.stations = vec![
         gun,
         Station {
+            slew: Default::default(),
             weapon,
             mount: [0.; 3],
             count,

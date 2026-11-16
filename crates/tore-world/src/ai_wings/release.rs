@@ -317,6 +317,7 @@ mod tests {
             store: None,
             count: 32,
             weight_class: 160,
+            slew: [0; 4],
         };
         let (mount, rack) = hardpoints::placed_on(AircraftId::B2, 5, &row, None);
         config.stations[0].mount = mount;
@@ -357,6 +358,7 @@ mod tests {
             store: None,
             count: 9,
             weight_class: 70,
+            slew: [0; 4],
         };
         let (mount, rack) = hardpoints::placed_on(AircraftId::B52, 5, &row, None);
         config.stations[0].mount = mount;

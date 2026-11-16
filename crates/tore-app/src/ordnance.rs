@@ -2267,10 +2267,11 @@ pub fn validate_sources(
                 }
                 let gun_station =
                     &gun.state.own().configuration().stations[gun.state.own().selected];
+                let (gun_launcher, gun_mount) = gun_station.gun_view(&launcher);
                 let pipper = tore_sim::combat::gunsight::solve(
                     &gun_station.weapon,
-                    &launcher,
-                    gun_station.gun_mount(),
+                    &gun_launcher,
+                    gun_mount,
                     None,
                 )?
                 .ok_or_else(|| format!("{id:?}: imported gun has no 1000-foot sight solution"))?;
@@ -2880,6 +2881,7 @@ mod tests {
                     store: Some(if i == 2 { "M61.JT" } else { "AIM9M.JT" }.into()),
                     count: if i == 2 { 500 } else { 4 },
                     weight_class: 0,
+                    slew: [0; 4],
                 })
                 .collect(),
         };
@@ -3010,6 +3012,7 @@ mod tests {
             store: Some(tank.source.clone()),
             count: 2,
             weight_class: 0,
+            slew: [0; 4],
         }];
         ui.loadout.configuration.refresh_tanks().unwrap();
         ui.tanks = vec![tank];
@@ -3063,6 +3066,7 @@ mod tests {
                     store: Some(tank.source.clone()),
                     count: 2,
                     weight_class: 0,
+                    slew: [0; 4],
                 }
             };
             ui.loadout.tank_hardpoints.push(source);

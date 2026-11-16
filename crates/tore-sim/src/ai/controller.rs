@@ -332,6 +332,9 @@ pub struct StationView {
     pub requires_sensor: bool,
     pub employment_zone: Option<tore_formats::weapons::Zone>,
     pub mount: [f64; 3],
+    /// The mount's rest direction and arcs ([`crate::combat::slew`]): the
+    /// nose line unless this is a slewed gun (the B-52's tail gun).
+    pub slew: crate::combat::slew::Slew,
     pub damage_vs_category: f64,
     /// Nominal store speed, for the fitted lead prediction.
     pub store_speed: ScalarSpeed,
@@ -342,10 +345,15 @@ pub struct StationView {
 
 /// Mount-relative geometry of one store against one target.
 struct MountGeometry {
+    /// The mount's own frame (the aircraft's for every store but a slewed
+    /// gun).
     basis: crate::attitude::Basis,
     origin: [f64; 3],
     range: f64,
     error: f64,
+    /// Whether the target is inside a slewed gun's arcs (always true for
+    /// any other store).
+    in_arc: bool,
 }
 
 impl StationView {
@@ -363,6 +371,10 @@ impl StationView {
         });
         let delta = crate::combat::missiles::sub(target.position, origin);
         let range = crate::combat::missiles::length(delta);
+        // A slewed gun (the B-52's tail gun) measures from its own rest
+        // direction; every other store from the nose, as it always did.
+        let body = basis;
+        let basis = self.slew.basis(body);
         let forward = crate::attitude::dot(delta, basis.forward);
         let right = crate::attitude::dot(delta, basis.right);
         let up = crate::attitude::dot(delta, basis.up);
@@ -376,6 +388,7 @@ impl StationView {
             origin,
             range,
             error,
+            in_arc: !self.slew.is_slewed() || self.slew.contains(body, delta),
         }
     }
 
@@ -419,11 +432,14 @@ impl StationView {
             origin,
             range,
             error,
+            in_arc,
+            ..
         } = self.mount_geometry(own, target);
         let permitted = self.energy_target.is_none_or(|id| id == Some(target.id))
             && self.infrared_fit(origin, target)
             && range >= self.minimum_range_ft
             && self.maximum_range_ft.is_none_or(|max| range <= max)
+            && in_arc
             && self.employment_limit_deg.is_none_or(|limit| error <= limit)
             && self.employment_zone.is_none_or(|zone| {
                 crate::combat::missiles::geometry(&zone, origin, basis, target.position, None)
@@ -444,6 +460,8 @@ impl StationView {
             origin,
             range,
             error,
+            in_arc,
+            ..
         } = self.mount_geometry(own, target);
         EmploymentCheck {
             range_ft: range,
@@ -451,7 +469,8 @@ impl StationView {
             below_minimum_range: !(range >= self.minimum_range_ft),
             beyond_maximum_range: self.energy_target.is_some_and(|id| id != Some(target.id))
                 || !self.maximum_range_ft.is_none_or(|max| range <= max),
-            beyond_angle_limit: !self.employment_limit_deg.is_none_or(|limit| error <= limit),
+            beyond_angle_limit: !in_arc
+                || !self.employment_limit_deg.is_none_or(|limit| error <= limit),
             outside_zone: !self.infrared_fit(origin, target)
                 || !self.employment_zone.is_none_or(|zone| {
                     crate::combat::missiles::geometry(&zone, origin, basis, target.position, None)
@@ -2069,6 +2088,9 @@ impl Controller {
                                 && g.solution.is_some()
                                 && frame.stations.iter().any(|s| {
                                     s.station == g.station
+                                        // A slewed gun swings its own barrel:
+                                        // it never turns the aircraft to lay it.
+                                        && !s.slew.is_slewed()
                                         && target.is_some_and(|t| {
                                             matches!(
                                                 s.verdict(&frame.own, &t, class),
@@ -3835,6 +3857,7 @@ mod tests {
                 targets: vec![enemy(2, [0.0, 20000.0, 8000.0])],
                 events: Vec::new(),
                 stations: vec![StationView {
+                    slew: Default::default(),
                     station: StationId(0),
                     guided: true,
                     capability: StoreCapability::AIR_TO_AIR_MISSILE,

@@ -173,6 +173,7 @@ fn a_fixed_pod_draws_a_fitted_body_and_an_internal_sensor_does_not() {
         store: Some("PAVESPK.SEE".into()),
         count: 1,
         weight_class: 0,
+        slew: [0; 4],
     });
     let config = Configuration::from_source(&profile, |name| {
         map.get(name)

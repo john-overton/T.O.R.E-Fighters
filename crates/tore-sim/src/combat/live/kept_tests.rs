@@ -58,6 +58,7 @@ fn scene() -> State {
     config.stations = vec![
         gun,
         Station {
+            slew: Default::default(),
             weapon: gbu10(),
             mount: [0.; 3],
             count: 4,

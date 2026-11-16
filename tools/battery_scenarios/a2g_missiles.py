@@ -220,6 +220,25 @@ def antiship_problems(output: str) -> list[str]:
     return problems
 
 
+def antiship_b52_problems(output: str) -> list[str]:
+    """B52-6 (2026-11-15): two AGM-84E from the B-52's pylons (station 1 of the run) at the Krivak:
+    designated on the A-G page through its radar, launched, seeker active, the ship hit."""
+    parts = runs(output)
+    if len(parts) != 1:
+        return [f"{len(parts)} runs finished, want 1"]
+    run, label, problems = parts[0], "B-52 AGM-84E", []
+    designated = DESIGNATED.search(run)
+    if designated is None or designated.group(1) != KRIVAK:
+        problems.append(f"{label}: the Krivak was not designated on the A-G page")
+    launch = _launch(run, label, problems)
+    if launch and launch.group(3) != KRIVAK:
+        problems.append(f"{label}: launched at {launch.group(3)}, want the Krivak")
+    end = _end(run, label, problems)
+    if end and int(end.group(3)) >= int(end.group(4)):
+        problems.append(f"{label}: the Krivak was not hit ({end.group(3)}/{end.group(4)})")
+    return problems
+
+
 def sarh_problems(output: str) -> list[str]:
     parts = runs(output)
     if len(parts) != 2:
@@ -438,6 +457,13 @@ def scenarios() -> list[Scenario]:
             then=[Step(fleet + ["--aircraft", "rafale", "--load", "AM39"], timeout=300)],
             check=antiship_problems,
             notes="Harpoon and Exocet at the Krivak on the A-G track.",
+        ),
+        Scenario(
+            name="a2g-antiship-b52", lane="flight",
+            args=fleet + ["--aircraft", "b52", "--load", "AGM84E", "--station", "1", "--count", "2"],
+            timeout=300,
+            check=antiship_b52_problems,
+            notes="B52-6: two AGM-84E from the B-52's underwing pylons at the Krivak, designated through the B-52's radar.",
         ),
         Scenario(
             name="a2g-sarh", lane="flight",

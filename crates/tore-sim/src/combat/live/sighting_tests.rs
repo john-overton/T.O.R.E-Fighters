@@ -253,6 +253,7 @@ fn loadout() -> crate::combat::loadout::Loadout {
         store: None,
         count: 4,
         weight_class: 32,
+        slew: [0; 4],
     };
     crate::combat::loadout::Loadout {
         aircraft: config.aircraft,

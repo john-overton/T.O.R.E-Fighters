@@ -187,6 +187,12 @@ pub struct Hardpoint {
     pub store: Option<String>,
     pub count: i32,
     pub weight_class: i32,
+    /// `slewH`, `slewP`, `slewLimitH`, `slewLimitP` of the record: where the
+    /// mount points at rest and the half-arc either side, 182 units a degree
+    /// ([`crate::surface_unit::ANGLE_UNITS_PER_DEGREE`]). A forward gun reads
+    /// zero heading; the B-52's tail gun 32,760 (180 degrees), 5,460 (30).
+    /// Rows the game adds read zero.
+    pub slew: [i32; 4],
 }
 /// Reviewed retail identities and explicit opinionated runtime variants.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1277,6 +1283,12 @@ impl Aircraft {
                 store: resolve(&f["defaultTypeName"])?,
                 count: f["maxItems"].number()?,
                 weight_class: f["maxWeight"].number()?,
+                slew: [
+                    f["slewH"].number()?,
+                    f["slewP"].number()?,
+                    f["slewLimitH"].number()?,
+                    f["slewLimitP"].number()?,
+                ],
             });
         }
         stations::append(id, &mut hardpoints);

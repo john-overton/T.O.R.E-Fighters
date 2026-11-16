@@ -1071,7 +1071,8 @@ fn other_round(
 /// Where a round of `station` leaves an aircraft flying as `launcher`, and
 /// the line it leaves along before its spread: an AC-130 gun (its `slot`)
 /// from the tip of its barrel along the barrel, trained as `aim` says (the
-/// host's [`gunship::muzzle`] and [`gunship::direction`]); any other gun
+/// host's [`gunship::muzzle`] and [`gunship::direction`]); a slewed gun (the
+/// B-52's tail gun) from its mount along its rest direction; any other gun
 /// from its mount along the nose. A barrel with no train drawn (zero, which
 /// no gun's arc reaches) points as its mesh lies, as the drawn barrel and
 /// its flash do.
@@ -1098,7 +1099,7 @@ fn gun_line(
         .muzzle(slot),
         None => (
             gunship::world_mount(launcher, station.mount),
-            launcher.basis.forward,
+            station.fire_direction(launcher.basis),
         ),
     }
 }

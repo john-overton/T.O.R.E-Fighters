@@ -150,6 +150,7 @@ fn station_view(
     mount: [f64; 3],
 ) -> StationView {
     StationView {
+        slew: Default::default(),
         station: StationId(station),
         guided: true,
         capability: StoreCapability::AIR_TO_AIR_MISSILE,

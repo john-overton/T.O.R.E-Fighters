@@ -434,8 +434,38 @@ pub struct Station {
     pub internal: bool,
     /// Its source location and pairing (B3).
     pub rack: super::hardpoints::Rack,
+    /// Where an aircraft gun points at rest and how far it swings: the
+    /// record's slew words ([`super::slew`]), read only for an aircraft gun
+    /// (not the AC-130's trained mounts, not a store). A forward gun and
+    /// every other station carry the default, the nose line.
+    pub slew: super::slew::Slew,
 }
 impl Station {
+    /// The line a round of this station leaves along, an aircraft in `body`:
+    /// the nose for every forward gun and store, the mount's rest direction
+    /// for a slewed gun ([`super::slew`]). The one place the fire direction
+    /// of an aircraft gun is read.
+    pub fn fire_direction(&self, body: Basis) -> Vector {
+        self.slew.direction(body)
+    }
+    /// The launcher as this gun sees it: its basis turned to the mount's
+    /// rest direction, and the mount's offset re-expressed in that basis so
+    /// the muzzle is the same point. A forward gun gets the launcher and
+    /// mount back unchanged. The sights and the gunnery solver read their
+    /// line from the launcher's forward, so they take this view.
+    pub fn gun_view(&self, launcher: &Launcher) -> (Launcher, Vector) {
+        let mount = self.gun_mount();
+        if !self.slew.is_slewed() {
+            return (*launcher, mount);
+        }
+        (
+            Launcher {
+                basis: self.slew.basis(launcher.basis),
+                ..*launcher
+            },
+            self.slew.mount_in_frame(launcher.basis, mount),
+        )
+    }
     /// Where the store this station releases next leaves, feet right, up
     /// and forward of the aircraft, when `units_after` whole releases remain
     /// once it has gone: where that store hangs, on its side of a paired
@@ -1001,6 +1031,7 @@ impl Configuration {
                 store: None,
                 count: 1,
                 weight_class: 0,
+                slew: [0; 4],
             };
             let (mount, mut rack) = place(pod.row, &row);
             rack.paired = false;
@@ -1168,10 +1199,19 @@ impl Configuration {
                 return Err(super::invalid("unreviewed live-fire station"));
             }
             let (mount, rack) = place(index, h);
+            // A slewed aircraft gun (the B-52's tail gun) points where its
+            // record says; the AC-130's trained mounts have their own
+            // machinery and every other station keeps the nose line.
+            let slew = if is_aircraft_gun(&weapon) && !super::gunship::has_linked_guns(a.id) {
+                super::slew::Slew::from_record(h.slew)
+            } else {
+                Default::default()
+            };
             stations.push(Station {
                 weapon,
                 mount,
                 rack,
+                slew,
                 count: h.count as u16,
                 // Source bit 8 fixes the loading slot; the reviewed SUU16 pod
                 // is still separate external hardware rather than an internal gun.
@@ -1251,6 +1291,7 @@ impl Configuration {
                     weapon,
                     mount,
                     rack,
+                    slew: Default::default(),
                     count: 0,
                     internal: false,
                 });
@@ -7476,6 +7517,7 @@ mod tests {
                 store: Some("PAVEWAY.JT".into()),
                 count: 4,
                 weight_class: 20,
+                slew: [0; 4],
             }],
             tank_hardpoints: vec![],
             cheat: false,
@@ -7547,6 +7589,7 @@ mod tests {
                 store: None,
                 count: 1,
                 weight_class: 0,
+                slew: [0; 4],
             }],
             tank_hardpoints: vec![],
             cheat: false,
@@ -7628,6 +7671,7 @@ mod tests {
                     store: None,
                     count,
                     weight_class: weight,
+                    slew: [0; 4],
                 }],
                 tank_hardpoints: vec![],
                 cheat: false,
@@ -7676,6 +7720,7 @@ mod tests {
                 store: Some(store.into()),
                 count,
                 weight_class,
+                slew: [0; 4],
             },
         )
         .to_vec();
@@ -7743,6 +7788,7 @@ mod tests {
             store: None,
             count: 2,
             weight_class: 4,
+            slew: [0; 4],
         };
         let mut config = fixture(false).own().configuration().clone();
         let mut weapon = config.stations[0].weapon.clone();
@@ -7837,6 +7883,7 @@ mod tests {
                     _ => count,
                 },
                 weight_class: limit,
+                slew: [0; 4],
             };
             assert_eq!(
                 loading::Station::from_source(&h)
@@ -7915,6 +7962,7 @@ mod tests {
             store: Some(tank.source.clone()),
             count: 2,
             weight_class: 0,
+            slew: [0; 4],
         };
         let mut config = fixture(false).own().configuration().clone();
         config.stations.clear();
@@ -8232,6 +8280,7 @@ mod tests {
                 store: None,
                 count: 4,
                 weight_class: 0,
+                slew: [0; 4],
             }],
             tank_hardpoints: vec![],
             cheat: false,
@@ -8271,6 +8320,7 @@ mod tests {
             store: Some(store.source.clone()),
             count: 2,
             weight_class: 0,
+            slew: [0; 4],
         };
         let mut config = fixture(false).own().configuration().clone();
         config.stations.clear();
@@ -8558,6 +8608,7 @@ mod tests {
                 aircraft: AircraftId::F18,
                 strike_class: StrikeClass::Fighter,
                 stations: vec![Station {
+                    slew: Default::default(),
                     weapon: w,
                     mount: [0.; 3],
                     count: 11,
@@ -9958,6 +10009,7 @@ mod tests {
             store: Some("AIM120.JT".into()),
             count: 4,
             weight_class: 10,
+            slew: [0; 4],
         };
         let mut load = Loadout {
             aircraft: AircraftId::F18,
@@ -10033,6 +10085,7 @@ mod tests {
                 store: Some(configuration.stations[0].weapon.source.clone()),
                 count: capacity,
                 weight_class: 0,
+                slew: [0; 4],
             };
             let mut load = Loadout {
                 aircraft: AircraftId::F18,
@@ -10138,6 +10191,7 @@ mod tests {
                 store: Some("M61.JT".into()),
                 count: 1000,
                 weight_class: 0,
+                slew: [0; 4],
             }],
         };
         let original = load.clone();
@@ -12874,6 +12928,102 @@ mod pair_tests {
         assert!(strikes.iter().all(|k| k.owner == 0 && k.victim == 1));
         assert!(!strikes.is_empty());
         assert!(s.ownship(0).unwrap().shots > 0);
+    }
+
+    /// B52-6: the B-52's tail gun record (`slewH` 32,760, 30 degree arcs) as a
+    /// station's slew.
+    fn tail_gun() -> super::super::slew::Slew {
+        super::super::slew::Slew::from_record([32_760, 0, 5_460, 5_460])
+    }
+
+    /// B52-6: a slewed gun fires along its mount's rest direction: with the
+    /// shooter flying away from the other aircraft, an aft mount hits it
+    /// and the same gun on a forward mount does not.
+    #[test]
+    fn a_slewed_gun_fires_astern_and_a_forward_gun_does_not() {
+        let behind = |slew: super::super::slew::Slew| {
+            let (mut s, mut l) = pair(600.);
+            s.own_mut().config.stations[0].weapon.source = "M61.JT".into();
+            s.own_mut().config.stations[0].slew = slew;
+            // The shooter now faces away from the other aircraft, which
+            // flies behind it.
+            l[0].basis = Basis::new(std::f64::consts::PI, 0., 0.);
+            l[0].velocity = l[0].basis.forward.map(|v| v * 300.);
+            l[1].basis = Basis::new(std::f64::consts::PI, 0., 0.);
+            l[1].velocity = l[1].basis.forward.map(|v| v * 300.);
+            let mut events = Vec::new();
+            for _ in 0..300 {
+                events.extend(step(&mut s, &l, [true, false]));
+            }
+            let first = s.projectiles.first().map(|p| p.direction);
+            let hit = events
+                .iter()
+                .any(|e| matches!(e, Event::OwnshipDamaged { aircraft: 1, .. }));
+            (hit, first)
+        };
+        let (hit, direction) = behind(tail_gun());
+        assert!(hit, "the tail gun hits the aircraft behind it");
+        if let Some(direction) = direction {
+            // The shooter faces -z; its rounds leave toward +z.
+            assert!(direction[2] > 0.99, "{direction:?}");
+        }
+        let (hit, _) = behind(Default::default());
+        assert!(!hit, "a forward gun fires away from the aircraft behind it");
+    }
+
+    /// B52-6: a forward gun is exactly as it was: its rounds leave along the
+    /// nose, its sight view is the launcher and mount unchanged, even when
+    /// the record's pitch word is not zero (the helicopters' chain guns).
+    #[test]
+    fn a_forward_gun_keeps_the_nose_line_and_its_sight_view() {
+        let (mut s, l) = pair(600.);
+        s.own_mut().config.stations[0].weapon.source = "M61.JT".into();
+        s.own_mut().config.stations[0].slew =
+            super::super::slew::Slew::from_record([0, -3_640, 8_190, 8_190]);
+        let station = &s.own().config.stations[0];
+        assert_eq!(station.fire_direction(l[0].basis), l[0].basis.forward);
+        let (view, mount) = station.gun_view(&l[0]);
+        assert_eq!(view.basis, l[0].basis);
+        assert_eq!(mount, station.gun_mount());
+        let mut events = Vec::new();
+        for _ in 0..300 {
+            events.extend(step(&mut s, &l, [true, false]));
+        }
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::OwnshipDamaged { aircraft: 1, .. }))
+        );
+    }
+
+    /// B52-6: the gun's sight follows the mount: its pipper is astern for a
+    /// tail gun, and the muzzle is the same point from either view.
+    #[test]
+    fn a_slewed_guns_sight_view_points_astern_from_the_same_muzzle() {
+        let (mut s, l) = pair(600.);
+        s.own_mut().config.stations[0].weapon.source = "M61.JT".into();
+        s.own_mut().config.stations[0].mount = [0., 2., -92.];
+        s.own_mut().config.stations[0].slew = tail_gun();
+        let station = &s.own().config.stations[0];
+        let (view, mount) = station.gun_view(&l[0]);
+        let place = |launcher: &Launcher, mount: Vector| -> Vector {
+            std::array::from_fn(|i| {
+                launcher.position[i]
+                    + launcher.basis.right[i] * mount[0]
+                    + launcher.basis.up[i] * mount[1]
+                    + launcher.basis.forward[i] * mount[2]
+            })
+        };
+        let body = place(&l[0], station.gun_mount());
+        let viewed = place(&view, mount);
+        for i in 0..3 {
+            assert!((body[i] - viewed[i]).abs() < 1e-6);
+        }
+        let solution = super::super::gunsight::solve(&station.weapon, &view, mount, None)
+            .unwrap()
+            .expect("a 1,000 foot pipper");
+        // The shooter faces +z; the pipper is 1,000 ft astern of the muzzle.
+        assert!(solution.point[2] < body[2] - 900., "{:?}", solution.point);
     }
 
     #[test]

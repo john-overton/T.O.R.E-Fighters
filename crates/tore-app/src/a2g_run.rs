@@ -738,6 +738,7 @@ fn fit_store(
             .get(name)
             .ok_or_else(|| format!("missing {name}"))?;
         config.stations.push(tore_sim::combat::live::Station {
+            slew: Default::default(),
             weapon: Weapon::parse(name, bytes)?,
             mount: [0., -4., 0.],
             count: o.count.unwrap_or(1),

@@ -143,6 +143,11 @@ impl Preset {
             "F4BR.SEE" | "MIG21R.SEE" | "MIG27R.SEE" | "F104R.SEE" => Some(Self::Basic),
             "F14R.SEE" | "F4JR.SEE" | "AC130R.SEE" | "AV8R.SEE" | "YAK141R.SEE" | "A7R.SEE"
             | "A10R.SEE" => Some(Self::Transitional),
+            // The B-52's radar (B52-7, 2026-11-15, fitted, agent decision):
+            // the Tu-160's record renamed, a long-range search set of the
+            // AC-130's class (Transitional). Without it the record decodes
+            // as unreviewed and the B-52 flew with no radar at all.
+            "B52R.SEE" => Some(Self::Transitional),
             "F18R.SEE" | "MIG29R.SEE" | "SU24R.SEE" | "SU27R.SEE" | "F22R.SEE" | "F15R.SEE"
             | "E3R.SEE" | "E2R.SEE" | "MIG31R.SEE" => Some(Self::Advanced),
             _ => None,
@@ -728,6 +733,7 @@ mod tests {
                 store: Some((*store).into()),
                 count: 1,
                 weight_class: 0,
+                slew: [0; 4],
             })
             .collect();
         a
@@ -820,6 +826,15 @@ mod tests {
             summary.contains("A6.ECM UNREVIEWED (not enabled)"),
             "{summary}"
         );
+    }
+
+    /// B52-7: the B-52's radar record has its preset, so it is enabled.
+    #[test]
+    fn the_b52_radar_record_is_reviewed_transitional() {
+        assert_eq!(Preset::for_record("B52R.SEE"), Some(Preset::Transitional));
+        assert_eq!(Preset::for_record("b52r.see"), Some(Preset::Transitional));
+        // The Tu-160's record it renames stays unreviewed until its own slice.
+        assert_eq!(Preset::for_record("TU160R.SEE"), None);
     }
 
     #[test]

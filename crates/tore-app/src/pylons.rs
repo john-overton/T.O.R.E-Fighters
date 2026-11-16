@@ -1471,6 +1471,7 @@ mod tests {
             store: None,
             count: i32::from(store.loaded),
             weight_class: 0,
+            slew: [0; 4],
         };
         let (_, placed) = tore_sim::combat::hardpoints::placed(&h, Some(&model));
         store.rack.over = placed.over;
@@ -1720,6 +1721,7 @@ mod tests {
             weapon.burst.actual_rounds_per_game = 1;
             let store = on_flat_wing(plain(mount, location, count));
             tore_sim::combat::live::Station {
+                slew: Default::default(),
                 weapon,
                 mount,
                 count,
