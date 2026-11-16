@@ -658,6 +658,15 @@ pub struct Configuration {
     pub fixed_pods: Vec<FixedPod>,
 }
 impl Configuration {
+    /// [`Self::set_wing_turn`] with the turn this aircraft's own swing spec
+    /// ([`super::swing::spec`]) gives at `speed_fps` with its flaps and gear
+    /// out (0 to 1; SWING-1): the host calls it every tick. An aircraft with
+    /// no swing wing is untouched.
+    pub fn set_wing_flight(&mut self, speed_fps: f64, flaps: f64, gear: f64) {
+        if let Some(spec) = super::swing::spec(self.aircraft) {
+            self.set_wing_turn(spec.turn(speed_fps, flaps, gear));
+        }
+    }
     /// Turn the swivelling wing stations ([`super::swing::swivels`]) with the
     /// swinging wing: every drawn rack on such a hardpoint is carried to where
     /// a wing turned `turn` radians ([`super::swing::wing_turn`]) puts it,
@@ -1138,6 +1147,19 @@ impl Configuration {
                 AircraftId::B52 => ["M61.JT", "AGM84E.JT"].contains(&name),
                 AircraftId::B2 => ["MK82.JT", "PAVEWA3.JT"].contains(&name),
                 AircraftId::F117 => ["PAVEWA3.JT"].contains(&name),
+                // Bomber batch B (BMB-B1, 2026-11-15): the retail default
+                // stores. The B-1B's retarded Mk 82 on its three bay rows,
+                // the Tu-160's AS-16 (Kh-15) on its two bay rows and the
+                // F-111F's GBU-28, Mk 82 six-pack and Maverick.
+                AircraftId::B1b => ["MK82AIR.JT"].contains(&name),
+                AircraftId::Tu160 => ["AS16.JT"].contains(&name),
+                AircraftId::F111 => ["GBU28.JT", "MK82P.JT", "AGM65G.JT"].contains(&name),
+                // Bomber batch C (BMB-C1, 2026-11-15): the retail default
+                // stores. The Tu-26's and Tu-95's 23 mm tail turret rows and
+                // AS-16 (Kh-15) rows, and the Su-34's AS-14, AT-12, AA-11
+                // and GSh-30-1 rows.
+                AircraftId::Tu26 | AircraftId::Tu95 => ["T23_1.JT", "AS16.JT"].contains(&name),
+                AircraftId::Su34 => ["AS14.JT", "AT12.JT", "AA11.JT", "GSH301.JT"].contains(&name),
             };
             if weapon.movement.acceleration > i32::MAX / 256
                 || weapon.movement.deceleration > i32::MAX / 256
@@ -2571,6 +2593,12 @@ impl Ownship {
     /// ([`Configuration::set_wing_turn`]); the host calls it every tick.
     pub fn set_wing_turn(&mut self, turn: f64) {
         self.config.set_wing_turn(turn);
+    }
+    /// [`Self::set_wing_turn`] with the turn this aircraft's own swing spec
+    /// ([`super::swing::spec`]) gives at `speed_fps` with its flaps and gear
+    /// out (SWING-1).
+    pub fn set_wing_flight(&mut self, speed_fps: f64, flaps: f64, gear: f64) {
+        self.config.set_wing_flight(speed_fps, flaps, gear);
     }
     /// Remember which stations hold something now (every tick, so a station
     /// that later runs dry is known to have been loaded).

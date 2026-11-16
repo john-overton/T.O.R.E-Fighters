@@ -86,14 +86,25 @@ pub const F117_REAL_FEET: [f64; 3] = [43. + 4. / 12., 65. + 11. / 12., 12. + 5. 
 /// moves from 61.6 to 68.4 degrees from the lateral axis (real about 67.5).
 pub const F117_SHAPE_SCALE: [f64; 3] = [0.7647, 1.0463, 0.8869];
 
+/// The F-111F's per-axis real-size factors (BMB-B1, 2026-11-15; coordinator
+/// first pass, BOMBERS-DECISIONS-B F111-2 and the F111-0 review, "F-111F
+/// gear" and "Size"). `f111.SH` has header exponent 9 (2/3 ft a unit, which
+/// `tore_sim::combat::debris::scale` carries), so these multiply that: x 0.859
+/// (the spread span 73.3 ft drawn against the real 63 ft), y 1.0 (the length
+/// 73.3 ft is already real) and z 0.827 (the gear-down height 20.7 ft against
+/// 17.1 ft). **Fitted** (agent derivation) for an **opinionated** choice (the
+/// Mirage and F-117 precedent); the outer panel is not cut.
+pub const F111_SHAPE_SCALE: [f64; 3] = [0.859, 1.0, 0.827];
+
 /// `[x, y, z]` factors for `id`'s shape, in shape-unit axes (x right, y
 /// forward, z up). `[1, 1, 1]` for every aircraft but the Mirage 2000, the
-/// Mirage F1 and the F-117A.
+/// Mirage F1, the F-117A and the F-111F.
 pub fn shape_axis_scale(id: AircraftId) -> [f64; 3] {
     match id {
         AircraftId::M2000 => M2000_SHAPE_SCALE,
         AircraftId::Mf1 => MF1_SHAPE_SCALE,
         AircraftId::F117 => F117_SHAPE_SCALE,
+        AircraftId::F111 => F111_SHAPE_SCALE,
         _ => IDENTITY,
     }
 }
@@ -128,7 +139,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_aircraft_but_the_two_mirages_and_the_f117_keeps_the_plain_shape_scale() {
+    fn every_aircraft_but_the_two_mirages_the_f117_and_the_f111_keeps_the_plain_shape_scale() {
         for id in AircraftId::ALL.into_iter().chain(AircraftId::SELECTABLE) {
             if id == AircraftId::M2000 {
                 assert_eq!(shape_axis_scale(id), M2000_SHAPE_SCALE);
@@ -138,6 +149,9 @@ mod tests {
                 assert!(!is_identity(id));
             } else if id == AircraftId::F117 {
                 assert_eq!(shape_axis_scale(id), F117_SHAPE_SCALE);
+                assert!(!is_identity(id));
+            } else if id == AircraftId::F111 {
+                assert_eq!(shape_axis_scale(id), F111_SHAPE_SCALE);
                 assert!(!is_identity(id));
             } else {
                 assert_eq!(shape_axis_scale(id), IDENTITY, "{id:?}");
@@ -187,6 +201,21 @@ mod tests {
         // The gear low point (21 units) follows the height factor.
         assert!((21. / 3. * F117_SHAPE_SCALE[2] - 6.208).abs() < 0.001);
         assert_eq!(right_up_forward(AircraftId::F117), [0.7647, 0.8869, 1.0463]);
+    }
+
+    #[test]
+    fn the_f111_factors_bring_the_shape_to_its_real_span_and_height() {
+        // BMB-B1: header scale 2/3 ft a unit; the spread span is 110 units
+        // (73.3 ft) against the real 63 ft, the gear-down height 31 units
+        // (20.7 ft) against 17.1 ft, the length already real.
+        let span = 110. * 2. / 3. * F111_SHAPE_SCALE[0];
+        assert!((span - 63.).abs() / 63. < 0.002, "{span}");
+        let height = 31. * 2. / 3. * F111_SHAPE_SCALE[2];
+        assert!((height - 17.1).abs() / 17.1 < 0.002, "{height}");
+        assert_eq!(F111_SHAPE_SCALE[1], 1.);
+        assert_eq!(right_up_forward(AircraftId::F111), [0.859, 0.827, 1.0]);
+        // The B-1B and the Tu-160 keep the plain scale.
+        assert!(is_identity(AircraftId::B1b) && is_identity(AircraftId::Tu160));
     }
 
     #[test]
