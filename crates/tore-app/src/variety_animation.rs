@@ -398,6 +398,37 @@ fn specification(id: Id) -> Option<Spec> {
                 &[(0x724c, Part::Gear, 22)],
                 2. / 3.,
             ),
+            // Bomber batch C interim rig specs (BMB-C1, 2026-11-15): each
+            // shape's exact CODE size, runtime face count and state words
+            // from the source reviews (docs/formats/aircraft-variety.md, the
+            // three 2026-11-15 batch C reviews). Only the gear word is
+            // mapped; the other words are pinned and unmapped, so each
+            // aircraft loads with the shared fitted gear law until its own
+            // rig slice.
+            // TU26.SH: six words (flames 0x7880, plates 0x788c, gear 0x7892,
+            // flap strips 0x789e and 0x78a4, rudder 0x78aa), gear adds 12
+            // faces; header exponent 10, so 4/3 ft a unit.
+            Id::Tu26 => (
+                26812,
+                310,
+                &[0x7880, 0x788c, 0x7892, 0x789e, 0x78a4, 0x78aa],
+                &[(0x7892, Part::Gear, 12)],
+                4. / 3.,
+            ),
+            // TU95.SH: one word (gear 0x33b0, six wheel plates; the four
+            // propeller discs are not a state word); header exponent 9, so
+            // 2/3 ft a unit.
+            Id::Tu95 => (9148, 155, &[0x33b0], &[(0x33b0, Part::Gear, 6)], 2. / 3.),
+            // SU34.SH: five words (afterburner plume 0x67c0, airbrake 0x67c6,
+            // gear 0x67cc, flaps 0x67d8 and 0x67de, the Su-35's layout), gear
+            // adds 8 faces; header exponent 8, so 1/3 ft a unit.
+            Id::Su34 => (
+                22506,
+                321,
+                &[0x67c0, 0x67c6, 0x67cc, 0x67d8, 0x67de],
+                &[(0x67cc, Part::Gear, 8)],
+                1. / 3.,
+            ),
             _ => return None,
         };
     Some(Spec {

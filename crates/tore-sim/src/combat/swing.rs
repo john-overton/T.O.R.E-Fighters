@@ -29,6 +29,9 @@
 //! have specs ([`B1B`], [`TU160`], [`F111F`], [`TU26`]) but no
 //! [`AircraftId`] yet, so [`spec`] does not return them: wiring one is one
 //! match arm there (batch B's identity slices).
+//! Update (BMB-C1, 2026-11-15): the Tu-26 has its identity, so [`spec`]
+//! returns [`TU26`] too (the B-1B and Tu-160 were wired by BMB-B1); only the
+//! F-111F's [`F111F`] is still unwired.
 use tore_formats::aircraft::AircraftId;
 
 /// Shape units to feet at the Tornado's header scale 2 (2/3 ft a unit).
@@ -619,7 +622,8 @@ pub fn spec(id: AircraftId) -> Option<&'static SwingSpec> {
         AircraftId::B1b => Some(&B1B),
         AircraftId::Tu160 => Some(&TU160),
         // AircraftId::F111F => Some(&F111F),
-        // AircraftId::Tu26 => Some(&TU26),
+        // BMB-C1 (2026-11-15): the Tu-26's identity exists, so it is wired.
+        AircraftId::Tu26 => Some(&TU26),
         _ => None,
     }
 }
@@ -1120,14 +1124,30 @@ mod tests {
             assert_eq!(spec.placement, Placement::NONE);
         }
         // Update (coordinator, 2026-11-15): the B-1B and Tu-160 are wired
-        // with their identities (BMB-B1); the F-111F and Tu-26 are not yet.
+        // with their identities (BMB-B1); the F-111F is not yet.
+        // Update (BMB-C1, 2026-11-15): the Tu-26 is wired with its identity.
         assert!(AircraftId::ALL.iter().all(|id| match spec(*id) {
             None => true,
             Some(s) => {
                 (id.source() == AircraftId::Tornado && s.name == TORNADO.name)
                     || (*id == AircraftId::B1b && s.name == B1B.name)
                     || (*id == AircraftId::Tu160 && s.name == TU160.name)
+                    || (*id == AircraftId::Tu26 && s.name == TU26.name)
             }
         }));
+        // The wired list: the Tornado (both versions), B-1B, Tu-160 and Tu-26.
+        let wired: Vec<AircraftId> = AircraftId::ALL
+            .into_iter()
+            .filter(|id| spec(*id).is_some())
+            .collect();
+        assert_eq!(
+            wired,
+            [
+                AircraftId::Tornado,
+                AircraftId::B1b,
+                AircraftId::Tu160,
+                AircraftId::Tu26
+            ]
+        );
     }
 }

@@ -9909,3 +9909,238 @@ The four specs are constants (`B1B`, `TU160`, `F111F`, `TU26`) with no identity 
 match arm there, written and commented out for each, once the aircraft has an `AircraftId`.
 `sweep_rate_dps` is `None` for all five: no source gives a rate and the drawn sweep is a pure
 function of speed. Nothing is drawn differently; the new aircraft's rigs are their own slices.
+
+## Bomber batch C identities (BMB-C1, 2026-11-15)
+
+Implementation, batch slice BMB-C1 (with BMB-C2 below, run together), Claude Sonnet.
+The three batch C source reviews above (T26-0, T95-0 and SU34-0, 2026-11-15) are now
+identities. `AircraftId` gains `Tu26`, `Tu95` and `Su34`, appended in that order after
+`F111`: `ALL` goes from 51 to 54 retail identities and `SELECTABLE` from 53 to 56 entries,
+append-only (batch rule B4), so nothing existing moved. Bindings and scales are the
+coordinator's first pass (`.local/m3-aircraft/BOMBERS-DECISIONS-C.md`, for John to review),
+applied as written.
+
+| | Tu-26 | Tu-95 | Su-34 |
+| --- | --- | --- | --- |
+| Record | `TU26.PT` | `TU95.PT` | `SU34.PT` |
+| Parse keys | `tu26`, `tu26.pt` | `tu95`, `tu95.pt` | `su34`, `su34.pt` |
+| Checkpoint code | 53 | 54 | 55 |
+| Wire position (place in `SELECTABLE`, 9 bits) | 53 | 54 | 55 |
+| Place in `ALL` | 51 | 52 | 53 |
+| `typeSize` | 660 (explicit arm, the default) | 660 (explicit arm) | 660 (explicit arm) |
+| Short / long name | `Tu-26` / `Tu- 26 Backfire-C` | `Tu-95` / `Tu- 95 Bear-H` | `Su-34` / `Su-34 Platypus` |
+| Shape stem | `TU26` | `TU95` | `SU34` |
+| HUD | `BMBROH.HUD` (the record's: the B-52's, the AC-130 module with seven bytes changed) | `BMBROH.HUD` | `SU33CC.HUD` (the record's: the MiG-29's, Su-25's and MiG-23's) |
+| Cockpit stem / picture | `AC130` / `~AC130H.PIC` | `AC130` / `~AC130H.PIC` | `SU33` / `~SU33H.PIC` (panel `~SU33_P.PIC`) |
+| Overlays | none (the AC-130's stem) | none | `~SU33_LH.PIC` and `~SU33_RH.PIC`, no centre (the Su-33 stem) |
+| PTS companion | none | none | none |
+| Radar / gun | `TU26R.SEE` / `T23_1.JT` | `TU95R.SEE` / `T23_1.JT` | `SU27R.SEE` / `GSH301.JT` |
+| Live-fire default stores | `T23_1`, `AS16` | `T23_1`, `AS16` | `AS14`, `AT12`, `AA11`, `GSH301` |
+| Strike class | Heavy (the rule: 273,370 lb) | Heavy (407,850 lb) | **Fighter** (the rule: 97,000 lb, +9 G, over 700 kt) |
+| Interim rig: CODE bytes / runtime faces | 26,812 / 310 | 9,148 / 155 | 22,506 / 321 |
+| State words | `7880 788c 7892 789e 78a4 78aa` | `33b0` | `67c0 67c6 67cc 67d8 67de` |
+| Gear word / faces added | `7892` +12 | `33b0` +6 | `67cc` +8 |
+| Gear low point (shape units) | 11 at 4/3 ft (14.67 ft) | 14 at 2/3 ft (9.33 ft) | 26 (the nose plate; the mains reach 25) at 1/3 ft (8.67 ft) |
+| Draw scale (`debris::scale`) | **4/3 ft a unit** (header exponent 10, as the F-14 and B-1B) | **2/3 ft a unit** (exponent 9, as the B-52) | 1/3 ft (exponent 8, the default; no entry) |
+| Per-axis real size (`aircraft_scale.rs`) | none (the mesh is 4 to 10 percent small, accepted) | none | none (1:1) |
+| Swing spec | **`swing::TU26` wired** | none | none |
+
+The wire identity is 9 bits since protocol 83, so 56 selectable identities use codes 0 to 55
+of 512 and appending three needs no protocol change. The three "code after the last identity
+is unknown" checkpoint tests moved from 53 to 56 (a new test, code 53 to 55, is
+`the_bomber_batch_c_round_trips_at_codes_53_to_55_and_shares_no_code`; the batch B test no
+longer asserts code 53 is unknown).
+
+**The Tu-26's swing wing is wired.** `swing::spec` returned the Tornado, B-1B and Tu-160; the
+commented `AircraftId::Tu26 => Some(&TU26)` arm is live, and the test that lists the wired
+aircraft (`the_tornados_spec_still_swivels_and_the_other_specs_only_where_they_say`) now
+expects the Tornado, B-1B, Tu-160 and Tu-26 (only the F-111F's spec is still unwired). Nothing
+draws the Tu-26's wing yet: the swing rig is its own slice (T26-3). The SWING-1 table above
+that says `swing::spec` returns only the Tornado's was already stale after batch B.
+
+**Interim choices (agent decisions 2026-11-15, until the cockpit and rig slices).**
+
+| Choice | Interim | Why |
+| --- | --- | --- |
+| HUD glass of the Tu-26 and Tu-95 | The AC-130 family's whole-picture aperture | As the B-52: they fly the same `~AC130H.PIC` through the same `bmbroh.HUD`. |
+| HUD glass of the Su-34 | The glass measured for the MiG-29, Su-25 and MiG-23 (`~SU33H.PIC`) | Decision Su-34 item 7: it follows the record (`su33cc.HUD`), "using the Su-33 family's already-measured glass". |
+| Pilot eyes | The default (no per-aircraft entry) | The fitted eyes (Tu-26 canopy, Tu-95 flight deck, Su-34) are the cockpit slices' (T26-7, T95-7, SU34-7). |
+| `ICO2SU34.PIC` | Nothing to add | The review found no Su-34 list icon. No code reads any `ICO2*.PIC` (the dependency closure never names one and no list screen loads it), so the Su-27's picture stands in by there being no per-aircraft picture at all. |
+| Rig | Gear word only; the other words pinned, unmapped | As batches A and B: the shared fitted gear law until each aircraft's rig slice. The Tu-95's propeller discs (four blur discs of eight coincident faces, no state word) are not mapped. `--animation-probe` reports the unmapped surfaces as required failures, the expected result. |
+| Ground alignment | The fighters' 0.7 default (the transports and B-52 use 0.4) | Flight tuning is each aircraft's X-8. |
+| Strike class | All three by the rule, `OVERRIDES` unchanged (one entry, `F111.PT`) | The Su-34 gets Fighter (the Flankers' class: the fighter passes plus the level run), acceptable for a Flanker strike variant. |
+| Tu-26 and Tu-95 tail gun | `T23_1.JT` is in `guns()` | The B-52's M61 precedent. The rear-facing mount is B52-6's; until it lands the tail guns fire along the nose like the B-52's did. |
+
+**Findings.**
+
+- `T23_1.JT` was "decoded only" in the JT-3 review (`unloaded_surface_weapons.rs`: no
+  imported aircraft mounts it). The Tu-26 and Tu-95 are exactly its two carriers, so that
+  retail test now expects them as carriers (and only them, `id.guns()` and the decoded rows
+  both). It stays out of `SUPPORTED_WEAPONS`, like the Gripen's BK27.
+- The Tu-26's bay row (flags `0x1500`, no default store) has no compatible default before
+  BMB-C2 gives it the active-radar bit (`AS16.JT` needs `0x20`): the audit stopped at
+  "TU26.PT source station 6 hides compatible AGM45.JT". With the bit the bay's empty selection
+  is the AS-16 and no `live.rs` fallback (the B-52's Mk 82) is needed.
+- The Su-34's fuselage and wing rows keep the retail designator bit (`0x07e5`), so the audit
+  gains two pod placements (80 to 82): one pod each on rows 6 and 7. Left as the record has
+  them (the decisions do not list it); clearing the bit on those two rows would bring the pin
+  back to 80. The same rows take tanks, 8 tank placements.
+- `stores_preview.rs` lists the three new aircraft (`tu26`, `tu95`, `su34`).
+- The `--help` line, `tore-extract --aircraft` and `tools/extract_assets.py` list the three
+  keys (54 reviewed retail aircraft).
+- None of the records is a parked target; `parked_aircraft.rs` is unchanged.
+
+**The shape reader needs no change.** `crates/tore-import/tests/bomber_batch_c.rs` loads
+`TU26.SH`, `TU95.SH` and `SU34.SH` with the current reader: 310, 155 and 321 runtime faces,
+the CODE sizes and state words above, and each gear word adds the reviews' plates (12, 6, 8).
+The same test reads the three records (type size 660) and every station row in order.
+
+**Audit pins.** See "Bomber batch C record and station corrections (BMB-C2)" below and
+[ordnance availability](../baselines/ordnance-availability.md): the two slices moved them
+together.
+
+## Bomber batch C record and station corrections (BMB-C2, 2026-11-15)
+
+Opinionated (coordinator first pass, `BOMBERS-DECISIONS-C.md`, for John to review),
+implemented by slice BMB-C2. Earlier sections stay as written for the retail state; this
+one records what the game now does. The behaviour and the sources of every changed number
+are in [aircraft records](../spec/aircraft-records.md#bomber-batch-c-record-corrections-tu-26-tu-95-su-34-bmb-c2-2026-11-15);
+the audit pins in [ordnance availability](../baselines/ordnance-availability.md).
+
+**Values (retail to game).**
+
+| Aircraft | Field | Retail | Game |
+| --- | --- | ---: | ---: |
+| Tu-26 | Empty weight, lb | 110,230 | 127,868 |
+| Tu-26 | Thrust, lbf (dry / afterburner) | 59,986 / 88,180 | 66,000 / 110,000 |
+| Tu-26 | Ceiling `maxAlt`, ft | 60,000 | 43,635 |
+| Tu-26 | 1 G fast edge at 36,000 ft, ft/s | 1,933 (1,145 kt) | 1,823 (1,080 kt) |
+| Tu-26 | Bay row 5 flags | `0x1500` | `0x1120` |
+| Tu-26 | Glove rows 7 and 8 capacity (AS-16) | 4 and 6 | 2 and 2 |
+| Tu-95 | Thrust, lbf | 355,080 | 129,000 (fitted) |
+| Tu-95 | Empty weight, lb | 264,550 | 198,415 |
+| Tu-95 | Internal fuel, lb | 100,000 | 148,150 |
+| Tu-95 | Maximum take-off, lb | 407,850 | 414,470 |
+| Tu-95 | Rows 5 and 6 (turrets), default | `T23_1.JT` x 2,000 each | none |
+| Tu-95 | Row 8 position (record units), flags, count, class | 27 / -35 / 35, `0x17e5`, 6, 160 | 36 / -6 / 35, `0x1025`, 10, 0 |
+| Su-34 | Empty weight, lb | 36,000 | 49,604 |
+| Su-34 | Internal fuel, lb | 20,000 | 26,676 |
+| Su-34 | Thrust, lbf (dry) | 40,755 | 33,800 |
+| Su-34 | 1 G fast edge, 36,000 and 49,500 ft, ft/s | 2,473 and 2,308 | 1,742 and 1,742 (Mach 1.8) |
+| Su-34 | Gun rounds | 150 | 180 |
+| Su-34 | Row 6 height (record units) | -30 | -18 |
+
+**The Tu-26's ceiling and speed edge, point by point (speed ft/s at altitude ft).** The
+F-117's way of moving the top vertices cannot lower a ceiling by 16,365 ft past the vertices
+under it (the 1 G polygon has points at 50,000 ft), so the polygons are cut at the new
+ceiling (`lower_ceiling`, the Tornado's, F-15E's and Gripen's way) and the speed cap is applied
+after.
+
+| Row | Retail | Game |
+| --- | --- | --- |
+| 1 G | 245@0, 309@19500, 423@38000, 591@50000, 870@60000, 1302@60000, 1712@50000, 1933@36000, 1010@0 | 245@0, 309@19500, 423@38000, 502@43635, 1812@43635, 1823@36000, 1010@0 |
+| 0 G | 180@0, 225@18000, 313@39000, 521@54000, 870@65000, 1337@65500, 1840@52750, 2084@36000, 1040@0 | 180@0, 225@18000, 313@39000, 454@49135, 1893@49135, 1974@36000, 1040@0 (ceiling 5,500 ft over the 1 G one, the record's step; speed step 151 ft/s over 1 G kept) |
+| -1, +2 | top 54,000 ft | cut at 43,635 ft (the fast side held to the 1 G edge) |
+| 3 | top 48,000 ft | cut at 43,635 ft |
+| -2, +4 | top 41,000 ft | unchanged |
+
+1,080 kt is 1,823 ft/s (Mach 1.88, `TU26.INF`). The trim applies only while `maxAlt` has been
+corrected, the 1 G and 0 G polygons top out at the retail altitudes and speeds (60,000 and
+65,500 ft; 1,933 and 2,084 ft/s). Sea level (598 kt, the cited Mach 0.86 is 567 kt) is not
+changed.
+
+**The Su-34 envelope.** Mach 1.8 above the tropopause (36,089 ft, sound 968.08 ft/s) is
+1,742 ft/s (1,032 kt, Wikipedia gives 1,900 km/h at altitude). The 1 G vertices at or above
+36,000 ft that are faster (2,308 at 49,500 ft, 2,473 at 36,000 ft) become 1,742; the 55,000
+ft vertex (1,704) is under it, and the 18,000 ft vertex (1,731) and sea level (1,250, 741 kt)
+stay. The 0 G polygon (2,417 at 52,000 ft, 2,600 at 36,000 ft) becomes 1,869 at both (the
+127 ft/s step over 1 G kept); every other row's fast side is held to the new 1 G edge.
+
+**Stations.**
+
+- Tu-26 bay row (flags `0x1500`, 8 stores, class 120, no default): the designator bit is
+  cleared (no pod on a bomb bay, B7) and the active-radar bit `0x20` set, so it takes the
+  Kh-15 (`AS16.JT`, which the real jet carries six of on a rotary launcher in the bay). The
+  same bit admits `AGM84A` and `AM39`, as on the B-52's bay rows; `AS15.JT` (the Kh-55
+  stand-in) stays refused (it needs `0x40`). The audit's empty selection for the row is the AS-16.
+- Tu-26 external rows: the real Kh-15 underwing count is four ("four more underwing"). A
+  default store's capacity is its row's count (`Loadout::capacity`, and the mission validator
+  expects the default count), so the default cannot be capped without the capacity. Rows 7 and
+  8 (the glove pairs, four and six) are cut to two each, one a side, four in all; the
+  intake-trunk pair (row 6, two) keeps its record default. The external default is therefore
+  six AS-16, four of them under the wings, and the glove rows' bomb capacity falls from 4 and
+  6 to 2 and 2. (A first attempt with `default_counts`, which changes the starting quantity
+  only, failed the mission validator: "Station 3 cannot hold 4 AS16.JT".)
+- Tu-95: rows 5 and 6 hold nothing (indices unchanged; the rows' mask `0x180a` is a fixed
+  gun row, so nothing can be loaded there). Row 8, the wing pylons: x 36 record units
+  (12 ft) out, up -6 (2 ft below the reference point; the wing underside there is 0.7 to 1.3
+  ft up and the gear's ground plane 9.3 ft down), forward 35 as the record; the mask `0x1025`
+  (reviewed row, pair, base, active-radar) plus `weapon_allowed` (every weapon but `AS16.JT`
+  refused, which also keeps out the Harpoon the `0x20` bit would admit); capacity ten (five
+  a side, the MS16's ten underwing missiles); weight class 0, because the class byte holds
+  255 at most (nine AS-16, 255 x 100 / 2,640) and ten need 264. `AS15.JT` stays refused.
+  The tail turret (row 3) stays where it is; moving it to the tail cone and facing it aft is
+  B52-6's mount and T95-5's.
+- Su-34: gun 180 rounds. Row 6 (four `AS14.JT`, fuselage pair) moves from -30 to -18 record
+  units (10 ft to 6 ft below the reference point). The retail point is 1.7 ft under the main
+  wheels' bottoms (-25 shape units); the new one is 2.3 ft above them and 0.7 ft under the
+  nacelle belly (-16 units). A `--stores-preview` frame shows the four missiles hanging
+  level with the intake bottoms. The two real stations with no row stay unplaced.
+
+**Fuel over the maximum take-off weight.** For none of the three is empty plus full fuel
+over the maximum (Tu-26 127,868 + 110,230 = 238,098 against 273,370; Tu-95 346,565 against
+414,470; Su-34 76,280 against 97,000; compile-time assertions in `aircraft_corrections.rs`).
+The default loads add 15,840 lb of AS-16 on the Tu-26 and Tu-95 and about 7,000 lb on the
+Su-34 (totals computed by hand, about 254,000, 362,000 and 83,200 lb), so all three start
+with a full tank under the existing cap; free flight and `--headless-flight` use the model's
+full tank (110,230, 148,150 and 26,676 lb at the start of the 1,200 tick runs).
+
+**What a player notices (`performance_probe`, clean, local records, empty weight with no
+fuel counted; before and after under `.local/m3-aircraft/checks/BMB-C2/`, `run_probes.sh`;
+"before" is the identity with the retail record).** Schedules: Tu-26 climb 350 KEAS then Mach
+0.85, Tu-95 250 KEAS then Mach 0.70 (the C-130-class 300 KEAS would pass the record's 355 kt sea
+level edge), Su-34 the fighter default (450 kt then Mach 0.9); turns at 250, 350 and 450 kt
+true (Tu-26), 200, 260 and 330 kt (Tu-95) held at speed, and Mach 0.7, 0.9 and 1.1 (Su-34);
+level acceleration from 364 and 316 kt (sea level and 36,000 ft).
+
+| Aircraft | Quantity | Before | After |
+| --- | --- | --- | --- |
+| Tu-26 | Level top speed, afterburner, sea level / 36,000 ft (thrust-limited, under the edges) | 524.6 kt / 1,003.8 kt (Mach 1.75) | 533.2 kt / 962.2 kt (Mach 1.68) |
+| Tu-26 | Level top speed, military power, 36,000 ft | 827.5 kt | 745.0 kt |
+| Tu-26 | Climb: time to 5,000 / 36,000 ft; highest | 54 s / 286 s; 51,881 ft | 48 s / 253 s; 44,354 ft |
+| Tu-26 | Sustained turn at 1,000 ft, 350 kt; 15,000 ft, 250 kt | 2.69 G; 1.06 G | 2.68 G; 1.24 G |
+| Tu-26 | Fuel flow implied TSFC, dry / afterburner (lb/(lbf h)) | 0.600 / 2.694 | 0.545 / 2.160 |
+| Tu-95 | Level top speed, military power, sea level / 36,000 ft | 320.7 kt / 417.0 kt | 295.2 kt / 383.6 kt |
+| Tu-95 | Climb: time to 5,000 / 20,000 ft; highest | 64 s / 210 s; 28,453 ft | 153 s / 1,348 s; 20,299 ft |
+| Tu-95 | Sustained turn at 1,000 ft, 260 kt; 15,000 ft, 330 kt | 2.70 G; 2.70 G | 2.31 G; 1.24 G |
+| Tu-95 | Military-power endurance (tank, 4 lb/s) | 417 min | 617 min |
+| Su-34 | Level top speed, afterburner, sea level / 36,000 ft | 655.1 kt / 1,295.9 kt (Mach 2.26) | 657.3 kt / 915.9 kt (Mach 1.60) |
+| Su-34 | Climb, afterburner, Mach 0.9 schedule: time to 5,000 / 36,000 ft; highest | 39 s / 113 s; 63,787 ft | 47 s / 144 s; 62,503 ft |
+| Su-34 | Sustained turn at 1,000 ft and 15,000 ft, Mach 0.9 | 2.93 G; 4.81 G | 2.46 G; 3.63 G |
+| Su-34 | Endurance, military / afterburner (tank, 5 and 30 lb/s) | 66.7 / 11.1 min | 88.9 / 14.8 min |
+
+The Tu-95 is the one to look at. At 129,000 lbf the hybrid model's single scalar thrust (times
+the altitude lapse, with the record's drag terms tuned for the old 355,080) leaves it 60 kt
+under its own sea-level edge (295 kt against 355), 80 kt under the 36,000 ft edge (384
+against 462) and climbing to 20,299 ft against the record's 40,750 ft ceiling (the 1,200
+tick `--headless-flight` at 5,000 ft cruises at 245 kt). That is T95-8's number to change
+(the decision says so); the figures are listed, not corrected. The Su-34's Mach 1.8 edge is
+not reached at the heavier real weight and the lower dry thrust (Mach 1.6 at 36,000 ft in
+the afterburner run, the settled speed is thrust-limited); the Tu-26's 1,080 kt edge is
+likewise above its settled speed (962 kt).
+
+**Checks.** `cargo fmt --all -- --check` clean; clippy `--workspace --all-targets --locked
+-D warnings` clean; `cargo test --locked --workspace --no-fail-fast` 7,786 passed, 0 failed,
+108 ignored; profile `.local/m3-aircraft/profile-bombc` refreshed;
+`--validate-ordnance` passed (54 / 22 / 5,447 / 257, pods 82, Cheat-only 276);
+`--headless-flight 1200` for tu26, tu95 and su34: no crash, 0 non-finite, 0 overspeed ticks;
+`--animation-probe` for all three: 310, 155 and 321 neutral faces and 4 required failures
+each (the unmapped elevator, rudder, aileron and flaps, as expected); tools unittests OK
+(skipped 5); `tools/check_docs.py` passed.
+
+**Not corrected, listed for John.** The Tu-95's thrust under the flight model (above); the
+Tu-95 ceiling and speeds (kept); the Tu-26's G rows (+4 against the real +2.5), its sea-level
+edge and 1.6 degree rest sweep (T26-3); the Su-34's G limit (+9, the page lists +9, the plan
++7), ceiling (55,000 ft, the usual figure is 48,000) and retail designator-pod flag on rows 6
+and 7 (two pod placements); the Tu-26's glove-row bomb capacity (cut with the AS-16 count);
+the Tu-26 bay's admission of the Harpoon and AM-39 with the AS-16 bit.

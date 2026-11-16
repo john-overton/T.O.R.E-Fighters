@@ -26,7 +26,7 @@ use tore_sim::{
 const HEIGHT_FT: f64 = 4000.;
 
 /// The aircraft drawn, with a short file name each.
-const AIRCRAFT: [(AircraftId, &str); 38] = [
+const AIRCRAFT: [(AircraftId, &str); 41] = [
     (AircraftId::F18, "f18d"),
     (AircraftId::F16C, "f16c"),
     (AircraftId::F14, "f14"),
@@ -65,6 +65,9 @@ const AIRCRAFT: [(AircraftId, &str); 38] = [
     (AircraftId::B1b, "b1b"),
     (AircraftId::Tu160, "tu160"),
     (AircraftId::F111, "f111"),
+    (AircraftId::Tu26, "tu26"),
+    (AircraftId::Tu95, "tu95"),
+    (AircraftId::Su34, "su34"),
 ];
 
 /// Camera eye and look point, feet right, up and forward of the aircraft,

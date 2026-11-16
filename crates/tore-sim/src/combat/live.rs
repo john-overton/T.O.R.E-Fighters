@@ -1154,6 +1154,12 @@ impl Configuration {
                 AircraftId::B1b => ["MK82AIR.JT"].contains(&name),
                 AircraftId::Tu160 => ["AS16.JT"].contains(&name),
                 AircraftId::F111 => ["GBU28.JT", "MK82P.JT", "AGM65G.JT"].contains(&name),
+                // Bomber batch C (BMB-C1, 2026-11-15): the retail default
+                // stores. The Tu-26's and Tu-95's 23 mm tail turret rows and
+                // AS-16 (Kh-15) rows, and the Su-34's AS-14, AT-12, AA-11
+                // and GSh-30-1 rows.
+                AircraftId::Tu26 | AircraftId::Tu95 => ["T23_1.JT", "AS16.JT"].contains(&name),
+                AircraftId::Su34 => ["AS14.JT", "AT12.JT", "AA11.JT", "GSH301.JT"].contains(&name),
             };
             if weapon.movement.acceleration > i32::MAX / 256
                 || weapon.movement.deceleration > i32::MAX / 256
