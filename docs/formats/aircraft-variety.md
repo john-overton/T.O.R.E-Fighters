@@ -11251,8 +11251,8 @@ last (new `BAY` lines); `net-a2g-stores-f117`: the watching client reads the bom
 its screen (human F-117 with `tore-bot --a2g bomb`); `net-ai-strike-handback-b2`: the AI that takes over a
 dropped B-2 opens its doors and the other client sees it. The open-bay RCS term reads `State::bay`
 (`scope.rs`, `docs/radar.md`) so it follows the AI's doors; the rows other radars read still carry no
-deployment (a decision John has not made), so no radar sees an AI's open bay yet. A replay records the
-door device for every aircraft as it records any.
+deployment (a decision John has not made), so no radar sees an AI's open bay yet. `replay-a2g-f117` (the AI wingman's recording) now reads the door device shut at the start and at 0.95 or more
+for the release (it asserted shut until this slice).
 
 ### Fix 4: tail-gun accuracy
 
