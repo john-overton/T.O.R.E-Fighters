@@ -47,7 +47,7 @@ fn sp(p: [f32; 3]) -> [f32; 3] {
 }
 
 /// Largest change of any vertex-to-vertex distance inside one group.
-fn rigidity(reference: &[Face], pose: &[Face], ids: &[usize], scale: f32) -> f32 {
+pub(super) fn rigidity(reference: &[Face], pose: &[Face], ids: &[usize], scale: f32) -> f32 {
     let before = keyed(reference);
     let after = keyed(pose);
     let (mut old, mut now) = (Vec::new(), Vec::new());
@@ -70,7 +70,13 @@ fn rigidity(reference: &[Face], pose: &[Face], ids: &[usize], scale: f32) -> f32
     error
 }
 
-fn pinned(reference: &[Face], pose: &[Face], ids: &[usize], point: [f32; 3], scale: f32) -> f32 {
+pub(super) fn pinned(
+    reference: &[Face],
+    pose: &[Face],
+    ids: &[usize],
+    point: [f32; 3],
+    scale: f32,
+) -> f32 {
     let old: BTreeMap<_, _> = keyed(reference)
         .into_iter()
         .filter(|(k, _)| ids.contains(&k.0))
@@ -87,14 +93,14 @@ fn pinned(reference: &[Face], pose: &[Face], ids: &[usize], point: [f32; 3], sca
     }
 }
 
-fn group<'a>(faces: &'a [Face], ids: &[usize]) -> BTreeMap<FaceKey, &'a Face> {
+pub(super) fn group<'a>(faces: &'a [Face], ids: &[usize]) -> BTreeMap<FaceKey, &'a Face> {
     keyed(faces)
         .into_iter()
         .filter(|(k, _)| ids.contains(&k.0))
         .collect()
 }
 
-fn lowest(pose: &[Face], ids: &[usize]) -> f32 {
+pub(super) fn lowest(pose: &[Face], ids: &[usize]) -> f32 {
     pose.iter()
         .filter(|f| ids.contains(&f.address))
         .flat_map(|f| &f.positions)
@@ -104,7 +110,13 @@ fn lowest(pose: &[Face], ids: &[usize]) -> f32 {
 
 /// Skin gap inside one group: shared vertices of the two windings of a plate
 /// must move together.
-fn group_skin_gap(reference: &[Face], pose: &[Face], ids: &[usize], scale: f32, m: &mut Metrics) {
+pub(super) fn group_skin_gap(
+    reference: &[Face],
+    pose: &[Face],
+    ids: &[usize],
+    scale: f32,
+    m: &mut Metrics,
+) {
     let old = group(reference, ids);
     let new = group(pose, ids);
     if let Some(g) = shared_vertex_gaps(&old, &new, scale).first() {
@@ -113,7 +125,7 @@ fn group_skin_gap(reference: &[Face], pose: &[Face], ids: &[usize], scale: f32, 
 }
 
 /// The extent of a group of faces: (min, max) on every axis.
-fn extent(pose: &[Face], ids: &[usize]) -> ([f32; 3], [f32; 3]) {
+pub(super) fn extent(pose: &[Face], ids: &[usize]) -> ([f32; 3], [f32; 3]) {
     let (mut lo, mut hi) = ([f32::INFINITY; 3], [f32::NEG_INFINITY; 3]);
     for p in pose
         .iter()
@@ -128,7 +140,7 @@ fn extent(pose: &[Face], ids: &[usize]) -> ([f32; 3], [f32; 3]) {
     (lo, hi)
 }
 
-fn pin(
+pub(super) fn pin(
     reference: &[Face],
     pose: &[Face],
     ids: &[usize],
@@ -146,7 +158,12 @@ fn pin(
 }
 
 /// Where `witness` (a vertex of the gear-down group `ids`) is in `pose`.
-fn follow(reference: &[Face], pose: &[Face], ids: &[usize], witness: [f32; 3]) -> Vec<[f32; 3]> {
+pub(super) fn follow(
+    reference: &[Face],
+    pose: &[Face],
+    ids: &[usize],
+    witness: [f32; 3],
+) -> Vec<[f32; 3]> {
     f4::witness_positions(&group(reference, ids), &keyed(pose), witness)
 }
 
@@ -355,7 +372,7 @@ fn exhaust(value: f64, reference: &[Face], pose: &[Face], scale: f32, m: &mut Me
 }
 
 /// Faces of one group that differ from the reference mark a neutral mismatch.
-fn unchanged(reference: &[Face], pose: &[Face], ids: &[usize], m: &mut Metrics) {
+pub(super) fn unchanged(reference: &[Face], pose: &[Face], ids: &[usize], m: &mut Metrics) {
     let old = group(reference, ids);
     let new = group(pose, ids);
     if old.len() != new.len() {
@@ -372,7 +389,7 @@ fn unchanged(reference: &[Face], pose: &[Face], ids: &[usize], m: &mut Metrics) 
 /// Mid point of two reference corners followed into the pose, each corner
 /// averaged over its occurrences first (corners occur in unequal numbers of
 /// faces). Distance in feet from the reference mid point.
-fn midpoint_gap(
+pub(super) fn midpoint_gap(
     old: &BTreeMap<FaceKey, &Face>,
     new: &BTreeMap<FaceKey, &Face>,
     corners: [[f32; 3]; 2],
@@ -394,14 +411,20 @@ fn midpoint_gap(
 }
 
 /// Whole-panel gates shared by a group: rigid, no skin gap between its faces.
-fn whole_panel(reference: &[Face], pose: &[Face], ids: &[usize], scale: f32, m: &mut Metrics) {
+pub(super) fn whole_panel(
+    reference: &[Face],
+    pose: &[Face],
+    ids: &[usize],
+    scale: f32,
+    m: &mut Metrics,
+) {
     group_skin_gap(reference, pose, ids, scale, m);
     let error = rigidity(reference, pose, ids, scale);
     m.reviewed_rigid_panel_error = m.reviewed_rigid_panel_error.max(error.min(1e9));
 }
 
 /// Direction of the net command on a witness's Z (feet times the sign).
-fn z_direction(
+pub(super) fn z_direction(
     old: &BTreeMap<FaceKey, &Face>,
     new: &BTreeMap<FaceKey, &Face>,
     witness: [f32; 3],
@@ -581,7 +604,7 @@ pub(super) fn combinations(
 /// outside the group in the reference moved (`only` keeps the vertices it
 /// accepts): the opening of the moving/fixed seam. Reported and bounded, not a
 /// failure (a hinged surface has to open).
-fn seam_opening(
+pub(super) fn seam_opening(
     reference: &[Face],
     pose: &[Face],
     ids: &[usize],
@@ -609,7 +632,7 @@ fn seam_opening(
     worst
 }
 
-fn surfaces_pass(m: &Metrics) -> bool {
+pub(super) fn surfaces_pass(m: &Metrics) -> bool {
     m.finite
         && !m.reviewed_anchor_missing
         && m.max_reviewed_anchor_gap <= EPSILON

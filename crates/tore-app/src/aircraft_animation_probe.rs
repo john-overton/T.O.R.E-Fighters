@@ -42,6 +42,7 @@ mod rafale;
 mod rotorcraft;
 mod su25;
 mod su27;
+mod su34;
 mod su35;
 mod tornado;
 mod tu160;
@@ -188,6 +189,11 @@ impl Control {
             // the fin is one fixed plate), so the pedals must not move anything.
             // Its stabilators, ailerons and flaps are `Required` below.
             Self::Rudder if id == Id::F15E => Expectation::Unsupported,
+            // SU34-3 (coordinator decision 2026-11-15, the F-15E's precedent):
+            // the Su-34's fins are one plate a side with no rudder face and no
+            // state word, so the pedals must not move anything. Its canards,
+            // tailerons, outer ailerons and flaps are `Required` below.
+            Self::Rudder if id == Id::Su34 => Expectation::Unsupported,
             // MF1-3: the Mirage F1's source has no flap panel (its one
             // trailing-edge panel per wing is the aileron), so the flap lever
             // moves nothing and the probe requires that it stays that way.
@@ -260,6 +266,7 @@ impl Control {
                         | Id::Mig29
                         | Id::Su27
                         | Id::Su35
+                        | Id::Su34
                         | Id::Mig21
                 ) =>
             {
@@ -760,6 +767,7 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
             | AircraftId::F111
             | AircraftId::Tu26
             | AircraftId::Tu95
+            | AircraftId::Su34
     ) {
         "reviewed-controls-and-attachments"
     } else {
@@ -913,6 +921,17 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
         if id == AircraftId::Su35 {
             for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
                 su35::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
+        if id == AircraftId::Su34 {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                su34::check(
                     control,
                     *value,
                     (&raw.faces, reference, pose),
@@ -1456,6 +1475,9 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     }
     if id == AircraftId::Su27 {
         failures.extend(su27::combinations(&airframe, &neutral, out)?);
+    }
+    if id == AircraftId::Su34 {
+        failures.extend(su34::combinations(&airframe, &neutral, out)?);
     }
     if let Some(source) = &a4e_sources {
         failures.extend(a4e::combinations(source, &airframe, &neutral, out)?);

@@ -1118,3 +1118,28 @@ swept), a 40-pose sweep against speed and flaps (measured turn equals the schedu
 0.01 degree), the root seam, swept span and taileron clearance at nine sweep angles, a
 202-value dense gear sweep (stow overshoot at most 0.65 ft) and dense brake and plume
 sweeps, every row passing. Not a claim of original control travel or retraction timing.
+
+## Su-34 rig fit
+
+Agent-authored whole-piece motion, 2026-11-15 (slices SU34-2 and SU34-3), over `SU34.SH`
+drawn at 1:1 (1/3 ft a unit). The shape has the Su-35's five state words at the same
+offsets and none for canards, tailerons, ailerons or rudders, so the rig reuses the Su-35's
+laws on the Su-34's own faces. Faces, hinges, the fold table, the probe evidence and the
+accepted findings: [Su-34 shape and rig](../formats/aircraft-variety.md#su-34-shape-and-rig-su34-23-2026-11-15).
+Every number is fitted; the real control travel and the real gear retraction were not found.
+
+| Control | Fitted motion |
+| --- | --- |
+| Elevator | both canard plates turn whole by 0.25 x the stick (pitch only); both taileron panels (quad and root triangle) turn whole by -0.30 x the stick |
+| Aileron | the taileron panels differentially, -side x 0.10 x the stick (sum clamped to 0.40 rad); the outer trailing quads turn about their leading hinge by 0.20 rad at full stick, right trailing edge up for a right roll |
+| Rudder | nothing (the fins are one plate a side, no rudder face) |
+| Flaps | the two neutral flap quads morph to the shape's lowered pose by the flap fraction; no up pose |
+| Airbrake | the raised plate turns about its forward edge down onto the dorsal ridge (45.5 degrees) as the brake falls from 1; hidden at 0 |
+| Gear | two main plates fold inward and the nose plates forward, 90 degrees x (1 - gear) about fitted hinges; hidden at 0, the source pose at 1 |
+| Afterburner | the sixteen plume faces scale along y from the nozzle exit plane (y -78) by the fraction; hidden at 0 |
+
+Acceptance: `--animation-probe` reports `reviewed-controls-and-attachments`, elevator,
+aileron, flaps, gear, brake and exhaust `required moved`, rudder `not-applicable`, a
+25-pose pitch/roll grid, a 25-pose flap/roll grid, dense elevator, aileron and flap sweeps, a
+7-value brake sweep and a 202-value gear sweep (grounded at 8.67 ft at gear 1, stow overshoot
+at most 0.17 ft), every row passing. Not a claim of original control travel or retraction timing.

@@ -17,9 +17,21 @@ const ROLL_L: [usize; 4] = [0x517b, 0x5198, 0x51d6, 0x52f0];
 const ROLL_R: [usize; 4] = [0x24c0, 0x2537, 0x254f, 0x25a3];
 const CAPS: [usize; 2] = [0x5857, 0x57d8];
 const BRACE: [usize; 2] = [0x5680, 0x5697];
-struct Morph {
-    neutral: Vec<[f32; 3]>,
-    deployed: Vec<[f32; 3]>,
+/// A neutral and a deployed vertex set for one flap face (the flap word's
+/// down pose is a morph target, not a turn). Shared with the Su-34 rig.
+pub(crate) struct Morph {
+    pub(crate) neutral: Vec<[f32; 3]>,
+    pub(crate) deployed: Vec<[f32; 3]>,
+}
+impl Morph {
+    /// The vertices `t` of the way from neutral to deployed.
+    pub(crate) fn at(&self, t: f32) -> Vec<[f32; 3]> {
+        self.neutral
+            .iter()
+            .zip(&self.deployed)
+            .map(|(p, q)| std::array::from_fn(|i| p[i] + (q[i] - p[i]) * t))
+            .collect()
+    }
 }
 pub struct Rig {
     flaps: BTreeMap<usize, Morph>,
@@ -32,28 +44,37 @@ const GEAR: [usize; 18] = [
     0x5432, 0x5451, 0x5470, 0x548f, 0x54ae, 0x54cd, 0x5680, 0x5697, 0x56f3, 0x5712, 0x5731, 0x5750,
     0x5549, 0x5568, 0x5587, 0x55a6, 0x55c5, 0x55e4,
 ];
-fn one(shape: &Shape, address: usize) -> AppResult<&Face> {
+/// The one face at `address`, named in the error by the shape `name`. The
+/// reviewed-face helpers below are shared with the Su-34 rig, which has its
+/// own face addresses and the same word layout.
+pub(crate) fn one_in<'a>(name: &str, shape: &'a Shape, address: usize) -> AppResult<&'a Face> {
     let mut found = shape.faces.iter().filter(|f| f.address == address);
     let result = found
         .next()
-        .ok_or_else(|| format!("SU35.SH missing face{address:x}"))?;
+        .ok_or_else(|| format!("{name} missing face{address:x}"))?;
     if found.next().is_some() {
-        return Err(format!("SU35.SH duplicate reviewed face{address:x}").into());
+        return Err(format!("{name} duplicate reviewed face{address:x}").into());
     }
     Ok(result)
 }
-fn roots(shape: &Shape, addresses: &[usize], points: &[[f32; 3]]) -> AppResult<()> {
+pub(crate) fn roots_in(
+    name: &str,
+    shape: &Shape,
+    addresses: &[usize],
+    points: &[[f32; 3]],
+) -> AppResult<()> {
     for &address in addresses {
         if !points
             .iter()
-            .all(|p| one(shape, address).is_ok_and(|f| f.positions.contains(p)))
+            .all(|p| one_in(name, shape, address).is_ok_and(|f| f.positions.contains(p)))
         {
-            return Err(format!("unreviewed SU35.SH root{address:x}").into());
+            return Err(format!("unreviewed {name} root{address:x}").into());
         }
     }
     Ok(())
 }
-fn branch(
+pub(crate) fn branch_in(
+    name: &str,
     bytes: &[u8],
     neutral: &BTreeSet<usize>,
     word: usize,
@@ -71,9 +92,62 @@ fn branch(
             .collect::<BTreeSet<_>>()
             != removed.iter().copied().collect()
     {
-        return Err(format!("unreviewed SU35.SH branch{word:x}={value}").into());
+        return Err(format!("unreviewed {name} branch{word:x}={value}").into());
     }
     Ok(pose)
+}
+fn one(shape: &Shape, address: usize) -> AppResult<&Face> {
+    one_in("SU35.SH", shape, address)
+}
+fn roots(shape: &Shape, addresses: &[usize], points: &[[f32; 3]]) -> AppResult<()> {
+    roots_in("SU35.SH", shape, addresses, points)
+}
+fn branch(
+    bytes: &[u8],
+    neutral: &BTreeSet<usize>,
+    word: usize,
+    value: i32,
+    added: &[usize],
+    removed: &[usize],
+) -> AppResult<Shape> {
+    branch_in("SU35.SH", bytes, neutral, word, value, added, removed)
+}
+/// The all-moving tail's turn (radians) for one side: the fitted pitch term
+/// (a pull raises both trailing edges) plus the fitted differential roll term
+/// (a positive aileron raises the right trailing edge and lowers the left),
+/// summed and clamped. Shared with the Su-34 tailerons.
+pub(crate) fn tail_angle(state: &State, left: bool) -> f64 {
+    let side: f64 = if left { -1. } else { 1. };
+    (-0.30 * state.elevator.clamp(-1., 1.) - side * 0.10 * state.aileron.clamp(-1., 1.))
+        .clamp(-0.40, 0.40)
+}
+/// The canard's pitch-only turn (radians), a quarter of the elevator. Shared.
+pub(crate) fn canard_angle(state: &State) -> f64 {
+    0.25 * state.elevator.clamp(-1., 1.)
+}
+/// The outer aileron's turn about its own hinge (radians), a fifth of the
+/// stick; the sign puts the right trailing edge up for a positive aileron
+/// when the axis points outboard on both sides. Shared.
+pub(crate) fn aileron_angle(state: &State) -> f64 {
+    -0.20 * state.aileron.clamp(-1., 1.)
+}
+/// The afterburner plume's length law: every vertex scales away from the
+/// nozzle exit plane `root` by the exhaust demand. Shared.
+pub(crate) fn flame_scale(face: &mut Face, root: f32, exhaust: f64) {
+    for p in &mut face.positions {
+        p[1] = root + (p[1] - root) * exhaust.clamp(0., 1.) as f32;
+    }
+}
+/// The airbrake plate's turn: the plate folds down onto the spine by
+/// `closed` radians as the brake falls from 1 (the source's raised pose) to
+/// 0 (hidden by the caller). Shared.
+pub(crate) fn brake_turn(face: &mut Face, hinge: [f32; 3], closed: f64, brake: f64) {
+    turn(
+        face,
+        hinge,
+        [1., 0., 0.],
+        closed * (1. - brake.clamp(0., 1.)),
+    );
 }
 fn roll_spec(a: usize) -> Option<(f32, [f32; 3], [f32; 3])> {
     if ROLL_L.contains(&a) {
@@ -238,12 +312,7 @@ impl Rig {
                 return None;
             }
             let t = state.flaps.clamp(0., 1.) as f32;
-            result.positions = m
-                .neutral
-                .iter()
-                .zip(&m.deployed)
-                .map(|(p, q)| std::array::from_fn(|i| p[i] + (q[i] - p[i]) * t))
-                .collect();
+            result.positions = m.at(t);
             update_normal(source, &mut result);
         } else if TAIL_L.contains(&a) || TAIL_R.contains(&a) {
             // All-moving stabilator: the whole flat pentagon per side, both
@@ -264,11 +333,12 @@ impl Rig {
             // pitch plus roll maximum.
             let left = TAIL_L.contains(&a);
             let pivot_x: f32 = if left { -20. } else { 18.5 };
-            let side: f64 = if left { -1. } else { 1. };
-            let angle = (-0.30 * state.elevator.clamp(-1., 1.)
-                - side * 0.10 * state.aileron.clamp(-1., 1.))
-            .clamp(-0.40, 0.40);
-            turn(&mut result, [pivot_x, -35.5, -5.], [1., 0., 0.], angle);
+            turn(
+                &mut result,
+                [pivot_x, -35.5, -5.],
+                [1., 0., 0.],
+                tail_angle(state, left),
+            );
             update_normal(source, &mut result);
         } else if CANARD_L.contains(&a) || CANARD_R.contains(&a) {
             // The canard is a whole flat panel per side: both windings, left
@@ -288,7 +358,7 @@ impl Rig {
                 &mut result,
                 [if left { -20. } else { 19.5 }, 45.5, 0.],
                 [1., 0., 0.],
-                0.25 * state.elevator.clamp(-1., 1.),
+                canard_angle(state),
             );
             update_normal(source, &mut result);
         } else if FIN.contains(&a) {
@@ -309,12 +379,7 @@ impl Rig {
         } else if let Some((inner, pivot, axis)) = roll_spec(a) {
             if a != 0x24c0 || source.positions.iter().all(|p| p[0] >= 49. - 1e-4) {
                 let mut moved = source.clone();
-                turn(
-                    &mut moved,
-                    pivot,
-                    axis,
-                    -0.20 * state.aileron.clamp(-1., 1.),
-                );
+                turn(&mut moved, pivot, axis, aileron_angle(state));
                 for ((p, q), old) in result
                     .positions
                     .iter_mut()
@@ -345,19 +410,17 @@ impl Rig {
             if state.brake <= 0. {
                 return None;
             }
-            turn(
+            brake_turn(
                 &mut result,
                 [0., 23., 8.],
-                [1., 0., 0.],
-                (10f64 / 21.).atan() * (1. - state.brake.clamp(0., 1.)),
+                (10f64 / 21.).atan(),
+                state.brake,
             );
         } else if FLAME.contains(&a) {
             if state.exhaust <= 0. {
                 return None;
             }
-            for p in &mut result.positions {
-                p[1] = -59. + (p[1] + 59.) * state.exhaust.clamp(0., 1.) as f32;
-            }
+            flame_scale(&mut result, -59., state.exhaust);
             update_normal(source, &mut result);
         }
         Some(result)
