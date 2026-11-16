@@ -431,7 +431,7 @@ pub fn launcher(s: &flight::State) -> Launcher {
         basis: Basis::new(s.yaw, s.pitch, s.bank),
         speed_fps: s.speed,
         velocity: s.velocity,
-        bay_ready: !s.bay_available() || s.bay >= 0.95,
+        bay_ready: !s.bay_available() || s.bay >= tore_sim::combat::bays::DOORS_READY,
         // Selecting the passive infrared channel stops radar transmission
         // without changing the radar power switch itself.
         radar_power: s.radar,

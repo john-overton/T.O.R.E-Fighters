@@ -128,6 +128,10 @@ pub struct StationSpec {
     /// every store and forward gun, the record's aft heading for a tail gun
     /// (B52-6; [`crate::combat::slew`]).
     pub slew: crate::combat::slew::Slew,
+    /// The store hangs in a weapon bay behind doors (BMB-AI, 2026-11-16): the
+    /// AI opens them before it releases or launches it, as a human's release
+    /// does ([`crate::combat::bays::DOORS_READY`]).
+    pub bay: bool,
 }
 
 impl StationSpec {
@@ -434,6 +438,14 @@ pub struct AiActor {
     /// The AV-8's and Yak-141's jetborne memory (slice H1), for the hovers
     /// the airfield sequences ask for. Default on other aircraft.
     jet_lift: super::jet_lift::JetLift,
+    /// The bay doors stay open until this tick (BMB-AI, 2026-11-16): one
+    /// second after the last release or launch from a bay station, as a
+    /// human's do ([`crate::combat::bays::DOORS_HOLD_TICKS`]).
+    bay_hold_until: u64,
+    /// The AI wants its bay doors open this step: the hold, the strike's
+    /// request or the weapon service's. Worked out again every step before
+    /// the flight steps, so a checkpoint leaves it out.
+    bay_wanted: bool,
     /// Write-only record of the latest mission step. No decision reads it.
     trace: ActorTrace,
     /// Write-only memory of what the journal already said about this actor.
@@ -536,6 +548,8 @@ impl AiActor {
             lase: None,
             rotor: super::rotor_adapter::RotorAdapter::new(),
             jet_lift: super::jet_lift::JetLift::new(),
+            bay_hold_until: 0,
+            bay_wanted: false,
             trace: ActorTrace::default(),
             journal_memory: JournalMemory::default(),
             last_visual: Vec::new(),
@@ -3977,6 +3991,15 @@ impl AiMission {
         // 4. Weapons: debit this actor's own store, then emit the event.
         for intent in &batch.weapons {
             if let Some(event) = actor.release(intent, &batch) {
+                // A store that left a bay keeps the doors open a second
+                // (BMB-AI, 2026-11-16), as a human's release does.
+                if actor
+                    .stations
+                    .iter()
+                    .any(|s| s.station == event.station && s.bay)
+                {
+                    actor.bay_hold_until = tick + crate::combat::bays::DOORS_HOLD_TICKS;
+                }
                 output.launches.push(event);
             }
         }
@@ -4058,6 +4081,11 @@ impl AiMission {
             }
         }
 
+        // The bay doors (BMB-AI): open for a release or launch that is near
+        // and for a second after one; the doors travel at the human's pace.
+        actor.bay_wanted = tick < actor.bay_hold_until
+            || actor.controller.bay_demand()
+            || actor.strike.as_ref().is_some_and(|s| s.bay_demand());
         // 6. Motion through the adapter and this actor's own flight model.
         actor.adapter.set_gun_aim(batch.gun_aim);
         actor.adapter.set_strike_handling(handling);
@@ -5111,6 +5139,11 @@ impl AiActor {
             time_home_s: self.time_home_s(),
             internal_fuel_lbs: self.flight.fuel,
             radar_emitting: self.flight.radar,
+            bay_doors: if self.flight.bay_available() {
+                self.flight.bay
+            } else {
+                1.0
+            },
             rotorcraft: super::rotor_adapter::flies(&self.flight),
         }
     }
@@ -5354,6 +5387,7 @@ impl AiActor {
                     employment_zone: s.employment_zone,
                     mount: s.mount,
                     slew: s.slew,
+                    bay: s.bay,
                     damage_vs_category: s.damage_vs_category,
                     store_speed: s.store_speed,
                     tracking_delay: s.tracking_delay,
@@ -5650,6 +5684,16 @@ impl AiActor {
                         | super::airfield::Phase::AirTaxi
                 )
             );
+        // The bay doors (BMB-AI, 2026-11-16): the switch every aircraft with
+        // a bay follows, so the doors of an AI F-22, F-117, B-2 or B-52 are
+        // open for its release, held a second after and then closed, and
+        // drawn, sent and recorded as a human's are.
+        if self.flight.bay_available() {
+            input.commands.push(tore_input::PilotCommand::Set(
+                tore_input::Switch::Bay,
+                self.bay_wanted,
+            ));
+        }
         // The engine-protection throttle cut is a jet's: on a helicopter the
         // throttle is the collective, and a quarter of it is a fall (a hit
         // AH-64 dived into the ground on it, slice ST-H). Opinionated (agent).
@@ -5941,6 +5985,7 @@ pub fn simple_stations(
             employment_zone: None,
             mount: [0.0; 3],
             slew: Default::default(),
+            bay: false,
             maximum_range_ft: Some(40000.0),
             energy_target: None,
         });
@@ -5974,6 +6019,7 @@ pub fn simple_stations(
             employment_zone: None,
             mount: [0.0; 3],
             slew: Default::default(),
+            bay: false,
             maximum_range_ft: Some(6000.0),
             energy_target: None,
         });
@@ -7929,6 +7975,7 @@ mod tests {
             alive: true,
             fuel_endurance_s: 3600.0,
             time_home_s: None,
+            bay_doors: 1.0,
             rotorcraft: false,
             internal_fuel_lbs: 8000.0,
             radar_emitting: true,

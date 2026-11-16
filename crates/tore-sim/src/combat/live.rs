@@ -141,7 +141,7 @@ const DROP_SEPARATION_T: u64 = 4;
 /// Fitted: a trigger press waits this long, 3 seconds, for the bay to open.
 const BAY_RELEASE_TICKS: u64 = 360;
 /// Fitted: the bay stays open 1 second after a release so the weapon clears.
-const BAY_HOLD_TICKS: u64 = 120;
+const BAY_HOLD_TICKS: u64 = super::bays::DOORS_HOLD_TICKS;
 
 /// Exact category switch at FA 0x411470; category is not a bitmask here.
 pub fn damage_class(category: u16) -> usize {

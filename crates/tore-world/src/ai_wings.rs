@@ -644,6 +644,9 @@ pub(crate) fn station_specs_loaded(
             station.mount
         };
         spec.slew = station.slew;
+        // A store in a weapon bay: the human's release waits for the doors
+        // (`Ownship::bay_waits`), and since BMB-AI the AI's does too.
+        spec.bay = !station.internal && station.rack.location().bay();
         spec.infrared_envelope = (w.flags & 0x10000 != 0
             && w.seeker_kind() == tore_formats::weapons::SeekerKind::Infrared)
             .then_some((
