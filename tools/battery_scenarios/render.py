@@ -566,6 +566,21 @@ def scenarios() -> list[Scenario]:
             notes="B-1B skin from above and below with the gear down, at its header scale (4/3 ft a unit, true size, no per-axis factor): no underside shape shows through the top and the double-sided panels do not z-fight, spread (the free-flight start is below the 280 knot sweep threshold). The shape's two E0 glove decal slots stay omitted rather than filled with skin (docs/formats/aircraft-variety.md, B-1B shape and rig). The zoom is 0.5 so the 137 ft span fits. The scenario starts stripped (`--loadout none`) because the B-1B default loadout is refused at start (payload over the mass limit, B1B-6/B1B-8 own it).",
         ),
         Scenario(
+            name="render-tu160-skin",
+            lane="flight",
+            args=["--free-flight", "--aircraft", "tu160", "--flight-view", "2", "--flight-look", "0,60", "--flight-zoom", "0.5", "--flight-devices", "1,0,0,0,0", "--capture-flight", "{work}/tu160-top.ppm", "--no-audio"],
+            env={"TORE_WEATHER_TIME": "12:00"},
+            window=True,
+            outputs=["tu160-top.ppm", "tu160-under.ppm"],
+            expect=["Scene capture:"],
+            check=skin_capture_problems,
+            then=[
+                Step(["--free-flight", "--aircraft", "tu160", "--flight-view", "2", "--flight-look", "0,-60", "--flight-zoom", "0.5", "--flight-devices", "1,0,0,0,0", "--capture-flight", "{work}/tu160-under.ppm", "--no-audio"], window=True, timeout=180),
+            ],
+            timeout=180,
+            notes="Tu-160 skin from above and below with the gear down and the wing at its spread 20 degrees, at its header scale (8/3 ft a unit, true size within 1 percent on span and length, no per-axis factor): no underside shape shows through the top and the double-sided panels (tailplane, fin, flap strips, keel plates) do not z-fight. The shape's E0 decal slots stay omitted rather than filled with skin (docs/formats/aircraft-variety.md, Tu-160 shape and rig). The zoom is 0.5 so the 181 ft span fits.",
+        ),
+        Scenario(
             name="render-runway-paint-calm",
             lane="flight",
             args=["--free-flight", "--aircraft", "f18", "--theater", "UKR", "--ground-start", "2", "--maneuver", "takeoff", "--flight-probe-ticks", "1300", "--flight-view", "1", "--capture-flight", "{work}/runway.ppm", "--no-audio"],

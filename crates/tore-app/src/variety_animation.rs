@@ -382,7 +382,11 @@ fn specification(id: Id) -> Option<Spec> {
             ),
             // TU160.SH: six words (flames 0x7ff0, keel plates 0x7ffc, gear
             // 0x8002, flaps 0x800e and 0x8014, rudder strip 0x801a), gear
-            // adds 12 faces; header exponent 11, so 8/3 ft a unit.
+            // adds 12 faces; header exponent 11, so 8/3 ft a unit. Update
+            // (T160-3, 2026-11-15): the Tu-160 loads through its own
+            // `tu160_animation` rig (swing wing, tailplane, rudder strip,
+            // flap strips, keel plates, gear, plumes); this row pins the
+            // layout, the scale and `supported`.
             Id::Tu160 => (
                 28716,
                 316,
@@ -527,6 +531,9 @@ enum SpecificRig {
     B1b(crate::b1b_animation::Rig),
     /// F117-3 and F117-4: the ruddervators, the gear and the interim bay pose.
     F117(crate::f117_animation::Rig),
+    /// T160-3: the swing wing, the tailplane, the rudder strip, the flap
+    /// strips, the keel plates, the gear and the plumes.
+    Tu160(crate::tu160_animation::Rig),
 }
 pub struct Rig {
     id: Id,
@@ -906,6 +913,15 @@ impl Rig {
                     shape,
                 ));
             }
+            Id::Tu160 => {
+                let (rig, shape) = crate::tu160_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::Tu160(rig),
+                    shape,
+                ));
+            }
             _ => {}
         }
         if tore_formats::module::code(bytes)?.0.len() != spec.code
@@ -1040,6 +1056,7 @@ impl Rig {
                 SpecificRig::B2(_) => crate::b2_animation::flame(address),
                 SpecificRig::B1b(_) => crate::b1b_animation::flame(address),
                 SpecificRig::F117(_) => crate::f117_animation::flame(address),
+                SpecificRig::Tu160(_) => crate::tu160_animation::flame(address),
             };
         }
         self.groups
@@ -1112,6 +1129,7 @@ impl Rig {
                 SpecificRig::B2(rig) => rig.animate(source, state),
                 SpecificRig::B1b(rig) => rig.animate(source, state),
                 SpecificRig::F117(rig) => rig.animate(source, state),
+                SpecificRig::Tu160(rig) => rig.animate(source, state),
             };
         }
         let mut face = source.clone();
@@ -1258,6 +1276,9 @@ mod tests {
         assert_eq!(specification(Id::B52).unwrap().scale, 2. / 3.);
         // B1B-2: the B-1B draws at its header scale too (true size).
         assert_eq!(specification(Id::B1b).unwrap().scale, 4. / 3.);
+        // T160-2: the Tu-160 draws at its header scale, 8/3 ft a unit (eight
+        // times the 1/3 ft default).
+        assert_eq!(specification(Id::Tu160).unwrap().scale, 8. / 3.);
     }
     fn spread(a: &[[f32; 3]], b: &[[f32; 3]]) -> f32 {
         let d =
