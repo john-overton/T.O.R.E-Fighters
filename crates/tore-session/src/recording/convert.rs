@@ -1139,7 +1139,11 @@ fn aircraft_difference(live: &AircraftPose, replayed: &AircraftPose) -> Option<S
 }
 
 /// Whether two lists of stores are the same, leaving out the swinging wing's
-/// turn on a swivelling station ([`tore_sim::combat::hardpoints::Rack::turn`]).
+/// turn on a swivelling station ([`tore_sim::combat::hardpoints::Rack::turn`])
+/// and the swing spec the host gives the F-111F's racks
+/// ([`tore_sim::combat::hardpoints::Rack::swing`], F111-9, 2026-11-16: the
+/// drawing sets it again from the aircraft's identity, so a recording does not
+/// carry it either).
 /// The host sets it every tick from the aircraft's speed and flaps and the
 /// drawing sets it again from the same two devices ([`tore_world::snapshot::DEVICES`]
 /// slots 9 and 1), so a recording does not carry it; the devices are compared
@@ -1155,6 +1159,7 @@ fn same_stores(live: &[StorePose], replayed: &[StorePose]) -> bool {
             .cloned()
             .map(|mut store| {
                 store.rack.turn = 0.;
+                store.rack.swing = None;
                 store
             })
             .collect()

@@ -602,6 +602,28 @@ def scenarios() -> list[Scenario]:
         problems += rc.file_problems(work, "log-b52-ripple/log.jsonl", rc.check_jsonl)
         return problems
 
+    # F111-9: an F-111F's pylon ripple (four Mk 82 from the outer pylon pair, row 7, 0.5 s apart at 650 knots with the
+    # wing held at 26 degrees by those very stores) recorded, replayed tick for tick with `--verify-render` (the stores
+    # of every aircraft compared each tick, the swing spec the host gives the racks among them) and read back as four
+    # releases and outcomes, the station's count falling 4 to 0. (The bay row cannot be flown by hand: its Mk 82 are
+    # 100 lb over the maximum takeoff weight the default tank leaves; the bay is `ai-strike-f111-bay` and
+    # `net-a2g-stores-f111`.)
+    f111_args = [*RUN, "UKR", "QUCOL", "--attack", "release", "--from", "1", "--altitude", "3000", "--speed", "650", "--repeat", "4",
+                 "--gap", "0.5", "--aircraft", "f111", "--station", "2", "--load", "MK82", "--count", "4",
+                 "--record", "{work}/f111-ripple.tore-replay", "--verify-render"]
+
+    def f111_check(work: Path, output: str) -> list[str]:
+        problems = verify_problems(output, "the F-111F ripple", 2_000)
+        rows = events(work, "f111-ripple")
+        for name in ("weapon.release", "weapon.outcome"):
+            got = len(kind(rows, name))
+            if not 3 <= got <= 4:
+                problems.append(f"{got} {name} events for a ripple of 4 presses")
+        if len(kind(rows, "stores.items")) < 3:
+            problems.append("fewer stores.items entries than releases")
+        problems += rc.file_problems(work, "log-f111-ripple/log.jsonl", rc.check_jsonl)
+        return problems
+
     return [
         Scenario(
             name="replay-a2g",
@@ -640,5 +662,18 @@ def scenarios() -> list[Scenario]:
             check_work=b52_check,
             notes="A B-52 bay ripple (eight Mk 82 from the forward bay row) recorded, replayed tick for tick and read back "
                   "as eight releases and outcomes (B52-9).",
+        ),
+        Scenario(
+            name="replay-a2g-f111-ripple",
+            lane="replay",
+            args=f111_args,
+            timeout=300,
+            expect=[r"a2g-run: done"],
+            outputs=["f111-ripple.tore-replay"],
+            then=[Step(["--recording-log", "{work}/f111-ripple.tore-replay", "--out", "{work}/log-f111-ripple", "--rate", "5"],
+                       timeout=300)],
+            check_work=f111_check,
+            notes="An F-111F pylon ripple (four Mk 82 from the outer pylon pair at 650 knots, the wing held at 26 degrees "
+                  "by those stores) recorded, replayed tick for tick and read back as four releases and outcomes (F111-9).",
         ),
     ]

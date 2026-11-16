@@ -538,3 +538,12 @@ B-52 at every weight, nobody else in the roster), so every other aircraft's law 
 Evidence is in the [aircraft variety](../formats/aircraft-variety.md#b-52-ai-missions-multiplayer-and-replay-b52-9-2026-11-16)
 B52-9 section: the full Southampton cycle is on the pavement from takeoff to parking (743 ticks off before, none
 after), the 80,000 lb landing at Simferopol is on it from the touchdown (1,201 ticks off before, none after).
+
+**Update (F111-9, 2026-11-16): the F-111F needs neither law.** Its wheels do not need over 0.2 throttle to taxi
+(`Situation::taxi_throttle_floor` is zero: the rolling deceleration is the default 0.8 ft/s squared, 4.8 for the B-52, so the
+balance at 99,999 lb is under 0.1), so it flies the shared 1,500 ft lookahead and the old taxi throttle, and
+with the merge of B52-9 nothing about it changed. The full Southampton cycle at the 99,999 lb default load
+(`ai-merged-airfield-f111-wing2`: airborne at 120.7 s, touchdown 172 kt, parked at 898.6 s) and the Simferopol
+landing (`ai-heavy-land-f111-ukr-a2`, 162 kt, 16,000 lb of fuel) both stay on the pavement from the takeoff roll to
+the parking (0 ticks off in 108,923 ground samples). No airfield code was changed, so every other aircraft is
+bit for bit what B52-9 left.

@@ -261,6 +261,38 @@ def recorded_probe_checks(work: Path, output: str, *, same_run: bool) -> list[st
     return problems
 
 
+F111_SWEEP_SPAN_DEG = 56.5
+F111_SWEEP_FROM_KT, F111_SWEEP_TO_KT = 250.0, 650.0
+F111_HOLD_DEG = 26.0
+
+
+def f111_drawn_sweep(knots: float) -> float:
+    """The sweep the drawing gives the F-111F's wing at `knots` with the flaps up and the default load (stores on
+    the outer pylons hold the wing to 26 degrees): the schedule's straight line from 250 knots (spread) to
+    650 knots (72.5 degrees, `swing::F111F`), held at 26."""
+    unit = (knots - F111_SWEEP_FROM_KT) / (F111_SWEEP_TO_KT - F111_SWEEP_FROM_KT)
+    return min(F111_SWEEP_SPAN_DEG * min(max(unit, 0.0), 1.0), F111_HOLD_DEG)
+
+
+def f111_sweep_problems(work: Path, output: str) -> list[str]:
+    """The recorded F-111F's flaps-up samples draw the wing through at least 8 degrees of sweep (F111-9)."""
+    log = work / "log" / "log.jsonl"
+    if not log.exists():
+        return ["missing the recording's event log"]
+    sweeps = []
+    for line in log.read_text().splitlines():
+        row = json.loads(line)
+        if row.get("type") == "sample" and row.get("flags") and "airborne" in row["flags"]:
+            devices = row.get("devices") or {}
+            if devices.get("flaps", 1) == 0 and devices.get("gear", 1) == 0:
+                sweeps.append(f111_drawn_sweep(row["tas_kt"]))
+    if not sweeps:
+        return ["no airborne flaps-up F-111F sample in the log"]
+    if max(sweeps) - min(sweeps) < 8.0:
+        return [f"the drawn sweep changed {max(sweeps) - min(sweeps):.1f} degrees in the recording, want at least 8"]
+    return []
+
+
 def record_scenario(
     name: str,
     probe: list[str],
@@ -623,6 +655,41 @@ def scenarios() -> list[Scenario]:
              "--probe-enemy-aircraft", "b52", "--probe-fight", "2:2", "--separation", "5",
              "--probe-attack", "300:10"],
             timeout=500,
+        )
+    )
+
+    # The F-111F Aardvark as the player and in both wings (slice F111-9): a 2 v 2 recorded three times, so the
+    # F111.PT identity (checkpoint code 54, two engines, the bay, the pylons with the swing spec the host gives
+    # their racks, and the swing wing with its sweep rate carried in the combat checkpoint) round-trips through
+    # the recording, plays back with nothing missing and records the same twice. The default load carries
+    # stores on the outer pylons, so the fight's wings are held at 26 degrees all through (500 to 570 knots):
+    # the sweep change is the takeoff's below. Its bay-release recording is `replay-a2g-f111-ripple`.
+    out.append(
+        record_scenario(
+            "replay-rec-f111-2v2",
+            ["--ai-probe-ticks", "2400", "--aircraft", "f111", "--probe-friendly-aircraft", "f111",
+             "--probe-enemy-aircraft", "f111", "--probe-fight", "2:2", "--separation", "5",
+             "--probe-attack", "300:10"],
+            timeout=500,
+        )
+    )
+
+    # The F-111F's wing moving in a recording (F111-9): a takeoff at Athens recorded, the wing out with the
+    # flaps and gear, then swept as the speed passes the schedule's 250 knots (the drawing reads the sweep
+    # from the speed and the flaps; a recording carries neither the turn nor a sweep device). The recording
+    # is verified tick for tick against the live pictures (`--verify-render`, which compares the aircraft's
+    # stores, with their swivelling pylons, and devices), and the log's flaps-up samples must cover a drawn
+    # sweep change of at least 8 degrees.
+    out.append(
+        record_scenario(
+            "replay-rec-f111-takeoff",
+            ["--ai-probe-ticks", "30000", "--theater", "GRE", "--ground-start", "1", "--aircraft", "f111",
+             "--probe-friendly-aircraft", "f111", "--probe-wing-size", "2", "--maneuver", "takeoff",
+             "--separation", "200", "--probe-wing-only"],
+            timeout=900, same_run=False, extra_check=f111_sweep_problems,
+            notes="An AI F-111F pair takes off from Athens and is recorded with `--verify-render`; the wing is out "
+                  "with the flaps and swept by the speed (the schedule's 250 to 650 knots), a drawn sweep change "
+                  "of at least 8 degrees in the log (F111-9).",
         )
     )
 

@@ -686,6 +686,15 @@ mod tests {
         assert_eq!(difference(&swept, &flat), None);
         flat.player.stores[0].items = 1;
         assert!(difference(&swept, &flat).unwrap().contains("stores differ"));
+        // F111-9: the swing spec the host gives the F-111F's racks is derived
+        // from the aircraft's identity as well, and a recording does not carry
+        // it (the replay's rack has none): stores equal but for it are the same.
+        let mut hosted = live[1].clone();
+        hosted.player.stores = vec![store(0.7)];
+        hosted.player.stores[0].rack.swing = Some(&swing::F111F);
+        let mut rebuilt = live[1].clone();
+        rebuilt.player.stores = vec![store(0.7)];
+        assert_eq!(difference(&hosted, &rebuilt), None);
     }
 
     /// Vertex streams drawn from a live and a replayed picture agree: the

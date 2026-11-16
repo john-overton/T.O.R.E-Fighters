@@ -298,6 +298,32 @@ def b52_gun_fight_problems(output: str) -> list[str]:
     return problems
 
 
+# F111-9 (2026-11-16): the F-111F's standard load, as the probe prints it: the inner pair's GBU-28, the retarded
+# Mk 82 six-packs, the four AGM-65G, the empty bay row (the Pave Tack is a pod, not a store) and the two empty AIM-9M
+# rails. No air-to-air store is aboard (the rails start empty and the probe has no flag to load them), no gun.
+F111_STANDARD_STORES = "GBU-28 x2, MK-82HDP6 x2, AGM-65 x4, MK-82HDP6 x2, MK-82 x0, AIM-9M x0, AIM-9M x0"
+
+
+def f111_unarmed_problems(output: str, *, wings: int, shots: int | None = None) -> list[str]:
+    """`ai-f111-*` (F111-9): the probe's usual checks, every F-111F still holds its whole standard load at the end
+    (it never fired or dropped anything: no air-to-air store, no gun) and, with `shots`, the whole fight's shot count
+    is exactly that."""
+    problems = probe_problems(output)
+    ours = [stations for _, stations in STORES_LINE.findall(output) if "GBU-28" in stations]
+    if len(ours) < wings:
+        problems.append(f"{len(ours)} F-111F stores lines, want {wings}")
+    for stations in ours:
+        if stations != F111_STANDARD_STORES:
+            problems.append(f"an F-111F's stores changed: {stations}")
+    total = SHOTS.search(output)
+    if shots is not None:
+        if total is None:
+            problems.append("no 'AI probe totals' line")
+        elif int(total.group(1)) != shots:
+            problems.append(f"{total.group(1)} shots in the fight, want {shots}")
+    return problems
+
+
 def b2_no_air_to_air_checker() -> Callable[[str], list[str]]:
     """The B-2 wing in a fight (slice B2-9): the probe's usual checks, and the B-2s carry no gun (rounds=0) and
     nothing but Mk 82 and GBU-27 on their stations, so they fire no air-to-air shot; the player's own run
@@ -1704,7 +1730,9 @@ def scenarios() -> list[Scenario]:
     # full takeoff weights, and every one of the three flies the pieces at the field lengths of the
     # retail missions (docs/spec/ai-airfield.md, "Heavy bombers"). The land order comes after the
     # climb-out (a B-2 is airborne at 205 s, a B-52 at 200 s).
-    for aircraft, order, ticks, kt, pavement in (("b2", 30000, 150000, 175, True), ("b52", 36000, 150000, 175, True)):
+    # F111-9 (2026-11-16): the F-111F joins them (airborne at about 115 s at the 12,000 ft field).
+    for aircraft, order, ticks, kt, pavement in (("b2", 30000, 150000, 175, True), ("b52", 36000, 150000, 175, True),
+                                                  ("f111", 18000, 150000, 180, True)):
         out.append(probe(f"merged-airfield-{aircraft}-wing2", [
             "--theater", "FRA", "--ground-start", "14",
             "--aircraft", aircraft, "--probe-friendly-aircraft", aircraft,
@@ -2124,6 +2152,25 @@ def scenarios() -> list[Scenario]:
                                               "--separation", "5", *attack), ticks=7200,
                      notes="The B-52 wing against Su-27s: the probe's usual checks hold for the B-52s and the "
                            "Su-27s, whoever wins."))
+    # 13l. The F-111F Aardvark in a mission (slice F111-9, 2026-11-16): the strike class is Attack (BMB-B1's override).
+    # Its standard load has no air-to-air store (the two AIM-9M rails start empty, there is no gun), so against its
+    # own kind nobody can shoot and against Su-27s it fires nothing and keeps its whole load, whoever wins.
+    # The strike itself is `ai-strike-f111-*` (ai_strike.py).
+    out.append(probe("f111-quick-mission-2v2", fight(2, 2, "--aircraft", "f111",
+                                                     "--probe-friendly-aircraft", "f111",
+                                                     "--probe-enemy-aircraft", "f111",
+                                                     "--separation", "5", *attack), ticks=7200,
+                     check=lambda output: f111_unarmed_problems(output, wings=3, shots=0),
+                     notes="All F-111F: the player's wing and the enemy wing fly the F111.PT identity (two TF30 class "
+                           "engines, the swing wing held at 26 degrees by the outer stores, no gun, no air-to-air "
+                           "store) in a 2 v 2: nobody engages, no shot, every load whole."))
+    out.append(probe("f111-vs-su27-2v2", fight(2, 2, "--aircraft", "f111",
+                                               "--probe-friendly-aircraft", "f111",
+                                               "--probe-enemy-aircraft", "su27",
+                                               "--separation", "5", *attack), ticks=7200,
+                     check=lambda output: f111_unarmed_problems(output, wings=1),
+                     notes="The F-111F wing against Su-27s: the Su-27s fire (and may bring an F-111F down), the "
+                           "F-111Fs fire nothing and keep their whole load."))
     # 14. The fixed acceptance probes.
     out.append(Scenario(name="ai-roster-probe", lane="ai", args=["--ai-roster-probe-ticks", "3600", "--no-audio"], timeout=1800))
     out.append(Scenario(name="ai-probe-matrix", lane="ai",

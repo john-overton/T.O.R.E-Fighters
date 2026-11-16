@@ -322,6 +322,39 @@ class F117UnarmedTests(unittest.TestCase):
             self.assertIn(name, names)
 
 
+F111_STORES = ai.F111_STANDARD_STORES
+F111_FIGHT = "\n".join(
+    [f"AI stores: actor={n} tanks=0 external_fuel=0 payload=24105 stations=[{F111_STORES}]" for n in (1, 2, 3)]
+    + ["AI probe totals: wings=3 ticks=7200 shots=0 dropped=0 warnings=0 live_projectiles=0 player_hp=250 target_hp=[125]"]
+)
+
+
+class F111UnarmedTests(unittest.TestCase):
+    """The F-111F engages nobody (F111-9): its standard load has no air-to-air store and no gun."""
+
+    def test_a_fight_where_nobody_fired_passes(self):
+        self.assertEqual([p for p in ai.f111_unarmed_problems(F111_FIGHT, wings=3, shots=0) if "stores" in p or "shots" in p], [])
+        # Against shooters the shot count is theirs; the F-111Fs still hold their whole load.
+        text = F111_FIGHT.replace("shots=0", "shots=3")
+        self.assertEqual([p for p in ai.f111_unarmed_problems(text, wings=3) if "stores" in p or "shots" in p], [])
+
+    def test_a_spent_store_fails(self):
+        text = F111_FIGHT.replace("AGM-65 x4", "AGM-65 x3", 1)
+        self.assertTrue(any("stores changed" in p for p in ai.f111_unarmed_problems(text, wings=3)))
+
+    def test_a_shot_in_an_all_f111_fight_fails(self):
+        text = F111_FIGHT.replace("shots=0", "shots=1")
+        self.assertTrue(any("1 shots" in p for p in ai.f111_unarmed_problems(text, wings=3, shots=0)))
+
+    def test_a_missing_wing_fails(self):
+        self.assertTrue(any("stores lines" in p for p in ai.f111_unarmed_problems("AI probe totals: shots=0 dropped=0\n", wings=3)))
+
+    def test_the_scenarios_exist(self):
+        names = {s.name for s in ai.scenarios()}
+        for name in ("ai-f111-quick-mission-2v2", "ai-f111-vs-su27-2v2"):
+            self.assertIn(name, names)
+
+
 HEAVY_LANDED = """\
 t=70289 (585.7s) Friendly 1-2 B2: phase=Rollout activity="Landing" alive=true agl=11 kt=160 x=268127 z=1423486 hdg=2 terrain_agl=11
 AI probe phases: Friendly 1-2: Waiting@0.0s Taxi@60.0s LineUp@73.3s TakeoffRoll@83.7s ClimbOut@139.9s Airborne@205.2s Marshal@250.0s Approach@250.0s Final@555.9s Rollout@585.7s TaxiClear@600.9s Parked@900.0s
@@ -347,7 +380,7 @@ class HeavyBomberTests(unittest.TestCase):
             "ai-merged-airfield-b2-wing2", "ai-merged-airfield-b52-wing2",
             "ai-heavy-takeoff-b2-gre-a1", "ai-heavy-takeoff-b52-gre-a1", "ai-heavy-takeoff-f117-gre-a2",
             "ai-heavy-land-b2-ukr-a2", "ai-heavy-land-b52-ukr-a2", "ai-heavy-land-f117-ukr-a2",
-            "ai-heavy-takeoff-f111-gre-a1", "ai-heavy-land-f111-ukr-a2",
+            "ai-heavy-takeoff-f111-gre-a1", "ai-heavy-land-f111-ukr-a2", "ai-merged-airfield-f111-wing2",
         ):
             self.assertIn(name, names)
 

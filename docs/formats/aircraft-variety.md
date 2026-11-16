@@ -16434,3 +16434,148 @@ degree hold) is unchanged.
 6. **The default load starts at 99,999 lb and approaches at 162 to 166 kt**, against 115 to
    150 kt in the weak real figures (landing weights 40,000 to 55,000 lb): a landing at
    the Load Ordnance default is a heavy landing, as the B-2's and B-52's are.
+
+## F-111F AI, missions, multiplayer and replay (F111-9, 2026-11-16)
+
+Implementation and verification mode, slice F111-9 (the F-111F's counterpart of B52-9, B2-9 and F117-9). The AI
+work was asked for by the coordinator on John's program (AGENTS.md: no AI work unless John asks). Everything here
+is `fitted`, agent decisions of 2026-11-16, except where a number is a record's. The shared bomber rules of
+[BMB-AI](#ai-fixes-for-the-bombers-bmb-ai-2026-11-16) and [B52-9](#b-52-ai-missions-multiplayer-and-replay-b52-9-2026-11-16)
+carry the F-111F unchanged: **no AI or airfield law was changed for it**. The one code fix is in the replay check
+(below). The tree was merged with `m3-aircraft` first (B52-9's final lookahead and taxi coast, both gated on
+`Situation::taxi_throttle_floor`), so the F-111F ran against them.
+
+### The AI strike (Attack class)
+
+The F-111F is an **Attack** class by BMB-B1's override (not a Heavy): the AI flies the retail passes (a level pass
+at 5,000 ft for a plain or laser bomb, the fast high pass for a seeker missile, the laydown for the retarded Mk 82),
+drops **one store a pass** (the Heavy's stick of eight does not apply) and takes the first store of the order bomb,
+then laser bomb (only with a spot assured), then seeker. Run with `--a2g-run UKR QUCOL --pilot ai --aircraft f111
+--load X --station N --count M`; stations are the run's order: 0 and 1 the inner wing rows (5 and 6, swivelling),
+2 and 3 the outer rows (7 and 8, carried), 4 the bay, 5 and 6 the AIM-9 rails.
+
+The wing is **held at 26 degrees** by the default load's stores on the outer pylons (F111-5), so every pylon is
+swept to the hold and every `ORIGIN` line reads the held wing's cell. The inner and the outer cell are the
+human's own, from `a2g-release-origin-f111` at 650 knots (-8.41 / -0.50 / 2.22 and -15.28 / -0.35 / -0.08 ft right,
+up and forward): the AI's racks are swept as the human's, at the AI's 393 knots (a free wing would sit at 36
+degrees there).
+
+| Run | What the log shows |
+| --- | --- |
+| GBU-28, inner pylon (station 0), `QUCOL` | level pass at 5,000 ft; `LASER` lasing from 0.025 s (its own Pave Tack and fixed laser); `RELEASE` at 3.4 s from (-8.41, -0.50, 2.22), `guided=Guiding` on its own spot, doors never move; impact 4.3 ft from the tank at 31 s, `KILL`, egress, not lost |
+| Mk 82, rows 6, 7 and 8 (stations 1, 2 and 3) | level pass; one release a pass at 16.25 s, 393 knots, from (-11.71, -0.35, 1.11), (-15.28, -0.35, -0.08) and (-18.30, -0.35, -1.09); `bay=0.00`, no `BAY` line; one bomb left in each row; the tank hurt (130 of 200), egress, not lost |
+| Two Mk 82 in the bay (station 4; the Pave Tack gives way to them) | `BAY` open at 15.7 s (0.96), release at 16.2 s from (-0.65, -2.59, 16.54) (the shared grid's first place), `bay=1.00`, the doors shut 1.95 s after the release, egress, not lost |
+| Four AGM-65G, outer pylon (station 2), the default load's row | the fast high pass fires one from 24,300 ft at 0.017 s from (-16.13, -0.40, -0.08), 11.8 s of flight, 16.5 ft from the tank, killed |
+| Two AGM-84E, outer pylon, against the Krivak (`QUSFLT`, `--unit`, 15 nm, 20,000 ft) | both leave at once (0.017 and 0.033 s), one a wing (right -15.28 and 15.28, forward -0.08), doors untouched, both hit at 29.3 s (96 ft), the Krivak destroyed; the run stops at 60 s |
+| Quick Mission wing (`--quick-wing`, `QUCOL`) | `ROLE strike`; the wing's standard load has the plain bomb first: the six retarded Mk 82 (`MK82P.JT`) of station 1, laydown at 1,308 ft, 483 knots, all six at once (a pack leaves whole), three vehicles killed, egress, not lost |
+
+**Open: the Ukraine factory.** The same quick-wing strike at the factory (`QUFACT`) is lost: the wingman's route from
+45,000 ft out crosses ground that rises to 730 ft, 2,600 ft past the release, the laydown holds 826 ft MSL (800 ft
+over the factory's 34 ft), so the aircraft is about 100 ft over the rise when the retarded pack's first three bombs
+fall onto it, and it is destroyed at 53 s (`KILL victim=0x2 category=0x4000`, `LOST crashed=yes`; three impacts at
+729 to 740 ft, 2,300 ft short of the target; the other three bombs land 133 to 192 ft from it). The same strike
+from the standard start at the factory (`--load MK82P --station 1 --count 6`, no `--quick-wing`) is clean: six
+bombs, 3 kills, not lost. It is the shared laydown height (the target's elevation, not the ground under the route),
+not an F-111F rule; the scenario uses the column. (The A-4E's quick wing at the factory flies the plain pass and
+is not lost.)
+
+The AI's **air-to-air** use of the F-111F is not exercised: the two AIM-9M rails start empty, the standard load
+has no air-to-air store, there is no gun, and the AI probe has no flag to load a wing's rails. An all-F-111F fight
+fires nothing; against Su-27s the F-111Fs fire nothing and keep their whole load (below).
+
+### Airfield
+
+No law change. The two heavy cycles of F111-8 and the full Southampton cycle pass on the merged tree with the
+B52-9 laws present (they are gated on `taxi_throttle_floor`, which the F-111F's wheels do not need: its rolling deceleration is the default 0.8 ft/s squared, the B-52's is 4.8, so the balance at 99,999 lb is under 0.1 against the 0.2 line; it flies
+the shared 1,500 ft lookahead and the old taxi throttle): `ai-heavy-takeoff-f111-gre-a1` and
+`ai-heavy-land-f111-ukr-a2` (touchdown 162 kt, parked at 508.4 s, 0 ticks off the pavement, checks in the
+battery before and after: the same), and the new `ai-merged-airfield-f111-wing2`: an AI wing of two from
+Southampton (FRA 14, 12,000 ft) at the full 99,999 lb: taxi 25.0 s, line up 35.1 s, takeoff roll 44.4 s, climb-out
+83.8 s, **airborne 120.7 s**, land order at 150 s, final 396.4 s, **touchdown 172 kt**, taxi clear 441.6 s, parked
+898.6 s; 108,923 ground samples, **0 off the pavement**; the check wants a touchdown at 180 kt or slower. Since
+no airfield code changed, the BMB-AI baseline comparison (the 129 airfield scenarios) was not rerun: the airfield
+code on `m3-f111` is `m3-aircraft`'s, whose B52-9 comparison stands.
+
+### Quick Mission
+
+`quick_mission::tests::the_f111_is_a_quick_mission_player_and_a_wing_choice`: `F111.PT` is offered as the player's
+aircraft ("F-111F Aardvark") and in every AI wing field, a draft carries it as the player and in every wing, and
+the night stealth rule (the B-2 and the F-117) does not take it. The strike is `ai-strike-f111-quick-wing` (above).
+Two 2 v 2 probes: `ai-f111-quick-mission-2v2` (all F-111F: no shot in 7,200 ticks, every wing still holds the
+standard load, `GBU-28 x2, MK-82HDP6 x2, AGM-65 x4, MK-82HDP6 x2, MK-82 x0, AIM-9M x0, AIM-9M x0`) and
+`ai-f111-vs-su27-2v2` (the Su-27s fire three missiles and hurt the player's wing; the F-111F wingman fires nothing
+and keeps its load; the probe's usual checks hold).
+
+### Multiplayer
+
+`net-a2g-stores-f111`: both players in F-111Fs (`F111_STORES_MISSION`, one wing of two). `tore-bot --load` hangs each
+store on the first station after the others that takes it, two of each, in the station order, so
+`AGM84E.JT,AGM84E.JT,AGM84E.JT,AGM84E.JT,MK82.JT` puts a Harpoon pair on each of the four wing rows (the outer
+pair holds the wing at 26 degrees) and the Mk 82 in the bay (the first row left that takes it); `--a2g bomb` (the
+first bomb station with a round) takes the Mk 82. The watching client sees a Mk 82 leave plane 0, the bomber's
+stations emptying on planes 0, 2 and 3 (the Mk 82 and the AI's), a Stores event of 20 bytes at most (12 events, 208 bytes), three
+aircraft drawn, and reads plane 0's **bay doors at 1.00** on its screen. (A plain `--load MK82.JT` bombs from the
+inner pylon, the first station that takes it, with the doors shut.) The Pave Tack pod is not on the wire as a
+store; it gives way to the Mk 82 in the loadout the bot sends.
+
+### Replay
+
+**A fix.** `--verify-render` failed for every F-111F recording at tick 1, "aircraft 0's stores differ"
+(`replay-rec-f111-2v2`: 2,400 of 2,401 ticks differing; the same for a pylon ripple). F111-3 gave `Rack` a `swing`
+field, the swing spec the host sets on the swivelling racks of an aircraft that is not the Tornado
+([`Rack::swing`]), and `same_stores` in `tore-session`'s `recording/convert.rs`, which leaves out the derived
+`Rack::turn`, did not leave it out: the live picture's racks carried `Some(F111F)` and the recording's none (the
+drawing sets it again from the aircraft's identity, `pylons::swung`). `same_stores` now clears it too, and
+`replay/convert.rs`'s sweep test pins that stores equal but for the swing spec are the same picture (and stores that
+differ in anything else are not). Evidence: both scenarios fail on the binary before the fix and pass after it
+(`checks/F111-9/run-rip-before` and `run-rec`). Nothing in the recording, the wire or a checkpoint changed.
+
+- `replay-rec-f111-2v2`: the F-111F as the player and in both wings, a 2 v 2 recorded three times: `--verify-render`
+  PASS (2,401 ticks, 0 differing), two runs record the same, the identity reads back. The default load carries
+  stores on the outer pylons, so the wings are held at 26 degrees all through the fight (500 to 570 knots).
+- `replay-rec-f111-takeoff` (the sweep): an AI F-111F pair takes off from Athens and is recorded for 250 s
+  (`--verify-render` PASS, 30,001 ticks, 0 differing): the wing is out with the flaps and gear (to 203 knots), and
+  once they are up the speed passes the schedule's 250 knots (drawn sweep 0 degrees), 321 knots (26 degrees, the
+  hold) and goes on to 461; the check reads the log and wants a drawn sweep change of at least 8 degrees (it is 26).
+- `replay-a2g-f111-ripple`: four Mk 82 from the outer pylon pair (`--station 2 --count 4`, 0.5 s apart, 650 knots,
+  the wing held at 26 degrees by those stores) recorded and replayed with `--verify-render` PASS (2,571 ticks,
+  0 differing); `--recording-log` reads back four releases and outcomes. The **bay cannot be flown by hand**: its two
+  Mk 82 push the start weight 100 lb over the 100,000 lb maximum (the default tank is already capped, F111-5 finding
+  6), so the bay is covered by `ai-strike-f111-bay` and `net-a2g-stores-f111`.
+
+**Not carried: the sweep of an AI F-111F, a peer or a replay.** Those draw the schedule's turn from the speed
+(the flaps and the held wing from the stores), not the rate-limited turn the host steps at 3 degrees a second; they
+differ only while the wing is moving (up to 18.8 s for the full 56.5 degrees). Carrying the present turn needs a field that is either a new device
+(`DEVICES` is 22, in the wire and the recording) or on `AircraftPose` (61 constructors). Both are a wire or a
+format change, so it stays open (F111-8 open item 4); verify-render is clean because the live and the replayed
+pictures both derive the schedule.
+
+### Checks (F111-9)
+
+Through `light3.sh`, profile `.local/m3-aircraft/profile-f111` (refreshed first), logs in
+`.local/m3-aircraft/checks/F111-9/`. `cargo fmt --all -- --check` clean; `cargo clippy --workspace --all-targets
+--locked -- -D warnings` clean; `cargo test --locked --workspace --no-fail-fast` 7,890 passed, 0 failed, 108
+ignored (7,886 before the merge of B52-9's three tests, plus the new Quick Mission test); `--validate-ordnance`
+passed with no pin moved (54 aircraft, 23 recovered stations, 5,398 weapon placements, 257 tank, 284 Cheat-only,
+83 pods); `python3 -B -m unittest discover -s tools` 607 tests OK (skipped 5); `tools/check_docs.py` passed (382
+files). Battery (`--jobs 2 --windows 1`): every `*f111*`, `ai-heavy-*`, `ai-strike-*`, `ai-merged-airfield-*`,
+`net-a2g-*`, `net-ai-strike-*` and `replay-a2g*` scenario, **98 of 98** (the 13 new ones among them: `ai-strike-f111-*`
+x6, `ai-f111-*` x2, `ai-merged-airfield-f111-wing2`, `net-a2g-stores-f111`, `replay-rec-f111-2v2`,
+`replay-rec-f111-takeoff`, `replay-a2g-f111-ripple`). Before the replay fix the two replay scenarios fail on the
+merged binary (`run-rip-before`). Not run: `--smoke-test`, `check_assets`, the rest of the AI lane (the
+862-scenario run), a Quick Mission played to the end, the BMB-AI airfield baseline comparison (no airfield code
+changed).
+
+Provenance: scenarios, checks and the replay fix fitted (agent decisions, 2026-11-16); ordnance, stations and
+the held wing are F111-5's; no retail bytes committed.
+
+### Open for John (F111-9)
+
+1. **The Ukraine factory quick wing** is lost to the AI's own retarded bombs over a rise (above): the laydown height
+   follows the target's elevation, not the ground under the route. A shared AI change.
+2. **The AI F-111F's air-to-air use** (the AIM-9M rails) is untested: the rails start empty and nothing loads them in
+   a probe.
+3. **AI, peer and replay sweep drawing** needs a pose or device field (a wire or format change).
+4. **The Pave Tack stays in the shut bay** while the AI lases; its cradle does not rotate out (F111-5).
+5. **The AI drops one Mk 82 a pass** (Attack class); an F-111F with four retarded Mk 82 packs lays one six-pack a
+   pass. A stick like the heavies' is a design choice.

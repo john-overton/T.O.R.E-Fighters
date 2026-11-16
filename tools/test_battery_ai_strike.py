@@ -1439,6 +1439,151 @@ class B52Tests(unittest.TestCase):
         self.assertTrue(any("doors moved" in p for p in s.b52_antiship_problems(harpoon(bay=True))))
 
 
+def f111_run(station, *, bay=False, releases=1, kill=True, laser=False, load="MK82.JT", cell=None, alt=5001,
+             profile="level", lost=False):
+    """An AI F-111F run on the Ukraine column: `releases` bombs from `station`'s cell (F111-9)."""
+    weapon, right, up, forward = s.F111_CELLS[station]
+    right, up, forward = cell or (right, up, forward)
+    weapon = load if load != "MK82.JT" else weapon
+    out = [
+        f"ai-strike: setup aircraft=F111 load={weapon} station={station} count=2 rounds=2 target=0x50000001 name=T-90 "
+        "target_at=1,2,3 hp=200 skill=1 profile=none handback=none order=none mode=none",
+        "ai-strike: PROFILE t=0.000 name=none requested=none note=chosen",
+        "ai-strike: start t=0.000 plane=0 range_ft=24304 alt_ft=5000 speed_kt=450",
+        f"ai-strike: PROFILE t=0.008 name={profile}",
+    ]
+    if laser:
+        out.append("ai-strike: LASER t=0.025 plane=0 state=Lasing mask=none range_ft=24798")
+    if bay:
+        out.append("ai-strike: BAY t=15.708 state=open bay=0.96")
+    for n in range(1, releases + 1):
+        out.append(f"ai-strike: ORIGIN t=16.225 n={n} station={station} right={right:.2f} up={up:.2f} forward={forward:.2f}")
+        out.append(f"ai-strike: RELEASE t=16.225 n={n} weapon={weapon} station={station} alt_ft={alt} speed_kt=394 "
+                   f"range_ft=12210 pass=1 aim_ft=154 inside=yes lead_ft=900 dive_deg=-0 "
+                   f"guided={'Guiding' if laser else 'Unguided'} spot_owner={0 if laser else 255} "
+                   f"bay={'1.00' if bay else '0.00'}")
+    if bay:
+        out.append("ai-strike: BAY t=18.175 state=shut bay=0.04")
+    out.append("ai-strike: IMPACT t=34.183 n=1 miss_ft=100.0 at=1,2,3")
+    if kill:
+        out.append("ai-strike: KILL t=34.183 victim=0x50000001 category=0x0400 target=yes")
+    if lost:
+        out.append("ai-strike: LOST t=40.000 reason=destroyed crashed=yes")
+    else:
+        out.append("ai-strike: EGRESS t=40.983 range_ft=6589 alt_ft=7480")
+    out.append(
+        f"ai-strike: summary t=60.992 ran_s=61.0 profile=level releases={releases} impacts=1 kills={1 if kill else 0} "
+        f"egress={'no' if lost else 'yes'} lost={'yes' if lost else 'no'} activity=Attacking target_hp=0/200 closest_ft=508 "
+        "store_rounds_left=1"
+    )
+    out.append("ai-strike: done")
+    return "\n".join(out)
+
+
+class F111Tests(unittest.TestCase):
+    """The F-111F strike checks (slice F111-9)."""
+
+    def test_the_cells_are_the_held_wings(self):
+        # The inner row 5 and the outer row 7 are the human's own held cells at 650 knots (a2g-release-origin-f111).
+        self.assertEqual(s.F111_CELLS[0][1:], (-8.41, -0.50, 2.22))
+        self.assertEqual(s.F111_CELLS[2][1:], (-15.28, -0.35, -0.08))
+
+    def test_each_station_flies_from_its_cell(self):
+        self.assertEqual(s.f111_laser_problems(f111_run(0, laser=True, load="GBU28.JT")), [])
+        three = "\n".join(f111_run(station) for station in (1, 2, 3))
+        self.assertEqual(s.f111_pylon_problems(three), [])
+        self.assertEqual(s.f111_bay_problems(f111_run(4, bay=True)), [])
+
+    def test_a_wing_not_held_a_second_bomb_a_moved_door_or_a_lost_aircraft_fails(self):
+        free = f111_run(2, cell=(-15.28, -0.35, -1.20))
+        self.assertTrue(any("held wing's cell" in p for p in s.f111_cell_problems(s.parse_runs(free)[0], "x", 2)))
+        two = f111_run(2, releases=2)
+        problems = s.f111_run_problems(s.parse_runs(two)[0], "x", 2, bay=False)
+        self.assertTrue(any("Attack class" in p for p in problems), problems)
+        doors = f111_run(2).replace("bay=0.00", "bay=1.00")
+        self.assertTrue(any("doors moved" in p for p in s.f111_run_problems(s.parse_runs(doors)[0], "x", 2, bay=False)))
+        shut = f111_run(4, bay=True).replace("bay=1.00", "bay=0.00")
+        self.assertTrue(any("doors at 0.00" in p for p in s.f111_bay_problems(shut)))
+        lost = f111_run(2, lost=True)
+        self.assertTrue(any("lost" in p for p in s.f111_run_problems(s.parse_runs(lost)[0], "x", 2, bay=False)))
+        low = f111_run(2, alt=800)
+        self.assertTrue(any("level pass" in p for p in s.f111_run_problems(s.parse_runs(low)[0], "x", 2, bay=False)))
+
+    def test_a_laser_bomb_wants_the_pod_to_lase_and_the_tank_to_die(self):
+        text = f111_run(0, laser=True, load="GBU28.JT")
+        self.assertTrue(any("never lased" in p for p in s.f111_laser_problems(text.replace("state=Lasing", "state=Ready"))))
+        self.assertTrue(any("killed nothing" in p for p in s.f111_laser_problems(f111_run(0, laser=True, load="GBU28.JT", kill=False))))
+        self.assertTrue(any("Unguided" in p or "guiding" in p for p in s.f111_laser_problems(f111_run(0, load="GBU28.JT"))))
+
+    def test_the_wrong_row_fails(self):
+        self.assertTrue(any("from station" in p for p in s.f111_laser_problems(f111_run(1, laser=True, load="GBU28.JT"))))
+
+    def test_the_harpoon_run_wants_one_a_wing_and_the_ship_destroyed(self):
+        def harpoon(kill=True, rights=(-15.28, 15.28), bay=False):
+            lines = [
+                "ai-strike: setup aircraft=F111 load=AGM84E.JT station=2 count=2 rounds=2 target=0x50000003 name=Krivak "
+                "target_at=1,2,3 hp=500 skill=1 profile=none handback=none order=none mode=none",
+                "ai-strike: PROFILE t=0.000 name=none requested=none note=chosen",
+                "ai-strike: start t=0.000 plane=0 range_ft=91140 alt_ft=20000 speed_kt=450",
+            ]
+            for n, right in enumerate(rights, 1):
+                lines.append(f"ai-strike: ORIGIN t=0.017 n={n} station=2 right={right} up=-0.46 forward=-0.08")
+                lines.append(f"ai-strike: RELEASE t=0.017 n={n} weapon=AGM84E.JT station=2 alt_ft=20000 speed_kt=449 "
+                             f"range_ft=91127 pass={n} aim_ft=0 inside=yes lead_ft=0 dive_deg=0 bay={'1.00' if bay else '0.00'}")
+            for n in range(1, len(rights) + 1):
+                lines.append(f"ai-strike: IMPACT t=29.333 n={n} miss_ft=96.3 at=1,2,3")
+            if kill:
+                lines.append("ai-strike: KILL t=29.333 victim=0x50000003 category=0x2000 target=yes")
+            lines.append("ai-strike: summary t=60.000 ran_s=60.0 profile=straight releases=2 impacts=2 kills=1 egress=no "
+                         "lost=no activity=Attacking target_hp=0/500 closest_ft=1889 store_rounds_left=0")
+            lines.append("ai-strike: done")
+            return "\n".join(lines)
+
+        self.assertEqual(s.f111_antiship_problems(harpoon()), [])
+        self.assertTrue(any("not destroyed" in p for p in s.f111_antiship_problems(harpoon(kill=False))))
+        self.assertTrue(any("one a wing" in p for p in s.f111_antiship_problems(harpoon(rights=(-15.28, -15.28)))))
+        self.assertTrue(any("doors moved" in p for p in s.f111_antiship_problems(harpoon(bay=True))))
+
+    def test_the_quick_wing_flies_the_six_pack_in_the_laydown(self):
+        lines = [
+            "ai-strike: setup aircraft=F111 load=GBU28.JT station=0 count=2 rounds=2 target=0x50000001 name=T-90 "
+            "target_at=1,2,3 hp=200 skill=1 profile=none handback=none order=none mode=none",
+            "ai-strike: PROFILE t=0.000 name=none requested=none note=quick-wing",
+            "ai-strike: ROLE t=0.000 plane=1 role=strike",
+            "ai-strike: start t=0.000 plane=1 range_ft=45322 alt_ft=5000 speed_kt=450",
+            "ai-strike: PROFILE t=0.008 name=laydown",
+        ]
+        for n in range(1, 7):
+            lines.append(f"ai-strike: RELEASE t=26.283 n={n} weapon=MK82P.JT station=1 alt_ft=1308 speed_kt=483 "
+                         "range_ft=4911 pass=1 aim_ft=152 inside=yes lead_ft=430 dive_deg=5 bay=0.00")
+        for n in range(1, 7):
+            lines.append(f"ai-strike: IMPACT t=34.283 n={n} miss_ft=300.0 at=1,2,3")
+        lines += [
+            "ai-strike: KILL t=34.450 victim=0x50000001 category=0x0400 target=yes",
+            "ai-strike: EGRESS t=40.367 range_ft=6679 alt_ft=2781",
+            "ai-strike: summary t=60.375 ran_s=60.4 profile=laydown releases=6 impacts=6 kills=1 egress=yes lost=no "
+            "activity=Attacking target_hp=0/200 closest_ft=599 store_rounds_left=1",
+            "ai-strike: done",
+        ]
+        text = "\n".join(lines)
+        self.assertEqual(s.f111_quick_wing_problems(text), [])
+        self.assertTrue(any("role" in p for p in s.f111_quick_wing_problems(text.replace("role=strike", "role=cap"))))
+        self.assertTrue(any("six MK82P" in p for p in s.f111_quick_wing_problems(text.replace("station=1", "station=3", 1))))
+        self.assertTrue(any("laydown" in p for p in s.f111_quick_wing_problems(text.replace("name=laydown", "name=level"))))
+
+    def test_the_maverick_run_wants_the_outer_cell_and_the_kill(self):
+        out = f111_run(2, load="AGM65G.JT", cell=(-16.13, -0.40, -0.08))
+        self.assertEqual(s.f111_maverick_problems(out), [])
+        self.assertTrue(any("held cell" in p for p in s.f111_maverick_problems(f111_run(2, load="AGM65G.JT"))))
+        self.assertTrue(any("not destroyed" in p for p in s.f111_maverick_problems(f111_run(2, load="AGM65G.JT", cell=(-16.13, -0.40, -0.08), kill=False))))
+
+    def test_the_scenarios_exist(self):
+        names = {sc.name for sc in s.scenarios()}
+        for name in ("ai-strike-f111-laser", "ai-strike-f111-pylon", "ai-strike-f111-bay", "ai-strike-f111-maverick",
+                     "ai-strike-f111-antiship", "ai-strike-f111-quick-wing"):
+            self.assertIn(name, names)
+
+
 if __name__ == "__main__":
     unittest.main()
 
