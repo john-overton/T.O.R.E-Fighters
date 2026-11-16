@@ -575,12 +575,24 @@ fn draw_gun(
         207,
         271,
     );
+    // A slewed gun (the B-52's tail gun) fires astern along its mount's rest
+    // direction: no pipper in the forward glass, `TAIL` where the forward
+    // gun's `LCOS` is (B52-6, fitted). The tracers show the line in the
+    // rear views.
+    let slewed = station.slew.is_slewed();
     paint.text(
         font,
-        if ro.stores.armed { "LCOS" } else { "SAFE" },
+        match (ro.stores.armed, slewed) {
+            (false, _) => "SAFE",
+            (true, true) => "TAIL",
+            (true, false) => "LCOS",
+        },
         207,
         259,
     );
+    if slewed {
+        return;
+    }
     let l = combat::launcher(s);
     if !ro.stores.armed
         || !l.alive
@@ -605,7 +617,8 @@ fn draw_gun(
             position: c.position,
             velocity: c.velocity,
         });
-    let solution = gunsight::solve(&station.weapon, &l, station.gun_mount(), radar)
+    let (gun_launcher, gun_mount) = station.gun_view(&l);
+    let solution = gunsight::solve(&station.weapon, &gun_launcher, gun_mount, radar)
         .ok()
         .flatten();
     let Some(solution) = solution else {

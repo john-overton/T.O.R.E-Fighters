@@ -55,6 +55,7 @@ pub(super) fn lau61() -> Weapon {
 fn carrying(weapon: Weapon, count: u16, mount: Vector) -> State {
     let mut config = fixture(false).own().configuration().clone();
     config.stations = vec![Station {
+        slew: Default::default(),
         weapon,
         mount,
         count,
@@ -146,6 +147,7 @@ fn a_b2_ripple_alternates_its_bays_and_empties_each_from_the_bottom_tier_up() {
         store: None,
         count: 32,
         weight_class: 160,
+        slew: [0; 4],
     };
     let mut config = fixture(false).own().configuration().clone();
     config.stations = [5, 6]
@@ -156,6 +158,7 @@ fn a_b2_ripple_alternates_its_bays_and_empties_each_from_the_bottom_tier_up() {
             let mut weapon = mk82();
             weapon.shape = Some("MK82.SH".into());
             Station {
+                slew: Default::default(),
                 weapon,
                 mount,
                 count: 32,
@@ -246,6 +249,7 @@ fn a_released_bomb_follows_the_shared_flight_model() {
 fn mk82_from_5000_ft_level_at_450_kt_lands_where_the_numbers_say() {
     let w = mk82();
     let station = Station {
+        slew: Default::default(),
         weapon: w,
         mount: [0.; 3],
         count: 1,
@@ -276,6 +280,7 @@ fn retard_deploys_after_release_and_all_bombs_inherit_aircraft_velocity() {
     cluster.movement.maximum_speed = 2933;
     let at = |w: &Weapon, knots: f64| {
         let station = Station {
+            slew: Default::default(),
             weapon: w.clone(),
             mount: [0.; 3],
             count: 1,

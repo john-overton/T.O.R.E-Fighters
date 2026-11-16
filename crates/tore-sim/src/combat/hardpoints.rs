@@ -1822,6 +1822,7 @@ mod tests {
             store: None,
             count: 2,
             weight_class: 0,
+            slew: [0; 4],
         }
     }
 
@@ -1878,6 +1879,7 @@ mod tests {
             count: 4,
             store: Some("AS15.JT".into()),
             weight_class: 46,
+            slew: [0; 4],
         };
         let axes = tore_formats::aircraft::scale::right_up_forward(AircraftId::M2000);
         let (plain_mount, plain) = placed_scaled(&row, Some(&model), axes);
@@ -1936,6 +1938,7 @@ mod tests {
             count: 12,
             store: Some("MK82.JT".into()),
             weight_class: 80,
+            slew: [0; 4],
         };
         let axes = tore_formats::aircraft::scale::right_up_forward(AircraftId::F15E);
         let (plain_mount, plain) = placed_scaled(&row, Some(&model), axes);
@@ -2239,6 +2242,7 @@ mod tests {
             store: Some("AGM84E.JT".into()),
             count: 18,
             weight_class: 170,
+            slew: [0; 4],
         };
         let (mount, rack) = placed_on(AircraftId::B52, 7, &row, Some(&model));
         // 17.3 ft out, 10.3 ft forward, the record's 2.7 ft up kept as the axis
@@ -2542,6 +2546,7 @@ mod tests {
             store: Some("MK82.JT".into()),
             count: 4,
             weight_class: 0,
+            slew: [0; 4],
         };
         let (mount, rack) = placed(&a4e, None);
         assert_eq!(mount[0], 0.);
@@ -2555,6 +2560,7 @@ mod tests {
             store: Some("AIM7.JT".into()),
             count: 4,
             weight_class: 0,
+            slew: [0; 4],
         };
         let (mount, rack) = placed(&f4e, None);
         assert_eq!(mount[0], FUSELAGE_WELL);
@@ -2635,6 +2641,7 @@ mod tests {
             store: Some("F250.GAS".into()),
             count: 2,
             weight_class: 46,
+            slew: [0; 4],
         };
         let (mount, rack) = placed_on(AircraftId::Mf1, 5, &belly, Some(&model));
         assert_eq!(mount[0], MF1_BELLY_OUT);
@@ -2656,6 +2663,7 @@ mod tests {
             store: Some("R550.JT".into()),
             count: 2,
             weight_class: 4,
+            slew: [0; 4],
         };
         let plain = placed_scaled(
             &tip,
@@ -2692,6 +2700,7 @@ mod tests {
             store: Some(store.into()),
             count,
             weight_class: 32,
+            slew: [0; 4],
         };
         let aircraft = |id| tore_formats::aircraft::Aircraft {
             id,
@@ -2736,6 +2745,7 @@ mod tests {
             store: Some(store.into()),
             count,
             weight_class,
+            slew: [0; 4],
         };
         let aircraft = |id| tore_formats::aircraft::Aircraft {
             id,
@@ -2803,6 +2813,7 @@ mod tests {
             store: Some("AGM65G.JT".into()),
             count: 2,
             weight_class: 0,
+            slew: [0; 4],
         };
         // 5.5 ft out, half a foot past the nacelle's edge: the store's
         // inboard side would cut into it, so the station moves out until
@@ -2885,6 +2896,7 @@ mod tests {
             store: Some(store.into()),
             count,
             weight_class: 0,
+            slew: [0; 4],
         }
     }
 
@@ -2926,6 +2938,7 @@ mod tests {
                 store: None,
                 count,
                 weight_class: 90,
+                slew: [0; 4],
             };
             let (mount, rack) = placed_on(id, row, &h, Some(&model));
             assert_eq!([mount[0], mount[2]], [right, forward]);
@@ -2971,6 +2984,7 @@ mod tests {
             count: 2,
             store: Some("MK82P3.JT".into()),
             weight_class: 30,
+            slew: [0; 4],
         };
         let moved = station_move(AircraftId::Tornado, 7).expect("row 7 is moved");
         assert_eq!(moved.location, Location::Wing);
@@ -3025,6 +3039,7 @@ mod tests {
             count: 2,
             store: Some("MK82P3.JT".into()),
             weight_class: 30,
+            slew: [0; 4],
         };
         let rail_row = Hardpoint {
             flags: 0x85,
@@ -3088,6 +3103,7 @@ mod tests {
                 store: None,
                 count: 1,
                 weight_class: 0,
+                slew: [0; 4],
             };
             let (mount, mut rack) = placed_on(AircraftId::Tornado, pod.row, &h, None);
             rack.paired = false;
@@ -3164,6 +3180,7 @@ mod tests {
             count: 2,
             store: Some("MK82P3.JT".into()),
             weight_class: 30,
+            slew: [0; 4],
         };
         let pod_row = Hardpoint {
             location: Location::Wing.byte(),
@@ -3172,6 +3189,7 @@ mod tests {
             store: None,
             count: 1,
             weight_class: 0,
+            slew: [0; 4],
         };
         let size = StoreSize::of_shape(Some("MK82.SH"));
         let pod = StoreSize::body([BOZ_107.length, BOZ_107.diameter]);
@@ -3289,6 +3307,7 @@ mod tests {
             count: 4,
             store: Some("AA9.JT".into()),
             weight_class: 0,
+            slew: [0; 4],
         };
         let (mount, rack) = placed_on(AircraftId::Mig31, 4, &row(4, [25, -10, 0]), Some(&model));
         assert_eq!(
@@ -3322,6 +3341,7 @@ mod tests {
             count: 2,
             store: Some("AA8.JT".into()),
             weight_class: 8,
+            slew: [0; 4],
         };
         let (mount, rack) = placed_on(AircraftId::Mig31, 5, &aa8, Some(&model));
         assert_eq!([mount[0], mount[2]], [50. / 3., 0.]);
@@ -3365,6 +3385,7 @@ mod tests {
             count: 4,
             store: Some("AIM120.JT".into()),
             weight_class: 0,
+            slew: [0; 4],
         };
         let source = row(1, [25, -10, 0]);
         let (mount, rack) = placed_on(AircraftId::F15, 4, &source, Some(&model));
@@ -3453,6 +3474,7 @@ mod tests {
             store: Some("AT2.JT".into()),
             count: 4,
             weight_class: 0,
+            slew: [0; 4],
         };
         let size = StoreSize::of_shape(Some("SWATR.SH"));
         let (old_mount, old_rack) = placed(&source, Some(&model));
@@ -3619,6 +3641,7 @@ mod tests {
             store: Some("AA11.JT".into()),
             count: 2,
             weight_class: 0,
+            slew: [0; 4],
         };
         let (mount, rack) = placed(&outer, Some(&model));
         let lead = 4. - 11. * 16.67 / 18.;
@@ -3682,6 +3705,7 @@ mod tests {
             store: Some("AA11.JT".into()),
             count,
             weight_class: 0,
+            slew: [0; 4],
         };
         let aa11 = StoreSize::of_shape(Some("ARCHR.SH"));
         for (id, [right, forward]) in [(AircraftId::Su27, SU27_WING), (AircraftId::Su35, SU35_WING)]
@@ -3739,6 +3763,7 @@ mod tests {
             store: Some("AGM65G.JT".into()),
             count: 4,
             weight_class: 0,
+            slew: [0; 4],
         };
         let at = |index, x| placed_on(AircraftId::A10, index, &row(x), None).0;
         assert_eq!(at(6, 25)[0], A10_WING[0]);

@@ -33,6 +33,8 @@ mod ground;
 mod gunship;
 mod jettison;
 mod orders;
+#[cfg(test)]
+mod tail_gun_tests;
 pub(crate) use orders::{GroundAim, GroundFact, OrderReport, order_label};
 pub mod outcome;
 mod record;
@@ -641,6 +643,7 @@ pub(crate) fn station_specs_loaded(
         } else {
             station.mount
         };
+        spec.slew = station.slew;
         spec.infrared_envelope = (w.flags & 0x10000 != 0
             && w.seeker_kind() == tore_formats::weapons::SeekerKind::Infrared)
             .then_some((
@@ -3319,6 +3322,12 @@ impl AiWings {
             .iter()
             .find(|s| s.station == event.station)
             .map_or([0.; 3], |s| s.mount);
+        // A slewed gun's rest direction and arcs (the B-52's tail gun).
+        let slew = actor
+            .stations()
+            .iter()
+            .find(|s| s.station == event.station)
+            .map_or_else(Default::default, |s| s.slew);
         // A store leaves its own side of its station, as a human's does
         // (B3); an aircraft with no combat configuration keeps its centre.
         let origin = match if gun {
@@ -3334,20 +3343,25 @@ impl AiWings {
             }),
             None => flight.position,
         };
+        // Where a slewed gun's barrel has swung to, when it fires.
+        let mut swung = None;
         if physical_gun {
             let Some(target) = actor.gun_target().filter(|t| t.id == event.target) else {
                 return 0;
             };
-            if !tore_sim::ai::gunnery::solve(
+            let solution = tore_sim::ai::gunnery::solve_mounted(
                 weapon,
                 &crate::combat::launcher(flight),
                 mount,
+                slew,
                 target,
-            )
-            .is_some_and(|s| s.aligned)
-            {
+            );
+            if !solution.is_some_and(|s| s.aligned) {
                 return 0;
             }
+            swung = solution
+                .filter(|_| slew.is_slewed())
+                .map(|s| s.aim.direction);
         }
         let launch_velocity = flight.velocity;
         let observed = actor
@@ -3373,7 +3387,7 @@ impl AiWings {
             return 0;
         };
         let direction = if gun {
-            basis.forward
+            swung.unwrap_or_else(|| slew.direction(basis))
         } else {
             unit([aim[0] - origin[0], aim[1] - origin[1], aim[2] - origin[2]])
         };

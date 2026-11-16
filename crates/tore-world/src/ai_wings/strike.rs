@@ -480,6 +480,11 @@ pub(super) fn describe(
         .filter_map(|(index, station)| {
             let w = &station.weapon;
             let gun = live::is_gun(w);
+            // A slewed gun (the B-52's tail gun) points astern: it is no
+            // strafing gun, only a defensive one (B52-6).
+            if gun && station.slew.is_slewed() {
+                return None;
+            }
             let kind = if gun { StoreKind::Gun } else { kind(w)? };
             let spec = specs.iter().find(|s| usize::from(s.station.0) == index)?;
             let rounds = match spec.store.rounds {

@@ -146,10 +146,23 @@ const DEFAULT_EYE: [f64; 2] = [7., 10.];
 /// looks over the canopy and down the spine to the ruddervators, not out of
 /// the inside of the glass. The shared seat (10 ft ahead, 3 ft above the back
 /// at that point) is 4 ft too far aft of the cockpit.
+///
+/// B-52 (B52-7, 2026-11-15, fitted from the shape: `B52.SH` at 2/3 ft a
+/// unit): the fuselage top is flat at 7.3 ft (11 units) from 31 ft aft of the
+/// origin to 58.7 ft ahead of it, where the nose steps down. The flight deck
+/// is the nose forward of that step: its glass faces stand at 58.7 ft ahead
+/// (a 10.7 ft wide window, 3.3 to 6 ft up) and its roof is flat at 3.3 ft
+/// (5 units) to 66.7 ft. The shared seat (10 ft ahead, 7 ft up) is 49 ft aft
+/// of the deck and 0.3 ft under the fuselage skin, so F2 Back looked at the
+/// inside of the roof. The seat is the middle of the deck, 63 ft ahead, and 9
+/// ft up: 1.7 ft over the fuselage crown behind it, so the back view clears
+/// the spine and looks down the length of the aircraft to the fin and the
+/// tail cone.
 pub(crate) fn eye_offset(id: Option<AircraftId>) -> [f64; 2] {
     match id {
         Some(AircraftId::B2) => [10., 20.],
         Some(AircraftId::F117) => [6., 14.],
+        Some(AircraftId::B52) => [9., 63.],
         _ => DEFAULT_EYE,
     }
 }
@@ -480,11 +493,12 @@ mod tests {
     /// every other aircraft, and an unknown type, keeps the shared one (7 ft
     /// up, 10 ft ahead).
     #[test]
-    fn only_the_b2_and_the_f117_have_their_own_pilot_eye() {
+    fn only_the_b2_the_f117_and_the_b52_have_their_own_pilot_eye() {
         for id in AircraftId::ALL {
             let want = match id {
                 AircraftId::B2 => [10., 20.],
                 AircraftId::F117 => [6., 14.],
+                AircraftId::B52 => [9., 63.],
                 _ => [7., 10.],
             };
             assert_eq!(eye_offset(Some(id)), want, "{id:?}");
@@ -507,6 +521,13 @@ mod tests {
         let f117 = at(Some(AircraftId::F117));
         for i in 0..3 {
             let moved = (f117[i] - shared[i]) - (-up[i] + forward[i] * 4.);
+            assert!(moved.abs() < 1e-9, "axis {i}");
+        }
+        // The B-52: 2 ft higher and 53 ft further forward (the drawn flight
+        // deck), clear of the 7.3 ft fuselage crown behind it.
+        let b52 = at(Some(AircraftId::B52));
+        for i in 0..3 {
+            let moved = (b52[i] - shared[i]) - (up[i] * 2. + forward[i] * 53.);
             assert!(moved.abs() < 1e-9, "axis {i}");
         }
     }

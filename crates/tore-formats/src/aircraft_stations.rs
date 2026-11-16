@@ -560,6 +560,7 @@ pub fn side_rail(id: AircraftId, rows: &mut Vec<Hardpoint>) {
         store: Some("AIM9M.JT".into()),
         count: 2,
         weight_class: 5,
+        slew: [0; 4],
     });
 }
 
@@ -826,6 +827,7 @@ pub fn adjust_defaults(id: AircraftId, rows: &mut Vec<Hardpoint>) {
                 count: B52_PYLON_ITEMS,
                 weight_class: B52_PYLON_CLASS,
                 store: Some("AGM84E.JT".into()),
+                slew: [0; 4],
             });
         }
         AircraftId::B2 => {
@@ -1023,6 +1025,7 @@ pub fn append(id: AircraftId, rows: &mut Vec<Hardpoint>) {
         count,
         weight_class,
         store: None,
+        slew: [0; 4],
     };
     match id {
         AircraftId::F15 => {
@@ -1071,6 +1074,7 @@ mod tests {
                     store: Some(s.3.into()),
                     count: s.4,
                     weight_class: s.5,
+                    slew: [0; 4],
                 })
                 .collect();
             let mut rows = original.clone();
@@ -1107,6 +1111,7 @@ mod tests {
                 store: Some(s.3.into()),
                 count: s.4,
                 weight_class: s.5,
+                slew: [0; 4],
             })
             .collect();
         append(AircraftId::F15, &mut rows);
@@ -1193,6 +1198,7 @@ mod tests {
                     store: Some(s.3.into()),
                     count: s.4,
                     weight_class: s.5,
+                    slew: [0; 4],
                 })
                 .collect::<Vec<_>>()
         };
@@ -1354,6 +1360,7 @@ mod tests {
             store: Some(store.into()),
             count,
             weight_class,
+            slew: [0; 4],
         };
         let retail = vec![
             row(1, 0x8, [0, 0, 0], "VIS340.SEE", 1, 0),
@@ -1396,6 +1403,7 @@ mod tests {
             store: (!store.is_empty()).then(|| store.into()),
             count,
             weight_class,
+            slew: [0; 4],
         }
     }
 

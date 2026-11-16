@@ -868,11 +868,21 @@ impl State {
                     + launcher.basis.forward[i] * mount[2]
             })
         };
-        let mut direction = r
-            .gun_pose
-            .map_or(launcher.basis.forward, |(_, heading, elevation)| {
+        // A gun on a slewed mount (the B-52's tail gun) leaves along the
+        // mount's rest direction; every forward gun and store leaves along
+        // the nose, as it always did ([`super::super::slew`]).
+        let mut direction = r.gun_pose.map_or_else(
+            || {
+                if super::is_gun(w) {
+                    station.fire_direction(launcher.basis)
+                } else {
+                    launcher.basis.forward
+                }
+            },
+            |(_, heading, elevation)| {
                 crate::combat::gunship::direction(launcher, heading, elevation)
-            });
+            },
+        );
         // A bomb leaves its station (staggered in a pack) along the nose,
         // then takes its own scatter.
         let bomb = ballistics::is_bomb(w).then(|| {

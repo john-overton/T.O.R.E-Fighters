@@ -4,7 +4,7 @@
 use super::weapon_service::{Phase, StationId};
 use crate::{
     attitude::{Basis, Vector, dot, unit},
-    combat::{gunsight, live},
+    combat::{gunsight, live, slew::Slew},
 };
 use tore_formats::weapons::Weapon;
 
@@ -41,6 +41,24 @@ pub fn solve(
     mount: Vector,
     target: Target,
 ) -> Option<Solution> {
+    solve_mounted(weapon, own, mount, Slew::default(), target)
+}
+
+/// [`solve`] for a gun on a mount with a rest direction and arcs
+/// ([`Slew`]). A forward mount is [`solve`] exactly. A slewed gun (the
+/// B-52's tail gun) is not laid by turning the aircraft: its barrel swings
+/// to the lead point when that point is inside the arcs, so the solution is
+/// the lead direction itself, `aligned` while the lead is inside the arcs
+/// and never off the lead (fitted, agent, 2026-11-15; a human fires along
+/// the rest direction). Rounds do not carry the aircraft's velocity, so the
+/// lead and the round's flight are the same as for a forward gun.
+pub fn solve_mounted(
+    weapon: &Weapon,
+    own: &live::Launcher,
+    mount: Vector,
+    slew: Slew,
+    target: Target,
+) -> Option<Solution> {
     let pipper = gunsight::solve_observed(
         weapon,
         own,
@@ -68,6 +86,7 @@ pub fn solve(
         return None;
     }
     let error: Vector = std::array::from_fn(|i| pipper.point[i] - target.position[i]);
+    let swing = slew.is_slewed().then(|| slew.contains(own.basis, delta));
     let relative: Vector = std::array::from_fn(|i| {
         own.basis.forward[i] * pipper.travel_ft / pipper.seconds.max(1e-6) - target.velocity[i]
     });
@@ -107,8 +126,12 @@ pub fn solve(
                 - delta[1] * (delta[0] * velocity[0] + delta[2] * velocity[2]) / horizontal)
                 / distance_sq,
         },
-        aligned,
-        miss_ft: dot(error, error).sqrt(),
+        aligned: swing.unwrap_or(aligned),
+        miss_ft: if swing.is_some() {
+            0.
+        } else {
+            dot(error, error).sqrt()
+        },
         seconds: pipper.seconds,
         range_ft: pipper.range_ft,
     })

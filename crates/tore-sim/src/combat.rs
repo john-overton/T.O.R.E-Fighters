@@ -22,6 +22,7 @@ pub mod loading;
 pub mod loadout;
 pub mod missiles;
 pub mod sight;
+pub mod slew;
 pub mod smoke;
 pub mod store_sizes;
 pub mod surface_guns;

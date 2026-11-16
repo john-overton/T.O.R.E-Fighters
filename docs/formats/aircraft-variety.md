@@ -10633,3 +10633,150 @@ OK (5 skipped); `tools/check_docs.py` passed (382 files).
    aircraft's AI.
 4. **Net bots.** Let `tore-bot --a2g bomb` take the first bomb of its `--load` so an F-117
    (and the B-52 and B-2) can be flown over the wire in `net-a2g-stores`?
+
+## B-52 ordnance, tail gun, sensors and cockpit (B52-6/7, 2026-11-15)
+
+Slices B52-6 (ordnance, default load, countermeasures, plus the rear-facing tail gun) and B52-7
+(sensors, HUD, cockpit, instruments) ran together (implementation mode, bomber batch A). They apply
+the accepted decisions of 2026-11-15: **9** (default 12 AGM-84E on the pylons), **13** (the M61 tail
+gun), **14** (the HUD follows the record, the retail radar and jammer rows stay) and the coordinator's
+first pass: "a tail gun firing forward is a bug, build the rear-facing mount". Earlier B-52 sections
+stay as written (B11): the [B52-5 section](#b-52-bay-pylons-and-tail-gun-b52-5-2026-11-15) said the
+tail gun fires forward and asked whether to build the mount; this section is the answer. Frames are in
+`.local/m3-aircraft/frames/B52-6/`, logs in `.local/m3-aircraft/checks/B52-6/`.
+
+### The slewed gun mount (agent decision, fitted; spec in the gun sections)
+
+The record's gun row (`B52.PT` row 4) carries `slewH` 32,760 (180 degrees, astern), `slewP` 0 and arcs
+of 5,460 (30 degrees) each way. Nothing read those words: every aircraft gun fired along the nose, so
+the B-52's tail gun shot forward from the tail cone, 92 ft behind the reference point, through its own
+airframe. It is now read, in general, so any aircraft whose gun row is slewed gets it (the Tu-26's and
+Tu-95's `T23_1.JT` turrets read the same heading; neither is flyable yet).
+
+- **Data.** `aircraft::Hardpoint` gains `slew: [i32; 4]` (the four words, zero on rows the game adds).
+  `tore_sim::combat::slew::Slew` turns them into a rest direction and arcs, and `Station` carries it
+  (checkpointed; `SIMULATION_VERSION` stays 12, the integration's bump covers it). It is read only for
+  an aircraft gun on an aircraft other than the AC-130, whose trained mounts keep their own machinery.
+- **The rule.** A zero heading is a **forward gun** and is bit-for-bit what it was: the nose line,
+  whatever the pitch word says (the helicopters' chain guns read a 20 degree depression that never
+  applied and still does not). A heading makes the mount **slewed**: it fires along the rest direction in
+  the aircraft frame, from the same muzzle. Only a slewed row's pitch is honoured (the Tu-95's dorsal and
+  ventral turrets tilt 20 degrees).
+- **What follows the mount.** The round (`State::release_round`, the one release for a human's trigger and an
+  AI's; dispersion is taken around the rest direction), the human's gunsight (HUD pipper, the gunnery
+  probe, the Load Ordnance gun check: `Station::gun_view`), the networked client's drawn rounds
+  (`net::guns::gun_line`), the AI (below). The hit model, live fire and rewind read the round's own position
+  and direction and needed nothing; a replay plays the simulation's rounds as fired.
+- **Human aiming (fitted, simple).** The human fires along the mount's centre line, astern. The 30 degree arcs
+  are the AI's. The HUD reads `TAIL 1242 M61` where a forward gun reads `LCOS` (`SAFE` while unarmed) and draws no
+  pipper (the line is behind the glass). **No rear-view cue exists** (F2 Back and the other rear views draw no HUD),
+  so none was built; the tracers (every third round) show the line (frames `tail-gun-side-60`,
+  `crop2x-tail-gun-tracers-aft`, `tail-gun-rear-view-f2`).
+
+### AI tail-gun use
+
+An AI B-52 uses its gun defensively: it engages a fighter inside the mount's 30 degree arcs (measured on the
+lead point), within the weapon's range and zone, with the ordinary permissions. The barrel swings to the lead
+point at once (fitted, no slew rate), the aircraft is never turned to lay it (the controller does not hold the
+gun-tracking motion for a slewed gun), and every round of a burst leaves along the swung barrel. A slewed gun is
+no strafing gun, so an AI striker leaves it out of its stores. Forward guns keep the nose-laid rule unchanged.
+Spec: [AI gun employment](../spec/ai-gun-employment.md#slewed-guns-the-b-52s-tail-gun-b52-6-2026-11-15).
+
+Evidence: the unit tests (below); `--ai-probe-ticks 3000 --aircraft f22 --probe-enemy-aircraft b52
+--probe-geometry rear --probe-guns` (battery `flight-b52-tail-gun`): the B-52 fired 128 rounds at the F-22 closing
+from behind and 89 reached it (the same probe from the front: no gun fire at the player, as before). That hit rate is the
+exact-lead swing's; it is high for a defensive gun (open item 2).
+
+### B52-6: the load, the bay and the sights (checked)
+
+- **Default load.** 12 `AGM-84E` on the pylons (row 7), the bay empty, the gun 1,242: Load Ordnance shows the
+  Fuselage row `M61 Vulcan Cannon 1242 (max 1242)`, three empty Internal Bay rows and the Wing row `AGM-84E SLAM 12
+  loaded (max 12)`, weight 488,000 of 488,000 lb, fuel 286,412 lb (frame `load-ordnance`).
+  `--validate-ordnance` passes with no pin moved (48 aircraft, 21 recovered stations, 4,732 weapon placements, 233
+  tank placements, 80 pod placements; `B52.PT` 27 placements).
+- **Live fire.** `flight-livefire-b52-slot1` (the gun, now astern), `-slot3` to `-slot5` (the three bay rows and the
+  never-loaded slot), `flight-bay-fire-b52-row3|5|6` (bay doors, release, close) and `flight-bay-fire-b52-pylon-row7`
+  pass. **`flight-livefire-b52-slot2` (the Harpoons against the practice aircraft) now reads "TARGET TYPE / NO LOCK"
+  and fires nothing, as every other aircraft's surface missile does**: the B-52 has its radar now (below), so the Harpoon
+  wants a surface target. It is listed with the other refused slots, and the new `a2g-antiship-b52` fires it.
+- **Harpoon against a ship.** `--a2g-run UKR QUSFLT --unit 0x50000003 --attack antiship --aircraft b52 --load AGM84E
+  --station 1 --count 2` (battery `a2g-antiship-b52`): the Krivak is designated on the A-G page through the B-52's radar,
+  an AGM-84E leaves from 5,000 ft at 350 kt, the seeker goes active and the second Harpoon hits (miss 38 ft, ship 500 to
+  200 hit points).
+- **Countermeasures.** The retail `B52.ECM` (the AC-130 jammer block, `TRANSITIONAL`, strength 0.30, RF mode) works: 99
+  chaff and 99 flares (the Weapons window `99 CHAFF 99 FLARE`), the chaff and flare commands release them (98 left, two flares
+  burning and 52 chaff puffs after 60 ticks), and `--jammer-on` lights `JAM` on the RWR window (frame
+  `countermeasures-chaff-flare-jammer`, crop `systems-rwr-weapons-strip-3x-jam-chaff-flare`). The Systems window shows
+  thrust, temperature, oil, hydraulics and fuel (`286405 LBS`).
+
+### B52-7: sensors
+
+`--sensor-summary` reads `B52: radar B52R.SEE search 150 nmi 60x60 deg track 150 nmi 45x45 deg look-down 0 TRANSITIONAL;
+infrared none; visual VIS300.SEE search 10 nmi 150x120 deg track 5 nmi 150x120 deg; jammer B52.ECM TRANSITIONAL strength
+0.30; signature radar 100 infrared 200`.
+
+- **The radar was not enabled; it is now (agent decision, fitted, John to confirm).** `B52R.SEE` (the Tu-160's record
+  renamed) had no preset assignment, so it decoded as `UNREVIEWED (not enabled)` and the B-52 flew with no radar at all.
+  It is now `Preset::Transitional` (the AC-130's class: a 100 ft/s Doppler notch, burn-through 8 nmi; `sensors::profile`,
+  [radar](../radar.md#presets)). One line to revert. It also gives the AI B-52 its radar.
+- **Modes.** The shared air-to-air ones, as the B-2's: RWS search to 150 nmi and TWS with a fire-control track to 150
+  nmi (the record's 911,400 range), scope ranges 5, 10, 25, 50, 100 and 150 (`M` cycles, `Y` history), no infrared channel
+  (no IR row), 60 degree search and 45 degree track cones. There is **no ground-mapping mode** (the shared radar has none; a
+  sensor change, John's call, as for the B-2), so the strike aids are the A-G designation of the radar contact (the Harpoon above)
+  and the bomb sights. The radar window reads `RADAR OFF` until the radar is switched on, then `TWS 10 ... TRACK` (frames
+  `tail-gun-external`).
+- **RCS page.** Page 0 reads `SIG 169` closed and `SIG 254` with the bay open (frame `crop3x-rcs-closed-vs-bay-open`; the
+  record's 100 with the 12 Harpoons on the pylons, and the open-bay term of 1.5 on top, `Deployment::bay`). The oval is the
+  exposure contour. The open bay reaches only the RCS page (no radar row carries the bay state), as for the F-22, F-117 and B-2.
+
+### B52-7: HUD and cockpit
+
+- **HUD (decision 14): the record.** `BMBROH.HUD` is the AC-130 module with seven bytes changed; the instrument frame is
+  `~ac130_p`, the forward art `~AC130H.PIC` (1280 x 490), the cockpit stem `AC130`. BMB-A1 gave the B-52 the AC-130's
+  whole-picture glass polygon; it is **kept** (the retail art has one window the size of the picture). The HUD draws as the
+  AC-130's does and carries the new `TAIL` gun line (frame `cockpit-front-view`); the annunciators and the bay cue are
+  unchanged by this slice. No B-52 cockpit art exists (B52-0).
+- **Eye (fitted, measured).** `mirrors::eye_offset` gains the B-52: **9 ft up and 63 ft ahead** of the model origin (the
+  shared seat is 7 up and 10 ahead). Measured on `B52.SH` (2/3 ft a unit): the fuselage top is flat at 7.3 ft (z 11) from 31 ft
+  aft to 58.7 ft ahead of the origin; there the nose steps down, and the flight deck is the nose forward of the step: glass
+  faces at 58.7 ft (a 10.7 ft wide window, z 5 to 9 units, 3.3 to 6 ft up), a flat roof at 3.3 ft (z 5) to 66.7 ft, the nose
+  cone ending 71.3 ft ahead. The shared seat is 49 ft aft of the deck and 0.3 ft under the fuselage skin (F2 Back looked at the
+  inside of the roof). The seat is the deck's middle, 63 ft ahead, 1.7 ft above the 7.3 ft crown behind it, so F2 Back clears the
+  spine and looks down the length of the aircraft to the fin (frame `cockpit-view-back-f2`; the wings, the pylons and their
+  Harpoons show). Readers and tests are the B2-7 ones (`mirrors::tests::only_the_b2_the_f117_and_the_b52_have_their_own_pilot_eye`,
+  `flight_views::tests::back_from_a_b2_sits_at_its_own_seat`); the forward cockpit, mirrors, padlock and target camera do not read
+  the eye. The record's `viewOffset` is not used (as for the B-2 and F-117).
+
+### Tests
+
+`tore-sim`: `combat::slew::tests` (the record words, forward mount with a pitch word ignored, the aft mount, the Tu-95 dorsal tilt,
+the arcs, the muzzle in the mount's frame), `combat::live::pair_tests` (a slewed gun fires astern and a forward gun does not; a forward gun
+keeps the nose line and its sight view; a slewed gun's sight points astern from the same muzzle), `sensors::profile::tests::
+the_b52_radar_record_is_reviewed_transitional`. `tore-world`: `ai_wings::tail_gun_tests` (a fighter astern is engaged and the round leaves
+astern along the lead, ahead and 40 degrees off are not, a forward gun with a fighter behind is not, the controller asks for tail-gun
+rounds against a fighter behind it and a forward gun does not, the retail `B52.PT` row reads as a slewed tail gun and the AI spec carries it).
+`tore-app`: the eye table and the Back camera. Battery: `flight-b52-tail-gun`, `a2g-antiship-b52`, `flight-livefire-b52-slot2` (refused slot).
+
+### Open for John
+
+1. **Radar enabled.** `B52R.SEE` as Transitional (above) is the agent's decision; the alternative is a B-52 with no radar.
+2. **AI tail-gun lethality.** The swing is exact and instant, so the AI B-52 hit an F-22 behind it with 89 of 128 rounds. A fitted aim
+   error or a slew rate would soften it. Networked clients draw the AI's rounds along the rest direction, not the swung barrel.
+3. **Rear-view cue.** None exists in the game (the rear views have no HUD); building one is a HUD change.
+4. **Eye** at 9 ft up, 63 ft ahead (the deck's middle, over the crown): fitted, change in `mirrors::eye_offset`.
+
+### Checks
+
+All through `.local/m3-imports/light3.sh`, profile `.local/m3-aircraft/profile-b52` refreshed first (logs in
+`.local/m3-aircraft/checks/B52-6/`): `cargo fmt --all -- --check` clean; `cargo clippy --workspace --all-targets --locked -- -D warnings`
+clean; `cargo test --locked --workspace --no-fail-fast` 7,798 passed, 0 failed, 108 ignored; `--validate-ordnance` passed with
+no pin moved; `--aircraft b52 --headless-flight 600` 0 non-finite, 276 kt level at 5,000 ft, fuel 312,197 to 312,127 lb;
+battery `*b52*` 23 of 23, and the guns and live fire of every aircraft (`flight-livefire-*`, `a2g-gun-key`, `ai-guns-*`,
+`ai-threat-gun-*`, `ai-record-guns`, `ai-long-guns-3v3`, `replay-rec-*guns*`, `replay-rec-threat-gun`, `flight-ac130-console-gun-lock`,
+`surface-zsu23-gun`, `flight-b52-*`, `a2g-antiship*`) 130 of 130, which proves every forward gun and the AC-130's mounts unchanged;
+`python3 -B -m unittest discover -s tools` OK; `tools/check_docs.py` passed. **Not run:** the full battery, `check_assets`, the net and
+mission batteries, `--smoke-test`, a B-52 gun over the wire.
+
+Provenance: slew words spec-derived (retail records); the forward/slewed rule, the AI swing, the `TAIL` cue, the radar preset and the eye
+fitted, agent decisions 2026-11-15. No retail bytes committed.
+

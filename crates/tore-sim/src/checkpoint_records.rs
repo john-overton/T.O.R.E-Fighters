@@ -12,6 +12,7 @@
 
 use crate::combat::hardpoints::Rack;
 use crate::combat::live::{Configuration, FixedPod, GunPod, Station, TankStation, TankStore};
+use crate::combat::slew::Slew;
 use tore_formats::weapons::{
     Burst, Countermeasures, Damage as WeaponDamage, Effects, Guidance as WeaponGuidance, Movement,
     Seeker, Tank, Weapon, Zone,
@@ -134,7 +135,10 @@ crate::checkpoint_struct!(Countermeasures {
     infrared_lose_lock_time,
 });
 
-crate::checkpoint_struct!(Station { mount, count, internal, rack } shared { weapon });
+crate::checkpoint_struct!(Station { mount, count, internal, rack, slew } shared { weapon });
+
+// A gun station's rest direction and arcs (B52-6).
+crate::checkpoint_struct!(Slew { rest, limit });
 
 // A station's source location and pairing (B3).
 crate::checkpoint_struct!(Rack {
@@ -389,6 +393,7 @@ mod tests {
             strike_class: crate::models::strike_class::StrikeClass::Heavy,
             stations: (0..count)
                 .map(|i| Station {
+                    slew: Default::default(),
                     weapon: weapon((i as u8) % distinct),
                     mount: [i as f64, -1.5, 0.25],
                     count: 1 + i as u16,

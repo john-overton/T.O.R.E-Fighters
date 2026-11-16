@@ -9227,8 +9227,8 @@ fn probe_on_pipper(
             position: contact.position,
             velocity: contact.velocity,
         });
-    let Ok(Some(solution)) = gunsight::solve(&station.weapon, launcher, station.gun_mount(), radar)
-    else {
+    let (launcher, mount) = station.gun_view(launcher);
+    let Ok(Some(solution)) = gunsight::solve(&station.weapon, &launcher, mount, radar) else {
         return false;
     };
     let pipper = missiles::sub(solution.point, launcher.position);

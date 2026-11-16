@@ -118,3 +118,32 @@ tracking an aircraft: [how the AI flies a pass](ai-strike.md#how-the-ai-flies-a-
 - Expose gun readiness, solution failure, burst/recovery timing and ammunition
   in replay explanations. A permanently expired service must not say merely
   "not yet". Repeat seeds and validate actual bullet releases and damage.
+
+## Slewed guns: the B-52's tail gun (B52-6, 2026-11-15)
+
+**Fitted**, an agent decision (the coordinator's first pass of 2026-11-15). The record's
+slew words and the fire direction of a slewed mount are in
+[gun pipper and cues](gunsight-targeting.md#slewed-gun-mounts-the-b-52s-tail-gun-b52-6-2026-11-15).
+This section is the AI's use of such a gun. Every forward gun keeps the rules above, unchanged.
+
+- **Defensive only.** An AI aircraft engages with a slewed gun only a target **inside the
+  mount's arcs** (30 degrees either side of astern for the B-52, measured as the heading and
+  pitch of the lead point from the rest direction), within the weapon's range and zone, with
+  the ordinary permissions (target order, terrain, ammunition). Nothing ahead or abeam is engaged. A
+  slewed gun is no strafing gun: it is left out of an AI striker's stores.
+- **The barrel swings, the aircraft does not turn.** Where a forward gun is laid by flying the
+  nose at the lead point, the AI's tail gun swings its barrel to the lead point inside
+  the arcs, instantly (fitted: no slew rate, the gunner's mount is not modelled). So the controller does not hold the gun-tracking
+  motion for it, and its flight is not changed by firing. Every round of a burst leaves along the swung barrel
+  (one direction, as a fixed barrel's rounds do, then the quarter-degree dispersion):
+  no round is turned toward the target after leaving. This is the one place the AI's barrel is
+  not the aircraft's nose.
+- **Cadence, ammunition and accounting** are the forward gun's: the 0.5 s burst and 0.5 s recovery, the
+  imported rate, physical rounds debited when emitted.
+- **Known limits.** A networked client draws the AI's tail-gun rounds along the mount's rest direction,
+  not the swung barrel (the wire carries no barrel angle for these guns); the host's rounds, hits and
+  kills are the simulation's. The human fires only along the rest direction.
+
+Tests: `tore-world` `ai_wings::tail_gun_tests` (a fighter astern is engaged, ahead or
+40 degrees off is not, a forward gun with a fighter behind is not; the controller path; the retail record).
+

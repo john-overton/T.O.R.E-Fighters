@@ -1228,6 +1228,10 @@ REFUSED_SLOTS = {
     ("m2000", 2),
     # The Gripen's AGM-65G is a surface missile (GRI-6).
     ("gripen", 2),
+    # The B-52's AGM-84E Harpoons are a surface missile (B52-7, 2026-11-15): the B-52 now has
+    # its radar (`B52R.SEE`, enabled), so the Harpoon wants a surface target as everyone's does.
+    # `a2g-antiship-b52` fires it at the Krivak.
+    ("b52", 2),
 }
 
 
@@ -2568,7 +2572,37 @@ def fight_scenarios() -> list[Scenario]:
                     timeout=600,
                 )
             )
+    # B52-6 (2026-11-15): the B-52's tail gun fires astern. A scripted F-22
+    # closes on an AI B-52 from behind and the B-52's gun hits it; nothing
+    # fires from the nose of a bomber in a tail chase otherwise.
+    out.append(
+        Scenario(
+            name="flight-b52-tail-gun",
+            lane="flight",
+            args=[
+                "--aircraft", "f22", "--probe-enemy-aircraft", "b52", "--probe-enemy-skill", "ace",
+                "--probe-geometry", "rear", "--separation", "1", "--probe-guns",
+                "--ai-probe-ticks", "3000", "--no-audio",
+            ],
+            check=b52_tail_gun_problems,
+            timeout=600,
+            notes="B52-6: an AI B-52's slewed M61 fires astern at a fighter in its rear arc (enemy_gun hits on the player).",
+        )
+    )
     return out
+
+
+def b52_tail_gun_problems(output: str) -> list[str]:
+    m = re.search(r"enemy_gun=(\d+)/(\d+)", output)
+    if not m:
+        return ["no debrief line with enemy_gun"]
+    hits, shots = int(m.group(1)), int(m.group(2))
+    problems = []
+    if shots == 0:
+        problems.append("the B-52's tail gun never fired at the fighter behind it")
+    elif hits == 0:
+        problems.append(f"the tail gun fired {shots} rounds and none reached the fighter")
+    return problems
 
 
 ATTACK_LINE = re.compile(
