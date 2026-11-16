@@ -43,6 +43,7 @@ fn own(position: Vector) -> OwnState {
         alive: true,
         fuel_endurance_s: 3_600.,
         time_home_s: Some(600.),
+        bay_doors: 1.0,
         rotorcraft: false,
         internal_fuel_lbs: 8_000.,
         radar_emitting: true,
@@ -124,6 +125,7 @@ fn store(station: u8, kind: StoreKind, rounds: u32) -> Store {
         frag_radius_ft: 0.,
         falls_free: false,
         flight: None,
+        bay: false,
     }
 }
 

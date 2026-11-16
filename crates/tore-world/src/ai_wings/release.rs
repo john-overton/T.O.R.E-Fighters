@@ -263,8 +263,9 @@ mod tests {
     }
     /// F117-5: an AI bomb leaves a fitted bay magazine (the F-117's left bay
     /// station) from the bay's own mount, through the shared release the
-    /// human's trigger takes; the AI's release does not wait for doors (the
-    /// same as the F-22's: its drawn doors stay shut, docs/spec/stores-on-pylons.md).
+    /// human's trigger takes; the shared release itself waits for no
+    /// door: since BMB-AI the strike holds a bay release until the doors are open
+    /// (docs/spec/ai-strike.md), so this calls the release directly.
     #[test]
     fn an_ai_bomb_leaves_a_fitted_bay_magazine_from_its_mount() {
         use tore_formats::aircraft::AircraftId;
@@ -299,7 +300,7 @@ mod tests {
     }
 
     /// B2-5: an AI bomb leaves the B-2's gridded bay inside its left opening,
-    /// through the shared release; as the F-22's and F-117's, it does not wait for doors.
+    /// through the shared release (the strike, not the release, waits for the doors).
     #[test]
     fn an_ai_bomb_leaves_a_b2_bay_grid_from_its_first_place() {
         use tore_formats::aircraft::{AircraftId, Hardpoint};
@@ -338,9 +339,8 @@ mod tests {
     }
 
     /// B52-5 and B2-5: an AI bomb leaves the B-52's bay row 5 (a grid magazine on the
-    /// shared grid) inside its one centred opening; its doors stay shut (the F-22's
-    /// and F-117's precedent: the AI's release does not wait for them, and
-    /// `bay_ready` is not part of its release).
+    /// shared grid) inside its one centred opening; the shared release
+    /// reads no door state (the strike, not the release, waits for them since BMB-AI).
     #[test]
     fn an_ai_bomb_leaves_a_b52_bay_grid_inside_the_centred_opening() {
         use tore_formats::aircraft::{AircraftId, Hardpoint};

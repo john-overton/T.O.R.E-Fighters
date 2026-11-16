@@ -760,6 +760,10 @@ struct Watch {
     threat_call: Option<(tore_sim::ai::helicopter_threat::Decision, u64)>,
     /// A helicopter's move-ahead plan last reported (its planning tick).
     ahead: Option<u64>,
+    /// Whether the striker's bay doors last read open (0.95 or more) or shut
+    /// (0.05 or less), for the `BAY` lines (BMB-AI, 2026-11-16): none until
+    /// the first reading, and always none for an aircraft with no bay.
+    doors: Option<bool>,
     /// The planes whose lasers are reported, and what each last showed.
     lasers: Vec<(u32, Option<LaserShown>)>,
     /// Ticks a laser weapon of the run flew guiding, and ticks of those its
@@ -847,6 +851,7 @@ impl Watch {
             strike_target: None,
             committed: false,
             commit_held: None,
+            doors: None,
             no_laze: None,
             threat_call: None,
             ahead: None,
@@ -1038,6 +1043,32 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
             flight.speed / FPS_PER_KNOT,
             w.gunship_rounds,
         );
+    }
+    // The bay doors of a striker with a bay, when they open and shut
+    // (BMB-AI, 2026-11-16): `BAY t=.. state=open|shut bay=..`, the first
+    // reading kept quiet so only changes are lines.
+    if let Some(actor) = scene.actor(w.plane)
+        && actor.flight().bay_available()
+    {
+        let door = actor.flight().bay;
+        let reading = if door >= tore_sim::combat::bays::DOORS_READY {
+            Some(true)
+        } else if door <= 0.05 {
+            Some(false)
+        } else {
+            None
+        };
+        if let Some(open) = reading
+            && w.doors != Some(open)
+        {
+            if w.doors.is_some() {
+                println!(
+                    "ai-strike: BAY t={t:.3} state={} bay={door:.2}",
+                    if open { "open" } else { "shut" }
+                );
+            }
+            w.doors = Some(open);
+        }
     }
     // The lowest the striker flew and, for a helicopter, its break once a
     // second (slice ST-H): heading, the threat's bearing and the break's
@@ -1357,6 +1388,9 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
             });
         let lead = scene.actor(w.plane).map_or(0., hooks::lead);
         let dive = hooks::dive_deg(scene.striker_velocity(w.plane));
+        // How far open its bay doors stood at the release (BMB-AI, 2026-11-16):
+        // 0 for an aircraft with no bay, which has none to open.
+        let doors = scene.actor(w.plane).map_or(0., |a| a.flight().bay);
         // Where the round started against the aircraft, feet right, up and
         // forward (B2-9, as the human run's `origin` line): the AI's release
         // from a bay grid is checked against the grid's cells.
@@ -1372,7 +1406,7 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
             );
         }
         println!(
-            "ai-strike: RELEASE t={t:.3} n={} weapon={} station={station} alt_ft={alt:.0} speed_kt={speed:.0} range_ft={range:.0}{aim} lead_ft={lead:.0} dive_deg={dive:.0}{guided}",
+            "ai-strike: RELEASE t={t:.3} n={} weapon={} station={station} alt_ft={alt:.0} speed_kt={speed:.0} range_ft={range:.0}{aim} lead_ft={lead:.0} dive_deg={dive:.0}{guided} bay={doors:.2}",
             w.releases,
             if name.is_empty() { "unknown" } else { &name },
         );

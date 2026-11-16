@@ -117,15 +117,20 @@ pub fn solve_mounted(
         std::array::from_fn(|i| relative_velocity[i] + arrival_velocity[i] * time_rate);
     let horizontal = delta[0].hypot(delta[2]).max(1.);
     let distance_sq = dot(delta, delta).max(1.);
+    let aim = Aim {
+        direction,
+        heading_rate: (delta[2] * velocity[0] - delta[0] * velocity[2]) / (horizontal * horizontal),
+        pitch_rate: (horizontal * velocity[1]
+            - delta[1] * (delta[0] * velocity[0] + delta[2] * velocity[2]) / horizontal)
+            / distance_sq,
+    };
+    // A slewed barrel also has to keep up with the lead point (fitted, BMB-AI,
+    // 2026-11-16: [`Slew::can_follow`]).
+    let swing = swing.map(|inside| {
+        inside && Slew::can_follow(aim.heading_rate, aim.pitch_rate, direction[1].asin())
+    });
     Some(Solution {
-        aim: Aim {
-            direction,
-            heading_rate: (delta[2] * velocity[0] - delta[0] * velocity[2])
-                / (horizontal * horizontal),
-            pitch_rate: (horizontal * velocity[1]
-                - delta[1] * (delta[0] * velocity[0] + delta[2] * velocity[2]) / horizontal)
-                / distance_sq,
-        },
+        aim,
         aligned: swing.unwrap_or(aligned),
         miss_ft: if swing.is_some() {
             0.

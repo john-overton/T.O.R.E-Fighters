@@ -25,6 +25,7 @@ fn at2(rounds: u32) -> Store {
         frag_radius_ft: 0.,
         falls_free: false,
         flight: None,
+        bay: false,
     }
 }
 
@@ -40,6 +41,7 @@ fn rockets(rounds: u32) -> Store {
         frag_radius_ft: 0.,
         falls_free: false,
         flight: None,
+        bay: false,
         ..at2(rounds)
     }
 }

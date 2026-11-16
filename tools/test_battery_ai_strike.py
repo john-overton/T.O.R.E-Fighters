@@ -1201,10 +1201,12 @@ def f117_run(plane=0, weapon="PAVEWA3.JT", alt=5000, profile="level", owner=None
     ]
     if role:
         out.append(f"ai-strike: ROLE t=0.000 plane={plane} role={role}")
+    out.append("ai-strike: BAY t=2.400 state=open bay=0.95")
     out.append(
         f"ai-strike: RELEASE t=3.858 n=1 weapon={weapon} station=0 alt_ft={alt} speed_kt=432 range_ft=21390 "
-        f"pass=1 aim_ft=0 inside=yes lead_ft=0 dive_deg=0 guided=Guiding spot_owner={owner}"
+        f"pass=1 aim_ft=0 inside=yes lead_ft=0 dive_deg=0 guided=Guiding spot_owner={owner} bay=1.00"
     )
+    out.append("ai-strike: BAY t=5.800 state=shut bay=0.05")
     out.append(f"ai-strike: IMPACT t=31.500 n=1 miss_ft={miss} at=1.0,2.0,3.0")
     out.append("ai-strike: KILL t=31.500 victim=0x50000001 category=0x0400 target=yes")
     if egress:
@@ -1271,11 +1273,13 @@ def b2_run(cells, alt=20000, spacing=0.25, kill=True, station=0, load="MK82.JT",
         "ai-strike: PROFILE t=0.000 name=none requested=none note=chosen",
         "ai-strike: start t=0.000 plane=0 range_ft=24304 alt_ft=20000 speed_kt=450",
     ]
+    out.append("ai-strike: BAY t=78.000 state=open bay=0.95")
     for n, (right, up, forward) in enumerate(cells, 1):
         t = 79.35 + spacing * (n - 1)
         out.append(f"ai-strike: ORIGIN t={t:.3f} n={n} station={station} right={right:.2f} up={up:.2f} forward={forward:.2f}")
         out.append(f"ai-strike: RELEASE t={t:.3f} n={n} weapon={load} station={station} alt_ft={alt} speed_kt=311 "
-                   "range_ft=19500 pass=1 aim_ft=154 inside=yes lead_ft=2155 dive_deg=-0")
+                   "range_ft=19500 pass=1 aim_ft=154 inside=yes lead_ft=2155 dive_deg=-0 bay=1.00")
+    out.append(f"ai-strike: BAY t={79.35 + spacing * len(cells) + 1.9:.3f} state=shut bay=0.05")
     for n in range(1, len(cells) + 1):
         out.append(f"ai-strike: IMPACT t={115.0 + n * 0.1:.3f} n={n} miss_ft=300.0 at=1.0,2.0,3.0")
     kills = 1 if kill else 0
@@ -1332,6 +1336,32 @@ class B2Tests(unittest.TestCase):
         self.assertTrue(s.b2_paveway_problems(bad))
         self.assertTrue(any("kill" in p for p in s.b2_paveway_problems(
             b2_run([(-7.28, -1.79, 6.67)], station=2, load="PAVEWA3.JT", kill=False))))
+
+class BayDoorTests(unittest.TestCase):
+    """BMB-AI: an AI release from a bay waits for the doors and the doors close after."""
+
+    def run_of(self, release_bay="1.00", opened=0.2, shut=3.0):
+        return s.Run([
+            ("setup", {"aircraft": "F117"}),
+            ("BAY", {"t": str(opened), "state": "open", "bay": "0.95"}),
+            ("RELEASE", {"t": "1.0", "bay": release_bay}),
+            ("BAY", {"t": str(shut), "state": "shut", "bay": "0.05"}),
+        ])
+
+    def test_a_release_with_the_doors_open_passes(self):
+        self.assertEqual(s.bay_door_problems(self.run_of(), "x"), [])
+
+    def test_a_release_with_the_doors_shut_fails(self):
+        self.assertTrue(any("doors at 0.00" in p for p in s.bay_door_problems(self.run_of("0.00"), "x")))
+
+    def test_doors_that_open_after_the_release_fail(self):
+        self.assertTrue(any("after the first release" in p for p in s.bay_door_problems(self.run_of(opened=1.5), "x")))
+
+    def test_doors_that_never_shut_or_shut_too_soon_fail(self):
+        never = s.Run([line for line in self.run_of().lines if line[1].get("state") != "shut"])
+        self.assertTrue(any("never closed" in p for p in s.bay_door_problems(never, "x")))
+        self.assertTrue(any("shut 0.2 s" in p for p in s.bay_door_problems(self.run_of(shut=1.2), "x")))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -18,7 +18,8 @@
 //!
 //! - **Strike** (slice ST-K, `net-ai-strike-handback`): a bomber that sets up
 //!   a level pass and is then dropped: turns the A-G radar on, designates the
-//!   nearest enemy ground object (Ctrl+X), selects its Mk 82s, puts the bomb
+//!   nearest enemy ground object (Ctrl+X), selects its first bomb (BMB-AI: the
+//!   Mk 82 of a fighter's load, the GBU-27 of an F-117's), puts the bomb
 //!   sight in LVL (Ctrl+M) and flies level at the target, never pressing the
 //!   trigger. It says once what it set (`strike set ...`).
 //! - **Watch**: presses nothing; says what its cockpit holds every two
@@ -50,12 +51,14 @@ pub enum Role {
     Lase,
     /// Drop a laser bomb on another plane's spot, then fire a HARM in BORE.
     Buddy,
-    /// Set up a level bomb pass at the nearest enemy ground object and fly
-    /// it without releasing (slice ST-K).
+    /// Set up a level bomb pass with the first bomb of its load at the
+    /// nearest enemy ground object and fly it without releasing (slice
+    /// ST-K).
     Strike,
-    /// Select the Mk 82s and drop one in CCIP about every four seconds,
-    /// wherever it is (slice BP3, `net-a2g-stores`: other games see the
-    /// stores go).
+    /// Select the first bomb of its load (the Mk 82s of a fighter's, the
+    /// GBU-27 of an F-117's; BMB-AI) and drop one in CCIP about every four
+    /// seconds, wherever it is (slice BP3, `net-a2g-stores`: other games see
+    /// the stores go).
     Bomb,
     /// Press nothing; report the cockpit (slice ST-K).
     Watch,
@@ -77,8 +80,24 @@ impl Role {
 /// The laser bomb the buddy drops and the missile it fires.
 const BOMB: &str = "GBU10.JT";
 const MISSILE: &str = "AGM88.JT";
-/// The strike role's bomb.
-const STRIKE_BOMB: &str = "MK82.JT";
+/// The station of the first bomb the aircraft carries (BMB-AI, 2026-11-16):
+/// the first station, in station order, whose weapon falls on the bomb
+/// equation or is a laser weapon (the F-117's GBU-27 is one) and that still
+/// holds a round. `None` when it carries none.
+fn first_bomb_station(frame: &ClientFrame, readout: &CockpitReadout) -> Option<usize> {
+    frame
+        .config
+        .stations
+        .iter()
+        .enumerate()
+        .find(|(index, station)| {
+            (tore_sim::combat::ballistics::is_bomb(&station.weapon)
+                || tore_sim::combat::laser::is_laser_weapon(&station.weapon))
+                && readout.stores.rounds(*index) > 0
+        })
+        .map(|(index, _)| index)
+}
+
 /// The lasing bot circles its target this far out, feet.
 const ORBIT_FT: f64 = 15_000.;
 /// How often the bot prints what it sees.
@@ -440,13 +459,13 @@ impl Script {
                 .or(self.point);
         }
         let station = usize::from(readout.stores.selected);
-        let selected = frame
-            .config
-            .stations
-            .get(station)
-            .map(|s| s.weapon.source.as_str());
         let ready = |t: Option<Duration>| t.is_none_or(|t| now.saturating_sub(t) >= PRESS * 2);
-        if selected != Some(STRIKE_BOMB) || !readout.stores.armed {
+        // Both bomb roles take the first bomb their `--load` hung (BMB-AI,
+        // 2026-11-16), where they used to take the Mk 82 by name: a bomb-only
+        // jet (the F-117's GBU-27, the B-2's Mk 82 or Paveway III) flies them
+        // over the wire too.
+        let wanted = first_bomb_station(frame, readout).map(|n| n == station);
+        if wanted != Some(true) || !readout.stores.armed {
             if ready(self.stepped_at) {
                 self.stepped_at = Some(now);
                 controls

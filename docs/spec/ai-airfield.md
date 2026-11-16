@@ -475,3 +475,53 @@ landing to parking, on the powered-lift physics) and the battery's
 `ai-stovl-ground-start-wing` on the imported data
 ([lane AI](../testing/lane-ai.md)). Retail comparison, broad crosswind
 coverage and multi-wing airport contention remain unmeasured.
+
+## Heavy bombers and aircraft that cannot fly slow clean (BMB-AI, 2026-11-16)
+
+**Fitted**, agent decisions (the coordinator's first pass of 2026-11-15, "the AI B-2 cannot land or
+take off alone"). Every number below is `fitted`; nothing is retail. The numbers come from the
+imported records through the flight model's weight-scaled stall speed.
+
+**Cause, landing.** The AI plans no slower than its loaded minimum level speed, and that minimum takes
+25 percent off only once the flaps are down. The flaps came down below 200 kt, but an aircraft whose
+flaps-up minimum is above 200 kt can never fly slower than that minimum, so it never reached the
+speed that lowers them, held its clean minimum all the way down, and landed there: the F-117 at
+224 kt, the B-2 at 219 to 232 kt (80 to 100 ft up, past the runway, then a go-around into the
+ground). At the 100 percent fuel of a takeoff-weight aircraft the flaps-up minimum at sea level is
+218 kt (F-117), 204 kt (B-2), 229 kt (B-52), 208 kt (B-1B), 267 kt (Tu-160), 238 kt (F-104) and
+199.5 kt (MiG-31); no other aircraft of the roster is over 190 kt at any weight (A-7 186, X-31 178).
+
+**Landing rule.** The flaps come down on the approach and in a go-around below
+`max(200 kt, 1.05 x the flaps-up minimum)` (`flaps_speed`; `Situation::clean_minimum_fps`). An aircraft
+whose flaps-up minimum is 190 kt or less keeps the 200 kt rule exactly, so every other aircraft's finals
+are as before (checked: the roster table in the BMB-AI section of the
+[aircraft variety](../formats/aircraft-variety.md#ai-fixes-for-the-bombers-bmb-ai-2026-11-16)). The final
+speed law (1.1 x minimum, never under the 1.15 G speed, under the 293 ft/s cap) is unchanged.
+
+**Cause, takeoff.** After liftoff the climb-out ends at 650 ft above the ground and raises the gear and
+flaps. A B-2 at 357,000 lb lifts off at 156 kt with a flapped minimum of 154 kt and a clean one of 213 kt;
+it climbed at a 4 degree path with its gear down and did not accelerate (154 kt at 650 ft), raised its
+flaps, and sank into the ground 10 s later. The B-52 never started: its rolling deceleration is
+4.8 ft/s squared (the shared value is 0.8), which 0.4 throttle of its engines (3.6 ft/s squared) cannot
+overcome, and the taxi law never asks for more, so it sat at its parking spot for 15 minutes.
+
+**Takeoff rules.** (1) The climb-out does not end while the aircraft is slower than 1.05 x its
+flaps-up minimum (`CLIMB_FLAPS_UP_MARGIN`): it flies a 1.5 degree path, raises the gear above 100 ft and
+accelerates with its flaps down until it can raise them, with a 400 s safety timeout (90 s otherwise,
+as before). This holds only for an aircraft whose flaps-up minimum is over 190 kt (the same test as the
+landing rule); every fighter and every transport (C-130, IL-76, E-3, 747, A310, AC-130: 100 to 185 kt)
+finishes at 650 ft exactly as before. (2) The
+taxi throttle keeps its shared law (0.05 plus 0.02 a ft/s under the target, at most 0.4) unless the
+throttle that just balances the wheels' rolling deceleration against the military thrust at this weight
+(`taxi_throttle_of`) is over 0.2: then that throttle times 1.1 is added and all the throttle may be used
+(the B-52: 0.53, so 0.58 added). A fighter needs about 0.05 and a B-2 about 0.13: both unchanged.
+
+Not changed: the rotation (the roll arms at the flapped minimum, 5 s of power, 4 degrees for 4 s, then
+8), the 650 ft height and the speed-hold and flare constants. Limits that the aircraft's own weight sets
+and the AI does not hide: a B-2 at its full 357,000 lb needs about 7,200 ft to lift off and cannot leave a
+5,532 ft field; a B-52 at full weight rolls about 5,450 ft after touchdown at 164 kt and runs about
+1,000 ft off the end of a 5,532 ft runway (it lands and stops); at 80,000 lb of fuel (301,000 lb) it
+touches down at 131 kt. The F-117's minimum is its lowest envelope row (the 0 G edge), which the flaps do
+not lower, so it lands at 170 to 190 kt, not the 155 to 165 of the real aircraft (open).
+Numbers and scenarios: the [aircraft variety](../formats/aircraft-variety.md#ai-fixes-for-the-bombers-bmb-ai-2026-11-16)
+BMB-AI section.
