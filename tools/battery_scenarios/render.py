@@ -481,6 +481,21 @@ def scenarios() -> list[Scenario]:
             notes="F-117A skin from above and below with the gear down, at its real size (per-axis shape scale 0.7647, 1.0463, 0.8869, docs/formats/objects-and-shapes.md, Aircraft shape scale): no underside shape shows through the top and the 19 double-sided panels do not z-fight. The shape's five E0 decal slots (two wing markings, two ruddervator markings, one fuselage side marking) stay omitted rather than filled with skin.",
         ),
         Scenario(
+            name="render-su34-skin",
+            lane="flight",
+            args=["--free-flight", "--aircraft", "su34", "--flight-view", "2", "--flight-look", "0,60", "--flight-zoom", "1.4", "--flight-devices", "1,0,0,0,0", "--capture-flight", "{work}/su34-top.ppm", "--no-audio"],
+            env={"TORE_WEATHER_TIME": "12:00"},
+            window=True,
+            outputs=["su34-top.ppm", "su34-under.ppm"],
+            expect=["Scene capture:"],
+            check=skin_capture_problems,
+            then=[
+                Step(["--free-flight", "--aircraft", "su34", "--flight-view", "2", "--flight-look", "0,-60", "--flight-zoom", "1.4", "--flight-devices", "1,0,0,0,0", "--capture-flight", "{work}/su34-under.ppm", "--no-audio"], window=True, timeout=180),
+            ],
+            timeout=180,
+            notes="Su-34 skin from above and below with the gear down, at its header scale (1/3 ft a unit, 1:1, no per-axis factor): no underside shape shows through the top and the 41 double-sided panels do not z-fight. The shape's two E0 wing decal slots (3786 left, 48d7 right) stay omitted rather than filled with skin (docs/formats/aircraft-variety.md, Su-34 shape and rig).",
+        ),
+        Scenario(
             name="render-runway-paint-calm",
             lane="flight",
             args=["--free-flight", "--aircraft", "f18", "--theater", "UKR", "--ground-start", "2", "--maneuver", "takeoff", "--flight-probe-ticks", "1300", "--flight-view", "1", "--capture-flight", "{work}/runway.ppm", "--no-audio"],

@@ -10510,3 +10510,198 @@ edge and 1.6 degree rest sweep (T26-3); the Su-34's G limit (+9, the page lists 
 +7), ceiling (55,000 ft, the usual figure is 48,000) and retail designator-pod flag on rows 6
 and 7 (two pod placements); the Tu-26's glove-row bomb capacity (cut with the AS-16 count);
 the Tu-26 bay's admission of the Harpoon and AM-39 with the AS-16 bit.
+
+## Su-34 shape and rig (SU34-2/3, 2026-11-15)
+
+Implementation and measurement, slices SU34-2 and SU34-3 run together (bomber batch C,
+worktree `m3-su34`), Claude Sonnet. The coordinator's first-pass decisions for the Su-34
+(`.local/m3-aircraft/BOMBERS-DECISIONS-C.md`, for John to review) are applied as written:
+draw at 1:1 with the single-seat look, canards pitch only, tailerons pitch plus roll,
+outer trailing quads as ailerons, no rudder motion, airbrake and flaps on their words,
+gear as drawn (one plate per main) with the fold probed for a clip. Provenance: the size
+and the shape reading are spec-derived measurements of `SU34.SH`; every motion limit is
+fitted (the Su-35's, which the Su-34's own word layout shares) or opinionated (the fold
+hinges); the real Su-34's control travel and gear retraction were not found. No retail
+bytes are committed. Frames are local only, in `.local/m3-aircraft/frames/SU34-2/`.
+
+### Size at 1:1 (SU34-2)
+
+`SU34.SH` of `FA_2.LIB` (CODE 22,506 bytes, 321 runtime faces; header exponent 8, so
+`object_scale` is 1 and a unit is 1/3 ft). A retail-reading test
+(`crates/tore-import/tests/su34_shape.rs`, skips without media) pins every number here.
+Neutral state, gear down, raw units:
+
+| Axis | Units | Feet at 1/3 | Real | Difference |
+| --- | ---: | ---: | ---: | ---: |
+| Span, x -79 to 76 | 155 | 51.7 | 48.2 ft | +7.2% |
+| Length, y -105 to 108 (stinger to nose) | 213 | 71.0 | 76.6 ft | -7.3% |
+| Height, gear down, z -26 to 35 | 61 | 20.3 | 20.0 ft | +1.7% |
+| Height, gear up, z -16 to 35 | 51 | 17.0 | | |
+
+(The SU34-0 review quotes +7.3%, -7.2% and +1.5%; the figures above are recomputed from
+the units, to one decimal.) Every axis is within 8%, the decision is 1:1, and **no scale
+entry is needed**: `aircraft::scale::shape_axis_scale(Su34)` is the identity, `debris::scale`
+is 1/3 (the existing test pairs it with the Su-27), and the rig spec says 1/3. Every
+consumer of the scale reads one of those:
+
+| Consumer | At 1/3 ft a unit? |
+| --- | --- |
+| Drawn aircraft, stores preview (`su34` key), damage looks and fragments | Yes: the header scale (all four damage shapes have exponent 8, retail test) |
+| Breakup piece offsets | Yes: `debris::attachment` multiplies by `scale(Su34)` |
+| Gear low point | Yes: 26 units, 8.67 ft (`models/variety.rs`, a BMB-C1 test) |
+| Wingtip vapor | Yes, and the record is valid: the two points are exactly the drawn wing tips (x -79 and 76, 0.3 ft down, 13.3 ft aft), a retail test pins it; no fix |
+| Parked placement | None: `SU34.PT` is not a parked target |
+| Hit size, cockpit eye point | Not shape-derived (below) |
+
+**The single-seat look is accepted.** The shape has one canopy hump and a Flanker
+nose; no platypus nose and no side-by-side cabin (SU34-0, coordinator decision 2).
+
+### Gear low point (checked)
+
+The gear word `67cc` adds eight faces: the two main plates (x 25 and -24, y -28 to -14,
+z -25 to 0), the nose plate (y 57 to 69, z -26 to -5) and the plate across it (y 66, x -2
+to 2), each in both windings. The flight model stands the aircraft on the nose plate's
+26 units, 8.67 ft; the mains reach 25 units, 8.33 ft, so on level ground the main
+wheels sit 0.33 ft above the pavement (0.7 degrees of nose-down over the 28 ft wheelbase;
+the same kind of offset the B-2 has). The ground frames (`ground-*`) show the nose plate
+and the mains on the pavement with no sinking or floating the eye can pick out. The belly
+clearance with the gear down is 10 units, 3.3 ft (nacelle bottom z -16), and the stores
+row 6 hangs 2.3 ft above the main wheel bottoms after BMB-C2.
+
+### Skin, decals and damage looks
+
+- **Twins.** 41 exact-vertex twin groups, every one a double-sided panel with opposite
+  stored normals, so the smooth path pairs them and hides the rear member (retail
+  test). The top and under frames (and `render-su34-skin`) show no underside through the
+  top skin and no z-fighting.
+- **Decals.** The export path finds two `E0` slots the runtime path omits (323 against
+  321 faces): `3786` (left, x -72 to -46, y -38 to -12, z 0, one unit above the left wing
+  skin) and `48d7` (right, x 43 to 69, y -37 to -12, z -1, coplanar with the right wing
+  skin). The runtime projector omits both, so the wing draws plain camouflage with no blank
+  or skin-filled patch, as for the Mirage 2000, the Tornado and the B-52. The nose number
+  `44`, the tail markings and the fuselage codes are textured faces and draw whole. No
+  clipping and no fix needed.
+- **Damage looks.** `SU34_A.SH` 305 faces, `_B` 22, `_C` 283, `_D` 22 load at the intact
+  shape's header scale (retail test). They share no face with the intact shape. A is the
+  body with the left outer wing gone (x -58 to 73 against -79 to 76) and 4 units longer at
+  the nose (y 111 against 108); C keeps both wings (x -78 to 76), runs from y -100 to 113;
+  B is a flat wing-like piece (x -53 to 14, y -30 to 29, z 0) and D a vertical fin-like plate
+  (x 0, y -15 to 19, z -12 to 24). No whole-body variant is registered for the Su-34
+  (`debris::damage_variant`), so a destroyed Su-34 draws the intact skin with the regional cuts, as the Mirage
+  2000, the Tornado and the B-52 do (open decision for John: register `LeftWing` as variant 0
+  and a tail or nose section as variant 1 as the F-5E does). Frames `damage-*` show the cut.
+- **Hit and damage volumes (finding, nothing changed).** The contact volume is one 28 ft
+  sphere for every aircraft (`AIRCRAFT_RADIUS_FT`), not derived from the shape. The Su-34's
+  half-span is 25.3 to 26.3 ft, so the wing boxes (to 25.8 ft) cover the wings to within
+  half a foot of the tips; the nose reaches 36 ft and the stinger 35 ft aft against boxes to
+  25.8 ft, so the outer 10 ft of nose and 9 ft of tail stinger are outside the volume. This is
+  the shared rule; a per-aircraft radius changes the simulation and is John's call.
+- **Eye point (finding, nothing changed).** The Su-34 takes the shared seat: 7 ft up and 10
+  ft ahead of the origin (z 21, y 30 units). The dorsal spine there is at z 15.6 (5.2 ft),
+  so the seat is 1.8 ft above the skin and 8.7 ft behind the canopy hump (y 56 to 74). It is
+  the same seat as the Su-27 and Su-33 families, as the decision says (`su33cc.HUD`, the
+  `SU33` cockpit stem); the cockpit view draws the 2D cockpit picture and the rear view uses the shared
+  seat. The record's `viewOffset` (2, 20, 80) is read by no host code. SU34-7 fits the eye.
+
+### Rig (SU34-3)
+
+`su34_animation.rs` is a new rig loaded through `variety_animation` (the generic spec row
+still pins the layout: CODE 22,506, 321 faces, the five words, gear +8). It validates the
+shape's layout, every surface's face and vertex addresses and both flap branches before it
+moves anything, and refuses a shape that differs. **Shared with the Su-35** (`su35_animation.rs`):
+the reviewed-face helpers `one_in`, `roots_in` and `branch_in` (the Su-35's `one`, `roots` and
+`branch` now call them, with their old `SU35.SH` error text); the control laws `tail_angle`,
+`canard_angle`, `aileron_angle`, the plume's `flame_scale`, the airbrake's `brake_turn`; the flap
+`Morph` with its `at` interpolation; and `turn` and `update_normal`. The Su-35 calls the
+same functions, so its behaviour is unchanged (its animation scenario and unit tests pass). New:
+every face table, pivot and the gear. Probe code reuses the F-15E probe's witness helpers
+(`rigidity`, `pinned`, `midpoint_gap`, `whole_panel`, `seam_opening` and others, now
+`pub(super)`) and the Su-35 probe's `virtual_point`.
+
+**Laws and surfaces** (all fitted unless the table says otherwise; positive elevator is a
+pull, positive aileron a right roll):
+
+| Surface | Faces | Motion |
+| --- | --- | --- |
+| Canards | `47cc`, `480d` (right); `34e6`, `3597` (left) | One whole plate a side about a lateral spindle through the root chord midpoint ((20, 23.5, -3) and (-21, 23, -3)); 0.25 x elevator, pitch only (a pull raises the leading edge). The ailerons and rudder move nothing here |
+| Tailerons | `4837`, `4906` (quad) and `4714`, `4777` (root triangle) right; `3666`, `3727`, `360b`, `3646` left | All four faces of a side turn as one rigid panel about a lateral spindle through the root edge midpoint ((23.5, -49, -3.5) and (-23, -49, -3.5)); angle = -0.30 x elevator - side x 0.10 x aileron, clamped to 0.40 rad (a pull raises both trailing edges; a right roll raises the right and lowers the left) |
+| Ailerons | `4886`, `4988` (right); `36d6`, `375f` (left) | The outer trailing quad turns about its leading hinge ((49, -29, -1) to (76, -27, -1) and (-49, -29, -1) to (-78, -27, -1)), 0.20 rad at full stick, trailing edge up for a right roll on the right and down on the left; the two hinge vertices stay exactly |
+| Flaps | `4c14`, `4c3b` (right, word `67de`); `4cbe`, `4cd5` (left, word `67d8`) | The neutral quads morph to the word's `-1` pose by the flap fraction (`4c71`, `4c88`; `4d1b`, `4d32`): the trailing edge drops 6 units and the inboard trailing corner draws in 2. The two hinge vertices stay. **`+1` removes the neutral faces and adds none (no up pose)**: as in the Su-35 rig, the neutral faces are the base and the `-1` pose only supplies the morph target, so `+1` is never drawn; the loader checks that `+1` really removes exactly those two faces and adds none, and refuses a shape that differs |
+| Airbrake | `4dc9`, `4de0` (word `67c6`, the raised pose) | Both windings turn as one plate about the forward edge (y 43, z 17) by 45.5 degrees x (1 - brake): at brake 1 it is the source pose, as brake falls the free edge comes down onto the dorsal ridge (the line from the apex (0, 43, 17) to (0, 24, 15)) and lies on it within 0.01 ft just above 0; hidden at 0 |
+| Gear | `4a7b`, `4a9a` (right main); `4ae6`, `4b05` (left main); `4b69`, `4b88` (nose plate); `4ba7`, `4bce` (plate across it) (word `67cc`) | Eight rigid plates. Each main (both windings) turns inward 90 degrees x (1 - gear) about the fore-aft line through its plate plane 1.5 units under the wing (x 25 and -24, z -1.5); the nose plate and the plate across it turn forward 90 degrees x (1 - gear) about the plate's aft top corner (y 57, z -5). Hidden at 0, the source pose at 1. No nosewheel steering (the nose is a plate with no strut) |
+| Plume | the sixteen faces of word `67c0` | Every vertex scales along y away from the nozzle exit plane (y -78) by the afterburner fraction; hidden at 0 |
+| Fins | `37cb`, `37ee`, `38b9`, `38dc` (left); `49af`, `49d6`, `49fd`, `4a24` (right) | **No motion**: one plate a side with no rudder face and no rudder word (the F-15E's precedent), so the pedals move nothing; the probe requires it (`Expectation::Unsupported`) |
+
+**Rule 11 fold table for the rig** (vertices turned / on the hinge / fixed off the axis; every
+row is zero in the last column, so no face folds):
+
+| Surface | Faces | Verts per face | Turn / hinge / fixed off axis |
+| --- | --- | --- | --- |
+| Canard (a side) | 2 | 4, 4 | 8 / 0 / 0 |
+| Taileron (a side) | 4 | 4, 4, 3, 3 | 14 / 0 / 0, all one panel |
+| Aileron (a side) | 2 | 4, 4 | 4 / 4 / 0 (two vertices a face on the leading hinge) |
+| Flap (a side) | 2 | 4, 4 | 4 / 4 / 0 (a morph: the hinge vertices stay, the two trailing vertices a face move) |
+| Airbrake | 2 | 4, 4 | 4 / 4 / 0 |
+| Main gear plates (a side) | 2 | 4, 4 | 8 / 0 / 0 (the fold line crosses the plate) |
+| Nose plate and plate across | 4 | 4, 4, 4, 4 | 16 / 0 / 0 (the pivot is the plate's own corner) |
+| Plume | 16 | 4 each | scaled from the exit plane: vertices at y -78 stay (on the plane), the rest scale |
+| Fins | 8 | 4 each | not moved |
+
+**Probe result (`--animation-probe su34`).** `animation probe SU34.PT: 321 neutral faces, 0
+required/check failures`. Reviewed scope; elevator, aileron, gear, flaps, brake and exhaust
+`required moved`; rudder `not-applicable`; hook not applicable (no hook flag). Gates, all passing at every sample:
+anchors held (at most 5.2e-6 ft), skin gap 0, rigid-panel error at most 2.6e-6 ft, signed
+direction witnesses on every surface, no new planar crossings, every face outside the
+moving groups exactly at its neutral position. Sweeps (files in the probe folder):
+`pitch-roll-combinations.csv` 25 poses, `flap-roll-combinations.csv` 25 poses (flaps 0 to 1
+against roll, half pitch), `dense-elevator.csv`, `dense-aileron.csv`, `dense-flaps.csv` (21 values
+each), `brake-sweep.csv` (7 values, the closed pose 0.000006 ft off the ridge) and
+`dense-gear.csv` (202 values: grounded at gear 1 on the 26 unit low point, closing never lowers a
+plate, anchors and rigid planes exact, neither main crosses the centre line). `seam-opening.csv`
+lists the opening at full travel.
+
+**Accepted findings (explicit acceptances, none a failure).**
+
+| Finding | Measured | Acceptance |
+| --- | --- | --- |
+| Taileron root seam | The root edge (28 units, 9.3 ft) has no fixed corner: at full pitch and roll (0.40 rad) the two root corners swing 1.86 ft from the boom faces they share (1.40 ft at full pitch alone, 0.47 ft at full roll) | Accepted (MiG-29, MiG-31, Su-27 and Su-35 precedent): a small root gap on the move; the Su-34's root chord is longer than the Su-35's, so the gap is larger |
+| Canard root seam | 0.62 ft right and 0.58 ft left at full pitch (0.25 rad on a 15 unit root chord) | Accepted, same reasoning |
+| Aileron trailing seam | 0.46 ft at full roll between the aileron's inboard trailing corner and the flap's outboard trailing corner they share | Accepted: a hinged surface has to open against its neighbour |
+| Gear stow overshoot | At gear just above 0 the main plates lie 0.5 unit (0.17 ft) under the wing skin at their outer end (x 22 to 26.5); the nose plates 0.09 unit under the belly. All else is inside the skin | Accepted (bound 0.6 unit, checked in the probe) |
+| **Fold across the nacelle belly (the coordinator's clip question)** | The mains are rigid plates with no door: from gear 1 down to 0.08 they lie outside the skin envelope, passing through the nacelle's outer wall and belly (the plate's lower edge reaches the belly line z -16 at about gear 0.42 and the keel at z -4 at about gear 0.07), and are inside the nacelle only in the last 8% (7 degrees) of travel. Neither main ever crosses the centre line (the right plate stows between x 1.5 and 26.5, the left between -25.5 and -0.5, both at z -1.5) | Accepted: a rigid plate has to pass through the wall it retracts into, as for every gear rig without doors; the stowed pose clips nothing visible beyond the 0.17 ft under the wing. The hinge sits 1.5 units under the plate's top (z 0) so the stowed plate lies half a unit under the wing skin (z -1) instead of on it (z-fighting); the 1.5 unit strip above the hinge swings outward to x 26.5 under the wing |
+| Brake closed pose | The plate lies along the ridge apex line; the ridge is a peak (x 0), so at its edges (x +-4) the closed plate is 4 units (1.3 ft) above the nacelle shoulders it spans | Accepted: authored in this slice as the source has no closed pose; it reads as a flat hatch on the spine |
+
+The `+1` flap value, the unused value 2 to 20 words and the absence of any slat, rudder or
+canard word are the source's, listed in the SU34-0 review.
+
+**Frames** (`.local/m3-aircraft/frames/SU34-2/`, a `.png` and a `.ppm` each; `su34-cap.sh`,
+`su34-frames.sh` and `su34-frames2.sh` in `.local/m3-aircraft/checks/` record the commands: free
+flight, view 2, `--instrument-layout small`, `--loadout none`, `TORE_WEATHER_TIME=12:00`, through
+`tools/agent-run.sh`): views `side-view`, `top-view`, `under-view`, `front-view`, `front-quarter`,
+`front-quarter-right`, `rear-quarter`, `rear-view`; canards and tailerons at pitch and roll
+`ctl-{neutral,pitchup,pitchdown,rollright,rollleft,pitchup-rollright,rudder}-top`,
+`ctl-{neutral,pitchup,rollright}-rear` and, from behind and above, `tailtop-{neutral,pitchup,
+rollright,pitchup-rollright,flaps1}`; ailerons in the roll frames; flaps `flaps{0,1}-top`,
+`flaps1-rear`, `tailtop-flaps1`; airbrake `brake{0,05,1}-side`, `brake1-rear`; the gear cycle
+`gear{1,0.75,0.5,0.3,0.15,0.05,0}-{side,under}`, `gear{1,0.3,0.05}-frontquarter`,
+`gear0.3-side-low`, `gear0.5-under-front`; afterburner `ab{0,05,1}-rear`, `ab{0,05,1}-side`; ground
+at the gear `ground-{side,front,rear}` (Ukraine ground start, the nose plate and both mains on the
+pavement); damage `damage-{left-wing,right-wing,nose,tail}-{0.6,1.0}`; 3x crops
+`crop3x-tail-*` and `crop3x-canard-*` (neutral, pitch up, roll right, pitch up with roll right,
+flaps down). Reading them: the canards and taileron panels tilt as one piece on pitch and tilt
+oppositely on roll with a small root gap at full travel; the outer trailing quads tip on roll; the
+flap trailing edges drop on the flap frames; the raised airbrake stands behind the canopy; the
+gear plates swing inward and disappear behind the nacelle by gear 0.5; the plume grows from the
+nozzles.
+
+**Checks** (all through `light3.sh`, profile `.local/m3-aircraft/profile-su34` refreshed first;
+logs in `.local/m3-aircraft/checks/SU34-2/`). `cargo fmt --all -- --check` clean; clippy
+`--workspace --all-targets --locked -D warnings` clean; `cargo test --locked --workspace
+--no-fail-fast` 7,791 passed, 0 failed, 108 ignored (7,786 before, plus the rig test and four
+retail shape tests); `--animation-probe su34`: 321 neutral faces, 0 required/check failures (the
+Su-27 and Su-35 probes: 150 and 334 faces, 0 failures); `--headless-flight 600` for the Su-34: no
+crash, 0 non-finite, 0 overspeed ticks, fuel 26,676 to 26,658.5 lb; battery scenarios
+`flight-animation-su34`, `flight-animation-su27`, `flight-animation-su35` and `render-su34-skin`:
+4 of 4 passed; `tools/check_docs.py` passed. A deliberate mutation of the rig (canard sign, gear
+fold direction, plume root) made the probe fail the elevator, gear and exhaust rows, and was
+reverted. Nothing was committed.

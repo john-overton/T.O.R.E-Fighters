@@ -421,7 +421,10 @@ fn specification(id: Id) -> Option<Spec> {
             Id::Tu95 => (9148, 155, &[0x33b0], &[(0x33b0, Part::Gear, 6)], 2. / 3.),
             // SU34.SH: five words (afterburner plume 0x67c0, airbrake 0x67c6,
             // gear 0x67cc, flaps 0x67d8 and 0x67de, the Su-35's layout), gear
-            // adds 8 faces; header exponent 8, so 1/3 ft a unit.
+            // adds 8 faces; header exponent 8, so 1/3 ft a unit. Update
+            // (SU34-3, 2026-11-15): the Su-34 loads through its own
+            // `su34_animation` rig (the Su-35's laws on its own faces); this
+            // row pins the layout, the scale and `supported`.
             Id::Su34 => (
                 22506,
                 321,
@@ -520,6 +523,9 @@ enum SpecificRig {
     B2(crate::b2_animation::Rig),
     /// F117-3 and F117-4: the ruddervators, the gear and the interim bay pose.
     F117(crate::f117_animation::Rig),
+    /// SU34-3: the canards, tailerons, outer ailerons, flap morph, airbrake,
+    /// gear and plume (the Su-35's laws on the Su-34's own faces).
+    Su34(crate::su34_animation::Rig),
 }
 pub struct Rig {
     id: Id,
@@ -869,6 +875,15 @@ impl Rig {
                     shape,
                 ));
             }
+            Id::Su34 => {
+                let (rig, shape) = crate::su34_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::Su34(rig),
+                    shape,
+                ));
+            }
             Id::F117 => {
                 let (rig, shape) = crate::f117_animation::Rig::load(bytes, shape)?;
                 return Ok(Self::with_specific(
@@ -987,6 +1002,7 @@ impl Rig {
                 SpecificRig::Su25(_) => crate::su25_animation::flame(address),
                 SpecificRig::Su27(_) => crate::su27_animation::flame(address),
                 SpecificRig::Su35(_) => crate::su35_animation::flame(address),
+                SpecificRig::Su34(_) => crate::su34_animation::flame(address),
                 SpecificRig::Yak141(_) => crate::yak141_animation::flame(address),
                 SpecificRig::V22(_) => crate::v22_animation::flame(address),
                 SpecificRig::A310(_)
@@ -1058,6 +1074,7 @@ impl Rig {
                 SpecificRig::Su25(rig) => rig.animate(source, state),
                 SpecificRig::Su27(rig) => rig.animate(source, state),
                 SpecificRig::Su35(rig) => rig.animate(source, state),
+                SpecificRig::Su34(rig) => rig.animate(source, state),
                 SpecificRig::A310(rig) => rig.animate(source, state),
                 SpecificRig::C130(rig) => rig.animate(source, state),
                 SpecificRig::Ac130(rig) => rig.animate(source, state),

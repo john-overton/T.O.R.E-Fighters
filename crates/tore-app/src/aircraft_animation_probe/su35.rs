@@ -379,7 +379,7 @@ fn map_vector(v: V, before: [V; 3], after: [V; 3]) -> V {
             .sum()
     })
 }
-fn virtual_point(before: &Face, after: &Face, p: [f32; 3]) -> Option<[f32; 3]> {
+pub(super) fn virtual_point(before: &Face, after: &Face, p: [f32; 3]) -> Option<[f32; 3]> {
     let (a, b) = observed_frames(before, after)?;
     let offset = map_vector(
         sub(p.map(f64::from), before.positions[0].map(f64::from)),

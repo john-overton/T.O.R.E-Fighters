@@ -164,6 +164,7 @@ mod store_sizes;
 mod stores_preview;
 mod su25_animation;
 mod su27_animation;
+mod su34_animation;
 mod su35_animation;
 mod surface_battle;
 mod surface_drive;

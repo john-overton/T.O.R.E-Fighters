@@ -13,7 +13,7 @@ from battery import Scenario
 REVIEWED_AIRCRAFT = ("a7", "f4b", "f4j", "f4e", "f4g", "f15", "mig17", "f16c", "f104", "a310", "c130", "ac130", "e3", "a10", "av8", "ah64", "mi24", "ch47",
                      "yak141", "v22", "il76", "e2", "b747",
                      "f18", "rafale", "mig29", "su27", "su35", "mig21", "su25", "f22", "f22n", "faxx", "x31", "mig23", "f14", "a4e", "mig25",
-                     "f16a", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc", "b52", "b2", "f117")
+                     "f16a", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc", "b52", "b2", "f117", "su34")
 
 
 def check_report(work: Path, _output: str) -> list[str]:
@@ -85,6 +85,11 @@ def check_report(work: Path, _output: str) -> list[str]:
         # The F-117 (F117-3 and F117-4): the ruddervator pitch/yaw grid (25 poses), the dense gear
         # sweep (202 values) and the interim bay sweep (8 values); no elevon, flap, brake or plume.
         "F117.PT": {"dense-gear.csv": 203, "pitch-yaw-combinations.csv": 26, "bay-sweep.csv": 9},
+        # The Su-34 (SU34-3): the gear sweep (202 values), the pitch/roll and flap/roll grids (25 poses
+        # each), the dense elevator, aileron and flap sweeps (21 values each) and the brake sweep (7).
+        "SU34.PT": {"dense-gear.csv": 203, "pitch-roll-combinations.csv": 26,
+                    "flap-roll-combinations.csv": 26, "dense-elevator.csv": 22,
+                    "dense-aileron.csv": 22, "dense-flaps.csv": 22, "brake-sweep.csv": 8},
         # The Tornado IDS (Clean) (TOR-13) drives the Tornado's own rig: the same sweeps.
         "tornadoc": {"dense-gear.csv": 203, "pitch-roll-combinations-25deg.csv": 26,
                      "pitch-roll-combinations-67deg.csv": 26, "sweep-flap-combinations.csv": 36,
