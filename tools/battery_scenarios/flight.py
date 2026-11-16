@@ -123,6 +123,11 @@ STATIONS["faxx"] = STATIONS["f22n"]
 # six a wing); its three bay rows (3, 5 and 6, nine Mk 82 each) start empty and keep an
 # empty Mk 82 selection, so three never-loaded slots follow.
 STATIONS["b52"] = [1242, 12, 0, 0, 0]
+# The F-111F (F111-5, 2026-11-16): the four wing rows (row 5 GBU28.JT x2, row 6 MK82P.JT x2,
+# row 7 AGM65G.JT x4, row 8 MK82P.JT x2), then the bay (row 9; it starts with the Pave Tack, a
+# designator pod, so its Mk 82 selection holds none) and the two AIM-9 rails (rows 10 and 11,
+# empty by default): three never-loaded slots follow.
+STATIONS["f111"] = [2, 2, 4, 2, 0, 0, 0]
 
 
 def _numbers(output: str, prefix: str) -> dict:
@@ -1236,6 +1241,8 @@ REFUSED_SLOTS = {
     # its radar (`B52R.SEE`, enabled), so the Harpoon wants a surface target as everyone's does.
     # `a2g-antiship-b52` fires it at the Krivak.
     ("b52", 2),
+    # The F-111F's AGM-65G row is a surface missile (F111-5).
+    ("f111", 3),
 }
 
 
@@ -1243,6 +1250,8 @@ REFUSED_SLOTS = {
 # station's ammunition falls by one pack. The Tornado's MK82P3.JT row (inner wing) is the only
 # one: each release sends three Mk 82s (1,500 lb) and takes one round (TOR-6, 2026-11-11).
 SHOTS_PER_ROUND = {("tornado", 3): 3, ("tornadoc", 3): 3}
+# The F-111F's two MK82P.JT rows (slots 2 and 4, rows 6 and 8) release a six-pack a round (F111-5).
+SHOTS_PER_ROUND.update({("f111", 2): 6, ("f111", 4): 6})
 
 
 def check_slot(ac: str, slot: int):
@@ -1396,6 +1405,32 @@ def slot_scenarios() -> list[Scenario]:
         outputs=["frames/b52-fire-row7-t000.png", "frames/b52-fire-row7-t400.png"],
         timeout=300,
         notes="B-52 pylon release: a Mk 82 leaves the underwing beam with the bay doors shut (18 loaded, nine a wing; the Harpoon default needs a target the preview does not give it, its live-fire slot scenario covers it).",
+    ))
+    # F111-5 (2026-11-16): the F-111F's bay (row 9, two Mk 82 abreast through the shared grid;
+    # the Pave Tack it holds by default is displaced by the load) and its fixed outer pylon (row
+    # 7, a Mk 82 pair): one press opens the doors, the bomb leaves from its cell and the doors
+    # close; the pylon release leaves the doors shut.
+    out.append(Scenario(
+        name="flight-bay-fire-f111-row9", lane="flight",
+        args=["--stores-preview", "{work}/frames"], window=True,
+        env={"TORE_STORES_PREVIEW_AIRCRAFT": "f111",
+             "TORE_STORES_PREVIEW_RECORDS": "9=MK82.JT:2",
+             "TORE_STORES_PREVIEW_FUEL": "20000",
+             "TORE_STORES_PREVIEW_FIRE": "9"},
+        expect=["Stores firing: f111 row=9 PASS"],
+        outputs=["frames/f111-fire-row9-t000.png", "frames/f111-fire-row9-t400.png"],
+        timeout=300,
+        notes="F-111F bay release: the doors open before the Mk 82 leaves and close after it, as the F-22's, F-117's and B-52's do.",
+    ))
+    out.append(Scenario(
+        name="flight-bay-fire-f111-pylon-row7", lane="flight",
+        args=["--stores-preview", "{work}/frames"], window=True,
+        env={"TORE_STORES_PREVIEW_AIRCRAFT": "f111", "TORE_STORES_PREVIEW_FIRE": "7",
+             "TORE_STORES_PREVIEW_RECORDS": "7=MK82P.JT:2", "TORE_STORES_PREVIEW_FUEL": "20000"},
+        expect=["Stores firing: f111 row=7 PASS"],
+        outputs=["frames/f111-fire-row7-t000.png", "frames/f111-fire-row7-t400.png"],
+        timeout=300,
+        notes="F-111F outer pylon release: a Mk 82 leaves the fixed outer wing pylon with the bay doors shut (the default Maverick needs a target the preview does not give it, its live-fire slot scenario covers it).",
     ))
     return out
 
@@ -2155,7 +2190,7 @@ def capture_scenarios() -> list[Scenario]:
     # AL1 and refuses a ground start ("an enemy airfield").
     for ac in AIRCRAFT:
         add(f"groundstart-{ac}", ["--free-flight", "--aircraft", ac, "--theater", "UKR", "--ground-start", "9", "--flight-view", "1", "--flight-look", "150,-15", "--flight-zoom", "1.5"])
-    for ac in ("f22", "f22n", "b52", "f117", "b2"):
+    for ac in ("f22", "f22n", "b52", "f117", "b2", "f111"):
         for bay in ("0", "0.5", "1"):
             add(f"bay-{ac}-{bay}", ["--free-flight", "--aircraft", ac, "--flight-view", "1", "--flight-look", "150,-30", "--flight-bay", bay])
     return out

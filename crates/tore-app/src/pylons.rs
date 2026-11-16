@@ -189,16 +189,29 @@ pub fn swung<'a>(
     if !swing::has_swivel(id) {
         return std::borrow::Cow::Borrowed(stores);
     }
-    let turn = swing::wing_turn_of(id, state.speed, state.flaps, state.gear) as f32;
+    // F111-5 (2026-11-16): a store on a fixed wing pylon holds the wing to its
+    // sweep limit; the flight's display flag says so, and so do the stores.
+    let held = state.wing_hold || wing_held(stores, id);
+    let turn = swing::wing_turn_carrying(id, state.speed, state.flaps, state.gear, held) as f32;
     let mut posed = stores.to_vec();
     for store in &mut posed {
-        let swivels = swing::swivels(id, usize::from(store.hardpoint));
-        store.rack.turn = if swivels { turn } else { 0. };
+        // The wing carries a fixed pylon too (it does not swivel it back).
+        let carried = swing::carries(id, usize::from(store.hardpoint));
+        store.rack.turn = if carried { turn } else { 0. };
         // F111-3: the swivelling stations turn about their own aircraft's
         // pivot (None for the Tornado's).
-        store.rack.swing = if swivels { swing::rack_spec(id) } else { None };
+        store.rack.swing = if carried { swing::rack_spec(id) } else { None };
     }
     std::borrow::Cow::Owned(posed)
+}
+
+/// Whether `stores` hold a store on a fixed wing pylon that holds `id`'s swing
+/// wing to its sweep limit ([`tore_sim::combat::swing::holds_sweep`]): the
+/// F-111F's outer rows 7 and 8, F111-5, 2026-11-16.
+pub fn wing_held(stores: &[StorePose], id: tore_formats::aircraft::AircraftId) -> bool {
+    stores.iter().any(|store| {
+        store.items > 0 && tore_sim::combat::swing::holds_sweep(id, usize::from(store.hardpoint))
+    })
 }
 
 /// A store's size, feet: length, largest cross-section width (fins
@@ -1477,6 +1490,30 @@ mod tests {
         store.rack.over = placed.over;
         store.rack.tip = placed.tip;
         store
+    }
+
+    /// F111-5 (2026-11-16): the drawing holds the F-111F's wing to 26 degrees
+    /// while a store hangs on a fixed outer pylon (rows 7 and 8), by the
+    /// stores it is given or the flight's display flag, and the stores it
+    /// draws ride the held wing.
+    #[test]
+    fn the_drawing_holds_the_f111_wing_while_a_store_hangs_on_a_fixed_outer_pylon() {
+        use tore_formats::aircraft::AircraftId;
+        use tore_sim::combat::swing::{self, FPS_PER_KNOT};
+        let at = |row: u8, items: u16| StorePose {
+            hardpoint: row,
+            ..plain([15.46, -3., 0.5], 4, items)
+        };
+        let id = AircraftId::F111;
+        assert!(wing_held(&[at(7, 2)], id) && wing_held(&[at(5, 1), at(8, 1)], id));
+        assert!(!wing_held(&[at(7, 0)], id) && !wing_held(&[at(5, 2), at(6, 2)], id));
+        assert!(!wing_held(&[at(7, 2)], AircraftId::Tornado));
+        // The held turn, from the same function the simulation uses.
+        let fps = 600. * FPS_PER_KNOT;
+        let free = swing::wing_turn_carrying(id, fps, 0., 0., false);
+        let held = swing::wing_turn_carrying(id, fps, 0., 0., true);
+        assert!(held < free);
+        assert!((swing::spec(id).unwrap().sweep_degrees(held) - 26.).abs() < 1e-9);
     }
 
     #[test]

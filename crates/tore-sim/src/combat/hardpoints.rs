@@ -1300,6 +1300,44 @@ pub fn station_move(id: AircraftId, hardpoint: usize) -> Option<StationMove> {
                 Hang::AsRecorded,
             )
         }
+        // The F-111F's outer wing pair (rows 7 and 8, the two fixed pylons a
+        // wing; F111-5, 2026-11-16): the record's span and the panel's
+        // mid-chord there, like the inner pair, so the pylon stands in the
+        // middle of the chord. The wing carries them (`swing::carries`), held
+        // to 26 degrees of sweep or less while they hold a store, so a store on
+        // one never leaves the wing.
+        (AircraftId::F111, 7 | 8) => {
+            let out = F111_WING_OUTER[hardpoint - 7];
+            at(
+                Location::Wing,
+                out,
+                super::swing::F111F
+                    .mid_chord(out)
+                    .expect("the F-111F has a panel outline"),
+                Hang::AsRecorded,
+            )
+        }
+        // The F-111F's two AIM-9 rails (rows 10 and 11, F111-5): on the
+        // outboard shoulder of the inner pair's pylons, as the F-14's glove
+        // pylon (not the Tornado's inboard flank: the pylon at row 5 stands
+        // 0.85 ft outboard of the sweep pivot and 0.85 ft from the wing root,
+        // so a missile on its inboard flank enters the glove, 0.26 ft spread
+        // and 0.38 ft at 72.5 degrees), carried and swivelled with the pylon
+        // they hang from.
+        (AircraftId::F111, 10 | 11) => {
+            let out = F111_WING_INNER[hardpoint - 10];
+            let forward = super::swing::F111F
+                .mid_chord(out)
+                .expect("the F-111F has a panel outline");
+            at(
+                Location::Wing,
+                out + SHOULDER_OUT,
+                forward + F111_RAIL_FORWARD,
+                Hang::Shoulder {
+                    pylon_forward: forward,
+                },
+            )
+        }
         (AircraftId::Su27, 7) => at(Location::Wing, SU27_WING[0], SU27_WING[1], Hang::Separate),
         (AircraftId::Su35, 7) => at(Location::Wing, SU35_WING[0], SU35_WING[1], Hang::Separate),
         _ => None,
@@ -1483,6 +1521,19 @@ const F111_WING_INNER: [f64; 2] = [
     29. / 3. * tore_formats::aircraft::scale::F111_SHAPE_SCALE[0],
     41. / 3. * tore_formats::aircraft::scale::F111_SHAPE_SCALE[0],
 ];
+
+/// The F-111F's two fixed outer pylons' spans, feet out (F111-5, 2026-11-16):
+/// the record's raw x (54 and 65) over three, times the size fit's x factor,
+/// 15.46 and 18.62 ft, where the record already puts them; only the forward
+/// coordinate moves, to the panel's mid-chord.
+const F111_WING_OUTER: [f64; 2] = [
+    54. / 3. * tore_formats::aircraft::scale::F111_SHAPE_SCALE[0],
+    65. / 3. * tore_formats::aircraft::scale::F111_SHAPE_SCALE[0],
+];
+
+/// How far ahead of the inner pylon's own store the F-111F's AIM-9 rail hangs
+/// its missile, feet (F111-5, fitted, the Tornado's [`TORNADO_RAIL_FORWARD`]).
+const F111_RAIL_FORWARD: f64 = 0.0;
 
 /// The Yak-141's outer underwing pylon (retail's row 16.67 ft out, which
 /// is past two thirds of the model's 18.5 ft half span, by the tip): 11 ft
@@ -3370,7 +3421,7 @@ mod tests {
                 let radius = |p: Vector, c: [f64; 3]| (p[0] - c[0]).hypot(p[2] - c[2]);
                 let at = pivot;
                 assert!((radius(now, at) - radius(spread, at)).abs() < 1e-6);
-                if degrees > 16. {
+                if degrees >= 45. {
                     let own = TORNADO.pivot_feet(true);
                     assert!((radius(now, own) - radius(spread, own)).abs() > 0.1);
                 }
@@ -3384,10 +3435,79 @@ mod tests {
                 assert!((was[i] - carried[i]).abs() < 1e-9);
             }
         }
-        // The outer pair is fixed.
-        assert_eq!(station_move(AircraftId::F111, 7), None);
-        assert_eq!(station_move(AircraftId::F111, 8), None);
+        // The outer pair is fixed: it does not swivel (F111-5 places it on the
+        // panel's mid-chord, and the wing carries it).
         assert!(!swing::swivels(AircraftId::F111, 7) && !swing::swivels(AircraftId::F111, 8));
+    }
+
+    /// F111-5 (2026-11-16): the F-111F's outer pair stands on the panel's
+    /// mid-chord at the record's span, carried by the wing without swivelling;
+    /// its two AIM-9 rails hang on the outboard shoulder of the inner pylons
+    /// and ride them; the bay is the shared magazine at its table mount.
+    #[test]
+    fn the_f111_outer_pylons_rails_and_bay_are_placed_where_the_table_says() {
+        use crate::combat::swing::{self, F111F};
+        let record = |location, flags, x| Hardpoint {
+            location,
+            position: [x, -12, -4],
+            flags,
+            count: 2,
+            store: Some("MK82.JT".into()),
+            weight_class: 50,
+            slew: [0; 4],
+        };
+        for (row, x) in [(7, 54), (8, 65)] {
+            let moved = station_move(AircraftId::F111, row).expect("rows 7 and 8 are placed");
+            assert_eq!(moved.location, Location::Wing);
+            assert!((moved.right - f64::from(x) / 3. * 0.859).abs() < 1e-9);
+            assert_eq!(moved.forward, F111F.mid_chord(moved.right).unwrap());
+            assert!(
+                swing::carries(AircraftId::F111, row) && !swing::swivels(AircraftId::F111, row)
+            );
+            assert!(swing::holds_sweep(AircraftId::F111, row));
+            let (mount, rack) = placed_on(AircraftId::F111, row, &record(4, 0x3e5, x), None);
+            assert_eq!(rack.location(), Location::Wing);
+            assert_eq!((mount[0], mount[2]), (moved.right, moved.forward));
+        }
+        // The mid-chord is aft of the leading edge and ahead of the trailing
+        // edge at both spans.
+        for out in [8.3, 11.74, 15.46, 18.62] {
+            let mid = F111F.mid_chord(out).unwrap();
+            // The drawn panel is -3.33 ft (trailing edge) to 8.0 at the inner
+            // pylons and 5.0 at the outer: the middle is 0.8 to 2.4.
+            assert!(mid > 0.5 && mid < 2.6, "{out}: {mid}");
+        }
+        // The rails: on the inner pylons' inboard flank, SHOULDER_OUT inboard of
+        // the pylon, at the pylon's forward, the Tornado's InboardRail hang.
+        for (row, pylon) in [(10, 5), (11, 6)] {
+            let rail = station_move(AircraftId::F111, row).expect("the rails are placed");
+            let beside = station_move(AircraftId::F111, pylon).unwrap();
+            assert!((rail.right - (beside.right + SHOULDER_OUT)).abs() < 1e-9);
+            assert_eq!(rail.forward, beside.forward + F111_RAIL_FORWARD);
+            assert!(
+                matches!(rail.hang, Hang::Shoulder { pylon_forward } if pylon_forward == beside.forward)
+            );
+            assert!(swing::swivels(AircraftId::F111, row));
+            let (_, rack) = placed_on(AircraftId::F111, row, &record(4, 0x85, 29), None);
+            assert_eq!(rack.location(), Location::Shoulder);
+        }
+        // The bay: the shared magazine at the table's mount, with the grid.
+        let bay = Hardpoint {
+            location: 3,
+            position: [0, -10, 47],
+            flags: 0x1500,
+            count: 2,
+            store: Some("MK82.JT".into()),
+            weight_class: 12,
+            slew: [0; 4],
+        };
+        let (mount, rack) = placed_on(AircraftId::F111, 9, &bay, None);
+        assert_eq!(rack.location(), Location::Magazine);
+        assert_eq!(
+            Some(mount),
+            super::super::bays::station(AircraftId::F111, 9)
+        );
+        assert_eq!(rack.grid(), Some([3.0, 12.0]));
     }
 
     #[test]

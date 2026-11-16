@@ -692,10 +692,30 @@ impl Configuration {
     /// ([`super::swing::spec`]) gives at `speed_fps` with its flaps and gear
     /// out (0 to 1; SWING-1): the host calls it every tick. An aircraft with
     /// no swing wing is untouched.
-    pub fn set_wing_flight(&mut self, speed_fps: f64, flaps: f64, gear: f64) {
+    ///
+    /// `fixed_stores` says a store hangs on one of the aircraft's fixed wing
+    /// pylons ([`Self::fixed_stores_carried`]): the F-111F's wing is held to 26
+    /// degrees or less then (F111-5, 2026-11-16).
+    pub fn set_wing_flight(&mut self, speed_fps: f64, flaps: f64, gear: f64, fixed_stores: bool) {
         if let Some(spec) = super::swing::spec(self.aircraft) {
-            self.set_wing_turn(spec.turn(speed_fps, flaps, gear));
+            self.set_wing_turn(spec.turn_carrying(speed_fps, flaps, gear, fixed_stores));
         }
+    }
+    /// Whether a store hangs on a fixed wing pylon that holds the sweep to its
+    /// limit ([`super::swing::holds_sweep`]), given `rounds`, the live count of
+    /// station `s` (a tank counts by its quantity): the F-111F's outer pair,
+    /// rows 7 and 8. False for an aircraft with no such pylon.
+    pub fn fixed_stores_carried(&self, rounds: impl Fn(usize) -> u32) -> bool {
+        let id = self.aircraft;
+        let held = |row: usize| super::swing::holds_sweep(id, row);
+        self.hardpoint_slots
+            .iter()
+            .enumerate()
+            .any(|(row, slot)| held(row) && slot.is_some_and(|slot| rounds(slot) > 0))
+            || self
+                .tanks
+                .iter()
+                .any(|tank| tank.quantity > 0 && held(tank.hardpoint))
     }
     /// Turn the swivelling wing stations ([`super::swing::swivels`]) with the
     /// swinging wing: every drawn rack on such a hardpoint is carried to where
@@ -715,19 +735,19 @@ impl Configuration {
         let slots = &self.hardpoint_slots;
         for (index, station) in self.stations.iter_mut().enumerate() {
             let row = slots.iter().position(|slot| *slot == Some(index));
-            if row.is_some_and(|row| super::swing::swivels(id, row)) {
+            if row.is_some_and(|row| super::swing::carries(id, row)) {
                 station.rack.turn = turn;
                 station.rack.swing = swing;
             }
         }
         for tank in &mut self.tanks {
-            if super::swing::swivels(id, tank.hardpoint) {
+            if super::swing::carries(id, tank.hardpoint) {
                 tank.rack.turn = turn;
                 tank.rack.swing = swing;
             }
         }
         for pod in &mut self.fixed_pods {
-            if super::swing::swivels(id, pod.hardpoint) {
+            if super::swing::carries(id, pod.hardpoint) {
                 pod.rack.turn = turn;
                 pod.rack.swing = swing;
             }
@@ -1189,7 +1209,9 @@ impl Configuration {
                 // F-111F's GBU-28, Mk 82 six-pack and Maverick.
                 AircraftId::B1b => ["MK82AIR.JT"].contains(&name),
                 AircraftId::Tu160 => ["AS16.JT"].contains(&name),
-                AircraftId::F111 => ["GBU28.JT", "MK82P.JT", "AGM65G.JT"].contains(&name),
+                AircraftId::F111 => {
+                    ["GBU28.JT", "MK82P.JT", "MK82.JT", "AGM65G.JT", "AIM9M.JT"].contains(&name)
+                }
                 // Bomber batch C (BMB-C1, 2026-11-15): the retail default
                 // stores. The Tu-26's and Tu-95's 23 mm tail turret rows and
                 // AS-16 (Kh-15) rows, and the Su-34's AS-14, AT-12, AA-11
@@ -1510,6 +1532,21 @@ impl Configuration {
             tank.quantity = quantity;
         }
         if changed {
+            self.refresh_tanks()?;
+        }
+        // The standard load's own designator pod on a bay row (the F-111F's
+        // Pave Tack, F111-5, 2026-11-16): a loaded pod, so a bomb load on the
+        // row displaces it ([`super::loadout::Loadout::refresh_equipment`]).
+        if let Some((row, record)) = tore_formats::aircraft::stations::default_bay_pod(a.id)
+            && let Some(Some(slot)) = self.hardpoint_slots.get(row).copied()
+            && self.stations.get(slot).is_some_and(|s| s.count == 0)
+            && let Ok(bytes) = read(record)
+        {
+            self.designator_pods = vec![super::sight::DesignatorPod {
+                station: slot,
+                store: super::sight::DesignatorStore::parse(record, &bytes)?,
+            }];
+            // The pod's mass joins the external equipment's.
             self.refresh_tanks()?;
         }
         Ok(self)
@@ -2646,7 +2683,16 @@ impl Ownship {
     /// ([`super::swing::spec`]) gives at `speed_fps` with its flaps and gear
     /// out (SWING-1).
     pub fn set_wing_flight(&mut self, speed_fps: f64, flaps: f64, gear: f64) {
-        self.config.set_wing_flight(speed_fps, flaps, gear);
+        let held = self.wing_held();
+        self.config.set_wing_flight(speed_fps, flaps, gear, held);
+    }
+    /// Whether this aircraft's swing wing is held to its fixed-store sweep
+    /// limit now: a store hangs on a fixed wing pylon
+    /// ([`Configuration::fixed_stores_carried`], the live counts). The
+    /// presentation reads it too ([`crate::flight::State::wing_hold`]).
+    pub fn wing_held(&self) -> bool {
+        self.config
+            .fixed_stores_carried(|station| u32::from(self.rounds(station)))
     }
     /// Remember which stations hold something now (every tick, so a station
     /// that later runs dry is known to have been loaded).
@@ -8063,6 +8109,67 @@ mod tests {
         assert_eq!(state.own().payload_lbs(), 1702.);
         state.command(0, Command::Jettison, launcher());
         assert_eq!(state.own().payload_lbs(), 0.);
+    }
+
+    /// F111-5 (2026-11-16): a store on the F-111F's fixed outer pylon (row 7)
+    /// holds the wing to 26 degrees and rides it; the inner pylon (row 5)
+    /// holds nothing but swivels with the same held turn; without a store on a
+    /// fixed pylon the wing follows its schedule to 72.5 degrees.
+    #[test]
+    fn a_store_on_a_fixed_f111_pylon_holds_the_wing_to_26_degrees_and_rides_it() {
+        use crate::combat::{
+            hardpoints::Rack,
+            swing::{self, F111F, FPS_PER_KNOT},
+        };
+        let mut config = fixture(false).own().configuration().clone();
+        let mut outer = config.stations[0].clone();
+        outer.weapon.source = "MK82.JT".into();
+        outer.count = 2;
+        outer.internal = false;
+        outer.mount = [15.46, -3.31, 0.5];
+        outer.rack = Rack {
+            location: 4,
+            paired: true,
+            ..Rack::default()
+        };
+        let mut inner = outer.clone();
+        inner.mount = [8.3, -3.31, 1.54];
+        config.stations = vec![outer, inner];
+        config.tanks.clear();
+        config.aircraft = tore_formats::aircraft::AircraftId::F111;
+        // Station 0 is hardpoint row 7 (fixed), station 1 row 5 (swivels).
+        config.hardpoint_slots = vec![None, None, None, None, None, Some(1), None, Some(0), None];
+        assert!(!config.fixed_stores_carried(|_| 0));
+        assert!(config.fixed_stores_carried(|slot| u32::from(slot == 0)));
+        assert!(!config.fixed_stores_carried(|slot| u32::from(slot == 1)));
+        let fps = 650. * FPS_PER_KNOT;
+        let spread = config.stations[0].release_point(1);
+        let free = F111F.turn(fps, 0., 0.);
+        config.set_wing_flight(fps, 0., 0., false);
+        assert_eq!(config.stations[0].rack.turn, free as f32);
+        assert_eq!(config.stations[1].rack.turn, free as f32);
+        assert!((F111F.sweep_degrees(free) - 72.5).abs() < 1e-9);
+        config.set_wing_flight(fps, 0., 0., true);
+        let held = (26_f64 - 16.).to_radians();
+        for station in &config.stations {
+            assert_eq!(station.rack.turn, held as f32);
+            assert!(station.rack.swing.is_some());
+        }
+        // The held pylon sits where the 26 degree wing carries it: aft of its
+        // spread point, and level.
+        let now = config.stations[0].release_point(1);
+        let expected = swing::spec(config.aircraft).unwrap().swept(
+            now[0] > 0.,
+            spread,
+            f64::from(held as f32),
+        );
+        assert!(now[2] < spread[2] && now[1] == spread[1]);
+        for i in 0..3 {
+            assert!(
+                (now[i] - expected[i]).abs() < 1e-6,
+                "{now:?} against {expected:?}"
+            );
+        }
     }
 
     /// TOR-5: a store on the Tornado's swivelling inner wing row rides the

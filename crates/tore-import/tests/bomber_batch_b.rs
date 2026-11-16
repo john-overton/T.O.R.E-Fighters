@@ -83,6 +83,11 @@ fn the_three_records_parse_as_their_own_identities_with_their_retail_rows() {
                 ("MK82P.JT", 2),
                 ("AGM65G.JT", 4),
                 ("MK82P.JT", 2),
+                // F111-5 (2026-11-16): the bay (row 9) and the two AIM-9
+                // rails (rows 10 and 11) are appended to the retail rows.
+                ("MK82.JT", 2),
+                ("AIM9M.JT", 2),
+                ("AIM9M.JT", 2),
             ],
         ),
     ];

@@ -44,7 +44,8 @@ AIRCRAFT = re.compile(
 # BMB-C1 and BMB-C2 (2026-11-15): 54 aircraft and 257 tank placements after the Tu-26, Tu-95 and Su-34
 # joined (the Su-34's two 0x07e5 rows take 8 tank placements). Batches A, B and C integration
 # (2026-11-16): 23 recovered stations (21 plus the Tu-26 and Tu-95 empty rows) and 278 Cheat-only
-# placements (260 plus batch C's 18).
+# placements (260 plus batch C's 18). F111-5 (2026-11-16): 284 Cheat-only placements (the F-111F's
+# bay and two AIM-9 rails take the two novelty bombs).
 AUDIT = re.compile(r"^ordnance audit: 54 aircraft, 23 recovered weapon stations, \d+ weapon placements, "
                    r"257 tank placements, (\d+) weapon and 9 tank records; passed$", re.M)
 # Aircraft with a bomb or rocket station the A2G records fit; the cargo and
@@ -87,7 +88,7 @@ def scenarios() -> list[Scenario]:
             expect=[
                 r"ordnance audit: 54 aircraft, 23 recovered weapon stations, \d+ weapon placements, 257 tank placements, \d+ weapon and 9 tank records; passed",
                 r"ordnance audit: 1 designator pods, \d+ pod placements, one to an aircraft, loaded and restored through the saved mission; passed",
-                r"ordnance audit: 2 novelty records, 278 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed",
+                r"ordnance audit: 2 novelty records, 284 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed",
             ],
             forbid=[r"PROBLEM"],
             check=catalog_problems,

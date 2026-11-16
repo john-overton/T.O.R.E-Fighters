@@ -1119,6 +1119,18 @@ swept), a 40-pose sweep against speed and flaps (measured turn equals the schedu
 202-value dense gear sweep (stow overshoot at most 0.65 ft) and dense brake and plume
 sweeps, every row passing. Not a claim of original control travel or retraction timing.
 
+Update (F111-5, 2026-11-16): three changes to the table above, details in [F-111F stations,
+bays and pylons](../formats/aircraft-variety.md#f-111f-stations-bays-and-pylons-f111-5-2026-11-16).
+The wing sweep is held to 26 degrees (a 10 degree turn) while a store hangs on a fixed outer
+pylon (rows 7 and 8): `f111_animation::sweep_turn` reads the display-only `State::wing_hold` and
+turns by `F111F.turn_carrying`, so the drawn wing and the stations on it agree with the simulation.
+A bay is cut into the forward belly plate `3132`: two doors hinged on the outer edges swing 90
+degrees down with `State::bay` about hinge lines in the plate (`cut_doors_sloped`), and a lined
+recess with a cradle rail and two posts draws only while the doors are off their seat
+(`Rig::faces`; `--animation-probe f111` reports the bay `required moved`). The four glove plates
+take the wing's own top skin, with texture coordinates fitted to its mapping, in place of one
+texel of the fillet. Everything is fitted; the real bay size was not found.
+
 ## Su-34 rig fit
 
 Agent-authored whole-piece motion, 2026-11-15 (slices SU34-2 and SU34-3), over `SU34.SH`

@@ -1039,3 +1039,14 @@ at least 0.05 ft with the doors open, and no two touch).
 Update (B2-5, 2026-11-15): the B-2's default load is the two Mk 82 bays alone (64 bombs, 32,000 lb), so
 `flight-liftoff-b2` records 155.2 kt after 7,232 ft (was 158.1 kt) and `flight-approach-b2` 167.5 kt (was 166.2 kt);
 the windows (140 to 165 kt and 140 to 170 kt) are unchanged.
+
+Update (F111-5, 2026-11-16): the F-111F's stations. `f111` joins `STATIONS` (`flight-livefire-f111-slot1` to
+`slot7`: the four wing rows, the bay and the two AIM-9 rails; the bay and rails start empty, and slot 3, the
+AGM-65G row, is a refused surface-missile slot). New scenarios:
+
+| Scenario | Does | Pass when |
+| --- | --- | --- |
+| `flight-bay-fire-f111-row9` | `--stores-preview` actual one-press release of the bay's two Mk 82 (`9=MK82.JT:2`, 20,000 lb of fuel) | the doors open to 0.95 before the bomb leaves and close after, `Stores firing: f111 row=9 PASS` |
+| `flight-bay-fire-f111-pylon-row7` | the same from the fixed outer pylon (`7=MK82P.JT:2`) | a bomb leaves row 7 with the bay doors shut, `Stores firing: f111 row=7 PASS` |
+| `render-f111-clearance` | headless `TORE_STORES_PREVIEW_BAYCLEAR` of the two Mk 82 in the open bay | at least 0.05 ft to the door planes, ends and roof, above the closed belly plane, 0.05 ft between the bombs |
+| `a2g-release-origin-f111` | `--a2g-run` releases of the outer pylon's Mk 82 at 200 and 650 knots and of the default GBU-28 on the inner pylon | each store leaves from where it hangs: 15.46 ft out and 1.31 ft ahead at 200 knots, 15.28 ft out and 0.08 ft aft at 650 (the wing held to 26 degrees by the outer store); the GBU-28 8.30 / 2.38 and 8.41 / 2.22 |

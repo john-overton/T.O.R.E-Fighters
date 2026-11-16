@@ -323,6 +323,8 @@ impl Control {
                         | Id::B52
                         | Id::B1b
                         | Id::Tu26
+                        // F111-5: the F-111F's fitted bay doors and lining.
+                        | Id::F111
                 ) =>
             {
                 Expectation::Required

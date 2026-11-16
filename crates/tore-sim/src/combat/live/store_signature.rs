@@ -32,6 +32,14 @@ impl Configuration {
             }
         }
         for pod in &self.designator_pods {
+            // A pod inside a bay (the F-111F's Pave Tack) is not outside.
+            if self
+                .stations
+                .get(pod.station)
+                .is_some_and(|s| s.internal || !s.rack.location().external())
+            {
+                continue;
+            }
             count += 1;
             lbs += f64::from(pod.store.weight_lbs.max(0));
         }

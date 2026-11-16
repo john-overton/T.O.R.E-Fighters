@@ -130,6 +130,14 @@ pub struct State {
     pub gun_aim: [[f64; 2]; 3],
     /// Display-only linked gun membership, bits 0..2.
     pub gun_group: u8,
+    /// Display-only: a swing-wing aircraft's wing is held to its fixed-store
+    /// sweep limit because a store hangs on a fixed wing pylon (the F-111F's
+    /// outer pair, 26 degrees or less; F111-5, 2026-11-16). Combat knows what
+    /// is carried, the flight does not: the world sets it on the frame's
+    /// presented clone, and every drawing of the wing and of the swivelling
+    /// stations reads it ([`crate::combat::swing::SwingSpec::turn_carrying`]).
+    /// False everywhere else, never coded on the wire or in a checkpoint.
+    pub wing_hold: bool,
     pub fuel: f64,
     pub systems: crate::aircraft_systems::Systems,
     pub payload_lbs: f64,
@@ -353,6 +361,7 @@ impl State {
             lift_controls,
             gun_aim: [[0.; 2]; 3],
             gun_group: 0,
+            wing_hold: false,
             fuel,
             systems: Default::default(),
             payload_lbs: 0.,

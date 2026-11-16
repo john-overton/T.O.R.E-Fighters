@@ -536,6 +536,68 @@ fn exhaust(value: f64, reference: &[Face], pose: &[Face], scale: f32, m: &mut Me
     }
 }
 
+/// The forward belly plate the bay is cut from, and the lining's addresses
+/// (F111-5): a ceiling and four walls, a cradle rail and two posts.
+const BELLY: usize = 0x3132;
+const LINING_BASE: usize = 0x7000;
+const LINING: usize = 20;
+
+/// The fitted bay: shut (0) the belly plate is whole and nothing is lined;
+/// open (above 0) the lining draws and the plate is two door leaves hanging on
+/// their hinge lines (the opening's outer edges at its aft end, in the sloping
+/// plate), the free edges `1.5 ft * sin(90 degrees * value)` below the plate
+/// there. Measured from the neutral plate's own vertices.
+fn bay(value: f64, reference: &[Face], pose: &[Face], scale: f32, m: &mut Metrics) {
+    let o = tore_sim::combat::bays::opening(ID).expect("F-111F bay");
+    let lining = pose
+        .iter()
+        .filter(|f| f.address >= LINING_BASE && f.address < LINING_BASE + 0x40)
+        .count();
+    let skins: Vec<&Face> = pose.iter().filter(|f| f.address == BELLY).collect();
+    let Some(plate) = reference.iter().find(|f| f.address == BELLY) else {
+        m.reviewed_anchor_missing = true;
+        return;
+    };
+    // The plate's height along it, from its own two end vertices.
+    let (lo, hi) =
+        plate
+            .positions
+            .iter()
+            .fold((plate.positions[0], plate.positions[0]), |(lo, hi), p| {
+                (
+                    if p[1] < lo[1] { *p } else { lo },
+                    if p[1] > hi[1] { *p } else { hi },
+                )
+            });
+    let slope = (hi[2] - lo[2]) / (hi[1] - lo[1]);
+    let aft = o.aft as f32 / scale;
+    let belly_aft = lo[2] + (aft - lo[1]) * slope;
+    if value == 0. {
+        m.reviewed_direction_failures += usize::from(lining != 0 || skins.len() != 1);
+        return;
+    }
+    m.reviewed_direction_failures += usize::from(lining != LINING);
+    // A vertex stays on each hinge line at the aft end, in the plate.
+    let half = o.outer as f32 / scale;
+    for hinge in [half, -half] {
+        let held = skins.iter().flat_map(|f| f.positions.iter()).any(|p| {
+            (p[0] - hinge).abs() < 1e-3
+                && (p[1] - aft).abs() < 1e-3
+                && (p[2] - belly_aft).abs() < 1e-3
+        });
+        m.reviewed_anchor_missing |= !held;
+    }
+    let lowest = skins
+        .iter()
+        .flat_map(|f| f.positions.iter())
+        .map(|p| p[2])
+        .fold(f32::MAX, f32::min);
+    let hang = half * (value as f32 * std::f32::consts::FRAC_PI_2).sin();
+    // The leaf's free edge lies a few thousandths short of the vertical drop
+    // because the plate (and so each hinge line) rises 3 degrees forward.
+    m.reviewed_direction_failures += usize::from((belly_aft - lowest - hang).abs() > 0.03);
+}
+
 pub(super) fn check(
     c: Control,
     value: f64,
@@ -567,6 +629,7 @@ pub(super) fn check(
             m.reviewed_neutral_mismatch |=
                 fixed_moved(reference, pose, &[&STRIP_R, &STRIP_L], scale) != 0;
         }
+        Control::Bay => bay(value, reference, pose, scale, m),
         Control::Rudder => {
             rudder(value, reference, pose, scale, m);
             m.reviewed_neutral_mismatch |= fixed_moved(reference, pose, &[&RUDDER], scale) != 0;

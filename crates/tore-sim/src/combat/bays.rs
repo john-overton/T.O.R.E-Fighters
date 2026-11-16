@@ -103,6 +103,43 @@ pub const B52_ROW_FLOOR_WIDTH: f64 = 2. * B52_BAY_HALF;
 pub const B52_ROW_LENGTH: f64 = B52_SLAB;
 pub const B52_ROW_CEILING: f64 = B52_BAY_DEPTH;
 
+/// The F-111F's belly plane, feet up (F111-5, 2026-11-16): the lowest point of
+/// the belly over the bay, the keel line of `F111.SH` at y 13 units where the
+/// two belly plates meet (z -6 units at the header's 2/3 ft a unit, times the
+/// size fit's z factor 0.827: -3.308 ft). The forward plate rises from it by
+/// one unit (0.55 ft) over its length, so the bay's far end stands that much
+/// higher.
+pub const F111_BELLY: f64 = -6. * 2. / 3. * tore_formats::aircraft::scale::F111_SHAPE_SCALE[2];
+/// Half the width of the F-111F's bay opening, feet: the belly plate is 3.44
+/// ft wide (x +-3 units at 2/3 ft and the x factor 0.859) and a pair of
+/// Mk 82 abreast (1.3 ft pitch) needs 2.6 ft, so the opening is 3.0 ft wide
+/// with a 0.22 ft keel strip either side. Fitted (agent decision, F111-5).
+pub const F111_BAY_HALF: f64 = 1.5;
+/// The F-111F's bay opening, feet forward: 12.0 ft long inside the forward
+/// belly plate (`F111.SH` face `3132`, y 13 to 34 units = 8.67 to 22.67 ft), so
+/// the doors cut from one plate and no leaf crosses the seam between plates.
+/// Fitted (the real bay length was not found).
+pub const F111_BAY_AFT: f64 = 9.67;
+pub const F111_BAY_FORE: f64 = 21.67;
+/// The recess depth over the belly plane, feet: under the fuselage's top skin
+/// (z +2 units, 1.1 ft up) with room for a Mk 82 pair's fins and the pod
+/// (fitted).
+pub const F111_BAY_DEPTH: f64 = 3.0;
+/// The Mk 82 family's origin lies this far ahead of the bomb's middle (the
+/// B-52's measurement, [`B52_ORIGIN_AHEAD`]); the bay's mount is the opening's
+/// middle plus it, so the bomb pair is centred in the opening, and the pod
+/// (a fitted body centred on its origin) sits 0.87 ft ahead of the middle.
+pub const F111_BAY_MOUNT_FORWARD: f64 = (F111_BAY_AFT + F111_BAY_FORE) / 2. + B52_ORIGIN_AHEAD;
+/// The fitted Pave Tack body hung in the bay, feet: length and diameter. The
+/// real pod's size was not found (it weighs 1,385 lb, USAF museum fact sheet);
+/// the fitted body is as long as the Mk 82 and a little thicker than its
+/// body, on its cradle posts. Agent decision, F111-5.
+pub const F111_PAVE_TACK_BODY: [f64; 2] = [8.0, 1.25];
+/// The Pave Tack's cradle: two posts from the floor to the roof either side of
+/// the pod's ends on the centre line, feet forward of the opening's middle
+/// (the bomb pair is shorter than the span between them).
+pub const F111_CRADLE_POSTS: f64 = 4.6;
+
 /// Every bay station, in aircraft and row order. Add a row per station.
 pub const STATIONS: &[BayStation] = &[
     BayStation {
@@ -186,6 +223,13 @@ pub const STATIONS: &[BayStation] = &[
         row: 6,
         mount: [0., B52_BELLY, B52_ROW_FORWARD[2] + B52_ORIGIN_AHEAD],
     },
+    // The F-111F's one weapons bay (F111-5): row 9, the Pave Tack by default
+    // or two Mk 82 abreast, on the centre line under the wing box.
+    BayStation {
+        aircraft: AircraftId::F111,
+        row: 9,
+        mount: [0., F111_BELLY, F111_BAY_MOUNT_FORWARD],
+    },
 ];
 
 /// A bay station whose stores hang in a grid: as many abreast (across the bay)
@@ -268,7 +312,22 @@ pub const GRIDS: &[BayGrid] = &[
         length: B52_ROW_LENGTH,
         ceiling: B52_BELLY + B52_ROW_CEILING,
     },
+    // The F-111F's bay (F111-5): the opening's width and length, under the
+    // recess roof.
+    BayGrid {
+        aircraft: AircraftId::F111,
+        row: 9,
+        width: 2. * F111_BAY_HALF,
+        length: F111_BAY_FORE - F111_BAY_AFT,
+        ceiling: F111_BELLY + F111_BAY_DEPTH,
+    },
 ];
+
+/// The fitted body of the designator pod `id` carries in its bay, feet: length
+/// and diameter (the F-111F's Pave Tack, [`F111_PAVE_TACK_BODY`]).
+pub fn pod_body(id: AircraftId) -> Option<[f64; 2]> {
+    (id.source() == AircraftId::F111).then_some(F111_PAVE_TACK_BODY)
+}
 
 /// The grid floor of bay station `row` of `id` (a variant reads its source's):
 /// its usable width and length, feet, and its ceiling, if it has one.
@@ -400,6 +459,23 @@ pub const OPENINGS: &[Opening] = &[
         inner_depth: B52_BAY_DEPTH,
         rail: [0., 0.],
     },
+    // The F-111F (F111-5, measured and fitted): one bay on the centre line cut
+    // from the forward belly plate, two doors hinged on the outer edges (drawn
+    // by `bay_doors::centre_doors`), 3.0 ft wide, 12.0 ft long, in the belly
+    // plane at the keel line under a flat roof 3 ft over it. No rail: the
+    // pod's cradle posts are the rig's furniture.
+    Opening {
+        aircraft: AircraftId::F111,
+        centre: 0.,
+        inner: 0.,
+        outer: F111_BAY_HALF,
+        aft: F111_BAY_AFT,
+        fore: F111_BAY_FORE,
+        belly: F111_BELLY,
+        depth: F111_BAY_DEPTH,
+        inner_depth: F111_BAY_DEPTH,
+        rail: [0., 0.],
+    },
 ];
 
 /// The opening of `id`, if the shared helper draws its doors.
@@ -529,6 +605,47 @@ mod tests {
                 assert!(at(loaded, slot)[1] <= at(loaded, slot - 1)[1] + 1e-9);
             }
         }
+    }
+
+    #[test]
+    fn the_f111_has_one_centred_bay_with_a_grid_for_two_abreast_and_a_pod_body() {
+        use super::super::hardpoints::{grid_cells, grid_point};
+        use super::super::store_sizes::StoreSize;
+        let o = opening(AircraftId::F111).unwrap();
+        assert!(reviewed(AircraftId::F111) && !reviewed(AircraftId::F16C));
+        assert_eq!((o.centre, o.inner), (0., 0.));
+        assert_eq!(o.inner_depth, o.depth);
+        // 3.0 ft by 12.0 ft inside the 3.44 ft by 14 ft forward belly plate.
+        assert!((2. * o.outer - 3.0).abs() < 1e-9 && (o.fore - o.aft - 12.).abs() < 1e-9);
+        assert!(o.outer < 3. * 2. / 3. * 0.859);
+        assert!(o.aft > 13. * 2. / 3. && o.fore < 34. * 2. / 3.);
+        // The belly plane is the keel line of the two plates.
+        assert!((F111_BELLY + 3.308).abs() < 1e-3 && o.belly == F111_BELLY);
+        // The mount is on the centre line, floor at the belly plane, the Mk 82
+        // origin ahead of the opening's middle.
+        let mount = station(AircraftId::F111, 9).unwrap();
+        assert_eq!(
+            mount,
+            [0., F111_BELLY, (o.aft + o.fore) / 2. + B52_ORIGIN_AHEAD]
+        );
+        assert_eq!(station(AircraftId::F111, 8), None);
+        // Two Mk 82 abreast, one long, under the roof; the grid is the opening.
+        let floor = grid(AircraftId::F111, 9).unwrap();
+        assert!((floor[0] - 3.0).abs() < 1e-9 && (floor[1] - 12.0).abs() < 1e-9);
+        assert_eq!(floor[2], F111_BELLY + F111_BAY_DEPTH);
+        let mk82 = StoreSize::of_shape(Some("MK82.SH"));
+        let ([abreast, along], pitch) = grid_cells(mk82, [floor[0], floor[1]]);
+        assert_eq!((abreast, along), (2, 1));
+        let left = grid_point(mount, 2, 1, mk82, [floor[0], floor[1]]);
+        let right = grid_point(mount, 2, 0, mk82, [floor[0], floor[1]]);
+        assert!((left[0] - right[0]).abs() - pitch < 1e-9);
+        assert!(left[0].abs().max(right[0].abs()) + mk82.width / 2. < o.outer);
+        assert_eq!(left[1], right[1]);
+        // The fitted Pave Tack body is shorter than the opening and lies
+        // between the cradle posts.
+        let body = pod_body(AircraftId::F111).unwrap();
+        assert!(body[0] < o.fore - o.aft && pod_body(AircraftId::B2).is_none());
+        assert!(F111_CRADLE_POSTS > body[0] / 2.);
     }
 
     #[test]

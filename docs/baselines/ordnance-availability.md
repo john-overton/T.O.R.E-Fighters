@@ -1148,3 +1148,29 @@ The `menus-ordnance-availability` expected line reads 54 aircraft, 23 recovered 
 5,395 weapon and 257 tank placements; `a2g-catalog` carries 54, 23, 257 and 278;
 `test_battery_a2g.py` carries 54, 23 and 257. Earlier sections quoting 22 recovered stations,
 5,447 weapon placements or 276 Cheat-only placements stay as written for their own states.
+
+## Update (F111-5, 2026-11-16): the F-111F's bay, rails and pylon refusals
+
+The F-111F gains a weapons bay (row 9, the Pave Tack by default, two Mk 82 as the alternative)
+and two AIM-9 rails (rows 10 and 11), and its inner pylons refuse the stores that enter the
+airframe. Measured by `--validate-ordnance` on this tree after the profile was refreshed (not
+added to the merged totals above; the coordinator recomputes at integration, B4):
+
+| Pin | Merged (batches A, B and C) | With F111-5 | Why |
+| --- | ---: | ---: | --- |
+| Aircraft | 54 | 54 | |
+| Weapon placements | 5,395 | 5,398 | F-111F 228 to 231: bay 3 bombs, rails 14, minus 14 refused on rows 5 and 6 |
+| Tank placements | 257 | 257 | |
+| Recovered weapon stations | 23 | 23 | |
+| Cheat-only placements | 278 | 284 | the bay and the two rails take the two novelty bombs |
+| Designator pod placements | 82 | 83 | the bay row keeps the designator bit |
+
+```text
+ordnance audit: 54 aircraft, 23 recovered weapon stations, 5398 weapon placements, 257 tank placements, 82 weapon and 9 tank records; passed
+ordnance audit: 1 designator pods, 83 pod placements, one to an aircraft, loaded and restored through the saved mission; passed
+ordnance audit: 2 novelty records, 284 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
+```
+
+The `menus-ordnance-availability` expected line reads 5,398 weapon placements; `a2g-catalog`
+carries 284 Cheat-only placements. Earlier sections quoting 5,395 or 278 stay as written for
+their own states.

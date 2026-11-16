@@ -122,6 +122,28 @@ def b52_clearance_problems(output: str) -> list[str]:
     return problems
 
 
+def f111_bay_problems(output: str) -> list[str]:
+    """The F-111F's two Mk 82 clear the open bay and each other, and stay above the closed belly plane (F111-5)."""
+    problems = []
+    stores = [line for line in output.splitlines() if re.match(r"Bay clearance: row9 MK82\.SH (left|right):", line)]
+    if len(stores) != 2:
+        problems.append(f"{len(stores)} bay stores reported, expected 2")
+    for line in stores:
+        for label in ("inner door", "outer door", "aft end", "fore end", "roof"):
+            m = re.search(rf"{label} (-?[\d.]+)", line)
+            if not m:
+                problems.append(f"no {label} in {line[:40]}")
+            elif float(m.group(1)) < 0.05:
+                problems.append(f"{line[:40]} clears the {label} by only {m.group(1)} ft")
+        m = re.search(r"hangs (-?[\d.]+) below the belly plane", line)
+        if not m or float(m.group(1)) > 0.:
+            problems.append(f"{line[:40]} hangs below the closed belly plane")
+    m = re.search(r"Bay clearance: f111 row9 MK82\.SH \w+ / row9 MK82\.SH \w+: nearest vertices (-?[\d.]+) ft", output)
+    if not m or float(m.group(1)) < 0.05:
+        problems.append("the two bombs touch")
+    return problems
+
+
 def skin_capture_problems(output: str) -> list[str]:
     """Every aircraft skin capture drew a non-blank frame."""
     captures = [line for line in output.splitlines() if line.startswith("Scene capture:")]
@@ -166,6 +188,15 @@ def scenarios() -> list[Scenario]:
                  "TORE_STORES_PREVIEW_AIRCRAFT": "b2"},
             expect=["Bay clearance: b2 opening"], check=b2_bay_problems,
             notes="Headless B-2 bay clearances in feet with the doors open (B2-5): the default 64 Mk 82 against the door planes, ends, sloped roof and top skin.",
+        ),
+        Scenario(
+            name="render-f111-clearance", lane="flight",
+            args=["--stores-preview", "{work}/stores"],
+            env={"TORE_STORES_PREVIEW_CPU": "1", "TORE_STORES_PREVIEW_BAYCLEAR": "1",
+                 "TORE_STORES_PREVIEW_AIRCRAFT": "f111",
+                 "TORE_STORES_PREVIEW_RECORDS": "9=MK82.JT:2", "TORE_STORES_PREVIEW_FUEL": "20000"},
+            expect=["Bay clearance: f111 opening"], check=f111_bay_problems,
+            notes="Headless F-111F bay clearances in feet with the doors open (F111-5): the two Mk 82 (the pod's alternative load) against the door planes, ends, roof and each other, above the closed belly plane.",
         ),
         Scenario(
             name="render-b52-clearance", lane="flight",

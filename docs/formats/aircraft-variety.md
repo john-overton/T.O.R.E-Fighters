@@ -14762,6 +14762,12 @@ the 0.7 ft stow gate are fitted (agent decisions 2026-11-15); the real-size fact
 first pass (opinionated, for John to review); the per-axis choice and not cutting the outer panel are the
 coordinator's decisions. Nothing attributed to John. No retail bytes committed.
 
+Update (F111-5, 2026-11-16): the 26 degree limit and the outer rows' places the paragraphs above
+leave open, the bay and the pylon-row findings are in [F-111F stations, bays and
+pylons](#f-111f-stations-bays-and-pylons-f111-5-2026-11-16). The swing outline is now the drawn
+skin's leading edge, (15, 12) to (54, 2), so rows 5 and 6 stand 0.84 and 0.79 ft further forward
+than "F111-3" says; the glove plates take the wing's skin.
+
 ## Bomber batch C identities (BMB-C1, 2026-11-15)
 
 Implementation, batch slice BMB-C1 (with BMB-C2 below, run together), Claude Sonnet.
@@ -15563,3 +15569,173 @@ astern with no further change; the Tu-95's dorsal and ventral rows (5 and 6, cle
 BMB-C2) stay empty and are not stations. Pinned by
 `the_retail_tu26_and_tu95_gun_rows_are_slewed_tail_guns_that_fire_astern` in
 `ai_wings/tail_gun_tests.rs`. The "rear-facing mount lands later" caveats above are met.
+
+## F-111F stations, bays and pylons (F111-5, 2026-11-16)
+
+Implementation, slice F111-5 of bomber batch B (worktree `m3-f111`, plan
+`.local/m3-aircraft/PLAN-F111.md`), Claude Sonnet. It applies the coordinator's first-pass
+decisions for the F-111F (`BOMBERS-DECISIONS-B.md`, "F-111F Aardvark" item 4 and 5, "SWING-1" and
+"F-111F rig"; John's to review): the wing rows re-placed on the panel's mid-chord, AIM-9 rails on
+the inner pylons, the sweep held to 26 degrees while the outer pylons carry, the designator bit
+off the wing rows and their class at 5,000 lb (BMB-B2), a weapons bay holding a Pave Tack by
+default, and the glove plates painted with the wing's own skin. Every number is **fitted** or
+**opinionated** (agent decisions, 2026-11-16) unless it says cited or measured. The numbers, the
+clearance tables and the code are in the [stores
+specification](../spec/stores-on-pylons.md#f-111f-stations-bays-and-pylons-f111-5-2026-11-16);
+earlier sections stay as written (B11): the survey and proposal in "F-111F stations (survey)" and
+the pivot work in "F-111F shape and rig (F111-2/3)" are what this builds on.
+
+**Stations after F111-5** (feet right / up / forward of the reference point; `F111.PT` keeps its
+nine rows and gains three, rows 9 to 11, while it is the retail record):
+
+| Row | What it is | Place | Capacity, class | Default |
+| ---: | --- | --- | --- | --- |
+| 5 | inner wing pylon pair, swivels (record 29 raw units) | +/-8.30 / pylon 1.0 ft under the wing / 2.38 (mid-chord) | 2, class 50 | 2 GBU-28 |
+| 6 | inner wing pylon pair, swivels (41) | +/-11.74 / 1.0 ft under / 1.86 | 2, class 50 | 2 Mk 82 (retarded) |
+| 7 | outer wing pylon pair, fixed (54) | +/-15.46 / 1.0 ft under / 1.31 | 4, class 50 | 4 AGM-65G |
+| 8 | outer wing pylon pair, fixed (65) | +/-18.61 / 1.0 ft under / 0.84 | 2, class 50 | 2 Mk 82 (retarded) |
+| 9 | weapons bay (new), shared magazine grid, centre line | 0 / -3.31 (belly plane) / 16.54 (the opening's middle plus the Mk 82 origin offset 0.87) | 2, class 12, flags `0x1500` | the Pave Tack pod; Mk 82 alternative |
+| 10 | AIM-9 shoulder rail (new) on row 5's pylon, swivels | +/-9.55 (1.25 ft outboard of the pylon) / on the pylon / 2.38 | 2 (one a side), class 5, `0x85` | empty |
+| 11 | AIM-9 shoulder rail (new) on row 6's pylon, swivels | +/-12.99 / on the pylon / 1.86 | 2, class 5, `0x85` | empty |
+
+**Wing rows 5 to 8.** The span is the record's, times the size fit's 0.859 (rows 5 and 6 as
+F111-3 left them; rows 7 and 8 were already 15.46 and 18.61 ft out), and the forward coordinate
+is the mid-chord of the drawn panel (TOR-14's rule), so every pylon stands in the middle of the
+chord: the stores preview's pylon-centre report reads **0.003 ft off the middle** at rows 7 and
+8 and 0.04 ft at row 5 (it read 0.8 ft aft at every pylon before: see the outline correction
+below). The height is the record's (-4 ft raw, the belly depth) under the wing's own surface,
+as every wing pylon: 1.0 ft deep. Rows 5 and 6 swivel (F111-3). Rows 7 and 8 are fixed pylons
+the wing **carries but does not turn back**: `swing::carries` is true for them, so the host and
+the drawing sweep their points with the panel (about the F-111F pivot) but not their stores'
+headings, and the wing is held to 26 degrees while they carry (below), so they are carried by at
+most 10 degrees.
+
+*Outline correction (F111-5).* `swing::F111F`'s panel outline had the leading edge from the
+shape's root corners, (13, 10) to (53, 0), which lies 0.8 ft aft of the drawn leading edge, the
+skin from (15, 12) to (54, 2) (faces `4021` and `4109`). The outline is now the drawn skin's,
+so rows 5 to 8 moved forward 0.84, 0.79, 0.81 and 0.80 ft (rows 5 and 6 from 1.54 and 1.07 to 2.38 and 1.86 ft; rows 7 and 8 from 0.50 and 0.04 ft, where the record's span puts them, to 1.31 and 0.84) and the
+fitted pylon centres agree with the drawn chord.
+
+**The sweep limit (decision 4).** While rows 7 or 8 carry a store or a tank the wing is held to
+26 degrees of sweep or less, whatever the speed (the schedule gives 23.06 degrees at 300 knots
+and 26 at 321, so below 321 knots nothing changes); the flaps still hold it spread. It is a
+function of the live loadout, so it is wired where the loadout is known:
+`SwingSpec::turn_carrying` (the schedule, held to `max_sweep_with_fixed_stores`);
+`Configuration::fixed_stores_carried` (rows 7 and 8, by the station's live rounds and by tanks);
+`Ownship::set_wing_flight` (the human's ownship) and `AiWings::carry_swing_wings` (every AI
+aircraft, by its actor's own rounds) set the stations' turn from it every tick; the drawing reads
+it from a new display-only flight flag, `State::wing_hold` (not coded on the wire, not in a
+checkpoint, like `gun_aim`): the world sets it on the frame's presented flight
+(`World::frame`) and the render snapshot sets it on a remote aircraft's pose from the stores it
+is drawn with (`pylons::wing_held`). `f111_animation::sweep_turn` and `pylons::swung` draw the held
+wing and the stations on it. When the last store leaves rows 7 and 8 the wing goes on to the
+schedule's sweep **at once** (the sweep has no rate, SWING-1: it is a pure function of speed), a
+jump of up to 46 degrees in one tick at 650 knots. Stated in the open items.
+
+**The bay (decision 5).** The shape has no bay (F111-0), so it is cut and lined as the B-52's
+is, from the forward belly plate `3132` (x +/-3 units, y 13 to 34, z -6 rising to -5: a 3.44 ft
+wide, 14 ft long quad, the plate's keel at the aft edge): an opening **3.0 ft wide and 12.0 ft
+long, 9.67 to 21.67 ft forward**, cut into two doors 1.5 ft wide hinged on the outer edges that
+swing 90 degrees down in the flight's 1.00 s bay travel, hanging 1.5 ft under the belly. The
+plate rises 0.55 ft forward, so the doors turn about hinge lines that lie in the plate
+(`roster_animation::cut_doors_sloped`: the axis is tilted 2.3 degrees), not about a level line,
+and the belly plane (-3.31 ft) is the keel line, the lowest point. The recess is **3.0 ft deep**
+(roof at -0.31 ft, under the fuselage's top skin at +1.1 ft); a lined box closes it (ceiling and
+four walls, the lower edges following the plate), a cradle rail hangs under the ceiling and two
+posts stand at the pod's ends, 4.6 ft either side of the opening's middle: drawn only while the
+doors are off their seat, in the grey of the gear plates (`f111_animation.rs`, addresses
+`7000` to `7013`). The cut and the lining are `bays::OPENINGS` and `bays::STATIONS` rows for the
+F-111F, so `State::bay_available` is true and the bay opens for a release and by the bay key.
+The real bay size was not found in a public source: the opening is the size the plate leaves.
+
+**What the bay holds.** The Pave Tack is a **designator pod loaded on the bay row**
+(`Loadout::load_designator`, the existing path): the record's `PAVESPK.SEE` stand-in (F111-0
+sensors), drawn as the shared authored pod model (a tube with a window on its nose) scaled to a
+fitted 8.0 by 1.25 ft body (`bays::pod_body`, real size not found; the pod hangs centred in the
+opening, 0.87 ft ahead of its middle, on the posts) and shown only while the doors are open,
+like every bay store. The standard load carries it (`stations::default_bay_pod`,
+`Configuration::with_default_load`): a Pave Tack at a station that holds no bomb. Loading two
+bombs on the row removes it (`refresh_equipment`: a pod leaves its station when a weapon takes it),
+and loading the pod again removes the bombs: **the pod and the bombs are alternatives**
+without a second row, so there is no `ALTERNATIVES` entry. The alternative load is **two Mk 82**
+(`MK82.JT`, the row's record, capacity 2, class 12 = 1,200 lb a store, so a 500 lb class bomb loads
+two, a 2,000 lb one none): they hang on the shared grid, two abreast (1.3 ft pitch), one long,
+one tier. The pod's mass (the record's 425 lb) is in the loadout; an internal pod adds nothing to
+the external-store radar signature (`store_signature`: a pod on a bay station is not outside).
+The sensors are unchanged: the laser and the FLIR stay the aircraft's fixed rows (3 and 4), so
+the pod adds a second laser designator of the same record that the sight takes first; the
+relabel as "Pave Tack" is F111-7's. A saved load that names every station names every pod it
+carries (`LoadoutSpec::apply` now drops the standard load's own pods first), and one saved
+with the four wing rows (before this slice) still restores, the bay and rails at their defaults
+(`later_weapon_rows` 3).
+
+**What each station admits and refuses** (measured with the stores preview, spread, 26 and
+72.5 degree wing, clip against the airframe at the store's full count; the 0.3 ft line of the
+F-15E A2 precedent for the airframe; the bay's 0.05 ft for its doors, ends, roof and neighbours):
+
+| Station | Admits | Refuses (named list) |
+| --- | --- | --- |
+| Row 5 (8.3 ft out, 0.85 ft from the pivot, under the glove) | the 61 catalog stores less 10 (tanks included, none refused) | `F111_ROW5_REFUSED`: `GBU29`, `GBU29P`, `GBU30`, `PAVEWA3` (1.10 ft into the airframe at 26 and 72.5 degrees), `AM39` 0.45, `AA6`, `GBU10`, `GBU10A`, `PAVEWAY` 0.37, `GBU16` 0.36 (`AS30` 0.28 and `GBU12` 0.23 stay) |
+| Row 6 | the 61 less 4 | `F111_ROW6_REFUSED`: the four GBU-27 class bombs (1.10 ft) |
+| Rows 7 and 8 | all 61 (no store enters the airframe at 16 or 26 degrees) | none |
+| Rails 10 and 11 | the AIM-9 family and the seven other infrared missiles the mask admits (`AA2`, `AA8`, `AA11`, `AA11B`, `AIM9B`, `AIM9M`, `AIM9X`) | `F111_RAIL_REFUSED`: `PL7`, `R550`, `AT12`, `GBU12` (the Tornado's rail line; not remeasured on the outboard shoulder) |
+| Bay (row 9) | `MK82`, `FAB250`, `LAU10` (two each) and the Pave Tack pod | `F111_BAY_REFUSED`: 15 stores that overrun the 12 ft opening or whose fins cross the door planes or the keel (`B13`, `B8`, `LAU61`, `AGM88`, `AGM45`, `GBU30`; `AT2`, `FAB500`, `MK82HD`, `CBU87`, `CBU89`, `MK20`, `RBK250`, `RBK500`, `GBU38`) |
+
+The bay's shared grid hangs a lone store in the outer column, so the singles (capacity 1) are
+measured off-centre and several refuse for that; centring a partial tier would move the B-2's and
+B-52's places and is the coordinator's to decide. Bay clearances for the two Mk 82 (doors open):
+0.40 ft to the door planes, 0.20 ft from the centre line, 2.35 ft to either end, 1.84 ft to the
+roof, 1.36 ft under the top skin, 0.25 ft above the closed belly plane, 0.39 ft between the two.
+
+**Glove plates.** The four fixed plates now take the wing's own top skin (`40bf` right, `44e5`
+left: colours, texture and flags) with texture coordinates fitted to that skin's mapping (a
+least-squares affine map from the plan position to the texel, residual a texel or two over the
+skin), so the plate carries the wing's pattern across the glove instead of one texel of the
+fillet; see the frames `glove-*`.
+
+**Findings.** (1) A pod could not stand beside the bay rows: the `0x400` designator bit that
+BMB-A2 and BMB-B2 cleared on the bomber bay rows is kept on this one row (the real Pave Tack
+station), and it is the only row that takes the pod. (2) The first scan, on the old chord outline, refused 12 stores on row 5 and 4 on row 6; the outline correction moved the pylons under the thicker part of the wing and two of the 12 (`AS30`, `GBU12`) now clear, all remeasured with Cheat loading (which ignores the lists) at 16, 26 and 72.5 degrees. (3) `ordnance_audit` pins: see the table
+below. (4) The AIM-9 rail on the inboard flank, as the Tornado's (TOR-11), enters the glove 0.26
+ft spread and 0.38 ft swept (row 5 stands 0.85 ft outboard of the pivot and the wing root), so the
+rails are on the outboard shoulder, as the F-14's glove pylon. (5) The default rails and the bay's
+bombs are empty by default: the real F-111F carried no AIM-9 in the Gulf War and the bay held the
+Pave Tack; the bomb-and-rail loads are Load Ordnance's.
+
+**Pins** (`--validate-ordnance`, measured on this tree after the profile was refreshed; the
+coordinator recomputes totals at integration, B4):
+
+| Pin | Before | After | Why |
+| --- | ---: | ---: | --- |
+| Aircraft | 54 | 54 | |
+| Weapon placements | 5,395 | 5,398 | the F-111F goes from 228 to 231: the bay admits 3 bombs, the two rails 7 missiles each (14), the inner pylons refuse 14 (row 5 ten, row 6 four); 228 + 3 + 14 - 14 |
+| Tank placements | 257 | 257 | no tank is refused or added |
+| Recovered weapon stations | 23 | 23 | the new rows have default stores, so they are source rows to the audit |
+| Cheat-only placements | 278 | 284 | the bay and the two rails take the two novelty bombs under Cheat loading |
+| Designator pod placements | 82 | 83 | the bay row keeps the designator bit |
+
+```text
+ordnance audit: 54 aircraft, 23 recovered weapon stations, 5398 weapon placements, 257 tank placements, 82 weapon and 9 tank records; passed
+ordnance audit: 1 designator pods, 83 pod placements, one to an aircraft, loaded and restored through the saved mission; passed
+ordnance audit: 2 novelty records, 284 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
+```
+
+`menus-ordnance-availability` and `a2g-catalog` carry the new expected lines (5,398 weapon and 284
+Cheat-only placements).
+
+
+**Open for John.** (1) The pod body (8.0 by 1.25 ft) and the bay opening (3.0 by 12.0 ft, 3 ft deep)
+are fitted: no real dimensions were found. (2) The cradle does not rotate out of the bay (the
+proposal's fitted animation was not done: the pod stays on its posts and shows with the doors
+open). (3) The wing releases to its scheduled sweep at once when the last outer store leaves
+(no sweep rate). (4) A lone bay store hangs off-centre (shared grid). (5) The default rails are
+empty. (6) The bay row's pod is the `PAVESPK.SEE` record and reads "Pave Spike" on the Load Ordnance
+page until F111-7's relabel. (7) Row 5's refusals list 12 stores because the pylon is 0.85 ft from the
+root; moving it outboard (it stands where the record puts it) would free them.
+
+Provenance: the record's rows, spans and the bay row's flag bits are the retail record's (F111-0);
+the mid-chord rule is TOR-14's; the outline correction, the bay opening, doors, lining, pod body,
+rails, refusal lists, defaults and the sweep hold's wiring are fitted (agent decisions, 2026-11-16);
+the 26 degree limit is the coordinator's first pass (one secondary source, no primary found);
+the 5,000 lb pylon rating and the Pave Tack's bay carriage are cited (Wikipedia, F111-0). No retail
+bytes are committed.

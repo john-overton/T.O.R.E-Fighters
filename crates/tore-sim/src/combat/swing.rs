@@ -307,6 +307,15 @@ impl SwingSpec {
     pub fn has_swivel(&self) -> bool {
         !self.swivel_rows.is_empty()
     }
+    /// Whether source hardpoint `hardpoint` rides the swinging wing: a
+    /// swivelling pylon, or a fixed one ([`Self::fixed_store_rows`]), which the
+    /// wing carries without turning it back (F111-5, 2026-11-16). A fixed
+    /// pylon's store does not turn with the wing in the drawing or the
+    /// release: the wing is held to 26 degrees or less while it holds one, so
+    /// the pylon is carried by at most 10 degrees of turn.
+    pub fn carries(&self, hardpoint: usize) -> bool {
+        self.swivels(hardpoint) || self.fixed_store_rows.contains(&hardpoint)
+    }
     /// The fixed length of the swivelling pylon of source hardpoint
     /// `hardpoint`, when it has one.
     pub fn pylon_length(&self, hardpoint: usize) -> Option<f64> {
@@ -565,13 +574,18 @@ pub const F111F: SwingSpec = SwingSpec {
     gear_holds_spread: false,
     sweep_rate_dps: None,
     placement: Placement::NONE,
-    swivel_rows: &[5, 6],
+    swivel_rows: &[5, 6, 10, 11],
     fixed_store_rows: &[7, 8],
     max_sweep_with_fixed_stores: Some(26.),
+    // Update (F111-5, 2026-11-16): the leading edge is the drawn skin's, shape
+    // (15, 12) to (54, 2) (faces `4021` and `4109`, the fillet corner out to the
+    // tip), not the earlier (13, 10) to (53, 0) chord of the root corners, which
+    // lay 0.8 ft aft of the drawn leading edge at the outer pylons: the pylon
+    // centre report read every pylon 0.8 ft aft of the middle of the chord.
     outline: Some(WingOutline {
         leading: [
-            [13. * FEET_PER_UNIT * 0.859, 10. * FEET_PER_UNIT],
-            [53. * FEET_PER_UNIT * 0.859, 0.],
+            [15. * FEET_PER_UNIT * 0.859, 12. * FEET_PER_UNIT],
+            [54. * FEET_PER_UNIT * 0.859, 2. * FEET_PER_UNIT],
         ],
         trailing: [
             [13. * FEET_PER_UNIT * 0.859, -5. * FEET_PER_UNIT],
@@ -766,6 +780,37 @@ pub fn swivels(id: AircraftId, hardpoint: usize) -> bool {
 /// Whether `id` has any swivelling station.
 pub fn has_swivel(id: AircraftId) -> bool {
     spec(id).is_some_and(SwingSpec::has_swivel)
+}
+
+/// Whether source hardpoint `hardpoint` of aircraft `id` rides its swinging
+/// wing, swivelling or fixed ([`SwingSpec::carries`], F111-5, 2026-11-16).
+pub fn carries(id: AircraftId, hardpoint: usize) -> bool {
+    spec(id).is_some_and(|spec| spec.carries(hardpoint))
+}
+
+/// Whether `hardpoint` of aircraft `id` is a fixed wing pylon that holds the
+/// sweep to its limit while it carries a store ([`SwingSpec::fixed_store_rows`],
+/// F111-5, 2026-11-16): the F-111F's rows 7 and 8.
+pub fn holds_sweep(id: AircraftId, hardpoint: usize) -> bool {
+    spec(id).is_some_and(|spec| {
+        spec.max_sweep_with_fixed_stores.is_some() && spec.fixed_store_rows.contains(&hardpoint)
+    })
+}
+
+/// How far aircraft `id`'s wing has turned from its drawn pose, radians, at
+/// `speed_fps` with its flaps and gear out, held to its fixed-store sweep limit
+/// when `fixed_stores` says a store hangs on a fixed pylon
+/// ([`SwingSpec::turn_carrying`]): 0 for an aircraft with no swing wing.
+pub fn wing_turn_carrying(
+    id: AircraftId,
+    speed_fps: f64,
+    flaps: f64,
+    gear: f64,
+    fixed_stores: bool,
+) -> f64 {
+    spec(id).map_or(0., |spec| {
+        spec.turn_carrying(speed_fps, flaps, gear, fixed_stores)
+    })
 }
 
 #[cfg(test)]
@@ -1098,7 +1143,8 @@ mod tests {
         assert!((degrees(f, 650., 0., 0.) - 72.5).abs() < 1e-9);
         assert_eq!(f.turn(knots(700.), 1., 0.), 0.);
         let rows: Vec<usize> = (0..12).filter(|row| f.swivels(*row)).collect();
-        assert_eq!(rows, [5, 6]);
+        // F111-5: the two AIM-9 rails (rows 10 and 11) ride the inner pylons.
+        assert_eq!(rows, [5, 6, 10, 11]);
         assert_eq!(f.fixed_store_rows, [7, 8]);
         assert_eq!(f.pylon_length(5), Some(3.3));
         assert_eq!(f.pylon_length(7), None);
@@ -1115,13 +1161,13 @@ mod tests {
             B1B.turn_carrying(fast, 0., 0., true),
             B1B.turn(fast, 0., 0.)
         );
-        // The mid-chord reads the panel's own edges: leading (13, 10) to
-        // (53, 0), trailing at y -5, shape units.
+        // The mid-chord reads the drawn panel's own edges (F111-5): leading (15,
+        // 12) to (54, 2), trailing at y -5, shape units.
         let u = 2. / 3.;
-        let x13 = 13. * u * 0.859;
-        let x53 = 53. * u * 0.859;
-        assert!((f.mid_chord(x13).unwrap() - (10. - 5.) / 2. * u).abs() < 1e-9);
-        assert!((f.mid_chord(x53).unwrap() - (0. - 5.) / 2. * u).abs() < 1e-9);
+        let x13 = 15. * u * 0.859;
+        let x53 = 54. * u * 0.859;
+        assert!((f.mid_chord(x13).unwrap() - (12. - 5.) / 2. * u).abs() < 1e-9);
+        assert!((f.mid_chord(x53).unwrap() - (2. - 5.) / 2. * u).abs() < 1e-9);
         assert!(f.mid_chord(x53).unwrap() < f.mid_chord(x13).unwrap());
     }
 
@@ -1170,5 +1216,41 @@ mod tests {
         assert_eq!(rack_spec(AircraftId::B1b), None);
         assert!(has_swivel(AircraftId::F111) && swivels(AircraftId::F111, 6));
         assert!(!swivels(AircraftId::F111, 7));
+    }
+
+    /// F111-5 (2026-11-16): the F-111F's rails (rows 10 and 11) ride the
+    /// swivelling pylons, the fixed outer rows 7 and 8 are carried by the wing
+    /// without swivelling and hold the sweep to 26 degrees while they carry a
+    /// store; nothing else holds anything.
+    #[test]
+    fn the_f111_outer_pylons_hold_the_sweep_to_26_degrees_while_they_carry() {
+        let id = AircraftId::F111;
+        for row in [5, 6, 10, 11] {
+            assert!(swivels(id, row) && carries(id, row) && !holds_sweep(id, row));
+        }
+        for row in [7, 8] {
+            assert!(!swivels(id, row) && carries(id, row) && holds_sweep(id, row));
+        }
+        assert!(!carries(id, 9) && !carries(id, 4));
+        assert!(!holds_sweep(AircraftId::Tornado, 7) && !carries(AircraftId::B2, 7));
+        let at = |kt: f64, flaps: f64, held: bool| {
+            F111F.sweep_degrees(wing_turn_carrying(id, kt * FPS_PER_KNOT, flaps, 0., held))
+        };
+        // Free, the wing follows the schedule to 72.5 degrees; held it stops
+        // at 26.
+        assert!((at(650., 0., false) - 72.5).abs() < 1e-9);
+        assert!((at(650., 0., true) - 26.).abs() < 1e-9);
+        assert!((at(450., 0., true) - 26.).abs() < 1e-9);
+        // Below the limit the schedule is untouched: 16 degrees to 250 knots,
+        // 23.06 at 300.
+        assert_eq!(at(200., 0., true), at(200., 0., false));
+        assert!((at(300., 0., true) - 23.0625).abs() < 1e-9);
+        assert_eq!(at(300., 0., true), at(300., 0., false));
+        // The flaps still hold it spread.
+        assert!((at(650., 1., true) - 16.).abs() < 1e-9);
+        // An aircraft with no limit is never held.
+        let tornado =
+            |held| wing_turn_carrying(AircraftId::Tornado, 600. * FPS_PER_KNOT, 0., 0., held);
+        assert_eq!(tornado(true), tornado(false));
     }
 }

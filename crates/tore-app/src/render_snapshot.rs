@@ -100,6 +100,11 @@ fn model_pose(mut s: flight::State, pose: &AircraftPose, tick: u64) -> flight::S
     if let Some(devices) = pose.devices {
         set_devices(&mut s, devices);
     }
+    // A store on a fixed wing pylon holds a swing wing to its sweep limit
+    // (the F-111F's outer rows, F111-5).
+    s.wing_hold = pose
+        .aircraft
+        .is_some_and(|id| crate::pylons::wing_held(&pose.stores, id));
     // A rotorcraft's blades turn at its rotor speed and its disks tilt as it
     // flies them (slice P7b).
     if pose.engine.rotor > 0. {
