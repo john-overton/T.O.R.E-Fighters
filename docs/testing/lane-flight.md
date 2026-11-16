@@ -1047,3 +1047,12 @@ GBU-12 leaves the intake, wing or tip station; nothing opens, the Su-34 has no b
 `render-su34-clearance` and `render-su34-clearance-mk82` (headless: the default and a Mk 82 load
 clip the airframe by at most 0.75 ft, no two stores touch, and every store stays at least 1 ft
 from the gear-down plates).
+
+Update (SU34-6, 2026-11-16): new scenarios `a2g-laser-su34` (the Su-34's built-in laser: an AS-14 from
+row 6 guides to the tank and destroys it, an AT-12 from row 7 guides and hurts it),
+`a2g-release-origin-su34` (AS-14 front pair then rear pair, AT-12 outer then middle pylon, AA-11 tip
+rails, LAU-61 rocket pods on the outer pylon, each from the cell it hangs at, left then right),
+`ai-strike-su34-origin` (an AI Su-34's AS-14, AT-12 and LAU-61 leave from the human's cells, guide and
+egress) and `flight-countermeasures-su34` (the retail `SU27.ECM` row, five chaff and three flare
+releases). `menus-ordnance-availability` expects 5,361 weapon placements (the four rocket pods back on
+row 7).

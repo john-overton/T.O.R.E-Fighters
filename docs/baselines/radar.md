@@ -369,3 +369,12 @@ Sensor View name; no other aircraft changed). The jammer row is gone (BMB-A2), s
 chaff and no flare line. The laser works from the fixed row with a GBU-27 released from the bay (`a2g-laser-f117`:
 lased, released, guided, the tank destroyed). The RCS page reads `SIG 1` closed and `SIG 2` with the bay open.
 See [the F-117 section](../formats/aircraft-variety.md#f-117-ordnance-sensors-and-cockpit-f117-67-2026-11-15).
+
+## Su-34 sensors: Su-27 radar, IRST, jammer and laser rows, 2026-11-16 (SU34-6, SU34-7)
+
+The Su-34 keeps the five sensor rows of its record, all fixed at the origin with no pod body:
+`SU27R.SEE` (Advanced, the Su-27's reviewed preset; the radar window runs the air-to-air RWS/TWS set),
+`SU27I.SEE` (the IRST), `SU27.ECM` (late-Cold-War jammer, 60 chaff, 60 flares) and `SU37L.SEE` (the
+built-in laser). The laser works from the fixed row (`a2g-laser-su34`: an AS-14 guides to 9 ft and
+destroys the tank, an AT-12 guides to 4 ft and hurts it). The RCS page reads `SIG 144`; there is no bay.
+See [the Su-34 section](../formats/aircraft-variety.md#su-34-ordnance-sensors-hud-and-cockpit-su34-67-2026-11-16).

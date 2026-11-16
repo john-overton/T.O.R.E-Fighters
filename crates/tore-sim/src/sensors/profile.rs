@@ -837,6 +837,24 @@ mod tests {
         assert_eq!(Preset::for_record("TU160R.SEE"), None);
     }
 
+    /// SU34-7: the Su-34's radar and jammer rows are the Su-27's own records,
+    /// already reviewed (`SU27R.SEE` Advanced, `SU27.ECM` late Cold War), so the
+    /// Su-34 flies with a radar and a jammer and needs no new assignment.
+    #[test]
+    fn the_su34_radar_and_jammer_rows_are_the_su27s_reviewed_records() {
+        assert_eq!(Preset::for_record("SU27R.SEE"), Some(Preset::Advanced));
+        assert_eq!(
+            Generation::for_record("SU27.ECM"),
+            Some(Generation::LateColdWar)
+        );
+        let radar = RadarProfile::from_seeker("SU27R.SEE", &seeker(3)).unwrap();
+        assert_eq!(radar.preset, Preset::Advanced);
+        assert!(radar.reviewed());
+        let jammer =
+            JammerProfile::from_countermeasures("SU27.ECM", &Countermeasures::NONE).unwrap();
+        assert!(jammer.reviewed());
+    }
+
     #[test]
     fn a_reviewed_record_still_enables_its_flying_channel() {
         let a = aircraft_with(&["F18R.SEE", "F18.ECM"]);

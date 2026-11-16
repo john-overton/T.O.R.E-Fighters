@@ -1215,6 +1215,57 @@ def b2_stick_problems(output: str) -> list[str]:
     return problems
 
 
+# The Su-34's first cells (SU34-6, 2026-11-16): where a human's first press leaves each row's store
+# (`a2g-release-origin-su34`), (right, up, forward) feet at the SU34-5 station positions. The AI's
+# release takes the same cells (`tore_world::ai_wings::release`).
+SU34_CELLS = {
+    "AS14.JT": (1, (-4.50, -2.05, 8.90)),
+    "AT12.JT": (2, (-18.00, -1.78, -3.40)),
+    "LAU61.JT": (2, (-18.00, -2.02, -3.40)),
+}
+
+
+def su34_origin_problems(output: str) -> list[str]:
+    """`ai-strike-su34-origin`: an AI Su-34 on the Ukraine column with an AS-14 (fuselage row), an
+    AT-12 and a LAU-61 pod (wing row): each release leaves from the cell a human's first press
+    leaves from, the missiles guide onto their own laser spot, the rocket lands, and it egresses."""
+    runs = parse_runs(output)
+    if len(runs) != len(SU34_CELLS):
+        return [f"{len(runs)} runs finished, want {len(SU34_CELLS)}"]
+    problems: list[str] = []
+    for run, (weapon, (station, want)) in zip(runs, SU34_CELLS.items()):
+        label = f"Su-34 {weapon}"
+        problems += consistency_problems(run, label)
+        if run.setup.get("aircraft") != "Su34" or run.setup.get("load") != weapon:
+            problems.append(f"{label}: flew {run.setup.get('aircraft')} with {run.setup.get('load')}")
+        release, impact = run.first("RELEASE"), run.first("IMPACT")
+        if release is None or impact is None:
+            problems.append(f"{label}: no release or no impact")
+            continue
+        if release.get("weapon") != weapon or release.get("station") != str(station):
+            problems.append(f"{label}: released {release.get('weapon')} from station {release.get('station')}")
+        origin = run.first("ORIGIN")
+        if origin is None:
+            problems.append(f"{label}: no ORIGIN line")
+            continue
+        right, up, forward = origin.get("right"), origin.get("up"), origin.get("forward")
+        for name, got, expect, tol in zip(("right", "up", "forward"), (right, up, forward), want, (0.05, 0.05, 0.5)):
+            if abs(float(got) - expect) > tol:
+                problems.append(f"{label}: left {name} {got}, a human's first press leaves from {expect}")
+        if weapon != "LAU61.JT":
+            if release.get("guided") != "Guiding" or release.get("spot_owner") != (run.first("start") or {}).get("plane", "0"):
+                problems.append(f"{label}: {release.get('guided')} on aircraft {release.get('spot_owner')}'s spot, want guiding on its own")
+            if not number(impact.get("miss_ft")) <= GUIDED_MISS_FT:
+                problems.append(f"{label}: landed {impact.get('miss_ft')} ft from the target")
+        if weapon == "AS14.JT" and not run.of("KILL"):
+            problems.append(f"{label}: no KILL")
+        if not run.of("EGRESS"):
+            problems.append(f"{label}: no EGRESS")
+        if run.of("LOST"):
+            problems.append(f"{label}: the Su-34 was lost")
+    return problems
+
+
 def b2_climb_problems(output: str) -> list[str]:
     """`ai-strike-b2-climb`: from 5,000 ft 30 nm out an AI B-2 climbs to its release floor (10,000 ft
     or more) before it bombs, then bombs and gets out; it never gets low."""
@@ -1598,6 +1649,22 @@ def scenarios() -> list[Scenario]:
         timeout=600, expect=[r"RELEASE", r"ORIGIN", r"KILL", r"EGRESS"], check=b2_paveway_problems,
         notes="An AI B-2's Paveway III (GBU-27) leaves the first place of its left bay's 4 abreast grid and kills "
               "the tank on its own laser spot.",
+    ))
+    extra.append(Scenario(
+        name="ai-strike-su34-origin", lane="flight",
+        args=pilot_run("UKR", "QUCOL", "--aircraft", "su34", "--load", "AS14", "--station", "1", "--seconds", "120",
+                       "--follow-egress"),
+        timeout=900,
+        then=[
+            Step(pilot_run("UKR", "QUCOL", "--aircraft", "su34", "--load", "AT12", "--station", "2",
+                           "--seconds", "120", "--follow-egress"), timeout=600),
+            Step(pilot_run("UKR", "QUCOL", "--aircraft", "su34", "--load", "LAU61", "--station", "2",
+                           "--seconds", "120", "--follow-egress"), timeout=600),
+        ],
+        expect=[r"RELEASE", r"ORIGIN", r"IMPACT"], check=su34_origin_problems,
+        notes="An AI Su-34 on the Ukraine column with an AS-14, an AT-12 and a LAU-61 pod: every release leaves from "
+              "the cell a human's first press leaves from (`a2g-release-origin-su34`), the missiles guide on its own "
+              "laser spot and the AS-14 kills the tank (SU34-6).",
     ))
     return extra + [
         Scenario(

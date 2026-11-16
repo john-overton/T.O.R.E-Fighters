@@ -3849,3 +3849,15 @@ AT-12 0.00 (1.44, 4.72); row 8 AA-11 0.59 (1.44, 16.4). The rear under-intake st
 point is 1.36 ft above the ground contact line with the gear down (the gear-down plates are
 at least 2.23 ft away). The `render-su34-clearance` scenarios pin these limits.
 See [the format notes](../formats/aircraft-variety.md#su-34-stations-bays-and-pylons-su34-5-2026-11-16).
+
+## The Su-34's rocket pods (SU34-6, 2026-11-16)
+
+Clearing the designator bit on the Su-34's fuselage and wing rows (SU34-5) also removed the four
+multi-rocket stores, because that bit is what admits a store with more than one body. The real jet
+carries rocket pods on its wing pylons, so the wing row (row 7, 14 and 18 ft out) takes `B8.JT`,
+`B13.JT`, `LAU10.JT` and `LAU61.JT` again through a guarded extra weapon (four pods, the row's own
+count; the fuselage row stays without them). They clip the airframe by 0.00 ft and clear the gear
+by about 5 ft (SU34-5's scan). A pod fires one rocket a press from the outer pylon pair (left then
+right, 2.02 ft down, 18 ft out, 3.40 ft aft); the human's and the AI's first release leave from the
+same cell (`a2g-release-origin-su34`, `ai-strike-su34-origin`). See
+[the format notes](../formats/aircraft-variety.md#su-34-ordnance-sensors-hud-and-cockpit-su34-67-2026-11-16).

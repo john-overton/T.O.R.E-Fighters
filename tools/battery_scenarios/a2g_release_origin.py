@@ -425,6 +425,52 @@ def b2_origin_problems(output: str) -> list[str]:
     return problems
 
 
+# The Su-34's stores (SU34-6, 2026-11-16), one run each, at the SU34-5 station positions on the
+# 1:1 shape. The fuselage row's four AS-14s hang in two tandem pairs under the intake ducts at 4.5 ft
+# out on 2 inch rails, the front pair (8.90 ft forward, 2.05 ft down) first, left then right, then
+# the rear pair (4.90 ft aft, 6.03 ft down, hung under the lowest part of the duct); the wing row's
+# four AT-12s hang one a pylon on the 1 ft middle and outer pylons, the outer pair (18 ft out,
+# 3.40 ft aft) first, then the middle pair (14 ft out, 0.40 ft aft); the tips' two AA-11s from the
+# tip rails (25.33 ft out, 0.33 ft down, 11.33 ft aft) with no pylon depth; the four LAU-61 rocket
+# pods the guarded extra weapon puts back on the wing row (4 pods, 19 rockets each) leave one rocket
+# a press from the outer pylon pair, left then right, 2.02 ft down. The AI's strike driver uses the
+# same cells (`ai-strike-su34-origin`).
+SU34_CASES = [
+    ("AS-14 fuselage row", [(4.50, -2.05, 8.90)] * 2 + [(4.50, -6.03, -4.90)] * 2, "LRLR", RAIL),
+    ("AT-12 wing row", [(18.00, -1.78, -3.40)] * 2 + [(14.00, -1.78, -0.40)] * 2, "LRLR", WING),
+    ("AA-11 wingtip", [(25.33, -0.33, -11.33)] * 2, "LR", None),
+    ("LAU-61 wing row", [(18.00, -2.02, -3.40)] * 4, "LRLR", WING),
+]
+
+
+def su34_origin_problems(output: str) -> list[str]:
+    parts = runs(output)
+    if len(parts) != len(SU34_CASES):
+        return [f"{len(parts)} runs finished, want {len(SU34_CASES)}"]
+    problems: list[str] = []
+    for part, (label, wants, sides_want, depth_want) in zip(parts, SU34_CASES):
+        firsts = [o for o in ORIGIN.findall(part) if o[0] == "0"]
+        if len(firsts) != len(wants):
+            problems.append(f"{label}: {len(firsts)} releases, want {len(wants)}")
+            continue
+        sides = []
+        for n, ((_, r, u, f, _station, _after, hr, hu, hf, depth), (wr, wu, wf)) in enumerate(zip(firsts, wants)):
+            r, u, f, hr, hu, hf = (float(v) for v in (r, u, f, hr, hu, hf))
+            if abs(r - hr) > 0.05 or abs(u - hu) > 0.05 or abs(f - hf) > 0.5:
+                problems.append(f"{label}: release {n} left from {r:.2f} {u:.2f} {f:.2f}, hung at {hr:.2f} {hu:.2f} {hf:.2f}")
+            if abs(abs(r) - wr) > 0.05 or abs(u - wu) > 0.05 or abs(f - wf) > 0.5:
+                problems.append(f"{label}: release {n} at {r:.2f} {u:.2f} {f:.2f}, want +-{wr:.2f} {wu:.2f} {wf:.2f}")
+            if depth_want is None:
+                if depth != "none":
+                    problems.append(f"{label}: release {n} pylon depth {depth}, want none")
+            elif depth == "none" or abs(float(depth) - depth_want) > 0.01:
+                problems.append(f"{label}: release {n} pylon depth {depth}, want {depth_want:.2f}")
+            sides.append("L" if r < 0 else "R")
+        if "".join(sides) != sides_want:
+            problems.append(f"{label}: sides {''.join(sides)}, want {sides_want}")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     base = ["--a2g-run", "UKR", "QUCOL", "--attack", "release", "--from", "1", "--altitude", "3000",
             "--speed", "420"]
@@ -514,6 +560,22 @@ def scenarios() -> list[Scenario]:
             ],
             check=mf1_origin_problems,
             notes="The Mirage F1's stores leave from where they hang: the wing Magics from 1 ft pylons, the wingtip Magics from the shifted tip rail, a Mk 82 pair from the belly pylon slot at 3.24 ft, left then right (MF1-6).",
+        ),
+        Scenario(
+            name="a2g-release-origin-su34", lane="flight",
+            args=base + ["--repeat", "4", "--gap", "0.5", "--aircraft", "su34", "--station", "1", "--load", "AS14",
+                         "--count", "4"],
+            timeout=300,
+            then=[
+                Step(base + ["--repeat", "4", "--gap", "0.5", "--aircraft", "su34", "--station", "2", "--load",
+                             "AT12", "--count", "4"], timeout=300),
+                Step(base + ["--repeat", "2", "--gap", "0.5", "--aircraft", "su34", "--station", "3", "--load",
+                             "AA11", "--count", "2"], timeout=300),
+                Step(base + ["--repeat", "4", "--gap", "0.5", "--aircraft", "su34", "--station", "2", "--load",
+                             "LAU61", "--count", "4"], timeout=300),
+            ],
+            check=su34_origin_problems,
+            notes="The Su-34's stores leave from where they hang: the four AS-14s from the two tandem pairs under the intake ducts (front pair first), the AT-12s from the middle and outer wing pylons (outer pair first), the AA-11s from the tip rails and the restored LAU-61 rocket pods from the outer pylons, left then right (SU34-6).",
         ),
         Scenario(
             name="a2g-release-origin-tornado", lane="flight",

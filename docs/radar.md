@@ -161,7 +161,7 @@ flying channel, instead of borrowing a preset.
 | --- | --- | ---: | ---: | ---: | --- |
 | Basic | F4BR, MIG21R, MIG27R | Disabled | 1.0 | 5 | 3 degrees / 0.05 |
 | Transitional | F14R, B52R (B52-7, 2026-11-15, fitted: the Tu-160's record renamed, a long-range bomber set; the AC-130's class) | 100 | 0.20 | 8 | 2 degrees / 0.02 |
-| Advanced | F18R, MIG29R, SU24R, SU27R, F22R, MIG31R | 60 | 0.45 | 10 | 1 degree / 0.005 |
+| Advanced | F18R, MIG29R, SU24R, SU27R (the Su-27, Su-35 and, from SU34-7 2026-11-16, the Su-34's row; no new assignment), F22R, MIG31R | 60 | 0.45 | 10 | 1 degree / 0.005 |
 
 Basic sets are primarily vulnerable to ground clutter and carry no Doppler notch,
 rather than taking a second old-aircraft punishment. The advanced set resists

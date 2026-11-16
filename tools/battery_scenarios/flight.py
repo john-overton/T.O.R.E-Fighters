@@ -1543,6 +1543,14 @@ def countermeasure_scenarios() -> list[Scenario]:
     out.append(Scenario(name="flight-countermeasures-b2", lane="flight", args=args, window=True,
                         check=check_countermeasures, timeout=180,
                         notes="The B-2's retail F18.ECM row: 30 chaff and 30 flares, five and three released (B2-6)."))
+    # SU34-6: the Su-34 keeps the retail SU27.ECM row (the Su-27's, "as the record gives it"): 30 chaff
+    # and 30 flares and the jammer.
+    args = ["--live-fire", "--aircraft", "su34"] + ["--combat-command", "chaff"] * 5
+    args += ["--combat-command", "flare"] * 3
+    args += ["--countermeasure-preview", "240", "--capture-flight", "{work}/cm.ppm", "--no-audio"]
+    out.append(Scenario(name="flight-countermeasures-su34", lane="flight", args=args, window=True,
+                        check=check_countermeasures, timeout=180,
+                        notes="The Su-34's retail SU27.ECM row: its chaff and flares, five and three released (SU34-6)."))
     out.extend(tornado_countermeasure_scenarios())
     return out
 

@@ -355,3 +355,15 @@ to 18.8 feet ahead with its crown 4.6 feet up at 14.6 feet; the seat is the cano
 feet over the crown, so Back looks over the glass and down the spine (frame
 `cockpit-view-back-f2`). The replay's Back, cockpit and HUD cameras and the listening seat use the
 same table. Evidence in [the F-117 section](../formats/aircraft-variety.md#f-117-ordnance-sensors-and-cockpit-f117-67-2026-11-15).
+
+## Pilot's eye on the Su-34 (2026-11-16, SU34-7)
+
+The per-identity Back eye table (`mirrors::eye_offset`) gains the Su-34: 7 feet up and 17 feet ahead
+of the model origin (fitted, agent decision), where the B-2 (10 and 20), the F-117 (6 and 14) and the
+B-52 (9 and 63) have their own and every other aircraft keeps 7 and 10. Measured on the 1:1 Su-34
+shape, the drawn canopy's crown is 5.7 feet up at 14.3 feet ahead and its glass falls to the
+windscreen apex at 19.3 feet; the shared seat sat 8.7 feet behind it. The seat is the canopy's middle,
+1.3 feet over the crown, so Back looks over the canopy and spine to both fins (frame
+`cockpit-view-back-f2`). The replay's Back, cockpit and HUD cameras and the listening seat use the
+same table; the mirror rear feed stays on the shared seat. Evidence in
+[the Su-34 section](../formats/aircraft-variety.md#su-34-ordnance-sensors-hud-and-cockpit-su34-67-2026-11-16).

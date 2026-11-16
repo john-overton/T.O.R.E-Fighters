@@ -15841,3 +15841,131 @@ and Cheat-only 278 unchanged. At integration the coordinator recomputes (B4).
    band (0.54 to 0.72).
 4. The four fuselage stores stand for four real stations (two intake, two tunnel). A tunnel
    row of their own would need a new record row.
+
+## Su-34 ordnance, sensors, HUD and cockpit (SU34-6/7, 2026-11-16)
+
+Implementation mode, agent-authored (SU34-6 and SU34-7, run together), applying the coordinator's
+first-pass decisions for the Su-34 (`BOMBERS-DECISIONS-C.md`, "Su-34" items 5 and 7 and "Su-34
+stations (SU34-5)") for John to review. Earlier sections stay as written. **Retail evidence:**
+`SU34.PT`, `SU33CC.HUD`, `~SU33H.PIC` and `SU34.SH` read from the install by the new tests
+`crates/tore-import/tests/su34_cockpit.rs` and `hud_aperture::the_su34_draws_the_su33_art_glass_measured_on_the_imported_picture`.
+
+### Rocket pods restored on the wing row (SU34-6)
+
+SU34-5 cleared the designator bit `0x400` on rows 6 and 7 (B7: no pod body on a station the real
+aircraft lacks). That bit is also the one the loader needs for any store with more than one body
+(`pod_count > 1`), so B-8, B-13, LAU-10 and LAU-61 left both rows. The real Su-34 carries rocket pods
+on its wing pylons, so the coordinator decided to restore them with a guarded extra weapon, the
+F-117's Paveway II precedent:
+
+| Item | Value |
+| --- | --- |
+| Guard | `aircraft_stations::extra_weapon(Su34, _, SU34_WING, name)` for the four names in `SU34_EXTRA_PODS` |
+| Row | row 7 only (the wing row, 14 and 18 ft out). Row 6 (two tandem pairs under the intake ducts, standing for four real stations) stays without them |
+| Count | the row's own, 4 pods (no weight cap, as the F-117's bays); each `LAU61.JT` pod carries 19 rockets, 76 rounds for the row |
+| Clearance | measured in SU34-5's scan: all four clip 0.00 ft and clear the gear by 4.8 to 5.2 ft on row 7 |
+| Other rows and aircraft | unchanged (unit test `the_su34_wing_row_takes_the_four_rocket_pods_and_nothing_else_moves`) |
+
+The audit's expectation takes the row's own count for the Su-34 as it does for the F-117
+(`ordnance_audit.rs`). **Pins:** weapon placements **5,361 from 5,357** (Su-34 99 to 103, catalog 58
+normal of 83 Cheat; the four pods are exactly the four placements added); aircraft 54, tank
+placements 257, recovered stations 23, designator pod placements 80 and Cheat-only 278 unchanged
+(`--validate-ordnance`, log `.local/m3-aircraft/checks/SU34-6/validate-ordnance.txt`; before:
+`validate-before.txt`). At integration the coordinator recomputes (B4).
+
+**Default load.** Unchanged: gun 180, 4 `AS14.JT`, 4 `AT12.JT`, 2 `AA11.JT` (6,811 lb of stores
+at the start). No default row takes a pod.
+
+### Live fire, jettison, guided stores and release origin (SU34-6)
+
+| Check | Scenario | Result |
+| --- | --- | --- |
+| Every slot fires | `flight-livefire-su34-slot1` to `slot4` (gun 180, AS-14, AT-12, AA-11) | gun 80 shots, 51 hits, 1 kill in the 1,200 tick probe; one missile a trigger, the other stations untouched. The default load holds no multi-body pack, so no `SHOTS_PER_ROUND` entry is needed; a pod loaded by hand fires one rocket a press (below) |
+| Jettison | `flight-jettison-su34-slot2` to `slot4` | each row empties and the payload falls |
+| Guided stores | `a2g-laser-su34` (new) | the built-in laser (fixed `SU37L.SEE` row, no pod body) holds a tank; an AS-14 from row 6 released at 0.77 s guides to 9 ft and destroys it (0 of 200 left); an AT-12 from row 7 guides to 4 ft and hurts it (120 of 200 left, as the Su-25's and A-10's runs) |
+| Release origin, human | `a2g-release-origin-su34` (new) | AS-14s leave the front pair (4.50 ft out, 2.05 ft down, 8.90 ft forward) then the rear pair (6.03 ft down, 4.90 ft aft), left then right, on 2 inch rails; AT-12s leave the outer pylons (18 ft, 3.40 ft aft) then the middle (14 ft, 0.40 ft aft), 1.78 ft down on 1 ft pylons; AA-11s leave the tip rails (25.33 ft out, 0.33 ft down, 11.33 ft aft, no pylon); LAU-61 rockets leave the outer pylon, 2.02 ft down, left then right |
+| Release origin, AI | `ai-strike-su34-origin` (new) | an AI Su-34 with an AS-14 (station 1), an AT-12 and a LAU-61 (station 2): each first release leaves from exactly the human's cell (`ORIGIN` lines), the missiles guide on the AI's own laser spot (AS-14 kills; AT-12 within 150 ft), the pod's rocket lands, and it egresses. The AI is the shared strike driver; no AI code changed. |
+
+Jettisoning a pod leaves the same way as any row. Pods that fire are counted per rocket (76 rounds
+for four LAU-61 on the row): a station release of a pod is one rocket, so the run's `rounds-after`
+falls by one a press.
+
+### Countermeasures and jammer
+
+The record gives `SU27.ECM` (the Su-27's, byte-equal to `MIG31.ECM`): 60 chaff, 60 flares and the
+jammer, late-Cold-War generation. Nothing changes. New scenario `flight-countermeasures-su34`: five
+chaff and three flare releases leave the standard outlet (carried 55 and 57 of 60, five chaff
+cartridges in the air). Frame `countermeasures-chaff-flare` shows two flares and a chaff puff behind
+the tail in the back view, the weapons window reading `58 CHAFF` and `58 FLARE`. The real jet's own
+figures were not sought; the record's 60 are kept.
+
+### Sensors (SU34-7)
+
+Every row of the record against the real aircraft (coordinator decision: keep all five, draw no body,
+B7; the rows are fixed and sit at the origin, so no pod body can appear on any station):
+
+| Row | Record | Real Su-34 | Verdict |
+| --- | --- | --- | --- |
+| 1 | `VIS300.SEE` | the pilot's eyes | kept |
+| 2 | `SU27R.SEE` | a forward radar (the real set is a different, terrain-following one) | kept. The record is the Su-27's; its preset is **Advanced**, assigned already for the Su-27 and Su-35 (`Preset::for_record`, `docs/radar.md`), so the Su-34 flies with a radar and needs no new entry (test `the_su34_radar_and_jammer_rows_are_the_su27s_reviewed_records`). It is the air-to-air RWS/TWS set; no ground-mapping mode exists for a bomber (the B-2's note) |
+| 3 | `SU27I.SEE` (IRST) | no IRST is cited for the real Su-34 | kept as the record gives it (open for John) |
+| 4 | `SU27.ECM` | an electronic-warfare suite | kept (above) |
+| 5 | `SU37L.SEE` | a laser designator | kept; it is the built-in laser the guided runs above use |
+
+No pod body is drawn anywhere (frames `external` and `pods/`).
+
+### HUD and cockpit (SU34-7)
+
+- **Binding.** `su33cc.HUD` and the Su-33 family art `~SU33H.PIC`, stem `SU33`, instrument frame
+  `~SU33_P.PIC` (the record's, BMB-C1, spec-derived); the `AircraftId` arm in `hud_aperture.rs`
+  already existed. The Su-34 has no picture of its own (`~SU34*.PIC` absent) and the single-seat look
+  is accepted, as decided.
+- **Glass aperture, measured.** The shared trapezoid `(511,100) (770,100) (752,388) (528,388)` was
+  measured for the MiG-29 and is used by the Su-25 and MiG-23. On the imported 1280 x 490 art the
+  combiner frame closes one transparent region, 68,414 pixels (x 510 to 770, y 90 to 393); the
+  polygon covers **66,681 pixels, none opaque, 97.5 percent of the glass** (the rest is the chords
+  at the top corners and the console under y 388). Not failed closed: an unknown picture size
+  still fails closed. Fitted (agent decision 2026-11-16).
+- **Pilot eye.** The shared seat (7 ft up, 10 ft ahead) sat 8.7 ft behind the drawn canopy.
+  Measured on `SU34.SH` at 1/3 ft a unit: the canopy's crown on the centre line is 17 units (5.7
+  ft) up at y 43 (14.3 ft ahead), its glass falls to 15 units at the windscreen apex (y 58, 19.3 ft
+  ahead) and on to the nose cone (11 units at y 67, 6 at y 77); the spine behind the crown is 15
+  units at y 24 and 13 at y 16. The new entry in `mirrors::eye_offset` is **7 ft up, 17 ft ahead**:
+  the canopy's middle (y 51), 1.3 ft over the crown (the F-117's margin), the same height as before.
+  The retail test pins that no skin point within 12 units of the centre line reaches the eye's 21
+  units, and that the eye lies between the crown and the apex. Only the Back view and the replay's
+  Back, cockpit and HUD cameras take it; the mirror rear feed stays on the shared seat. The
+  record's `viewOffset` (2, 20, 80) is read by no host code. Fitted (agent decision 2026-11-16).
+  Frame `cockpit-view-back-f2`: the view clears the canopy and spine and looks down to both fins
+  and the stinger.
+- **Instruments.** The Su-33 family window frame draws under the bezel (frames `cockpit-front-view`,
+  `instrument-page-1`). The weapons window reads `180 GSH-301`, `4 AS-14`, `4 AT-12`, `2 AA-11`,
+  `60 CHAFF` and `60 FLARE`.
+- **RCS page.** Page 0 reads `SIG 144` (frame `rcs-page-closed`); there is no bay, so no open-bay
+  reading.
+- **Rear view.** The F2 view is the fitted eye above (frame `cockpit-view-back-f2`). There is no
+  rear-view HUD, so no rear cue (the B-52's finding). The cockpit art's mirrors keep the shared
+  rear feed.
+- **List screen.** There is no `ICO2SU34.PIC` and nothing reads an `ICO2*.PIC`: the Quick Mission
+  aircraft list shows the Su-34 as a name only, like every aircraft (frame `menu-aircraft`), so no
+  fallback to the Su-27's icon is needed or coded. The Load Ordnance page names the sensor line
+  `Built-in laser designator: no pod needed for laser ordnance.` (frame `menu-ordnance`).
+
+### Checks
+
+Through `light3.sh`, profile `profile-su34` refreshed first. `cargo fmt --all -- --check` clean;
+`cargo clippy --workspace --all-targets --locked -- -D warnings` clean; `cargo test --locked
+--workspace --no-fail-fast` 7,874 passed, 0 failed, 108 ignored (7,861 after SU34-5); `--validate-ordnance`
+passed (54 / 23 / **5,361** / 257 / 80 pods / 278 Cheat-only); `--aircraft su34 --headless-flight
+600` 0 non-finite, 0 overspeed, no loss. Logs and frames: `.local/m3-aircraft/checks/SU34-6/`,
+`.local/m3-aircraft/frames/SU34-6/` (local only).
+
+### Open for John
+
+1. Rocket pods return on row 7 only. Row 6 stays without them; adding it is a one-line change.
+2. `SU27I.SEE` (an IRST) stays though none is cited for the real Su-34.
+3. The radar is the Su-27's air-to-air set; the real terrain-following ground-attack radar has no
+   mode here (no ground-mapping mode for a bomber).
+4. The eye is fitted (7 ft up, 17 ft ahead); the single-seat look means it sits where the drawn
+   canopy is, not at the real side-by-side cabin.
+5. Chaff and flares are the record's 60 each; the real jet's figures were not sought.

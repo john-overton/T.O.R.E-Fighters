@@ -306,3 +306,11 @@ row and `--cockpit-sheet OUT_DIR f117` prints `f117 NO MIRRORS FITTED`, as for t
 feed camera stays on the shared seat; only the Back view and the replay cameras take the per-aircraft
 eye, which gives the F-117 6 feet up and 14 feet ahead. See [the F-117 section](../formats/aircraft-variety.md#f-117-ordnance-sensors-and-cockpit-f117-67-2026-11-15).
 Frames are under `.local/m3-aircraft/frames/F117-6/`.
+
+## 2026-11-16 Su-34 cockpit: the Su-33 family's mirrors, its own Back eye (SU34-7)
+
+The Su-34 flies the Su-33 family cockpit (`su33cc.HUD`, stem `SU33`, `~SU33H.PIC`, 1280 x 490), so its
+mirrors are the reviewed `SU33` seeds, fed by the rear camera on the shared seat. Only the Back view
+and the replay cameras take the per-aircraft eye (`mirrors::eye_offset`), which gives the Su-34 7 feet
+up and 17 feet ahead, over the drawn canopy. See [the Su-34 section](../formats/aircraft-variety.md#su-34-ordnance-sensors-hud-and-cockpit-su34-67-2026-11-16).
+Frames are under `.local/m3-aircraft/frames/SU34-6/`.

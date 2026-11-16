@@ -30,6 +30,9 @@ bar, and hit within 60 ft.
 `a2g-laser-missile`: an Su-25 lases with its built-in designator and its AS-14 homes
 on its own spot and destroys a tank.
 
+`a2g-laser-su34`: an Su-34's built-in laser holds a tank's spot; its AS-14 homes on it and destroys it,
+and its AT-12 homes on it and hurts it (SU34-6).
+
 `a2g-at2`: a Mi-24's AT-2 is steered at the designated tank while the helicopter
 holds it in its 45 degree cone and hits it; again with the helicopter turning away
 2 s after the launch: the missile goes blind for good and misses.
@@ -176,6 +179,34 @@ def b2_laser_problems(output: str) -> list[str]:
     if not readings or readings[-1] > 1.0:
         problems.append(f"{label}: stopped guiding with {readings[-1:] or 'no reading'} s to go")
     _countdown(parts[0], label, problems)
+    return problems
+
+
+def su34_laser_problems(output: str) -> list[str]:
+    """`a2g-laser-su34` (SU34-6): the Su-34's built-in laser (the fixed `SU37L.SEE` row, no pod body)
+    holds a spot on a tank and (1) an AS-14 from the fuselage row guides onto it and destroys it, and
+    (2) an AT-12 from the wing row guides to within 60 ft and hurts it (an AT-12 does not kill a T-80,
+    as the Su-25's and A-10's runs show)."""
+    parts = runs(output)
+    if len(parts) != 2:
+        return [f"{len(parts)} runs finished, want 2"]
+    problems: list[str] = []
+    for part, label, kills in (
+        (parts[0], "Su-34 AS-14 on its own spot", True),
+        (parts[1], "Su-34 AT-12 on its own spot", False),
+    ):
+        release, sight, impact, target = _one(part, label, problems)
+        if release and (release.group(2), release.group(3), release.group(4)) != ("Laser", "Guiding", "0"):
+            problems.append(f"{label}: released {release.group(0)}, want guiding on its own spot")
+        if sight and (sight.group(7), sight.group(6)) != ("Lasing", "no"):
+            problems.append(f"{label}: the laser was {sight.group(7)} (buddy {sight.group(6)}) at release")
+        if impact and (impact.group(2) != "Guiding" or float(impact.group(3)) > 60):
+            problems.append(f"{label}: ended {impact.group(0)}")
+        if kills and not _killed(part, target):
+            problems.append(f"{label}: the tank was not destroyed")
+        if not kills and (target is None or int(target.group(1)) >= int(target.group(2))):
+            problems.append(f"{label}: the tank was not hit")
+        _countdown(part, label, problems)
     return problems
 
 
@@ -348,6 +379,18 @@ def scenarios() -> list[Scenario]:
             check=b2_laser_problems,
             notes="The B-2's GBU-27 (Paveway III, four abreast in the left bay) from 20,000 ft on the spot of its own "
                   "designator (the Pave Spike row, no pod body) guides onto a tank and destroys it (B2-6, B2-7).",
+        ),
+        Scenario(
+            name="a2g-laser-su34", lane="flight",
+            args=run("UKR", "QUCOL", "laser", "--aircraft", "su34", "--load", "AS14", "--station", "1",
+                     "--count", "2", "--altitude", "3000", "--speed", "400", "--from", "5", "--seconds", "90"),
+            timeout=300,
+            then=[Step(run("UKR", "QUCOL", "laser", "--aircraft", "su34", "--load", "AT12", "--station", "2",
+                           "--count", "4", "--altitude", "3000", "--speed", "400", "--from", "5",
+                           "--seconds", "90"), timeout=300)],
+            check=su34_laser_problems,
+            notes="The Su-34's built-in laser (the fixed SU37L.SEE row, no pod body) lases a tank: an AS-14 from the "
+                  "fuselage row guides onto it and destroys it, an AT-12 from the wing row guides and hurts it (SU34-6).",
         ),
         Scenario(
             name="a2g-laser-buddy", lane="flight",
