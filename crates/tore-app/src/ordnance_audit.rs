@@ -27,7 +27,9 @@ mod store_pairs;
 // (2026-11-10); their placements belong to each aircraft's station slice.
 // BMB-A1 raised it to 48 for the B-52, B-2 and F-117 (2026-11-15); their
 // placements belong to each aircraft's station slice.
-const AIRCRAFT: usize = 48;
+// BMB-B1 raised it to 51 for the B-1B, Tu-160 and F-111F (2026-11-15); their
+// placements belong to each aircraft's station slice.
+const AIRCRAFT: usize = 51;
 /// 17 from 14: the Gripen's one and the Mirage F1's two optional weapon rows
 /// (B5-1, 2026-11-10; the batch-5 records carry rows with no default weapon).
 /// 18 from 17: the F-5E's wing pair no longer holds the AIM-7 by default, so it
@@ -94,7 +96,16 @@ const TANK_RECORDS: usize = 9;
 /// `GBU10A.JT`, `PAVEWAY.JT` and `GBU12.JT`, one a row; `GBU16.JT` refused by
 /// name), so `F117.PT` goes from 38 to 46 placements (the normal catalog from
 /// 19 to 23 stores).
-const WEAPON_PLACEMENTS: usize = 4784;
+/// 5,145 from 4,784: the bomber batch B records join (BMB-B1, 2026-11-15) and
+/// take their station corrections (BMB-B2): B-1B 63, Tu-160 70, F-111F 228.
+/// Measured with the retail rows first (BMB-B1 alone: 5,173, B-1B 75 and
+/// F-111F 244); clearing the designator bit on the B-1B's three bay rows
+/// (`0x1500` to `0x1100`) and the F-111F's four wing rows (`0x07e5` to
+/// `0x03e5`) removes the multi-store pods those rows admitted, 12 on the
+/// B-1B and 16 on the F-111F (BMB-B2, fitted). The F-111F's weight class cap
+/// (70 and 60 to 50) refuses nothing (the heaviest carried store is the
+/// GBU-28 at 4,500 lb).
+const WEAPON_PLACEMENTS: usize = 5145;
 /// 188 from 182: the F-16A's centreline tank row (F150.GAS or F250.GAS) plus
 /// the tank selection its two 0x07e5 wing rows accept, 6 tank placements.
 /// 192 from 188: the MiG-31 (M31-1). 201 from 192: the Mirage 2000 (M2K-1).
@@ -104,7 +115,10 @@ const WEAPON_PLACEMENTS: usize = 4784;
 /// F-5E 5, Tornado 8, Mirage F1 4.
 /// 233 from 231: the Mirage F1's centreline row has no default pod now, so its
 /// two tank placements (150 and 250 gallon) count (B5-2, John 2026-11-10).
-const TANK_PLACEMENTS: usize = 233;
+/// 249 from 233: the F-111F's four wing pair rows take tanks (BMB-B1,
+/// 2026-11-15): 16 tank placements (measured; the other two batch B bombers
+/// have none).
+const TANK_PLACEMENTS: usize = 249;
 /// Station and novelty-record pairs the Cheat loading accepts and the normal
 /// loading refuses (A2G decision 16). 182 from 174: Boulder and Moose on the
 /// F-16A's four wing and wingtip rows (slice F16A-4). 186: the MiG-31 (M31-1). 194: the Mirage 2000 (M2K-1).
@@ -117,7 +131,9 @@ const TANK_PLACEMENTS: usize = 233;
 /// more (TOR-6b, John 2026-11-11).
 /// 240 from 222: the bomber batch A records (BMB-A1, 2026-11-15), 18 more
 /// Cheat-only pairs on the B-52, B-2 and F-117 bay rows.
-const NOVELTY_PLACEMENTS: usize = 240;
+/// 258 from 240: the bomber batch B records (BMB-B1, 2026-11-15), 18 more
+/// Cheat-only pairs on the B-1B, Tu-160 and F-111F rows (measured).
+const NOVELTY_PLACEMENTS: usize = 258;
 /// Station and designator-pod pairs the normal rules accept (A2G decision 7).
 /// 67 from 65: the F-16A's two 0x07e5 wing rows carry the decoded designator
 /// bit 0x400, one pod each (slice F16A-4). 68: the MiG-31 (M31-1). 71: the Mirage 2000 (M2K-1).
@@ -128,6 +144,11 @@ const NOVELTY_PLACEMENTS: usize = 240;
 /// 80 from 84: the B-2's four bay rows lose the designator bit (flags 0x1504 to
 /// 0x1104, BMB-A2, 2026-11-15, fitted; B7: the real jet has no pod station), so
 /// the four pod placements are gone again.
+/// 80, unchanged by batch B: BMB-B1 alone measured 87 (the B-1B's three bay
+/// rows and the F-111F's four wing rows carry the retail designator bit
+/// `0x400`, one pod each), and BMB-B2 clears the bit on those seven rows
+/// (fitted: no pod on a bomb bay, and the F-111F's Pave Tack rides in its bay,
+/// not on a pylon), so the pod placements are 80 again.
 const POD_PLACEMENTS: usize = 80;
 
 pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {

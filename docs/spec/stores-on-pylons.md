@@ -3518,3 +3518,77 @@ the external-store signature.
 Provenance: stations, bays, doors, rail, timing and the 3.0 ft mount fitted (agent
 2026-11-15); the 1 s bay travel, the 0.95 gate and the hold are the F-22's; the refusal of
 `GBU16` and the Paveway II admission applied from John's decision 25.
+
+## Update (SWING-1, 2026-11-15): the swing wing is a per-aircraft spec
+
+The Tornado's swing wing (TOR-3, TOR-5, TOR-12, TOR-14) was a set of module constants in
+`combat::swing`. SWING-1 turns it into data, `SwingSpec`, so the B-1B, Tu-160, F-111F and Tu-26
+can use the same code. **The Tornado's behaviour is unchanged**: every value moved into
+`swing::TORNADO` as it was, the module constants (`SWEEP_MIN`, `SWEEP_FROM_KNOTS`, `PIVOT_R`,
+`WING_IN_FT`, `WING_LEADING`, `PYLON_LENGTH_FT` and the rest) read it, and the Tornado's tests
+(swing, hardpoints, pylons, `tornado_animation`, pod clearance, replay) pass with their
+assertions as they were.
+
+**The spec.** `swing::spec(id) -> Option<&'static SwingSpec>` resolves through
+`AircraftId::source()` (so Tornado IDS (Clean) shares the Tornado's) and is `None` for every
+aircraft without a swing wing. A `SwingSpec` holds:
+
+| Field | Meaning |
+|---|---|
+| `sweep_min`, `sweep_max` | The real leading-edge sweep range, degrees. |
+| `rest_sweep` | The sweep the shape is drawn at, the rig's zero turn. Equal to `sweep_min` except for the Tu-26 (mesh at 18.4, real 20). |
+| `feet_per_unit`, `axis_scale` | The header scale and a per-axis size fit (right, forward, up), `[1, 1, 1]` unless the aircraft's size is fitted per axis (F-111F). |
+| `pivot_right`, `pivot_left` | The wing pivots, shape units (right, forward, up), vertical axis. |
+| `law` | `SweepLaw::Linear { from_knots, to_knots }` or `SweepLaw::Detents(&[(knots, degrees)])`, smoothstep between points. |
+| `gear_holds_spread` | Whether the gear, as well as the flaps, holds the wing spread (Tu-26). |
+| `sweep_rate_dps` | The real actuator rate when a source gives one. None does; the drawn sweep is a pure function of speed and nothing moves at a rate. `None` throughout. |
+| `placement` | The Tornado's in, up, forward and root-shift values (TOR-12); `Placement::NONE` for the others. |
+| `swivel_rows`, `fixed_store_rows`, `max_sweep_with_fixed_stores` | Which source hardpoints swivel with the wing; which wing rows are fixed; the sweep limit while a fixed row carries a store. |
+| `outline`, `pylon_length_ft` | The placed panel's edges (for `mid_chord`) and the fixed pylon length, where the aircraft has swivelling pylons. |
+
+**The turn.** `SwingSpec::turn(speed_fps, flaps, gear)` is the wing's turn in radians from the
+drawn pose: `min_turn + share * (sweep_max - sweep_min) * (1 - hold)`, where `share` is the
+schedule's (0 spread, 1 fully swept), `hold` is the flaps (and the gear where
+`gear_holds_spread`) and `min_turn = (sweep_min - rest_sweep)` is zero except for the Tu-26.
+For the Tornado it is the arithmetic `wing_turn` always had, bit for bit.
+`SwingSpec::turn_carrying` also applies `max_sweep_with_fixed_stores`. `speed_for_sweep`,
+`pivot_feet`, `swept`, `unswept`, `swivels`, `has_swivel`, `pylon_length` and `mid_chord` are
+methods too.
+
+**What the callers use.** `swing::wing_turn_of(id, speed_fps, flaps, gear)` (0 for an aircraft
+with no spec) and `Configuration::set_wing_flight(speed_fps, flaps, gear)` /
+`Ownship::set_wing_flight`, which the host (`tore-world` combat) and the AI
+(`AiWings::carry_swing_wings`) call every tick instead of computing the Tornado's turn;
+`pylons::swung` resolves the id; `hardpoints::station_move` reads the placement (`in`,
+`forward`, `up`) from the spec of the aircraft whose row swivels; `replay/convert.rs`'s sweep
+test reads the schedule and the full turn from `swing::spec(AircraftId::Tornado)`. The
+Tornado-flavoured free functions (`wing_turn(speed, flaps)`, `speed_for_sweep`, `pivot_feet`,
+`swept`, `unswept`, `mid_chord`) stay as the Tornado's, for the Tornado's drawing rig and tests.
+
+**The four new specs** (constants `B1B`, `TU160`, `F111F`, `TU26`; no `AircraftId` exists for
+them yet, so `spec(id)` does not return them; `swing::ALL` lists all five). Schedules are
+fitted or opinionated (the real wings are selected by the crew); ranges are cited.
+
+| Spec | Sweep (rest) | Pivot (shape units, scale) | Schedule | Holds spread | Swivel |
+|---|---|---|---|---|---|
+| `TORNADO` | 25 to 67 (25) | (6.5, -1.351, 0.465), 2/3 ft | Linear 304 to 600 kt | Flaps | Rows 7 to 10 |
+| `B1B` | 15 to 67.5 (15) | (10, 11), 4/3 ft: 13.33 ft out, 14.67 forward | Linear 280 to 520 kt | Flaps | None |
+| `TU160` | 20 to 65 (20) | (4.8, 0), 8/3 ft: 12.8 ft out | Detents 20 to 250 kt, 35 from 320 to 520, 65 from 600, smoothstep between | Flaps | None |
+| `F111F` | 16 to 72.5 (16) | (13, 2.5), 2/3 ft, x scaled 0.859: 7.4 ft out, 1.67 forward | Linear 250 to 650 kt | Flaps | Rows 5 and 6; fixed rows 7 and 8 hold the sweep to 26 degrees or less while they carry stores |
+| `TU26` | 20 to 65 (18.4) | (14, 3), 4/3 ft: 18.67 ft out, 4 ft forward | Linear 300 to 560 kt | Flaps and gear | None |
+
+The `F111F` spec also carries the panel outline (leading edge shape (13, 10) to (53, 0),
+trailing edge at y -5) and the Tornado's 3.3 ft pylon length. No placement offsets: whether
+the F-111F's 4.7 ft root seam gets a root shift or a glove plate is its rig slice's decision.
+
+**Wiring an aircraft.** The identity slice adds the `AircraftId` and one arm to `swing::spec`
+(the four arms are written there, commented out). The rig slice then draws the panels with
+`spec.turn(state.speed, state.flaps, state.gear)` and `spec.pivot_feet`; a swivelling aircraft
+(F-111F) also needs its rows' `station_move` entries centred on `spec.mid_chord`, and
+`Rack::position` (which carries a swivelling station's point with `swing::swept`, the
+Tornado's pivot) to take the aircraft's pivot. That is the F-111F slice's change; SWING-1
+leaves `Rack` and its checkpoint layout alone.
+
+Tests: `swing.rs` (`the_tornados_spec_is_the_modules_constants_and_resolves_for_both_versions`,
+`every_spec_is_consistent_and_its_schedule_runs_from_spread_to_swept`, and one schedule test
+each for the B-1B, Tu-160, Tu-26 and F-111F).

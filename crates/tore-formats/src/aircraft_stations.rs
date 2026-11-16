@@ -56,6 +56,13 @@ pub const B2_BAY_ROWS: std::ops::Range<usize> = 5..9;
 /// The designator bit of a station's flags (a targeting or laser pod may sit
 /// there, and a multi-store pod: `loading.rs`).
 pub const DESIGNATOR_BIT: i32 = 0x400;
+/// The B-1B's three bay rows (`B1.PT` rows 5 to 7; BMB-B2).
+pub const B1B_BAY_ROWS: std::ops::Range<usize> = 5..8;
+/// The F-111F's four wing pair rows (`F111.PT` rows 5 to 8; BMB-B2).
+pub const F111_WING_ROWS: std::ops::Range<usize> = 5..9;
+/// The real F-111 pylon rating as a weight class (class x 100 lb, BMB-B2):
+/// 5,000 lb a store.
+pub const F111_WING_CLASS: i32 = 50;
 /// The F-117's two internal bay rows (`F117.PT` rows 4 and 5, flags `0x1100`,
 /// one store each): [`weapon_allowed`] refuses the stores that cannot clear
 /// the fitted bays and [`extra_weapon`] admits the Paveway II laser bombs.
@@ -619,6 +626,29 @@ fn default_signature(id: AircraftId) -> &'static [Signature] {
             (3, 0x1100, [-10, -22, -2], "PAVEWA3.JT", 1, 20),
             (3, 0x1100, [10, -22, -2], "PAVEWA3.JT", 1, 20),
         ],
+        // The bomber batch B rows (BMB-B2). The Tu-160's two bay rows carry no
+        // designator bit (0x1184), so it has no entry.
+        AircraftId::B1b => &[
+            (1, 0x1008, [0, 0, 0], "VIS340.SEE", 1, 0),
+            (1, 0x1008, [0, 0, 0], "F18R.SEE", 1, 0),
+            (1, 0x1008, [0, 0, -50], "F18.ECM", 1, 0),
+            (1, 0x1008, [0, 0, 0], "PAVESPK.SEE", 1, 0),
+            (1, 0x1008, [0, 0, 0], "AV8IR.SEE", 1, 0),
+            (3, 0x1500, [0, -31, 110], "MK82AIR.JT", 4, 140),
+            (3, 0x1500, [0, -31, 63], "MK82AIR.JT", 4, 140),
+            (3, 0x1500, [0, -31, -37], "MK82AIR.JT", 4, 140),
+        ],
+        AircraftId::F111 => &[
+            (1, 0x8, [0, 0, 0], "VIS240.SEE", 1, 0),
+            (1, 0x8, [0, 0, 0], "A6R.SEE", 1, 0),
+            (1, 0x8, [0, 0, -50], "A6.ECM", 1, 0),
+            (1, 0x8, [0, 0, 0], "AV8IR.SEE", 1, 0),
+            (1, 0x8, [0, 0, 0], "PAVESPK.SEE", 1, 0),
+            (4, 0x7e5, [29, -12, -4], "GBU28.JT", 2, 70),
+            (4, 0x7e5, [41, -12, -8], "MK82P.JT", 2, 70),
+            (4, 0x7e5, [54, -12, -13], "AGM65G.JT", 4, 70),
+            (4, 0x7e5, [65, -12, -17], "MK82P.JT", 2, 60),
+        ],
         _ => &[],
     }
 }
@@ -676,6 +706,18 @@ fn default_signature(id: AircraftId) -> &'static [Signature] {
 ///   flares, which go with it (no source found for a chaff or flare dispenser
 ///   on the real jet, and none is added). The row keeps its place, mask, count
 ///   and position, the way the F-5E's did in B5-2.
+/// - **B-1B** (`B1.PT` rows 5 to 7, the three bay rows; BMB-B2, coordinator
+///   first pass 2026-11-15): the designator bit `0x400` is cleared (`0x1500`
+///   to `0x1100`), as for the B-2: no pod on a bomb bay. **Fitted** (agent
+///   decision). Nothing else of a row changes.
+/// - **F-111F** (`F111.PT` rows 5 to 8, the four wing pairs; BMB-B2,
+///   coordinator first pass 2026-11-15): the designator bit is cleared
+///   (`0x07e5` to `0x03e5`; the real Pave Tack rides in the bay, not on a
+///   wing pylon, docs/formats/aircraft-variety.md "F-111F sensors"), and each
+///   weight class is capped at 50 (5,000 lb a store, the real pylon rating,
+///   Wikipedia "General Dynamics F-111 Aardvark": "each pylon had a capacity
+///   of 5,000 lb"; the record's 70 and 60 are 7,000 and 6,000 lb). **Fitted**
+///   (agent decision). Defaults, counts, masks and positions stay.
 pub fn adjust_defaults(id: AircraftId, rows: &mut [Hardpoint]) {
     if !is_retail(id, rows) {
         return;
@@ -697,6 +739,17 @@ pub fn adjust_defaults(id: AircraftId, rows: &mut [Hardpoint]) {
             }
         }
         AircraftId::F117 => rows[F117_JAMMER].store = None,
+        AircraftId::B1b => {
+            for row in &mut rows[B1B_BAY_ROWS] {
+                row.flags &= !DESIGNATOR_BIT;
+            }
+        }
+        AircraftId::F111 => {
+            for row in &mut rows[F111_WING_ROWS] {
+                row.flags &= !DESIGNATOR_BIT;
+                row.weight_class = row.weight_class.min(F111_WING_CLASS);
+            }
+        }
         _ => {}
     }
 }
@@ -1636,6 +1689,62 @@ mod tests {
         let before = key(&edited);
         adjust_defaults(AircraftId::B2, &mut edited);
         assert_eq!(key(&edited), before);
+    }
+    /// BMB-B2 (2026-11-15): the B-1B's three bay rows lose only the designator
+    /// bit; the F-111F's four wing rows lose it and cap their weight class at
+    /// 50 (5,000 lb); an edited record or another identity is left alone.
+    #[test]
+    fn the_b1b_bay_rows_and_the_f111_wing_rows_are_corrected_and_nothing_else_moves() {
+        let retail = default_rows(AircraftId::B1b);
+        assert_eq!(retail.len(), 8);
+        assert!(retail[B1B_BAY_ROWS].iter().all(|h| h.flags == 0x1500));
+        let mut rows = retail.clone();
+        adjust_defaults(AircraftId::B1b, &mut rows);
+        let mut expected = key(&retail);
+        for row in &mut expected[5..8] {
+            row.1 = 0x1100;
+        }
+        assert_eq!(key(&rows), expected);
+        assert!(
+            rows[B1B_BAY_ROWS]
+                .iter()
+                .all(|h| h.flags & DESIGNATOR_BIT == 0)
+        );
+        assert!(rows[..5].iter().all(|h| h.flags == 0x1008));
+        // Repeated application is a no-op (the signature no longer matches).
+        adjust_defaults(AircraftId::B1b, &mut rows);
+        assert_eq!(key(&rows), expected);
+        let retail = default_rows(AircraftId::F111);
+        assert_eq!(retail.len(), 9);
+        let classes: Vec<_> = retail[F111_WING_ROWS]
+            .iter()
+            .map(|h| h.weight_class)
+            .collect();
+        assert_eq!(classes, [70, 70, 70, 60]);
+        let mut rows = retail.clone();
+        adjust_defaults(AircraftId::F111, &mut rows);
+        let mut expected = key(&retail);
+        for row in &mut expected[5..9] {
+            row.1 = 0x3e5;
+            row.5 = 50;
+        }
+        assert_eq!(key(&rows), expected);
+        assert!(
+            rows[F111_WING_ROWS]
+                .iter()
+                .all(|h| h.flags & DESIGNATOR_BIT == 0)
+        );
+        assert!(rows[..5].iter().all(|h| h.flags == 0x8));
+        let mut edited = default_rows(AircraftId::F111);
+        edited[0].count += 1;
+        let before = key(&edited);
+        adjust_defaults(AircraftId::F111, &mut edited);
+        assert_eq!(key(&edited), before);
+        let mut other = default_rows(AircraftId::B2);
+        let before = key(&other);
+        adjust_defaults(AircraftId::F111, &mut other);
+        adjust_defaults(AircraftId::B1b, &mut other);
+        assert_eq!(key(&other), before);
     }
     /// F117-5 (2026-11-15): the F-117's two bay rows take the Paveway II laser
     /// bombs beyond the retail bomb-only mask, and nothing else of the row,

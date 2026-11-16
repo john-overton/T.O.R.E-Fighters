@@ -10183,3 +10183,218 @@ BMB-B1; the wire identity is 9 bits. The type size arm is 636.
   use may fit better (the AI slice).
 - The swept-wing flight behaviour (no sweep law) and the gear sweep inhibitor are not
   modelled by the Tornado precedent.
+
+## Bomber batch B identities (BMB-B1, 2026-11-15)
+
+Implementation, batch slice BMB-B1 (with BMB-B2 below, run together), Claude Sonnet.
+The three batch B source reviews above (B1B-0, T160-0 and F111-0, 2026-11-15) are now
+identities. `AircraftId` gains `B1b`, `Tu160` and `F111`, appended in that order after
+`F117`: `ALL` goes from 48 to 51 retail identities and `SELECTABLE` from 50 to 53
+entries, append-only (batch rule B4), so nothing existing moved. Bindings and scales are
+the coordinator's first pass (`.local/m3-aircraft/BOMBERS-DECISIONS-B.md`, for John to
+review), applied as written.
+
+| | B-1B | Tu-160 | F-111F |
+| --- | --- | --- | --- |
+| Record | `B1.PT` | `TU160.PT` | `F111.PT` |
+| Parse keys | `b1b`, `b1.pt` | `tu160`, `tu160.pt` | `f111`, `f111.pt` |
+| Checkpoint code | 50 | 51 | 52 |
+| Wire position (place in `SELECTABLE`, 9 bits) | 50 | 51 | 52 |
+| Place in `ALL` | 48 | 49 | 50 |
+| `typeSize` | **636 (new arm)** | 588 (new arm, the MiG-31's) | 660 (explicit arm) |
+| Short / long name | `B-1B` / `B- 1B Lancer` | `Tu-160` / `Tu-160 Blackjack-A` | `F-111F` / `F-111F Aardvark` |
+| Shape stem | `B1` (`b1.SH`) | `TU160` | `F111` |
+| HUD | `BMBRCC.HUD` (the record's: the B-2's module, three bytes changed) | `B2.HUD` (the record's) | `AC130.HUD` (the record's) |
+| Cockpit stem / picture | `B2` / `~B2H.PIC` | `B2` / `~B2H.PIC` | `AC130` / `~AC130H.PIC` |
+| Overlays | none (the B-2's stem) | none | none (the AC-130's stem) |
+| PTS companion | none | none | none |
+| Radar / gun | `F18R.SEE` / none | `TU160R.SEE` / none | `A6R.SEE` / none |
+| Live-fire default stores | `MK82AIR` | `AS16` | `GBU28`, `MK82P`, `AGM65G` |
+| Strike class | Heavy (the rule: 477,000 lb) | Heavy (606,260 lb) | **Attack by override** (the rule gives Fighter) |
+| Interim rig: CODE bytes / runtime faces | 27,468 / 314 | 28,716 / 316 | 25,206 / 254 |
+| State words | `7b10 7b16 7b1c 7b22 7b2e 7b34 7b3a` | `7ff0 7ffc 8002 800e 8014 801a` | `7240 7246 724c 7258 725e 7264` |
+| Gear word / faces added | `7b22` +12 | `8002` +12 | `724c` +22 |
+| Gear low point (shape units) | 8 at 4/3 ft (10.7 ft) | 5 at 8/3 ft (13.3 ft) | 11 at 2/3 ft times the height factor 0.827 (6.07 ft) |
+| Draw scale (`debris::scale`) | **4/3 ft a unit** (header exponent 10, as the F-14) | **8/3 ft a unit** (exponent 11) | 2/3 ft a unit (exponent 9, as the Tornado) |
+| Per-axis real size (`aircraft_scale.rs`) | none | none | **x 0.859, y 1.0, z 0.827** (`F111_SHAPE_SCALE`) |
+
+The wire identity is 9 bits since protocol 83, so 53 selectable identities use codes 0 to
+52 of 512 and appending three needs no protocol change. The three "code after the last
+identity is unknown" checkpoint tests moved from 50 to 53 (a new test, code 50 to 52, is
+`the_bomber_batch_b_round_trips_at_codes_50_to_52_and_shares_no_code`).
+
+**No-overlay stems.** BMB-A1 found `cockpit_overlays()` assumes `~<stem>_LH.PIC` for any
+stem it does not list. The B-1B and Tu-160 fly the B-2's stem `B2` (already listed) and the
+F-111F the AC-130's (already listed), so no new entry was needed; a new test pins
+`[None, None, None]` for all three. The B-2's cockpit retail test
+(`b2_cockpit.rs`) used to assert that no other identity shares the `B2` family; it now
+expects exactly the two batch B bombers whose records name it.
+
+**Interim choices (agent decisions 2026-11-15, until the cockpit and rig slices).**
+
+| Choice | Interim | Why |
+| --- | --- | --- |
+| HUD glass of the B-1B and Tu-160 | The aperture B2-7 measured for `~B2H.PIC` (`hud_aperture.rs`) | They fly the same 1394 x 508 picture, so the same polygon; the B1B-0 and T160-0 reviews proposed failing closed only because it was unmeasured then. A one-line switch to an empty mask if John wants it closed. |
+| HUD glass of the F-111F | The AC-130 family's whole-picture aperture | As the B-52: it flies the same `~AC130H.PIC`. |
+| Pilot eye | The default (no per-aircraft entry) | The fitted eyes (Tu-160 flight deck, F-111F) are the cockpit slices' (T160-7, F111-7). |
+| Rig | Gear word only; the other words pinned, unmapped | As batch A and batch 5: the shared fitted gear law until each aircraft's rig slice. `--animation-probe` reports the four unmapped surfaces (elevator, rudder, aileron, flaps) as required failures, the expected result. |
+| Ground alignment | The fighters' 0.7 default (the transports and B-52 use 0.4) | Flight tuning is each aircraft's X-8. |
+| Strike class | B-1B and Tu-160 by the rule; F-111F `OVERRIDES` entry `F111.PT` to Attack | Coordinator decision (F111 item 9): the rule rates it Fighter on its 1,434 kt top speed, but it is a strike jet. `OVERRIDES` held no entry until now. |
+
+**The shape reader needs no change.** B2-0's two opcodes (`0x7c`, `0x7f`) were already
+merged. `crates/tore-import/tests/bomber_batch_b.rs` loads `B1.SH`, `TU160.SH` and
+`F111.SH` with the current reader: 314, 316 and 254 runtime faces and the state words
+above, and each gear word adds the reviews' plates (12, 12, 22). The same test reads the
+three records (type sizes 636, 588 and 660) and every station row in order.
+
+**Other identity probe findings.**
+
+- `datalink::tests::the_aircraft_without_a_radar...` needed no change: all three have a
+  radar row.
+- The F-111F's four wing pair rows take tanks, so the audit's tank placements move
+  (pins below).
+- None of the records is a parked target; `parked_aircraft.rs` is unchanged.
+
+**Audit pins.** See "Bomber batch B record and station corrections (BMB-B2)" below and
+[ordnance availability](../baselines/ordnance-availability.md): the two slices moved
+them together (retail rows first measured at 5,173 weapon placements).
+
+## Bomber batch B record and station corrections (BMB-B2, 2026-11-15)
+
+Opinionated (coordinator first pass, `BOMBERS-DECISIONS-B.md`, for John to review),
+implemented by slice BMB-B2. Earlier sections stay as written for the retail state; this
+one records what the game now does. The behaviour and the sources of every changed number
+are in [aircraft records](../spec/aircraft-records.md#bomber-batch-b-record-corrections-b-1b-tu-160-f-111f-bmb-b2-2026-11-15);
+the audit pins in [ordnance availability](../baselines/ordnance-availability.md).
+
+**Values (retail to game).**
+
+| Aircraft | Field | Retail | Game |
+| --- | --- | ---: | ---: |
+| B-1B | Maximum take-off, lb | 447,000 | 477,000 |
+| B-1B | Internal fuel, lb | 105,000 | 265,274 |
+| B-1B | Thrust, lbf (dry / afterburner) | 58,400 / 140,000 | 69,560 / 123,120 |
+| B-1B | 1 G fast edge, 36,000 to 41,500 ft, ft/s | 1,410 / 1,400 (835 kt, Mach 1.46) | 1,210 (Mach 1.25, 716.9 kt) |
+| B-1B | Bay rows 5 to 7 flags | `0x1500` | `0x1100` |
+| Tu-160 | Empty weight, lb | 202,260 | 242,500 |
+| Tu-160 | Thrust, lbf (dry / afterburner) | 158,092 / 232,398 | 123,600 / 220,400 |
+| Tu-160 | Internal fuel, lb | 368,000 | 326,285 |
+| Tu-160 | Bay rows 4 and 5 flags | `0x1184` | unchanged (no designator bit set) |
+| F-111F | Internal fuel, lb | 5,025 (gallons) | 32,663 |
+| F-111F | Thrust, lbf (dry / afterburner) | 50,200 / 80,000 | 29,120 / 50,200 |
+| F-111F | Fuel flow, lb/s (dry / afterburner) | 3 / 6 | 5 / 35 (fitted) |
+| F-111F | Wing rows 5 to 8 flags / weight class | `0x07e5` / 70, 70, 70, 60 | `0x03e5` / 50 each (5,000 lb) |
+
+**The B-1B envelope, point by point (speed ft/s at altitude ft).**
+
+| Row | Retail | Game |
+| --- | --- | --- |
+| 1 G | 220@0, 250@15000, 350@33500, 460@44750, 630@55000, 900@55000, 1200@50000, 1400@41500, 1410@36000, 1120@0 | the two vertices at 41,500 and 36,000 ft become 1210; the rest as retail |
+| 0 G | 170@0, 200@15500, 290@34250, 420@46625, 610@58000, 917@57875, 1235@52750, 1465@42375, 1475@36000, 1180@0 | 1465@42375 and 1475@36000 become 1275 (the 65 ft/s step over the 1 G edge kept) |
+| -1 G (a copy of 1 G) | as 1 G | 1210 at both (held to the 1 G edge) |
+
+Mach 1.25 above the tropopause (36,089 ft, sound 968.08 ft/s) is 1,210 ft/s (716.9 kt).
+Sea level (1,120 ft/s, 664 kt, Mach 1.00; the real jet is about Mach 0.92 low) is not
+changed: the decision names only the edge at altitude. The trim applies only while
+`maxTakeoffWeight` has just been corrected and the 0 G and 1 G polygons are the retail
+ones. The Tu-160's top speed (1,270 kt against the real Mach 2.05, about 1,200 kt) and the
+F-111F's (1,434 kt, real) are not trimmed: the decision lists neither.
+
+**Fuel flow.** The F-111F's retail 3 and 6 lb/s imply a TSFC of 0.215 and 0.270 at the
+corrected thrust, far under any turbofan's. **No TF30-P-100 specific fuel consumption was
+found** (Wikipedia "Pratt & Whitney TF30", all-aero.com and Pilotfriend list none, nor does
+Wikipedia "Thrust-specific fuel consumption"), so the flow is fitted from the closest cited
+low-bypass afterburning turbofan the repository already uses, the RB.199 (0.598 lb/(lbf h)
+dry, 2.5 reheat; Wikipedia "Thrust-specific fuel consumption", the Tornado's B5-3 rows):
+29,120 x 0.598 / 3,600 = 4.84, so 5 lb/s; 50,200 x 2.5 / 3,600 = 34.9, so 35 lb/s (the
+JT8D-derived Volvo RM8 on the same page, 0.64 and 2.52, rounds to the same). The probe's
+implied TSFC is 0.618 and 2.51. **Not corrected, listed for John:** the B-1B's 6 and 16
+lb/s imply 0.311 dry and 0.468 afterburner at the corrected thrust against the cited F101-GE-102's
+0.562 and 2.46 (Wikipedia "Thrust-specific fuel consumption"), which gives 11 and 84 lb/s;
+the Tu-160's 26 and 174 imply 0.757 and 2.84 against the cited NK-32's 0.72 to 0.73 and 1.7
+(about 25 and 104 lb/s): the dry flow is right, the afterburner flow is 70 percent high. The
+decision names no flow for these two, so neither is touched.
+
+**Fuel over the maximum take-off weight.** For none of the three is empty plus full
+fuel over the maximum (B-1B 457,274 against 477,000; Tu-160 568,785 against 606,260;
+F-111F 80,144 against 100,000; compile-time assertions in `aircraft_corrections.rs`).
+The default loads do put two of them over it, so the fuel cap (78086f7e, `Loadout::new`)
+starts their tank lower, measured in `--validate-ordnance`:
+
+| Aircraft | Empty, lb | Tank capacity, lb | Default load's starting fuel, lb | Total / maximum, lb |
+| --- | ---: | ---: | ---: | ---: |
+| B-1B | 192,000 | 265,274 | **243,000** | 477,000 / 477,000 |
+| Tu-160 | 242,500 | 326,285 | 326,285 (full) | 600,532 / 606,260 |
+| F-111F | 47,481 | 32,663 | **28,838** | 99,999 / 100,000 |
+
+The B-1B's twelve bay Mk 82 and the F-111F's wing stores are counted in the total
+(42,000 lb on the B-1B). Free flight and `--headless-flight` use the model's full tank.
+
+**Station rows.** The B-1B's bay rows lose the designator bit (the B-2's reasoning, B7: no
+pod on a bomb bay), so the multi-store pods are no longer offered there (B-1B weapon
+placements 75 to 63). The F-111F's wing rows lose it too (the real Pave Tack rides in the
+bay, a later slice) and cap at 5,000 lb a store, so its weapon placements go 244 to 228;
+nothing the record carries is over 5,000 lb (GBU-28 4,500). The Tu-160's bay rows
+(`0x1184`) have no designator bit, so nothing changes there.
+
+**What a player notices (`performance_probe`, clean, local records, full fuel; before and
+after under `.local/m3-aircraft/checks/BMB-B2/`, `run_probes.sh`).** Schedules: B-1B climb
+300 KEAS then Mach 0.85, Tu-160 350 KEAS then Mach 0.9, F-111F the fighter default (450 kt then
+Mach 0.9); turns at 250, 350 and 450 kt true for the bombers and Mach 0.7, 0.9 and 1.1
+for the F-111F. Level acceleration from 316 to 364 kt, "before" is the identity with the retail record.
+
+| Aircraft | Quantity | Before | After |
+| --- | --- | --- | --- |
+| B-1B | Level top speed, afterburner, sea level / 36,000 ft | 663.3 kt / 834.9 kt (Mach 1.45) | 663.2 kt / 716.2 kt (Mach 1.25) |
+| B-1B | Climb: time to 5,000 / 36,000 ft; highest | 39 s / 249 s; 55,062 ft | 59 s / 478 s; 51,635 ft |
+| B-1B | Sustained turn at 1,000 ft, 350 kt | 3.61 G | 2.92 G |
+| B-1B | Military power, 36,000 ft: settled speed | 538.8 kt | 392.5 kt (drifts 2,642 ft: cannot hold level) |
+| B-1B | Military-power endurance (tank / flow 6 lb/s) | 292 min | 737 min |
+| Tu-160 | Level top speed, military, sea level; afterburner, sea level | 754 kt; 915 kt | 726 kt; 969 kt |
+| Tu-160 | Climb: time to 5,000 / 36,000 ft; highest | 38 s / 241 s; 42,928 ft | 38 s / 241 s; 43,962 ft |
+| Tu-160 | Sustained turn at 1,000 ft, 350 kt | 1.49 G | 1.71 G |
+| Tu-160 | Military-power endurance (26 lb/s) | 236 min | 209 min |
+| F-111F | Level top speed, afterburner, sea level / 36,000 ft | 764 kt / 1,390 kt (Mach 2.42) | 663 kt (Mach 1.00) / 1,206 kt (Mach 2.10) |
+| F-111F | Climb (Mach 0.8): time to 5,000 / 36,000 ft; highest | 19 s / 63 s; 69,362 ft | 35 s / 141 s; 67,301 ft |
+| F-111F | Sustained turn at 1,000 ft, Mach 0.9 | 2.91 G (settles at 745 kt) | 3.64 G (settles at 590 kt) |
+| F-111F | Military-power endurance (tank / flow) | 28 min | 109 min |
+
+The F-111F's afterburner no longer carries the jet to Mach 2.5; the TF30's real 50,200 lbf
+against 80,000 puts the probe at Mach 2.10 at 36,000 ft (the real top speed is Mach 2.5
+with a lighter, clean load and the inlets; a fitted flight-model matter for F111-8). The
+B-1B now cannot hold level flight on military power at 36,000 ft at its heavier weight, and
+its 51,635 ft climb ceiling is under the record's 55,000 ft: both are flight-model reviews
+(B1B-8). The Tu-160's accelerations at 36,000 ft, and the B-1B's, run past the envelope's
+edge in the probe's afterburner runs (the B2-8 warning: the settled speeds are the edge,
+and the altitude drifts of 13,000 ft on the Tu-160 show the probe leaving the record's level
+region); they are listed, not taken as findings.
+
+**Not corrected, listed for John.** The B-1B and Tu-160 fuel flows (above); the B-1B's
+sea-level edge (Mach 1.00 against the real 0.92); the Tu-160's 1,270 kt top speed and
+50,000 ft ceiling (real 1,200 kt, 49,200 ft); the F-111F's G limit (-2 / +5 against the
+real +7.33) and 60,000 ft ceiling (real 66,000); the B-1B ceiling (55,000, no source);
+Kh-55 (`AS15.JT`) stays refused on the Tu-160 bays (decision 6).
+
+## Update (SWING-1, 2026-11-15): the shared swing-wing spec
+
+`combat::swing` is no longer Tornado-only. Its constants are fields of a `SwingSpec`
+(`swing::TORNADO`, every value unchanged) and `swing::spec(id)` looks one up by aircraft. The
+B-1B, Tu-160, F-111F and Tu-26 swing-wing surveys above ("B-1B swing-wing survey", "Tu-160
+swing-wing survey", "F-111F swing wing", "Tu-26 swing-wing survey") each said the constants had
+to become a per-aircraft spec chosen by `AircraftId::source()`; this is that change, with the
+values from the coordinator's decisions (`BOMBERS-DECISIONS-B.md`, `-C.md`, 2026-11-15). The
+design, the field list and the callers are in [Stores on pylons](../spec/stores-on-pylons.md#update-swing-1-2026-11-15-the-swing-wing-is-a-per-aircraft-spec).
+
+The four specs are constants (`B1B`, `TU160`, `F111F`, `TU26`) with no identity behind them yet:
+
+| Spec | Range (rest) | Pivot | Schedule | Notes |
+|---|---|---|---|---|
+| B-1B | 15 to 67.5 (15), a 52.5 degree turn | Shape (10, 11) at 4/3 ft a unit: 13.33 ft out, 14.67 ft forward | Spread to 280 kt, fully swept by 520 kt, linear | Flaps hold it spread; no swivel |
+| Tu-160 | 20 to 65 (20) | Shape (4.8, 0) at 8/3 ft a unit: 12.8 ft out (fitted to the three published spans) | 20 degrees to 250 kt, 35 from 320 to 520 kt, 65 from 600 kt, smoothstep between | Flaps hold it at 20; no swivel |
+| F-111F | 16 to 72.5 (16), a 56.5 degree turn | Shape (13, 2.5) at 2/3 ft with the size fit's x 0.859: 7.4 ft out, 1.67 ft forward | Spread to 250 kt, fully swept by 650 kt (option b of the review), linear | Flaps hold it spread; rows 5 and 6 swivel; rows 7 and 8 fixed, sweep held to 26 degrees or less while they carry stores (`max_sweep_with_fixed_stores`) |
+| Tu-26 | 20 to 65 (mesh at 18.4: the spread wing is already turned 1.6 degrees, the full turn is 46.6) | Shape (14, 3) at 4/3 ft a unit: 18.67 ft out, 4 ft forward | Spread to 300 kt, fully swept by 560 kt, linear | Flaps or gear hold it spread; no swivel |
+
+`swing::spec` returns only the Tornado's today (both versions). Wiring one of the four is one
+match arm there, written and commented out for each, once the aircraft has an `AircraftId`.
+`sweep_rate_dps` is `None` for all five: no source gives a rate and the drawn sweep is a pure
+function of speed. Nothing is drawn differently; the new aircraft's rigs are their own slices.

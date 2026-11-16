@@ -359,6 +359,45 @@ fn specification(id: Id) -> Option<Spec> {
                 &[(0x4c5c, Part::Gear, 31)],
                 1. / 3.,
             ),
+            // Bomber batch B interim rig specs (BMB-B1, 2026-11-15): each
+            // shape's exact CODE size, runtime face count and state words
+            // from the source reviews (docs/formats/aircraft-variety.md, the
+            // three 2026-11-15 batch B reviews). Only the gear word is
+            // mapped; the other words are pinned and unmapped, so each
+            // aircraft loads with the shared fitted gear law until its own
+            // rig slice.
+            // B1.SH: seven words (flames 0x7b10, bay walls 0x7b16, spoilers
+            // 0x7b1c, gear 0x7b22, flaps 0x7b2e and 0x7b34, rudder 0x7b3a),
+            // gear adds 12 faces; header exponent 10, so 4/3 ft a unit.
+            Id::B1b => (
+                27468,
+                314,
+                &[0x7b10, 0x7b16, 0x7b1c, 0x7b22, 0x7b2e, 0x7b34, 0x7b3a],
+                &[(0x7b22, Part::Gear, 12)],
+                4. / 3.,
+            ),
+            // TU160.SH: six words (flames 0x7ff0, keel plates 0x7ffc, gear
+            // 0x8002, flaps 0x800e and 0x8014, rudder strip 0x801a), gear
+            // adds 12 faces; header exponent 11, so 8/3 ft a unit.
+            Id::Tu160 => (
+                28716,
+                316,
+                &[0x7ff0, 0x7ffc, 0x8002, 0x800e, 0x8014, 0x801a],
+                &[(0x8002, Part::Gear, 12)],
+                8. / 3.,
+            ),
+            // F111.SH: six words (flames 0x7240, dorsal panels 0x7246, gear
+            // 0x724c, flaps 0x7258 and 0x725e, rudder 0x7264), gear adds 22
+            // faces (nose 6, mains 16); header exponent 9, so 2/3 ft a unit
+            // (the per-axis real-size fit applies through the shape's axis
+            // scale, not here).
+            Id::F111 => (
+                25206,
+                254,
+                &[0x7240, 0x7246, 0x724c, 0x7258, 0x725e, 0x7264],
+                &[(0x724c, Part::Gear, 22)],
+                2. / 3.,
+            ),
             _ => return None,
         };
     Some(Spec {

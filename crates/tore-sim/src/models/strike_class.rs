@@ -18,8 +18,8 @@
 //!
 //! The thresholds are opinionated (John, 2026-10-11); the order and the
 //! top-speed test opinionated (agent). The escape hatch is [`OVERRIDES`]: a
-//! data table keyed by PT resource name, empty for every current aircraft,
-//! for the day the rule is wrong for an aircraft we care about.
+//! data table keyed by PT resource name, holding only the F-111F, for an
+//! aircraft the rule gets wrong.
 
 use crate::combat::gunship;
 use tore_formats::aircraft::Aircraft;
@@ -93,10 +93,13 @@ impl StrikeClass {
 }
 
 /// Per-aircraft overrides, by PT resource name (`"F117.PT"`), for an aircraft
-/// the rule gets wrong. Empty for every current aircraft. Opinionated (agent):
-/// an escape hatch, not a place to list aircraft. The F-117 (retail flies it
-/// at 5,000 ft level) is the likely first.
-pub const OVERRIDES: &[(&str, StrikeClass)] = &[];
+/// the rule gets wrong. Opinionated (agent): an escape hatch, not a place to
+/// list aircraft. One entry: the F-111F (BMB-B1, 2026-11-15; coordinator first
+/// pass, BOMBERS-DECISIONS-B F111 item 9) is a strike jet, but the rule rates
+/// it Fighter on its 1,434 kt top speed (over the 700 kt Attack limit), so it
+/// is overridden to Attack. The F-117 (retail flies it at 5,000 ft level)
+/// needed none: the rule already gives it Attack.
+pub const OVERRIDES: &[(&str, StrikeClass)] = &[("F111.PT", StrikeClass::Attack)];
 
 /// The five facts the rule reads. Built from an imported record
 /// ([`Record::from_aircraft`]) or, in tests and tools, from the aircraft
@@ -295,11 +298,31 @@ mod tests {
             (AircraftId::B52, Heavy),
             (AircraftId::B2, Heavy),
             (AircraftId::F117, Attack),
+            // Bomber batch B (BMB-B1, 2026-11-15; coordinator first pass): the
+            // rule gives the B-1B (447,000 lb in the record, 477,000 real)
+            // and the Tu-160 (606,260 lb) Heavy and the F-111F Fighter (1,434
+            // kt, 100,000 lb, +5 G). The F-111F is overridden to Attack in
+            // `OVERRIDES`; this table lists the rule's class, so it reads
+            // Fighter here and Attack below.
+            (AircraftId::B1b, Heavy),
+            (AircraftId::Tu160, Heavy),
+            (AircraftId::F111, Fighter),
         ];
         assert_eq!(expected.len(), AircraftId::SELECTABLE.len());
         for (id, class) in expected {
             assert_eq!(row(&rows, id.pt()), *class, "{id:?}");
         }
+        // The class the game uses, with the override table (BMB-B1).
+        let class_of = |pt: &str| {
+            rows.iter()
+                .find(|r| r.resource == pt)
+                .map(|r| StrikeClass::of(&r.record))
+                .unwrap_or_else(|| panic!("{pt} in the catalog"))
+        };
+        assert_eq!(class_of("F111.PT"), Attack);
+        assert_eq!(class_of("B1.PT"), Heavy);
+        assert_eq!(class_of("TU160.PT"), Heavy);
+        assert_eq!(class_of("F117.PT"), Attack);
         // Table entries that share a record or are not imported.
         assert_eq!(row(&rows, "TU95.PT"), Heavy);
         assert_eq!(row(&rows, "B52.PT"), Heavy);
@@ -455,9 +478,14 @@ mod tests {
         let table = [("newbombr.pt", Attack)];
         assert_eq!(StrikeClass::of_with(&new, &table), Attack);
         assert_eq!(StrikeClass::of_with(&base(), &table), Fighter);
-        // Shipped overrides touch no retail aircraft: every record's class is
-        // the rule's.
+        // Shipped overrides touch one retail aircraft, the F-111F (BMB-B1):
+        // every other record's class is the rule's.
         for r in catalog() {
+            if r.resource == "F111.PT" {
+                assert_eq!(r.record.rule(), Fighter);
+                assert_eq!(StrikeClass::of(&r.record), Attack);
+                continue;
+            }
             assert_eq!(
                 StrikeClass::of(&r.record),
                 r.record.rule(),
@@ -465,6 +493,7 @@ mod tests {
                 r.resource
             );
         }
+        assert_eq!(super::OVERRIDES.len(), 1);
     }
 
     fn token(kind: &str, value: i64) -> Token {

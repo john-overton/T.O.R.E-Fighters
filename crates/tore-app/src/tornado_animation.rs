@@ -265,7 +265,7 @@ fn renormal(face: &mut Face) {
 /// hold the wing out. This does not invent a flight
 /// law; it only draws the wing.
 pub(crate) fn sweep_turn(state: &State) -> f64 {
-    tore_sim::combat::swing::wing_turn(state.speed, state.flaps)
+    tore_sim::combat::swing::TORNADO.turn(state.speed, state.flaps, state.gear)
 }
 /// The wing's leading-edge sweep angle for a turn, degrees (25 spread to 67).
 pub(crate) fn sweep_degrees(turn: f64) -> f64 {
