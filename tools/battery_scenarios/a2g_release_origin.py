@@ -425,12 +425,49 @@ def b2_origin_problems(output: str) -> list[str]:
     return problems
 
 
+# BMB-AI2 (2026-11-16): a ripple tapped faster than the bay doors open (about 0.8 s) is held, not
+# dropped. (aircraft, station, load, count, presses, gap seconds); each press is one store.
+# The B-2's two bays alternate and the driver re-selects its one loaded station every tick, so its
+# held presses are proved in `a_b2_ripple...` and `presses_made_while_the_bay_doors_open...` instead.
+TAP_RUNS = [
+    ("b52", "2", "MK82", "9", 8, "0.2"),
+    ("b52", "2", "MK82", "9", 8, "0.1"),
+    ("b52", "2", "MK82", "9", 8, "0.05"),
+]
+
+
+def tap_args(aircraft: str, station: str, load: str, count: str, presses: int, gap: str) -> list[str]:
+    return ["--a2g-run", "UKR", "QUCOL", "--attack", "release", "--from", "1", "--altitude", "20000",
+            "--speed", "300", "--repeat", str(presses), "--gap", gap, "--aircraft", aircraft, "--station",
+            station, "--load", load, "--count", count]
+
+
+def tap_problems(output: str) -> list[str]:
+    parts = runs(output)
+    if len(parts) != len(TAP_RUNS):
+        return [f"{len(parts)} runs finished, want {len(TAP_RUNS)}"]
+    problems: list[str] = []
+    for part, (aircraft, _, _, _, presses, gap) in zip(parts, TAP_RUNS):
+        fired = len(re.findall(r"^a2g-run: fired t=", part, re.M))
+        if fired != presses:
+            problems.append(f"{aircraft} {presses} taps {gap} s apart: {fired} releases, want {presses}")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     base = ["--a2g-run", "UKR", "QUCOL", "--attack", "release", "--from", "1", "--altitude", "3000",
             "--speed", "420"]
     run = ["--a2g-run", "UKR", "QUCOL", "--attack", "release", "--from", "1", "--altitude", "3000",
            "--speed", "420", "--repeat", "4", "--gap", "0.5"]
     return [
+        Scenario(
+            name="a2g-ripple-taps", lane="flight",
+            args=tap_args(*TAP_RUNS[0]),
+            timeout=300,
+            then=[Step(tap_args(*run), timeout=300) for run in TAP_RUNS[1:]],
+            check=tap_problems,
+            notes="Eight one-tick presses of a bay ripple, 0.2, 0.1 and 0.05 s apart, from the B-52's forward row: a press made while the doors are still opening is held and fires when they are open, so eight presses give eight releases (BMB-AI2; before, four, one and one).",
+        ),
         Scenario(
             name="a2g-release-origin", lane="flight",
             args=run + ["--aircraft", "a4e", "--load", "MK82", "--count", "4"],

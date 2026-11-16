@@ -138,7 +138,9 @@ The bays stay shut until a weapon is released (**opinionated, requested by John
 on 2026-09-28**). Pressing the trigger for a bay weapon whose shot is otherwise
 ready opens the doors; the weapon leaves as soon as they are open, about one
 second later, and the doors close 1 second after the release. One press
-commits the shot, so the trigger need not be held. While the doors open the
+commits the shot, so the trigger need not be held, and every further press made
+while the doors are still opening is held too and fires when they are open (BMB-AI2,
+below). While the doors open the
 HUD shows `OPENING BAY`. The press lapses, and the doors close, if the shot
 stops being ready (disarm, a new selection, a lost target) or the doors are not
 open within 3 seconds. Doors the pilot opened with O stay open, and a release
@@ -589,3 +591,18 @@ the marker, retaining a straight edge; marker UV follows its current edge
 coordinate. Both endpoint surfaces/art remain original. Intermediate blade
 shape changes are fitted because the source poses differ in width and length.
 No afterburner geometry or capability is added.
+
+## Presses held while the bay doors open (BMB-AI2, 2026-11-16)
+
+**Fitted**, agent decision, for the human's trigger; recorded as such. A press that waits for the doors showed the
+bay closed, and a press is refused while the bay shows closed, so every press behind the first was dropped: eight
+one-tick taps 0.2 s apart gave 4 releases on the B-52 and 0.1 s apart gave 1 (the B-1B's 8 taps gave 5, B1B-9; the
+Tu-26 needed 10 for 8, T26-9). A real stores computer waits for the doors, so the waiting station now counts the
+presses behind the first (up to 32, `BAY_PRESS_QUEUE`) and fires one store a tick, from whichever bay is selected (a
+gridded bay hands over to its sister, so the B-2 still alternates), once the doors are open. The 3-second lapse, the
+1-second hold after the release and every other rule above are unchanged, and a lapse drops every held press. Only a
+station inside a bay waits, so no other aircraft changes. The AI's bay hold (BMB-AI, the doors open 1.5 s before its
+release) lives in the mission and is untouched. The press count is carried in the combat checkpoint; no wire or
+recording byte moves, since a press is still the trigger bit. Pinned by `presses_made_while_the_bay_doors_open_are_held_and_fire_one_a_tick`
+and `a_station_outside_a_bay_holds_no_presses`; battery `a2g-ripple-taps` (the B-52, 8 taps at 0.2, 0.1 and 0.05 s: 8 releases each).
+
