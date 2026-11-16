@@ -28,6 +28,25 @@ use std::f64::consts::PI;
 /// Angle units a degree in the record words (the surface units' scale).
 const UNITS_PER_DEGREE: f64 = 182.;
 
+/// Fitted (BMB-AI, 2026-11-16, agent decision): how fast the AI gunner can
+/// swing a slewed barrel, degrees a second. A target whose lead point sweeps
+/// the mount faster than this cannot be followed: the gun holds fire (a
+/// fighter crossing close astern at a few hundred feet).
+pub const BARREL_SLEW_DEG_PER_S: f64 = 30.;
+/// Fitted (BMB-AI): the barrel trails the lead point by this many seconds of
+/// the lead's angular rate (the gunner's tracking lag).
+pub const BARREL_LAG_S: f64 = 0.2;
+/// Fitted (BMB-AI): one standard deviation of the gunner's aim error, degrees
+/// on each of the two axes, redrawn about twice a second (a burst's laying),
+/// and the extra scatter of each round. Together with the lag they make an
+/// AI tail gunner dangerous and not a laser: a fighter in the rear arc takes
+/// hits on roughly 10 to 25 percent of the rounds at 2,000 to 3,000 ft (the
+/// M61's range is 7,500 ft), most of them at under 1,000 ft, and a few at
+/// 5,000. The exact lead and instant swing hit 89 of 128 rounds
+/// (docs/spec/ai-gun-employment.md, BMB-AI).
+pub const AIM_ERROR_DEG: f64 = 1.0;
+pub const ROUND_SCATTER_DEG: f64 = 0.35;
+
 /// Where a gun mount points at rest and how far it may swing.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Slew {
@@ -91,6 +110,59 @@ impl Slew {
             && up.atan2(forward.hypot(right)).abs() <= self.limit[1]
     }
 
+    /// Whether the barrel can follow a lead point sweeping the mount at
+    /// `heading_rate` and `pitch_rate` radians a second at `pitch` radians of
+    /// elevation (the lead direction's own rates, [`Aim`]-style):
+    /// [`BARREL_SLEW_DEG_PER_S`] (fitted, BMB-AI).
+    ///
+    /// [`Aim`]: crate::ai::gunnery::Aim
+    pub fn can_follow(heading_rate: f64, pitch_rate: f64, pitch: f64) -> bool {
+        let sweep = (heading_rate * pitch.cos()).hypot(pitch_rate);
+        sweep.is_finite() && sweep <= BARREL_SLEW_DEG_PER_S.to_radians()
+    }
+
+    /// The direction a slewed barrel actually fires along when the exact lead
+    /// is `lead` and that lead is moving at `rates` (`[heading, pitch]`, radians
+    /// a second): the lead, set back by the gunner's lag
+    /// ([`BARREL_LAG_S`]) and moved by a deterministic aim error
+    /// ([`AIM_ERROR_DEG`] a burst, [`ROUND_SCATTER_DEG`] a round) drawn from
+    /// `burst` and `round` alone (fitted, BMB-AI). A forward gun never calls
+    /// this: it is laid by the aircraft and fires as before.
+    pub fn laid_direction(lead: Vector, rates: [f64; 2], burst: u64, round: u64) -> Vector {
+        let lead = unit(lead);
+        if !lead.iter().all(|v| v.is_finite()) {
+            return lead;
+        }
+        // The two axes across the lead: the way world heading grows (+x for a
+        // lead along +z) and the way elevation grows, both unit and square to it.
+        let across = unit([lead[2], 0., -lead[0]]);
+        let (across, up) = if across.iter().all(|v| v.is_finite()) && across != [0.; 3] {
+            let up = [
+                lead[1] * across[2] - lead[2] * across[1],
+                lead[2] * across[0] - lead[0] * across[2],
+                lead[0] * across[1] - lead[1] * across[0],
+            ];
+            (across, up)
+        } else {
+            ([1., 0., 0.], [0., 0., 1.])
+        };
+        let flat = lead[0].hypot(lead[2]);
+        let mut seed = burst.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0x2545_f491_4f6c_dd1d;
+        let bias = [normal(&mut seed), normal(&mut seed)];
+        let mut seed = seed ^ round.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        let scatter = [normal(&mut seed), normal(&mut seed)];
+        let sigma = |degrees: f64| degrees.to_radians();
+        let across_error = -rates[0] * flat * BARREL_LAG_S
+            + bias[0] * sigma(AIM_ERROR_DEG)
+            + scatter[0] * sigma(ROUND_SCATTER_DEG);
+        let up_error = -rates[1] * BARREL_LAG_S
+            + bias[1] * sigma(AIM_ERROR_DEG)
+            + scatter[1] * sigma(ROUND_SCATTER_DEG);
+        unit(std::array::from_fn(|i| {
+            lead[i] + across[i] * across_error + up[i] * up_error
+        }))
+    }
+
     /// The mount's rest direction in the world for an aircraft in `body`.
     pub fn direction(&self, body: Basis) -> Vector {
         self.basis(body).forward
@@ -114,6 +186,22 @@ impl Slew {
             dot(world, unit(frame.forward)),
         ]
     }
+}
+
+/// A unit normal draw by summing four uniforms (no transcendental functions,
+/// so every platform draws the same): the state advances by splitmix64.
+fn normal(state: &mut u64) -> f64 {
+    let mut sum = 0.;
+    for _ in 0..4 {
+        *state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut z = *state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        z ^= z >> 31;
+        sum += (z >> 11) as f64 / (1u64 << 53) as f64;
+    }
+    // Four uniforms have mean 2 and variance 1/3.
+    (sum - 2.) * 3f64.sqrt()
 }
 
 #[cfg(test)]
@@ -184,6 +272,76 @@ mod tests {
         assert!(!slew.contains(body, [a.sin(), 0., -a.cos()]));
         assert!(!slew.contains(body, [0., a.sin(), -a.cos()]));
         assert!(!slew.contains(body, [0., 0., 1.]));
+    }
+
+    /// The share of rounds that stay inside an aircraft's contact sphere
+    /// ([`crate::combat::live::AIRCRAFT_RADIUS_FT`]) at `range_ft` when the barrel is
+    /// laid on a still lead dead astern, over many bursts of four rounds.
+    fn hit_share(range_ft: f64, rates: [f64; 2]) -> f64 {
+        let lead = [0., 0., -1.];
+        let (mut hits, mut rounds) = (0, 0);
+        for burst in 0..4_000u64 {
+            for round in 0..4u64 {
+                let laid = Slew::laid_direction(lead, rates, burst, round);
+                let cross = (laid[0] * laid[0] + laid[1] * laid[1]).sqrt() / -laid[2];
+                hits += u32::from(cross * range_ft <= crate::combat::live::AIRCRAFT_RADIUS_FT);
+                rounds += 1;
+            }
+        }
+        f64::from(hits) / f64::from(rounds)
+    }
+
+    /// BMB-AI (2026-11-16, fitted): the AI tail gunner lays the barrel with
+    /// an error of about 1 degree (redrawn twice a second), a lag behind a
+    /// moving lead and a limit on how fast the barrel swings. A fighter in
+    /// the rear arc takes hits on 10 to 25 percent of the rounds at 2,000 to
+    /// 3,000 ft (the exact, instant swing hit 89 of 128 rounds), nearly all at
+    /// 500 ft and few at 5,000 ft.
+    #[test]
+    fn a_tail_gunner_is_dangerous_up_close_and_not_a_laser() {
+        for range in [2_000., 2_500., 3_000.] {
+            let share = hit_share(range, [0.; 2]);
+            assert!((0.10..=0.26).contains(&share), "{range} ft: {share}");
+        }
+        let (close, mid, far) = (
+            hit_share(500., [0.; 2]),
+            hit_share(1_000., [0.; 2]),
+            hit_share(5_000., [0.; 2]),
+        );
+        assert!(
+            close > 0.9 && mid > 0.5 && far < 0.06,
+            "{close} {mid} {far}"
+        );
+        // The lag: a lead sweeping at 20 degrees a second is trailed by four
+        // degrees, so almost nothing reaches a fighter 2,500 ft off.
+        assert!(hit_share(2_500., [20_f64.to_radians(), 0.]) < 0.02);
+    }
+
+    #[test]
+    fn the_laid_barrel_is_deterministic_and_the_same_for_the_same_burst_and_round() {
+        let lead = unit([0.1, 0.05, -1.]);
+        let a = Slew::laid_direction(lead, [0.01, -0.02], 17, 3);
+        assert_eq!(a, Slew::laid_direction(lead, [0.01, -0.02], 17, 3));
+        assert_ne!(a, Slew::laid_direction(lead, [0.01, -0.02], 18, 3));
+        assert_ne!(a, Slew::laid_direction(lead, [0.01, -0.02], 17, 4));
+        // A round of the same burst moves by the scatter only (a degree or two at most).
+        let b = Slew::laid_direction(lead, [0.01, -0.02], 17, 4);
+        assert!(dot(a, b) > 0.999, "{}", dot(a, b));
+        assert!((dot(a, a) - 1.).abs() < 1e-12);
+    }
+
+    #[test]
+    fn the_barrel_follows_a_lead_only_up_to_its_swing_rate() {
+        let below = (BARREL_SLEW_DEG_PER_S - 1.).to_radians();
+        let above = (BARREL_SLEW_DEG_PER_S + 1.).to_radians();
+        assert!(Slew::can_follow(below, 0., 0.));
+        assert!(Slew::can_follow(0., below, 0.));
+        assert!(!Slew::can_follow(above, 0., 0.));
+        assert!(!Slew::can_follow(0., above, 0.));
+        // Heading rate counts for its cosine of elevation: the same rate is
+        // easy to follow overhead.
+        assert!(Slew::can_follow(above, 0., 1.4));
+        assert!(!Slew::can_follow(f64::NAN, 0., 0.));
     }
 
     #[test]
