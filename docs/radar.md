@@ -160,7 +160,7 @@ flying channel, instead of borrowing a preset.
 | Preset | Radar records | Notch half-width, ft/s | Range factor at notch centre | Reference burn-through B, nmi | Angular coupling half-width / sidelobe floor |
 | --- | --- | ---: | ---: | ---: | --- |
 | Basic | F4BR, MIG21R, MIG27R | Disabled | 1.0 | 5 | 3 degrees / 0.05 |
-| Transitional | F14R, B52R (B52-7, 2026-11-15, fitted: the Tu-160's record renamed, a long-range bomber set; the AC-130's class), TU160R (T160-6/7, 2026-11-16, fitted: the record B52R renames, so the B-52's class), A6R (F111-7, 2026-11-16, fitted: the A-6's attack and terrain-following set, the F-111F's radar; the F-14's class), TU26R (T26-7, 2026-11-16, fitted, agent decision: the Tu-26's own record, the same class as the B-52's) | 100 | 0.20 | 8 | 2 degrees / 0.02 |
+| Transitional | F14R, B52R (B52-7, 2026-11-15, fitted: the Tu-160's record renamed, a long-range bomber set; the AC-130's class), TU160R (T160-6/7, 2026-11-16, fitted: the record B52R renames, so the B-52's class), A6R (F111-7, 2026-11-16, fitted: the A-6's attack and terrain-following set, the F-111F's radar; the F-14's class), TU26R (T26-7, 2026-11-16, fitted, agent decision: the Tu-26's own record, the same class as the B-52's), TU95R (T95-7, 2026-11-16, fitted: the same record renamed again, the B-52's reading) | 100 | 0.20 | 8 | 2 degrees / 0.02 |
 | Advanced | F18R, MIG29R, SU24R, SU27R, F22R, MIG31R | 60 | 0.45 | 10 | 1 degree / 0.005 |
 
 Basic sets are primarily vulnerable to ground clutter and carry no Doppler notch,
@@ -260,6 +260,14 @@ reviewed, fitted agent decisions: `A6R.SEE` Transitional (search 50 nmi, track 2
 degree cones, look-down 0, from the record) and `A6.ECM` Transitional, strength 0.30 (RF mode, 30
 chaff, 30 flares). The EA-6B's `EA6R.SEE` and `EA6.ECM` stay unreviewed. One line each in
 `sensors::profile` (`Preset::for_record`, `Generation::for_record`) to revert.
+
+Update (T95-7, 2026-11-16): the Tu-95 carries `TU95.ECM`, the Tu-160's `TU160.ECM` with
+its mode flags, radar deception chance (30), infrared deception chance (40) and their
+signature terms all zero; its chaff and flare counts (99 each) and dispenser angles are
+unchanged. It is read as Early with no RF mode and strength 0.00, like `F104.ECM`
+(`sensors::profile::Generation::for_record`, fitted, agent decision): the Bear emits no
+noise and carries 99 chaff and 99 flares. Its radar `TU95R.SEE` is Transitional (table
+above), so the Bear has a radar and the A-G designation its AS-16 needs.
 
 Only installed, powered, undamaged RF jammers contribute. Jammer strength S is
 `clamp(ECM.radar_deception_chance / 100, 0, 1)`, repurposed as an authored

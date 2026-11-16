@@ -15641,6 +15641,10 @@ No afterburner and no flame word: exhaust and brake are `Expectation::Unsupporte
 false; nothing breaks. The shape has no bay word (T95-5 adds the fitted bay and doors), so bay is
 `Unsupported` too.
 
+Update (T95-5, 2026-11-16): the fitted bay is in ([Tu-95 stations, bays and pylons](#tu-95-bear-h-stations-bays-and-pylons-t95-5-2026-11-16)),
+so bay is `Required` now and `--animation-probe tu95` checks it (0 failures); the neutral face count
+(125) and the other rows above are as they were.
+
 `--animation-probe tu95`: 125 neutral faces (155 less the 30 hidden propeller phases), scale 0.6666667,
 **0 required failures and 0 check failures**, scope `reviewed-controls-and-attachments`. Elevator and
 rudder are `required moved` (5 distinct poses each), gear 22, rotor 4 (the fourth sample is one whole
@@ -18614,3 +18618,565 @@ the tail gun over the wire.
 3. After a kill the AI keeps searching (B52-9's open item, not traced for the Tu-26 either: the antiship run stops at 60 s).
 4. The stick walks past the aim point as the B-2's and B-52's do.
 5. The tail gun's rounds over the wire are not covered (`tore-bot` has no gun role).
+
+## Tu-95 Bear-H stations, bays and pylons (T95-5, 2026-11-16)
+
+Implementation mode (bomber batch C, slice T95-5), by an agent (Claude Sonnet). It applies the
+coordinator's first-pass decisions for John to review (`BOMBERS-DECISIONS-C.md`, Tu-95 items 6, 7,
+8 and 9, "BMB-C1/C2") and the B-52 and B-2 pattern: the shared `combat::bays` tables (`STATIONS`,
+`GRIDS`, `OPENINGS`), `bay_doors::centre_doors` and `centre_lining`, `Location::Magazine`,
+`Location::Beam` and the B52-6 slewed gun mount. Earlier sections stay as written (B11); this
+replaces the [Tu-95 bay and pylon survey](#tu-95-bay-and-pylon-survey-for-john) proposal and the
+"no bay" lines of [Tu-95 shape and rig](#tu-95-shape-and-rig-t95-23-2026-11-15). The numbers and the
+clearance tables are in the
+[stores specification](../spec/stores-on-pylons.md#tu-95-bay-pylons-and-tail-gun-t95-5-2026-11-16).
+
+Provenance: the belly skin, the tail cone, the wing height and the propeller discs are **measured**
+from `TU95.SH`; the six-missile bay and the ten pylon missiles are cited public figures (Wikipedia,
+"Kh-55", the T95-0 review); the bay's width, depth, door count, grid, the pylon beam and every
+refusal are **fitted** or **opinionated** (agent decisions, 2026-11-16). No retail bytes are committed.
+
+**Stations after T95-5.** The record's nine rows are kept; only positions and masks move.
+
+| Row | What it is now | Position (feet right / up / forward) | Capacity, class | Default |
+| ---: | --- | --- | --- | --- |
+| 3 | tail turret, `T23_1.JT`, slewed aft (`Station.slew`) | 0 / +2.0 / -80.67 (was 0 / 0 / -33.3) | 2,000 rounds | `T23_1.JT` x2,000 |
+| 5, 6 | the Bear-A to F dorsal and ventral turrets | cleared by BMB-C2, not stations | | none |
+| 7 | belly bay, `Location::Magazine`, shared grid | 0 / -3.70 (belly plane) / +8.64 (the bay's middle, 13.0, less the missile's origin offset) | 6, class 160 (16,000 lb) | 6 `AS16.JT` |
+| 8 | wing pylons, `Location::Beam`, one beam a wing | +/-12.0 / -2.0 (record; the lugs hang 1.08 ft under the wing) / +9.0 (was +11.67) | 10 (five a wing), no weight class | none |
+| 0, 1, 2, 4 | the fixed sensor rows (`VIS300.SEE`, `TU95R.SEE`, `TU95.ECM`, `SU37L.SEE`) | unchanged, no body | | as retail |
+
+`SU37L.SEE` stays a fixed row with no body (decision 9, B7 satisfied). No sensor pod hangs on a
+station the real aircraft does not have: the bay mask `0x1180` has no designator bit and the pylon
+mask `0x1025` none either.
+
+**Bay (decision 6).** The retail row hangs 11.7 ft below the reference point, 2.4 ft under the gear's
+ground-contact plane. `TU95.SH` has no bay word, so the opening is cut from the belly skin, like the
+B-52's. The belly there is four triangles (`1a38`, `1a50` on the right, `22a7`, `22c1` on the left,
+y 0 to 71 units) forming a shallow V: z -7 units on the keel, rising 0.33 to 0.4 unit a unit out to z
+-5 at x -5 and +6. The opening is **5.5 ft wide** (about 5, widened from 5.0 so the six missiles'
+outer fin tips stand inside the walls: 0.10 ft clear, they were 0.15 ft through a 2.5 ft wall) and
+**26.0 ft long** (shape y 0 to 39 units, 0 to 26 ft forward; the record's 12.67 ft is inside it). The
+belly plane, where the doors hinge and the walls start, is the skin height at the two hinge lines 2.75
+ft out: -5.35 (left), -5.63 and -5.75 units (right), -5.55 units on average, **-3.70 ft**; the keel
+sags 0.97 ft below it. Two doors, each 2.75 ft wide, hinged on the outer edges, swing 90 degrees down
+in the flight's 1.00 s bay travel and hang to -6.45 ft, 2.9 ft above the gear contact line (-9.33). The
+V makes each leaf hang tilted 15 to 19 degrees outward at its free edge (the leaf is cut from the
+sloping skin and turns rigidly); cosmetic, accepted. A lined box closes the recess under the intact top
+skin: ceiling, four walls and a rail under the ceiling at each of the three lanes of the grid (20
+faces, no posts: the bay is one row long), drawn only while the doors are off their seat, in the
+material of the flat skin plate ahead of the opening (`1998`). The roof is **5.5 ft over the belly
+plane (+1.80 ft)**, 0.7 ft under the top skin over the walls (2.5 ft) and 1.27 ft over the top tier.
+The real Tu-95MS carries its six missiles on a rotary launcher in a ring; the shared grid has no ring,
+so the fitted approximation is **three abreast and two tiers** (the T95-0 proposal). The rig is
+`tu95_animation.rs` (`BELLY`, `LINING_BASE`, `Rig::faces`), the opening a row of `bays::OPENINGS`.
+
+**Grid.** The row is a row of the shared `bays::GRIDS` (floor 5.5 by 26.0 ft, ceiling the roof):
+an AS-16 (`KIKBK.SH`, 15.7 ft, fins 3 ft) stands three abreast at the grid's 1.59 ft pitch (its
+diameter plus 0.1 ft), one long (26.0 ft over 15.95 ft), and the roof allows two tiers, so the row
+holds six by room, which is the record's count. The mount is the bay's middle plus the missile's origin
+offset (the drawn missile spans -3.5 to +12.2 ft about its origin, 4.36 ft behind its middle), so it is
+centred 5.15 ft from each end. The ripple is the shared grid's: bottom tier first, outermost lane
+first alternating sides.
+
+**What the bay admits (`T95_BAY_REFUSED`, decision 6).** The retail mask `0x1180` (bomb and infrared
+bits) admitted 35 stores. A sweep loaded each at the row's count (at most six) and measured the open
+bay (the report below; `.local/m3-aircraft/checks/T95-5/bay-sweep.txt`). **Five stay** and 30 are
+refused by name, because they leave under 0.05 ft to a wall, a door leaf, the roof, an end, the floor,
+a rail or a neighbour, or pass through one, mainly: the long stores (`MK84`, `FAB1000`, the GBU-12/16/28/29/30
+and Paveway family), the 3 ft span missiles the infrared bit admits (`AGM84E`, `AGM88`, `AGM45`,
+`AS14`, `AS30`, `AGM65`, `AT12`) and the bombs whose fins touch their neighbours at this pitch
+(`CBU87`, `CBU89`, `FAB500`, `GBU38`, `MK20`, `MK82HD`, `MK82P`, `RBK250`, `RBK500`, `AT2`). The
+five that stay: `FAB250`, `MK82`, `MK82AIR`, `MK82P3` (they clear everything by 0.25 ft or more) and
+`AS16`, the default, which clears everything except its own neighbours: **its fins touch the next
+missile's (0.00 ft)**, the one exception to the 0.05 ft line, kept because six AS-16 are the aircraft's
+load (the real launcher folds the wings; the stand-in cannot). `AS15.JT` (the Kh-55 stand-in, 220
+lb) stays refused as in the Tu-160 decision: the mask has no bit for it, no list entry is needed.
+Cheat loading is unchanged. `--validate-ordnance`: weapon placements 5,395 to 5,365 (`TU95.PT` 36 to 6).
+
+**Pylons (decision 7, opinionated).** Row 8 is the record's wing row, moved by BMB-C2 to x +/-12 ft
+(shape x 18 units), 2.0 ft under the reference point (above the gear line: the lowest store is 7.7 ft
+over the contact line) with the mask cut to the AS-16 and ten stores (the Tu-95MS16's ten pylon
+Kh-55s; the real arrangement was not found). The generic wing rack hangs five a side on two pylons
+and crosses the missiles' fins (ten pairs under 0.05 ft), so the row is a `Location::Beam` like the
+B-52's: three abreast (pitch the 3 ft span plus 0.1 ft) in a rear row of three and a front row of two,
+rows 1.05 lengths (16.5 ft) apart, centred on the row's point. T95-5 moves the record's forward
+offset from 35 to **27 units (9.0 ft)**: at 35 the front row's noses reached 32.1 ft forward and
+stood 0.09 ft from the inboard propeller disc (31.7 ft); at 9.0 ft they stop 2.2 ft short. The beam is
+drawn by `pylons.rs::beam_pylon` (generic). The AS-16 is the only store the row admits.
+
+**Guns (decision 8).** The tail turret (row 3, `T23_1.JT`, 2,000 rounds, 2 rounds a shot) moves from
+33.3 ft aft to the point of the drawn tail cone, 80.67 ft aft and 2.0 ft up (`TU95.SH` y -121 and z 3
+units), and keeps its record slew (heading 180 degrees, 45 degree arcs), which B52-6's mount reads, so
+the gun fires astern. Rows 5 and 6 hold nothing.
+
+**Default load and weight.** The bay holds its six AS-16 (15,840 lb, class 160); the pylon row starts
+empty and keeps an empty AS-16 selection, so Load Ordnance offers ten. The loadout counts stores in
+the weight as it does for the B-52 (the start-fuel fix keeps a default load under the maximum).
+
+**Release.** Bay: the press asks for the doors; a store leaves once `State::bay` is at 0.95 and the
+doors close after it (the F-22's timing). Pylons release from the beam with the doors shut. The AI
+releases through the shared strike release, which does not wait for doors: an AI Tu-95's doors stay
+drawn shut while its bombs leave (the B-52's and F-22's precedent). `State::bay_available()` is true
+for the Tu-95 (a row in `bays::STATIONS`), so the open-bay RCS term applies.
+
+**Open for John.**
+1. The bay is 5.5 ft wide, not 5 (the AS-16's fins would be 0.15 ft through a 2.5 ft wall).
+2. Six AS-16 stand with their fins touching (the one exception to the 0.05 ft line); the real six-
+   missile ring is not drawn. Alternatives: refuse the AS-16 (no default), or a wider pitch (a grid
+   change).
+3. The bay admits five stores (the AS-16 and four bombs, 500 lb class and under); the real Bear-H
+   carries no bombs, so the four are only a consequence of the masks (refuse them too?).
+4. The pylon row moved to 9.0 ft forward (the record's 11.7 ft hit the propeller disc); five a side.
+5. The door leaves hang tilted by the keel's V.
+6. The tail turret sits at the cone's point, 80.7 ft aft; the real turret is under the fin.
+
+**Checks.** See the plan's T95-5 entry; clearance, sweep and frame files are in
+`.local/m3-aircraft/checks/T95-5/` and `.local/m3-aircraft/frames/T95-5/`.
+
+
+## Tu-95 Bear-H ordnance, sensors, HUD and cockpit (T95-6/7, 2026-11-16)
+
+Slices T95-6 (ordnance, default load, countermeasures) and T95-7 (sensors, HUD, cockpit, instruments)
+ran together (implementation mode, bomber batch C), by an agent (Claude Sonnet). They apply the
+coordinator's first pass (`BOMBERS-DECISIONS-C.md`, Tu-95 items 8, 9 and 10, "Tu-95 stations
+(T95-5)") and the B-52 pattern ([B52-6/7](#b-52-ordnance-tail-gun-sensors-and-cockpit-b52-67-2026-11-15)).
+No decision proved impossible. Earlier Tu-95 sections stay as written (B11); the corrections they
+need are named below as updates. Frames are in `.local/m3-aircraft/frames/T95-6/`, logs in
+`.local/m3-aircraft/checks/T95-6/`.
+
+### The default load (T95-6, opinionated: the coordinator's brief)
+
+**16 AS-16: six in the belly bay and ten on the beam pylons.** T95-5 left row 8 empty (the retail row
+names no store); `aircraft_stations::adjust_defaults` now gives it `AS16.JT` at its ten
+(`TU95_WING_DEFAULT`). Load Ordnance (frame `load-ordnance`) reads Fuselage `23mmx1 turret 2000 (max
+2000)`, Internal Bay `AS-16 Kickback 6 loaded (max 6)`, Wing `AS-16 Kickback 10 loaded (max 10)`; vehicle
+weight 388,894 of 414,470 lb, 25,576 available: empty 198,415, internal fuel 148,150 (100 percent) and
+42,329 lb of stores (16 AS-16 at 2,640 lb and the rounds). The Weapons window reads `2000 23MMX1`, `16
+AS-16`, `99 CHAFF 99 FLARE`. `--headless-flight 600 --aircraft tu95` flies the loaded Bear level at 243.2
+kt at 5,000 ft with 0 non-finite samples (as at T95-5); a ground start parks at 9.3 ft, 4.7 kt.
+
+`--validate-ordnance`: aircraft 54, **recovered weapon stations 22 (from 23)**, weapon placements 5,365,
+tank placements 257, Cheat-only 278, designator pods 82, all unchanged but the one. The recovered count
+falls because the Tu-95's pylon row is now a default store row and no longer an optional empty one
+(`TU95.PT`: 3 source rows, 0 optional weapon rows, 6 compatible placements, 0 tanks; catalog 5 normal, 83
+Cheat). `ordnance_audit.rs` carries the dated note; `a2g-catalog`, `menus-ordnance-availability` and
+`test_battery_a2g.py` read 22. Pins before and after: 54 / 23 / 5,365 / 257 / 82 / 278, then 54 / 22 /
+5,365 / 257 / 82 / 278.
+
+### Live fire, jettison, release (T95-6)
+
+| Scenario | What it shows |
+| --- | --- |
+| `flight-livefire-tu95-slot1` | the tail turret fires 301 rounds in 1,200 ticks astern (the aircraft in the fixture crashes at the end, as the B-52's does) |
+| `flight-livefire-tu95-slot2`, `-slot3` | the bay's and the beams' AS-16 are surface missiles: against the practice aircraft the Weapons window reads `TARGET TYPE`, `NO LOCK` and nothing is fired. Listed as refused slots (`REFUSED_SLOTS`, as the B-52's Harpoons) |
+| `flight-jettison-tu95-slot2`, `-slot3` | the bay's six lighten the load 42,329 to 26,455 lb, the beams' ten to 15,873 lb; the station reads 0 and the selection moves on |
+| `a2g-sarh-as16-tu95` (new) | an AS-16 from the bay and one from the beam (`--attack sarh`, `~QUCOL`, 350 kt, 3,000 ft, 4 nm): each is designated on the A-G page through the Bear's radar, locked CUED, launched at the lead truck and kills it (miss 24 and 28 ft). The bay's missile leaves at 2.98 s, the beam's at 2.03 s: the press waits for the doors (1 s) |
+| `a2g-release-origin-tu95` (new) | the human's presses: bay cells (feet right, up, forward) -1.59, -2.12, 8.64; 1.59, -2.12, 8.64; 0.00, -2.12, 8.64; then the second tier at -0.53 (outermost lane first, alternating sides, bottom tier first; the bomb sight holds the sixth past the target, so five are measured). Beams: front row at 17.24 ft ahead (-15.10, 15.10, -12.00, 12.00), rear row at 0.76 ft ahead (-8.90, 8.90, -15.10, 15.10, -12.00, 12.00), 0.58 ft under the reference point, 1 ft pylon depth. Every release leaves within 0.05 ft of where it hangs |
+| unit test `an_ai_tu95_leaves_the_bay_and_the_beams_from_the_humans_places` | the AI reads the same places: `Station::next_release_point`, which the strike's gate and the shared release read, walks the same six bay cells and ten beam cells (right and forward for the beams, whose height needs the drawn wing's underside) |
+
+The guided AS-16 (`kind sarh`, guidance Active, role Surface) needs the Bear's radar, which is why T95-7's
+radar preset (below) is part of this slice's proof: with the record's `TU95R.SEE` unreviewed the run read
+`NO TARGET` and no AS-16 could be launched. The AS-16 is not a pack (`SHOTS_PER_ROUND` unchanged).
+
+### Tail turret (T95-6)
+
+`flight-tu95-tail-gun` (new): `--aircraft f22 --probe-enemy-aircraft tu95 --probe-enemy-skill ace
+--probe-geometry rear --separation 1 --probe-guns --ai-probe-ticks 3000` (the B-52's scenario with the
+Bear). The AI Tu-95's slewed twin 23 mm turret (the cone's point, heading 180 degrees, 45 degree arcs) fires
+astern at the closing F-22 through BMB-AI's aim model (1 degree aim error, lag, 30 degrees a second swing):
+**5 of 180 rounds hit** (2.8 percent; the check fails above 35 percent or at no fire). It needed no code:
+the mount reads its record words (the integration note above). The human's tail turret draws `TAIL 2000
+23MMX1` on the HUD and the tracers show the astern line (frame `tail-gun-side`). Rows 5 and 6 stay cleared.
+
+### Countermeasures (T95-6) and a correction to the source review
+
+The Bear carries **99 chaff and 99 flares**, and `flight-countermeasures-tu95` (new) releases five and three
+(94 and 96 left, five cartridges in the air, six flares burning), frame `countermeasures-chaff-flare-jammer`
+(`97 CHAFF 97 FLARE` after two of each). **Update (T95-6, to the T95-0 review):** the review read `TU95.ECM`
+as "no chaff and no flare dispenser (the Tu-160's `TU160.ECM` adds 30 and 40)". Those two bytes are the radar
+and infrared deception chances, not counts. `TU95.ECM` differs from `TU160.ECM` in the mode flags (`$1f0` to
+`$0`), the radar deception chance (30 to 0), its signature term, the infrared deception chance (40 to 0) and
+its term; the two dispenser blocks (99 chaff and 99 flares, chances 35, angles 95/24 and 159/31) are
+identical. So the Bear has dispensers and **no jammer** (flags 0, chance 0): `Generation::for_record` reads it
+**Early with no RF mode and strength 0.00** (fitted, agent decision; the F-5E's `F104.ECM` precedent), which
+`--sensor-summary` prints as `jammer TU95.ECM EARLY strength 0.00 (no RF mode)`. Devices leave from the
+shared standard outlet, 15 ft aft of the reference point and 2 ft under it (inside the 80 ft tail, as the
+B-52's). `--jammer-on` still lights `JAM` on the RWR window (the window's switch, not the record: nothing
+radiates), frame `countermeasures-chaff-flare-jammer`.
+
+### Sensors (T95-7)
+
+`--sensor-summary`: `Tu95: radar TU95R.SEE search 150 nmi 60x60 deg track 150 nmi 45x45 deg look-down 0
+TRANSITIONAL; infrared none; visual VIS300.SEE search 10 nmi 150x120 deg track 5 nmi 150x120 deg; jammer
+TU95.ECM EARLY strength 0.00 (no RF mode); signature radar 400 infrared 75`.
+
+Every sensor row against the real aircraft, none with a body and none a station:
+
+| Row | Record | Real Bear-H | Decision |
+| --- | --- | --- | --- |
+| `VIS300.SEE` | the transports' visual sensor | eyes | kept |
+| `TU95R.SEE` | the Tu-160's radar record renamed (43 bytes of names) | nose search and bombing radar (Clam Pipe, Jane's, T95-0) | kept; **Transitional** (below) |
+| `TU95.ECM` | dispensers 99/99, no jammer | pylon ECM pods and chaff (Jane's, T95-0); no figure | kept as the record reads |
+| `SU37L.SEE` | laser designator, fixed row (flags `0x1008`, origin) | none (inertial and terrain-reference missiles) | kept, **no body** (decision 9; B7) |
+
+No pod hangs anywhere: the bay mask `0x1180` and the pylon mask `0x1025` carry no designator bit (T95-5), so
+nothing can be loaded that the real aircraft lacks.
+
+- **Radar profile (agent decision, fitted, John to confirm):** `TU95R.SEE` was `UNREVIEWED (not enabled)`,
+  so the Bear flew with no radar and the AS-16 refused to launch (`NO TARGET`). It is `Preset::Transitional`
+  as `B52R.SEE` (the same Tu-160 record renamed; the AC-130 class: 100 ft/s Doppler notch, burn-through 8
+  nmi; `sensors::profile`, [radar](../radar.md#presets)). One line to revert. Modes are the shared
+  air-to-air ones (RWS 150 nmi, TWS track 150 nmi, scope 5 to 150, no infrared, no ground map: the shared
+  radar has none; the strike aids are the A-G designation of a radar contact and the sights). Frame
+  `tail-gun-side` shows `TWS 10 ... TRACK` with the F-22 in the radar window.
+- **RCS page (frames `rcs-page-closed`, `rcs-page-bay-open`):** `SIG 483` with the bay closed and `SIG 724`
+  with it open (record 400 with 16 AS-16 hung, the open-bay term of 1.5 on top; the HUD adds a `BAY` cue
+  while the doors are off their seat). The open bay reaches the RCS page only, as the F-22's, F-117's,
+  B-2's and B-52's.
+
+### HUD and cockpit (T95-7)
+
+- **HUD:** the record's `bmbroh.HUD` (the AC-130 module, panels `~AC130*`; byte-identical to the B-52's), the
+  AC-130 stem and `~AC130H.PIC` (1280 x 490). No Tu-95 cockpit art exists (T95-0). The HUD draws as the
+  B-52's: flight data, `TAIL 2000 23MMX1` for the slewed gun, the weapon and count, `NO TARGET`, `BAY` with
+  the doors open (frame `cockpit-front-view`, 90 degree looks `cockpit-look-left-45`).
+- **Glass aperture (measured):** `hud_aperture::mask` already holds the Tu-95 on the AC-130 arm (BMB-C1): the
+  one window the art has is the picture, so the polygon is the whole 1280 x 490 rectangle, trimmed by the
+  art's own opaque pixels, **not failing closed** (the HUD draws, frame `cockpit-front-view`). It is now
+  pinned for the Tu-95 (`hud_aperture::tests::the_tu95_glass_is_the_whole_ac130_picture_less_its_opaque_pixels`:
+  the rectangle, an opaque pixel left out, the same mask as the B-52's and Tu-26's, a 1394 x 508 picture
+  fails closed) and the retail-reading `crates/tore-import/tests/tu95_cockpit.rs` pins the bindings, the
+  four fixed sensor rows (flags `0x1008`, at the origin), the HUD's panel frame, the art size, the absence of
+  any `~TU95*` picture and the record's `viewOffset` (0, 20, 60).
+- **Eye (fitted, measured):** `mirrors::eye_offset` gains the Tu-95: **5 ft up and 53 ft ahead** of the model
+  origin (the shared seat is 7 up, 10 ahead). Measured on `TU95.SH` (2/3 ft a unit, the centre line): the
+  fuselage top is flat at 3.1 ft (4.7 units) from 45 ft aft of the origin to 48 ft ahead; the flight deck is
+  the nose ahead of that: a roof 3.3 ft up (5 units) from 47.3 to 51.3 ft ahead, the windscreen falling to 1.3
+  ft at 58.7 ft, the cone ending at 64 ft (the glazed faces are flat colours, no texture). The shared seat is
+  37 ft aft of the deck, over the wing. The seat is the deck's middle, 53 ft ahead, 1.7 ft over the roof (the
+  B-52's margin), so F2 Back clears the crown and looks down the aircraft to the fin (frame
+  `cockpit-view-back-f2`: the wings with the pylon missiles, the fin, the tail cone). The forward cockpit,
+  padlock and target camera do not read the eye (the forward camera sits at the origin).
+  `mirrors::tests::only_the_b2_the_f117_and_the_b52_have_their_own_pilot_eye` and
+  `flight_views::tests::back_from_a_b2_sits_at_its_own_seat` carry the Tu-95. The record's `viewOffset` is not
+  used.
+- **Propeller discs:** they hide neither the HUD nor the cockpit view. The forward view (camera at the origin,
+  the inboard disc plane 31.7 ft ahead, its inner edge 16 ft out of line) shows no disc; the 45 degree looks show none; the
+  F2 Back view from the deck shows the two inboard discs as grey blur at the outer 80 pixels of each side of the
+  1280 pixel picture, as they would stand beside a cockpit looking aft (frame `cockpit-view-back-f2`), clear of
+  the centre, the HUD (none draws on the rear views) and the windows. Not changed.
+- **Rear view:** F2 Back is the only rear view; the rear views carry no HUD, so no rear cue for the tail turret
+  exists (the B-52's open item 3, unchanged).
+
+### Tests
+
+`tore-sim`: `sensors::profile::tests::the_tu95_radar_is_transitional_and_its_jammer_is_early`;
+`tore-formats`: the Tu-95 default row in `aircraft_stations::tests` (row 8 `AS16.JT`); `tore-world`:
+`ai_wings::release::tests::an_ai_tu95_leaves_the_bay_and_the_beams_from_the_humans_places`; `tore-app`: the
+glass test and the eye tests above; `tore-import`: `tu95_cockpit.rs` (retail-reading, skips without media) and
+`bomber_batch_c.rs` (row 8 `AS16.JT` x10). Battery additions: `flight-tu95-tail-gun`,
+`flight-countermeasures-tu95`, `a2g-sarh-as16-tu95`, `a2g-release-origin-tu95`; `STATIONS["tu95"]` is `[2000, 6,
+10]`, so `flight-livefire-tu95-slot1` to `-slot3` and `flight-jettison-tu95-slot2` and `-slot3` run (slots 2 and
+3 refused).
+
+### Open for John
+
+1. **Default load of 16 AS-16** (six bay, ten beams) is the brief's; the loaded Bear is 388,894 of 414,470 lb.
+2. **Radar enabled as Transitional** (`TU95R.SEE`), and **`TU95.ECM` read as Early with no jammer** (the record
+   gives none; the real Bear-H carries ECM pods and "Ground Bouncer" jamming, T95-0). A fitted jammer would be
+   an invention; the alternative is to author one.
+3. **The T95-0 "no dispensers" reading was wrong**: the Bear has 99 chaff and 99 flares, leaving from the shared
+   standard outlet (inside the fuselage; the shared law puts every aircraft's at 15 ft aft).
+4. **`--jammer-on` lights `JAM`** on the RWR window though the record radiates nothing (shared window).
+5. **Eye 5 ft up, 53 ft ahead.** No rear cue for the tail turret (no rear-view HUD exists).
+6. **The AS-16 in the bay and on the beams are two Active radar missiles needing the A-G page**: no unguided
+   release exists for them (the Harpoon's rule).
+
+### Checks
+
+All through `.local/m3-imports/light3.sh`, profile `.local/m3-aircraft/profile-tu95` refreshed first, logs in
+`.local/m3-aircraft/checks/T95-6/`: see the plan's T95-6 and T95-7 entry for the counts.
+
+Provenance: radar and jammer records, the HUD module, panel names and cockpit art are spec-derived (retail);
+the radar preset, the jammer generation, the default load, the eye and the aperture's measurement are fitted or
+opinionated, agent decisions 2026-11-16 (the load the coordinator's brief); the shape measurements are from
+`TU95.SH`. No retail bytes are committed.
+
+## Tu-95 Bear-H flight review (T95-8, 2026-11-16)
+
+Implementation mode, slice T95-8 (bomber batch C), by an agent (Claude Sonnet). The Tu-95 flies the hybrid
+adapter's `variety` configuration built from `TU95.PT` with BMB-C2's real weights (empty 198,415 lb, tank
+148,150 lb, maximum takeoff 414,470 lb), the record's own G rows (-1 to +3), fuel flow (4 lb/s) and ceiling
+(40,750 ft). What changed is the thrust number, one new vertex in the 1 G speed edge, and six per-aircraft
+flight terms in the B-52H's way ([B52-8](#b-52-flight-review-b52-8-2026-11-15)). Every number below is
+**fitted**, an agent decision of 2026-11-16, unless it is a cited real figure. The coordinator's first pass
+(`BOMBERS-DECISIONS-C.md`, "BMB-C1/C2": "T95-8 owns the thrust number and the flight fit") applies; one of its
+numbers, the 129,000 lbf, changed for the reason in the first cause below. Logs and the probe scripts are local:
+`.local/m3-aircraft/checks/T95-8/` (`run_probes.sh`, `run_ground.sh`, `before/`, `after/`).
+
+### The real figures
+
+All read 2026-11-16 unless named. The game's own Jane's text is `TU95.INF` ("Bear-H" performance block; reference
+media, quoted by figure only).
+
+| Figure | Real | Source |
+| --- | --- | --- |
+| Maximum level speed, sea level | 350 kt | `TU95.INF` |
+| Maximum level speed, 25,000 ft | Mach 0.83, 499 kt (925 km/h) | `TU95.INF`; Wikipedia "Tupolev Tu-95" (Tu-95MS) |
+| Maximum level speed, 38,000 ft | Mach 0.78, 447 kt | `TU95.INF` |
+| Nominal cruise | 384 kt (`TU95.INF`), 380 kt (Wikipedia) | as listed |
+| Service ceiling | 39,370 ft normal, 29,850 ft with the maximum weapon load (`TU95.INF`); 45,000 ft (Wikipedia, "13,716 m"); 10,500 m (airforce-technology.com, Tu-95MS, 34,450 ft) | as listed |
+| Rate of climb | 2,000 ft/min (10 m/s, no weight or altitude stated) | Wikipedia "Tupolev Tu-95" (Tu-95MS) |
+| Takeoff speed | 162 kt | `TU95.INF` (at the 414,470 lb maximum) |
+| Landing speed, approximate | 146 kt | `TU95.INF`; maximum landing weight 297,620 lb (135 t) |
+| Takeoff run, landing run | 2,540 m (8,333 ft), 1,700 m (5,577 ft) | airforce-technology.com, "Tu-95MS strategic bomber" (185 t maximum takeoff, 135 t maximum landing) |
+| Range | 15,000 km (8,100 nautical miles) Wikipedia; 10,500 km (5,670 nautical miles, 14,100 km with one refuelling) airforce-technology.com | as listed |
+| Engines | 4 x NK-12MV, 11,033 kW (14,795 ehp) each | `TU95.INF`; Wikipedia "Kuznetsov NK-12" |
+| Roll rate | none found | (the record's roll limit applies) |
+
+No published static thrust, thrust at speed, climb time or fuel burn exists in a source that could be cited, as
+the T95-0 review found; the climb and range are therefore fitted to the rate of climb and range above, not to a
+curve.
+
+### Causes
+
+1. **The thrust number.** The record's 355,080 lbf was four times 14,795 shp times six, not a thrust. BMB-C2 set
+   129,000 lbf (the AC-130U's 2.18 lbf per shp). The model has one thrust number for takeoff, climb and cruise,
+   where a turboprop's falls with speed (the review's cited-formula estimate is 71,600 to 95,400 lbf at the 162
+   kt takeoff speed and 43,500 at 355 kt). With 129,000 the 388,894 lb takeoff needs a rolling term of about 9.8
+   ft/s squared to reach the published run (6.8 gave 5,708 ft), which makes the AI's taxi throttle 0.92: the wheels
+   nearly cancel the engines; **100,000 lbf** needs 4.8, the B-52H's fit (taxi throttle 0.58), sits just above the cited takeoff-speed range, and climbs at 1,800 to 2,700 ft/min
+   against the published 2,000. 100,000 is the record value now (`TU95_THRUST_LBF`, `aircraft_corrections.rs`;
+   [aircraft records](../spec/aircraft-records.md)).
+2. **The drag law.** The shared hybrid drag is the full thrust at the 1 G top-speed edge on the square law, times
+   one plus the loading times the record's 60 percent loaded drag. A full tank (loading 0.75) makes that 1.45 times
+   the thrust at the edge, so the aircraft topped out at 0.83 of the edge: 295 kt at sea level, a 1,530 ft/min
+   best climb and a highest altitude of 9,611 ft in the bomber schedule. At 400 kt at 25,000 ft it could not even
+   cruise: full throttle gave 359 kt.
+3. **The speed edge in the middle.** The 1 G fast edge ran in a straight line from 355 kt at sea level to 462 kt
+   at 36,000 ft, so 430 kt at 25,000 ft, 14 percent under Jane's 499 kt there.
+4. **No takeoff or landing drag.** As for the B-52: the shared takeoff has no flap, gear or induced drag and no
+   thrust lost with speed, so the 388,894 lb run was 3,535 ft against a published 8,333 ft at the maximum weight,
+   and the landing rollout was 1,373 ft.
+5. **Thrust lapse.** The shared `exp(-h / 70,000)` keeps 0.70 of the sea-level thrust at 25,000 ft; a turboprop's
+   power follows about the 0.8 power of the density ratio, 0.52 there.
+
+### The fitted terms
+
+| Term | Shared value | Tu-95 | Fitted against |
+| --- | --- | --- | --- |
+| Thrust, lbf | 355,080 (retail), 129,000 (BMB-C2) | 100,000 | cause 1: the cited takeoff-speed thrust range, a takeoff run near the published one with the B-52's rolling term, the published 2,000 ft/min |
+| Clean-drag shape (`DragShape`: 0.56 of the reference drag on the square law, the rest on the 12th power of speed over the edge) | square law | 0.56 / 12 | The cruise burn: 400 kt at 25,000 ft burns 2.29 lb/s, 380 kt 2.19 lb/s, so the range is about 7,100 nautical miles against the published 8,100 (Wikipedia) and the top speed is within 5 percent of the edge at the aircraft's usual weights. 1 at the edge. 0.39 of the thrust at 0.8 of the edge, about 0.5 at 0.87 |
+| 1 G fast edge at 25,000 ft | 430 kt (straight line) | 842 ft/s, 499 kt, Mach 0.83 | `TU95.INF`. One vertex in the record's 1 G polygon (the 0 G row 55 ft/s over it, the record's own step at 36,000 ft; every higher G row stays inside the 1 G edge). Sea level (355 kt, Jane's 350) and 36,000 ft (462 kt, Mach 0.81, Jane's 447 at 38,000 ft) stay |
+| Thrust lapse height | 70,000 ft | 38,000 ft | the turboprop power lapse, 0.52 at 25,000 ft. The cruise burn is the throttle fraction, so it does not move it |
+| Rolling and takeoff-run deceleration | 0.8 ft/s squared | 4.8 | a takeoff run of 7,417 ft at 388,894 lb (the published 8,333 ft is at 414,470 lb, the same run scaled by the square of the weight is about 7,330); carries flap and gear drag and the thrust the propellers lose with speed |
+| Wheel brake deceleration | 18 ft/s squared | 1.0 | the 337,041 lb landing rolls 4,429 ft against the published 5,577 ft (at 297,620 lb); at 292,744 lb 4,136 ft |
+| Ground alignment rate | 0.7 | 0.4 | the transports' value and the B-52's (BMB-A1 open item) |
+
+Not changed: the stall reference fraction (1; see "Takeoff and landing speed" below), the fuel flow (4 lb/s), the
+G rows, the roll limit, the ceiling (40,750 ft), the sea-level and 36,000 ft speed edges.
+
+Code: `crates/tore-sim/src/models/variety/tu95.rs` (the terms and their notes), `models/variety.rs` (the hook and
+the alignment), `crates/tore-formats/src/aircraft_corrections.rs` (`TU95_THRUST_LBF`, the `Tu95` arm of
+`fit_envelopes`). The `DragShape` hook is the B-52's; no shared law moved: the B-52's loose test that no other
+aircraft has a drag shape, a fitted lapse or a fitted rolling term now lists the Tu-95 beside it and passes, and
+`the_tu95_gains_one_mid_altitude_vertex_only_on_the_retail_rows` shows the edge moves for the Tu-95's identity
+and thrust only.
+
+### Before, after and real
+
+Weights: full is a full tank with no stores (346,565 lb), max adds the default load of 16 AS-16 (388,894 lb),
+typical is 300,000 lb (fuel 101,585, no stores). Ground figures are the ground start at the default load on a
+12,000 ft runway (Greece, airport 1) unless a column says otherwise. Logs: `.local/m3-aircraft/checks/T95-8/`.
+
+| Figure | Before | After | Real (source) |
+| --- | --- | --- | --- |
+| Level top speed, sea level (full / typical) | 295.2 / 310.7 kt | 332.8 / 339.5 kt | 350 kt (`TU95.INF`) |
+| Level top speed, 15,000 ft (full / typical) | 332.3 / 349.4 kt | 413.2 / 421.6 kt | none found |
+| Level top speed, 25,000 ft (full / typical) | 356.6 / 375.3 kt | 466.8 / 476.3 kt | 499 kt, Mach 0.83 (`TU95.INF`); the edge is 499 kt |
+| Level top speed, 36,000 ft (full / typical) | 383.6 / 403.8 kt | 432.4 / 441.2 kt | 447 kt at 38,000 ft, Mach 0.78 (`TU95.INF`) |
+| Cruise, 400 kt at 25,000 ft, throttle trimmed | 3.99 lb/s at full throttle (held 359 kt); 3,700 nautical miles | 2.29 lb/s, 7,174 nautical miles | cruise 380 to 384 kt; range 8,100 nautical miles (Wikipedia), 5,670 (airforce-technology.com) |
+| Cruise, 380 kt at 30,000 ft, throttle trimmed | 4.00 lb/s at full throttle (held 369 kt); 3,809 nautical miles | 2.19 lb/s, 7,134 nautical miles | as above |
+| Climb, best sustained rate (full / max / typical) | 1,530 / 1,560 / 1,499 ft/min | 2,175 / 1,805 / 2,713 ft/min | 2,000 ft/min (Wikipedia) |
+| Climb, time to 5,000 ft (full / max / typical) | 751 s / none / 362 s | 167 / 196 / 138 s | none found |
+| Climb, time to 20,000 ft / 30,000 ft (full) | not reached | 599 s / 1,001 s | none found |
+| Highest altitude in the bomber climb schedule (full / max / typical) | 9,611 / 130 / 15,653 ft | 40,395 / 39,616 / 40,476 ft | 39,370 ft normal, 29,850 ft with the maximum weapons (`TU95.INF`); 45,000 ft (Wikipedia). The record's 40,750 ft is unchanged |
+| Takeoff ground run to liftoff, 388,894 lb | 3,535 ft (GRE 1), 3,697 ft (UKR 1) | 7,417 ft (GRE 1), 7,762 ft (UKR 1) | 8,333 ft at 414,470 lb (airforce-technology.com), about 7,300 ft scaled to this weight |
+| Liftoff speed, 388,894 lb | 137.0 kt | 137.1 kt | 162 kt at 414,470 lb, about 157 kt scaled (`TU95.INF`) |
+| Takeoff, 342,329 lb (fuel 101,585) | 2,498 ft at 128.6 kt | 4,650 ft at 128.7 kt | none found |
+| Approach, 292,744 lb (fuel 52,000, about the maximum landing weight) | 147.4 kt, touchdown 124.3 kt, rollout 1,248 ft | 147.4 kt, touchdown 127.1 kt, rollout 4,136 ft | 146 kt at 297,620 lb (`TU95.INF`); run 5,577 ft |
+| Approach, 337,041 lb (the battery's 65 percent fuel) | 158.1 kt, touchdown 131.9 kt, rollout 1,373 ft | 158.1 kt, touchdown 135.0 kt, rollout 4,429 ft | about 155 kt scaled to this weight |
+| Sustained turn, held speed, full tank: 300 kt at 1,000 ft / 350 kt at 15,000 ft / 400 kt at 25,000 ft | 30 degrees (1.15 G) / none / none | 66 degrees (2.49 G) / 64 degrees (2.30 G) / 52 degrees (1.63 G) | none found |
+| Instantaneous pull (full aft stick) | 2.5 G | 2.5 G (G rows and loading unchanged) | none found |
+| Roll rate (full stick) | 23.6 deg/s | 23.6 deg/s | none found |
+| `--headless-flight 1200` level speed at 5,000 ft | 244.7 kt | 265.0 kt | none |
+
+### Takeoff and landing speed (not refitted)
+
+The model's liftoff speed is the weight-scaled stall speed times its takeoff rule, 137 kt at 388,894 lb, against
+Jane's 162 kt at 414,470 lb (about 157 kt scaled to the default load), 13 percent under. The approach, from the
+same stall rule, is 158.1 kt at 337,041 lb against about 155 kt scaled from Jane's 146 kt, 2 percent over, and
+147.4 kt at 292,744 lb against 146 at 297,620. One stall reference cannot give both the takeoff and the landing,
+and the landing is the one the scripted approach and the AI use, so the stall was left alone (the B-52's
+`stall_reference_fraction` moved only its landing). A fraction of 0.85 would put the liftoff at 149 kt and the
+approach at 171 kt. John can choose.
+
+### Heavy-class AI laws (BMB-AI)
+
+The takeoff climb-out wait and the flaps law of BMB-AI apply to aircraft whose flaps-up minimum is above
+190.5 kt. The Tu-95's flapped minimum at the default load is 136.5 kt, so the flaps-up minimum is about 182 kt
+(the flap factor is 0.75), under the threshold: those two laws are bit for bit the shared ones for the Tu-95.
+The taxi law does apply: the rolling term of 4.8 ft/s squared makes the throttle that balances the wheels 0.58 at
+the default load, so `taxi_throttle_of` raises the taxi throttle floor, as for the B-52. Two scenarios were added
+and pass: `ai-heavy-takeoff-tu95-gre-a1` (Athens, 12,000 ft; airborne and climbing out) and
+`ai-heavy-land-tu95-ukr-a2` (Simferopol, 60,000 lb of fuel; touchdown 121 kt). The landing parks at 603.2 s, 3 s past
+the 600 s the other heavies' scenarios run, with 445 ticks (3.7 s) off the pavement in the taxi-in (the B-52's is
+1,201), so the Tu-95's runs 90,000 ticks and tolerates the off-pavement ticks the way the B-52's does. (Update, T95-9,
+2026-11-16: after B52-9's coasting law the 445 became 1,357; T95-9's stopping law took it to 0, parked at 599.9 s, and
+the scenario now demands the pavement; see
+[Tu-95 AI, missions, multiplayer and replay](#tu-95-bear-h-ai-missions-multiplayer-and-replay-t95-9-2026-11-16).)
+The AI's own handling of the Tu-95 (strike, quick mission) is T95-9's.
+
+### Engine and propeller model: the limit
+
+No per-aircraft thrust that falls with speed exists, and none was added: it is a new shared concept. The single
+number is fitted for takeoff and climb (100,000 lbf), the drag shape for the cruise, and the rolling term for the
+run. Consequences: the thrust is the same at every speed, so the climb at 400 kt is stronger than a real turboprop's,
+the level top speed is where the drag shape meets the throttle (about 0.93 to 0.99 of the edge, by weight), and the
+number means roughly the propellers' thrust at the takeoff speed. The engine count is the record's 4 (the Tu-95 has four engines, unlike the B-52).
+
+### Open for John
+
+1. **Thrust 100,000 lbf, not the first pass's 129,000.** A fit to takeoff and climb with no cited thrust curve.
+   129,000 works for the climb (2,100 to 2,500 ft/min) but the takeoff run then needs a rolling term of about 9.8
+   ft/s squared (the AI taxi throttle 0.92). Which?
+2. **The 1 G edge at 25,000 ft raised to 499 kt** (Jane's Mach 0.83). It is a record change, **fitted**; the first
+   pass said the speeds stay. Without it the aircraft reaches 430 kt at 25,000 ft.
+3. **Liftoff 137 kt against Jane's 162 kt** (13 percent under) and approach 158 kt (2 percent over): one stall rule
+   serves both. A fraction of 0.85 splits the difference (149 and 171 kt).
+4. **Takeoff and landing runs** rest on one source (airforce-technology.com's 2,540 m and 1,700 m), at the
+   maximum weights. The brake term (1.0 ft/s squared) is below the rolling term (4.8), as the B-52's (2.6 and 4.8);
+   a hands-off rollout stops sooner than a braked one.
+5. **Range** 7,100 nautical miles (steady burn from a full tank, no weight loss) against 8,100 (Wikipedia) or 5,670
+   (airforce-technology.com): the fuel flow (4 lb/s at full throttle) stays.
+6. **Ceiling** 40,750 ft kept (the climb schedule gets to 39,600 to 40,500 ft). Jane's 29,850 ft with the
+   maximum weapon load is not modelled: the model's ceiling does not fall with the stores.
+7. **Roll rate** 23.6 deg/s is the record's limit; no real figure was found.
+8. **The model has no thrust that falls with speed or propeller efficiency** (see above).
+
+### Checks
+
+All through `.local/m3-imports/light3.sh`, profile `.local/m3-aircraft/profile-tu95` refreshed first, logs in
+`.local/m3-aircraft/checks/T95-8/`: see the T95-8 entry in `.local/m3-aircraft/PLAN-T95.md` for the counts.
+
+Provenance: the real figures are cited above (Jane's text in `TU95.INF`, Wikipedia "Tupolev Tu-95" and "Kuznetsov
+NK-12", airforce-technology.com "Tu-95MS strategic bomber"); the thrust, drag shape, edge vertex, lapse,
+rolling and brake terms and the alignment are fitted, agent decisions of 2026-11-16. No retail bytes are committed.
+
+## Tu-95 Bear-H AI, missions, multiplayer and replay (T95-9, 2026-11-16)
+
+Implementation and verification mode, slice T95-9 (the Tu-95's counterpart of B52-9, B2-9 and F117-9). The AI
+work was asked for by John through the program (AGENTS.md: no AI work unless John asks). Everything here is
+`fitted`, agent decisions of 2026-11-16, except where a number is a record's. The shared heavy-bomber rules of
+[BMB-AI](#ai-fixes-for-the-bombers-bmb-ai-2026-11-16) and the B-52's two airfield laws of
+[B52-9](#b-52-ai-missions-multiplayer-and-replay-b52-9-2026-11-16) (a 3,000 ft final lookahead and a coast over
+the taxi speed, both gated on `Situation::taxi_throttle_floor > 0`, which the Tu-95 meets at 0.58) carry the
+Tu-95; this slice adds one more gated airfield law, scenarios and one unit test.
+
+### The taxi-in is now clean (one more gated airfield law)
+
+T95-8 left the heavy landing with 3.7 s off the pavement and a 90,000 tick run. After the merge with B52-9 the
+landing at Simferopol (60,000 lb of fuel) had **1,357 ticks (11.3 s) off the pavement at two anchors** (legs 2
+and 4 of the taxi-in), and parked at 607.1 s. The cause was the one B52-9 found in the B-52's taxi-in, one step
+later: the Tu-95's brakes are weak (1.0 ft/s squared, T95-8), so it rolled 20 to 30 ft past an anchor it had
+been told to stop at, and while stopping it steered for the anchor *behind* it, turned 150 degrees at 5 kt and
+swung 30 ft off the taxiway before the next leg began.
+
+The law (`ai/airfield.rs`, `Sequence::command`): while `stopping` at an anchor, an aircraft with
+`taxi_throttle_floor > 0` steers along the leg's own course (the bearing from the leg's start to its anchor)
+instead of the bearing from where it is to the anchor. A fighter, a transport or any aircraft with no floor
+steers as before, so their runs are unchanged. Unit test
+`a_heavy_stopping_past_an_anchor_holds_the_legs_course`. Result at Simferopol: **0 of 57,086 ground ticks off the
+pavement, parked at 599.9 s** (was 1,357 and 607.1 s). The Southampton cycle (`ai-merged-airfield-b52-wing2`) is
+unchanged bit for bit, parked at 1,177.5 s.
+
+**The baseline comparison** (the brief's: ai-takeoff, ground, theater, records-land, merged-airfield, ils-terrain,
+taxi and lost-lead, plus every `ai-heavy-*`: 170 scenarios) on the binary before this slice's change (the merge
+`e3be7164`) and after it, `--jobs 3`, logs compared line for line apart from the command and the clock:
+**165 identical, 5 different**. The five: the two Tu-95 scenarios (the point of the change: before, 1,357 and 433
+ticks off the pavement and `FAIL` against the tightened check; after, 0 and `pass`), `ai-ils-terrain-fra-a9` (its
+only difference is the session clock; it fails the same way on both, `land order was never given`, a failure that
+predates this slice), and the **two B-52 scenarios**, which the law reaches because the B-52 has a taxi floor too:
+`ai-heavy-land-b52-ukr-a2` parks at the same spot 0.9 s earlier (533.2 s against 534.1 s) and
+`ai-merged-airfield-b52-wing2` parks at the same spot 5 ticks later (141,302 against 141,297); both still pass with 0
+ticks off the pavement. The B-1B and Tu-160 (no taxi floor) are bit-identical in a ground takeoff with a land order at
+Southampton on both binaries (`checks/T95-9/cyc/`). Logs: `.local/m3-aircraft/checks/T95-9/cmp-base/`, `cmp-new/`,
+`compare.txt`.
+
+### The AI strike from the bay (and the beams)
+
+`--a2g-run UKR QUCOL --pilot ai --aircraft tu95 --load MK82 --station 1 --count 6` (the Tu-95's bay row is
+station 1, the wing beams station 2; the beams take the AS-16 only, so there is no bomb stick from them). The
+B-2's and B-52's stick rules needed no change:
+
+| Run | What the log shows |
+| --- | --- |
+| Six Mk 82 in the belly bay, 20,000 ft, 12 nm | `BAY` open at 81.7 s (0.96), six releases 82.2 to 83.5 s, 0.25 s apart, each `bay=1.00`, from right -1.95, 1.95, -0.65, 0.65 ft (front row, 16.19 ft forward) then -1.95 and 1.95 ft (back row, 8.64 ft forward), up -2.98 ft; the doors read shut at 85.4 s, 1.95 s after the last; impacts at 118.8 to 119.9 s, 184 to 719 ft from the aim (the stick walks on, as the B-2's and B-52's do); egress at 131.4 s; not lost. The human's own run leaves from the same six places (`a2g-run --station 1`, checked by hand) |
+| Quick Mission, factory target, `--quick-wing` | `ROLE strike` for the wing (the bomber-class default), doors open at 285.0 s, the same six leave at 5,007 ft and 193 kt, the factory is destroyed (0 of 100 left), egress at 322.7 s |
+| Two AS-16 on the bay row or the beams against the Krivak (`ai-strike-tu95-antiship`, `-antiship-beams`) | **A known limit, pinned.** The AI selects the Krivak with the radar missile (`SELECTION kind=RadarAgm`), flies at it, and has released nothing at 90 s; the doors never move. Run on, it turns to defend at 123 s and is hurt from 140 s |
+
+**Why the AS-16 never leaves** (no code changed; the evidence is in `.local/m3-aircraft/checks/T95-9/strike-as16-*.log`):
+
+1. The AI fires a seeker missile inside half its zone-1 maximum (20,000 ft slant for the AS-16's 6.58 nmi, 39,990
+   ft) and only with the target inside the zone's angles and altitude band
+   (`ai_wings/strike.rs`, `seeker_lock`). At 20,000 ft the slant is never under 19,993 ft, so the run never
+   comes due; the AI's bay doors open (`COMMIT open=yes`) and shut again over a cargo ship with no release.
+2. Lower, the fleet ends it first. The Ukraine and Vladivostok fleets' defences kill the 393 hit point Tu-95
+   from about 25,000 to 30,000 ft out (a Krivak, a Kirov, a Sovremennyy and the Jianghus all carry missiles and
+   guns): over `~QUSFLT`, `~QULFLT` and `~QVSFLT` at 3,000, 8,000, 10,000, 12,000 and 20,000 ft (and from four
+   headings at the Vladivostok support ship) it was lost 52 to 90 s in with no release. The cargo-ship stem
+   `~QWTCARG` of the WTA theater has no ship defences but is ringed by SA-6 and AAA sites that end a Tu-95 at
+   1,500 and 10,000 ft too; at 12,000 to 17,000 ft it flies over the ship (closest 105 to 156 ft) and releases
+   nothing.
+3. The B-52's AGM-84E sinks the Krivak from 15 nm because the Harpoon outranges the fleet; the AS-16 does not.
+   Real Kh-15 range is about 150 km; the retail record's 6.58 nmi is a weapon-data question outside this slice
+   (see the T95-0 note on the Kh-15).
+
+Open item for John: give the AS-16 a longer reach (a record edit), or let the heavy AI drop to the missile's band
+when no defence covers the target.
+
+### The AI in a 2 v 2 (the tail turret)
+
+`ai-tu95-quick-mission-2v2` flies every wing as the Tu-95 (Heavy strike class, the slewed tail turret, 6 AS-16
+in the bay and 10 on the beams): the probe's usual checks hold, every Tu-95 still holds all sixteen AS-16 (a
+surface missile is refused against an aircraft) and the tail guns shoot (**263 shots in 7,200 ticks, 230 by
+4,800**). `ai-tu95-vs-su27-2v2` flies the Tu-95 wing against two Su-27s (8 shots; the probe's usual checks hold
+whoever wins).
+
+### Quick Mission, multiplayer, replay
+
+- **Quick Mission.** `the_tu95_is_a_quick_mission_player_and_a_wing_choice` (`quick_mission.rs`) pins that the
+  Tu-95 is the player's choice and every AI wing field's, by its own key `TU95.PT` and name "Tu- 95 Bear-H"
+  (retail's spacing), that the drafted mission carries it as the player and in every wing and never another
+  bomber, and that the stealth night rule is not its. `ai-strike-tu95-quick-wing` is the live run above.
+- **Multiplayer.** `net-a2g-stores-tu95`: both players in Tu-95s, `tore-bot --a2g bomb --load MK82.JT` (the bay
+  row is the only station that takes a Mk 82): the watcher sees a Mk 82 leave plane 0, its stores empty, the bay
+  stores drawn (3, from 7 stores events of 76 bytes, the largest 16) and plane 0's bay doors at 1.00. The tail
+  turret is not covered over the wire: `tore-bot` has no gun role (the B-52's limit).
+- **Replay.** `replay-rec-tu95-2v2` records the all-Tu-95 2 v 2 (4,800 ticks, with the turret's rounds in
+  flight) three times: `--verify-render` passes with nothing missing or differing and two runs record the same.
+  `replay-a2g-tu95-ripple` records the six-Mk 82 bay ripple (`--station 1 --count 6 --repeat 6 --gap 0.5`), 6,154
+  ticks compared with none missing or differing, read back as six releases and outcomes, with the recorded bay
+  device shut at both ends and at 0.95 or more at every release.
+
+### Not done, open
+
+- The AS-16 limit above, and with it any AI anti-ship strike by the Tu-95.
+- The AI Tu-95 at the heavy floor and the missile's zone altitude band were not traced further.
+- The turret over the wire (no `tore-bot` gun role).
+- The Tu-95 at 388,894 lb needs 7,417 ft to take off (T95-8): a 5,532 ft field overruns it, as BMB-AI item 2
+  says of the B-52. Unchanged.
+
+Provenance: the airfield law, the scenarios and their windows are fitted agent decisions of 2026-11-16; the
+stations, ordnance and AS-16 record are T95-5 to T95-7's; no retail bytes are committed.

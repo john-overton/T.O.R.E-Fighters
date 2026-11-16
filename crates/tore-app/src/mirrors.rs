@@ -204,6 +204,18 @@ const DEFAULT_EYE: [f64; 2] = [7., 10.];
 /// middle, 56 ft ahead, 7 ft up: 1.7 ft over the 5.33 ft crown (the B-52's
 /// margin), so the back view clears the spine and looks down the length of
 /// the aircraft to the fin and the nozzles.
+///
+/// Tu-95 (T95-7, 2026-11-16, fitted from the shape: `TU95.SH` at 2/3 ft a
+/// unit): the fuselage top is flat at 3.1 ft (4.7 units) from 45 ft aft of the
+/// origin to 48 ft ahead of it. The flight deck is the nose forward of that:
+/// a roof 3.3 ft up (5 units) from 47.3 to 51.3 ft ahead, then the windscreen
+/// falling to 1.3 ft (2 units) at 58.7 ft and the nose cone ending 64 ft
+/// ahead. The shared seat (10 ft ahead, 7 ft up) is 37 ft aft of the deck and
+/// 3.9 ft over the crown, so F2 Back already cleared the spine but looked out
+/// from the middle of the wing, not the cockpit. The seat is the middle of
+/// the deck, 53 ft ahead, and 5 ft up: 1.7 ft over the roof (the B-52's
+/// margin), so the back view looks over the crown and down the length of the
+/// aircraft to the fin, past the four propeller discs.
 pub(crate) fn eye_offset(id: Option<AircraftId>) -> [f64; 2] {
     match id {
         Some(AircraftId::B2) => [10., 20.],
@@ -213,6 +225,7 @@ pub(crate) fn eye_offset(id: Option<AircraftId>) -> [f64; 2] {
         Some(AircraftId::Tu160) => [12., 71.],
         Some(AircraftId::F111) => [5., 25.],
         Some(AircraftId::Tu26) => [7., 56.],
+        Some(AircraftId::Tu95) => [5., 53.],
         _ => DEFAULT_EYE,
     }
 }
@@ -539,11 +552,12 @@ mod tests {
         }
     }
 
-    /// B2-7, F117-7, B52-7 and T26-7: only the B-2, the F-117, the B-52 and
-    /// the Tu-26 have a seat of their own; every other aircraft, and an
-    /// unknown type, keeps the shared one (7 ft up, 10 ft ahead).
+    /// B2-7, F117-7, B52-7, B1B-7, T160-7, F111-7, T26-7 and T95-7: only the B-2,
+    /// the F-117, the B-52, the B-1B, the Tu-160, the F-111F, the Tu-26 and the Tu-95
+    /// have a seat of their own; every other aircraft, and an unknown type, keeps
+    /// the shared one (7 ft up, 10 ft ahead).
     #[test]
-    fn only_the_b2_the_f117_the_b52_the_b1b_the_tu160_the_f111_and_the_tu26_have_their_own_pilot_eye() {
+    fn only_the_bombers_with_a_drawn_flight_deck_have_their_own_pilot_eye() {
         for id in AircraftId::ALL {
             let want = match id {
                 AircraftId::B2 => [10., 20.],
@@ -553,6 +567,7 @@ mod tests {
                 AircraftId::Tu160 => [12., 71.],
                 AircraftId::F111 => [5., 25.],
                 AircraftId::Tu26 => [7., 56.],
+                AircraftId::Tu95 => [5., 53.],
                 _ => [7., 10.],
             };
             assert_eq!(eye_offset(Some(id)), want, "{id:?}");
@@ -610,6 +625,13 @@ mod tests {
         let tu26 = at(Some(AircraftId::Tu26));
         for i in 0..3 {
             let moved = (tu26[i] - shared[i]) - forward[i] * 46.;
+            assert!(moved.abs() < 1e-9, "axis {i}");
+        }
+        // The Tu-95 (T95-7): 2 ft lower and 43 ft further forward (the drawn
+        // flight deck), 1.7 ft over its 3.3 ft roof.
+        let tu95 = at(Some(AircraftId::Tu95));
+        for i in 0..3 {
+            let moved = (tu95[i] - shared[i]) - (-up[i] * 2. + forward[i] * 43.);
             assert!(moved.abs() < 1e-9, "axis {i}");
         }
     }

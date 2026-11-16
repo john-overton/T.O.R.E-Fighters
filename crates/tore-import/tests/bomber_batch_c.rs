@@ -76,7 +76,8 @@ fn the_three_records_parse_as_their_own_identities_with_their_station_tables() {
                 ("", 2_000),
                 ("", 2_000),
                 ("AS16.JT", 6),
-                ("", 10),
+                // The pylon row starts loaded with its ten AS-16 (T95-6).
+                ("AS16.JT", 10),
             ],
         ),
         (
@@ -174,18 +175,34 @@ fn the_corrected_records_carry_the_real_figures_and_station_flags() {
     );
 
     let tu95 = read(AircraftId::Tu95);
-    assert_eq!(n(&tu95, "thrust"), 129_000);
+    assert_eq!(n(&tu95, "thrust"), 100_000);
     assert_eq!(
         (n(&tu95, "weight"), n(&tu95, "internalFuel")),
         (198_415, 148_150)
     );
     assert_eq!(n(&tu95, "maxTakeoffWeight"), 414_470);
+    // T95-8: the 1 G fast edge gains a vertex at 25,000 ft, 842 ft/s (499 kt),
+    // and keeps the record's 600 ft/s at sea level and 780 at 36,000 ft.
+    let fast = |g: i32, altitude: f64| {
+        tu95.envelopes
+            .iter()
+            .find(|e| e.g == g)
+            .unwrap()
+            .speeds(altitude)
+            .unwrap()
+            .1
+    };
+    assert_eq!(
+        (fast(1, 0.), fast(1, 25_000.), fast(1, 36_000.)),
+        (600., 842., 780.)
+    );
+    assert_eq!(fast(0, 25_000.), 897.);
     assert_eq!(
         (n(&tu95, "maxAlt"), n(&tu95, "fuelConsumption")),
         (40_750, 4)
     );
     let pylons = &tu95.hardpoints[stations::TU95_WING_PYLONS];
-    assert_eq!(pylons.position, [36, -6, 35]);
+    assert_eq!(pylons.position, [36, -6, 27]);
     assert_eq!(
         (pylons.flags, pylons.count, pylons.weight_class),
         (0x1025, 10, 0)

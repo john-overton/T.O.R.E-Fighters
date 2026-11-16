@@ -22,6 +22,8 @@ AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su2
 VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310", "mig25", "f16a", "mig31", "m2000", "f15e", "gripen", "f5e", "mf1", "tornado", "tornadoc", "b52", "b2", "f117", "f111", "b1b", "tu160"]
 # The Tu-26 Backfire-C joins the variety flight (T26-8, 2026-11-16).
 VARIETY_AIRCRAFT += ["tu26"]
+# The Tu-95 Bear-H joins the variety flight (T95-8, 2026-11-16).
+VARIETY_AIRCRAFT += ["tu95"]
 # Aircraft whose PT disables spins (X-31 flag, F-22 family): they never enter one.
 SPIN_IMMUNE = {"x31", "f22", "f22n", "faxx"}
 
@@ -142,6 +144,13 @@ STATIONS["f111"] = [2, 2, 4, 2, 0, 0, 0]
 # pair (row 7) and the outer glove pair (row 8), two each. The bay row (5) starts empty and keeps an empty
 # AS-16 selection, so one never-loaded slot follows.
 STATIONS["tu26"] = [2000, 2, 2, 2, 0]
+# The Tu-95 Bear-H (T95-5, 2026-11-16): the tail turret (row 3, 2,000 rounds, now at the drawn
+# tail cone), the six default AS-16 in the belly bay (row 7) and the pylon row (row 8, ten
+# AS-16, empty by default and keeping an empty AS-16 selection). Rows 5 and 6 (the Bear-A to F
+# turrets) hold nothing and are not stations.
+# Update (T95-6, 2026-11-16): the pylon row now starts loaded with its ten AS-16 (the default load
+# is 16, six in the bay and ten on the beams), so it is a third live slot.
+STATIONS["tu95"] = [2000, 6, 10]
 
 
 def _numbers(output: str, prefix: str) -> dict:
@@ -267,6 +276,10 @@ TAKEOFF_RUN_TICKS = {"b2": "12000", "b52": "18000"}
 # 5,512 ticks (46 s), so it runs 9,000 ticks like the ordinary aircraft and allows 7,000 (B1B-8,
 # 2026-11-16, agent decision); 4,500 would fail it.
 TAKEOFF_TICKS_MAX["b1b"] = 7000
+# The Tu-95's 7,400 ft run at its 388,894 lb default gross takes 8,200 ticks
+# (T95-8, 2026-11-16): its scenarios run 18,000 ticks and allow 10,000.
+TAKEOFF_TICKS_MAX["tu95"] = 10000
+TAKEOFF_RUN_TICKS["tu95"] = "18000"
 
 
 def check_takeoff(output: str, ac: str | None = None) -> list[str]:
@@ -502,6 +515,21 @@ THEATER_FOR = {"b52": "GRE", "b1b": "GRE"}
 # The Tu-160's landing roll is 4,100 ft from a 1,470 ft touchdown (T160-8, 2026-11-16): UKR airport 1 (5,532 ft) is
 # too short, so its liftoff and approach scenarios start from Athens (GRE 1, 12,000 ft) like the B-52H's.
 THEATER_FOR["tu160"] = "GRE"
+# The Tu-95's run (7,400 ft) is also longer than UKR airport 1 (5,532 ft): Greece airport 1 (T95-8).
+THEATER_FOR["tu95"] = "GRE"
+# The Tu-95 Bear-H (T95-8, 2026-11-16; agent decisions, fitted windows). The game's own Jane's text
+# (`TU95.INF`, Bear-H) gives a takeoff speed of 162 kt (at the 414,470 lb maximum, about 157 kt scaled to the
+# 388,894 lb default load) and a landing speed of about 146 kt (at the 297,620 lb maximum landing weight, about
+# 155 kt at the scenario's 337,000 lb). The model's weight-scaled stall gives 137.1 kt after 7,417 ft at the
+# default load (GRE 1; the published takeoff run is 2,540 m, 8,333 ft, at the maximum weight) and an approach of
+# 158.1 kt (touchdown 135.0 kt, rollout 4,429 ft; the published landing run is 1,700 m, 5,577 ft, at the
+# maximum landing weight). The liftoff speed is 13 percent under Jane's: the stall is not refitted, because
+# the same weight-scaled stall sets the approach, which is within 2 percent. The windows bracket the Jane's
+# figure and the recorded one, so a change in either direction shows.
+LIFTOFF_TARGET["tu95"] = (135, 165)
+APPROACH_TARGET["tu95"] = (145, 170)
+KNOWN_LIFTOFF["tu95"] = 137.1
+KNOWN_APPROACH["tu95"] = 158.1
 # Internal fuel of each aircraft's default load, pounds.
 INTERNAL_FUEL_LB = {
     "f18": 11220, "rafale": 9900, "f14": 15741, "a4e": 4434, "x31": 9975, "mig29": 13000, "su27": 19000,
@@ -546,6 +574,8 @@ INTERNAL_FUEL_LB["f117"] = 18500
 INTERNAL_FUEL_LB["b1b"] = 265274
 # F111.PT internal fuel, 32,663 lb (BMB-B2: the record's 5,025 gallons at 6.5 lb a gallon).
 INTERNAL_FUEL_LB["f111"] = 32663
+# TU95.PT internal fuel, 148,150 lb (BMB-C2, the Tu-95MS tank; the approach scenario flies 65 percent, 96,298 lb).
+INTERNAL_FUEL_LB["tu95"] = 148150
 APPROACH_FUEL_CAP_LB = 100000
 
 # The Tu-26 Backfire-C (T26-8, 2026-11-16; agent decisions, fitted windows). The
@@ -716,6 +746,8 @@ LIFTOFF_AIRCRAFT += ["tu160"]
 LIFTOFF_AIRCRAFT += ["f111"]
 # The Tu-26 Backfire-C joins them (T26-8, 2026-11-16).
 LIFTOFF_AIRCRAFT += ["tu26"]
+# The Tu-95 joins them (T95-8, 2026-11-16).
+LIFTOFF_AIRCRAFT += ["tu95"]
 
 
 def liftoff_scenarios() -> list[Scenario]:
@@ -1378,6 +1410,11 @@ REFUSED_SLOTS = {
     # 2026-11-16): the three default rows (slots 2 to 4) refuse the practice aircraft. The
     # `a2g-sarh-as16-tu26` runs fire them from a glove row and from the bay at a target on the ground.
     ("tu26", 2), ("tu26", 3), ("tu26", 4),
+    # The Tu-95's AS-16 rows, the bay (slot 2) and the pylon beams (slot 3), are surface missiles
+    # (T95-6, 2026-11-16): the Bear has its radar now, so they want a surface target. The
+    # `a2g-sarh-as16-tu95` scenario launches one from each against the lead truck.
+    ("tu95", 2),
+    ("tu95", 3),
 }
 
 
@@ -1546,6 +1583,31 @@ def slot_scenarios() -> list[Scenario]:
             timeout=300,
             notes="Tu-160 bay release: the doors open before the AS-16 leaves and close after it, as the F-22's and B-2's do (T160-5).",
         ))
+    # T95-5 (2026-11-16): the Tu-95's fitted belly bay (row 7) through the same actual one-press
+    # release with six Mk 82 (the default AS-16 needs a target the preview does not give it): the
+    # doors open to 0.95 before the bomb leaves, then close; the pylon row 8 takes the AS-16 only.
+    out.append(Scenario(
+        name="flight-bay-fire-tu95-row7", lane="flight",
+        args=["--stores-preview", "{work}/frames"], window=True,
+        env={"TORE_STORES_PREVIEW_AIRCRAFT": "tu95",
+             "TORE_STORES_PREVIEW_RECORDS": "7=MK82.JT:6",
+             "TORE_STORES_PREVIEW_FUEL": "100000",
+             "TORE_STORES_PREVIEW_FIRE": "7"},
+        expect=["Stores firing: tu95 row=7 PASS"],
+        outputs=["frames/tu95-fire-row7-t000.png", "frames/tu95-fire-row7-t400.png"],
+        timeout=300,
+        notes="Tu-95 bay release: the doors open before the Mk 82 leaves and close after it, as the F-22's and the B-52's do.",
+    ))
+    out.append(Scenario(
+        name="flight-bay-fire-tu95-pylon-row8", lane="flight",
+        args=["--stores-preview", "{work}/frames"], window=True,
+        env={"TORE_STORES_PREVIEW_AIRCRAFT": "tu95", "TORE_STORES_PREVIEW_FIRE": "8",
+             "TORE_STORES_PREVIEW_RECORDS": "8=AS16.JT:10", "TORE_STORES_PREVIEW_FUEL": "100000"},
+        expect=["Stores firing: tu95 row=8 PASS"],
+        outputs=["frames/tu95-fire-row8-t000.png", "frames/tu95-fire-row8-t400.png"],
+        timeout=300,
+        notes="Tu-95 pylon release: an AS-16 leaves the underwing beam with the bay doors shut (ten loaded, five a wing; the row takes the AS-16 alone).",
+    ))
     out.append(Scenario(
         name="flight-bay-fire-b52-pylon-row7", lane="flight",
         args=["--stores-preview", "{work}/frames"], window=True,
@@ -1825,8 +1887,26 @@ def countermeasure_scenarios() -> list[Scenario]:
     out.append(Scenario(name="flight-countermeasures-tu26", lane="flight", args=args, window=True,
                         check=check_countermeasures, timeout=180,
                         notes="The Tu-26's TU26.ECM row: its chaff and flares, five and three released (T26-6)."))
+    # T95-6 (2026-11-16): the Tu-95's own `TU95.ECM` carries 99 chaff and 99 flares like the B-52's
+    # (the source review read the Tu-160 record's 30 and 40 as counts: they are the radar and
+    # infrared deception chances, and the Tu-95's are zero), with no radio-frequency or infrared jammer.
+    args = ["--live-fire", "--aircraft", "tu95"] + ["--combat-command", "chaff"] * 5
+    args += ["--combat-command", "flare"] * 3
+    args += ["--countermeasure-preview", "240", "--capture-flight", "{work}/cm.ppm", "--no-audio"]
+    out.append(Scenario(name="flight-countermeasures-tu95", lane="flight", args=args, window=True,
+                        check=check_tu95_countermeasures, timeout=180,
+                        notes="The Tu-95's retail TU95.ECM: 99 chaff and 99 flares, five and three released, no jammer (T95-6)."))
     out.extend(tornado_countermeasure_scenarios())
     return out
+
+
+def check_tu95_countermeasures(output: str) -> list[str]:
+    """The shared dispenser check, and the Tu-95's record: 99 of each."""
+    problems = check_countermeasures(output)
+    m = re.search(r"capacity_chaff=(\d+) capacity_flares=(\d+)", output)
+    if not m or (int(m.group(1)), int(m.group(2))) != (99, 99):
+        problems.append(f"capacities {m.groups() if m else None}, want 99 chaff and 99 flares")
+    return problems
 
 
 def _origins(output: str) -> tuple[list[float] | None, list[tuple[str, list[float]]]]:
@@ -2456,7 +2536,7 @@ def capture_scenarios() -> list[Scenario]:
     for ac in AIRCRAFT:
         add(f"groundstart-{ac}", ["--free-flight", "--aircraft", ac, "--theater", "UKR", "--ground-start", "9", "--flight-view", "1", "--flight-look", "150,-15", "--flight-zoom", "1.5"])
     # T26-5 (2026-11-16): the Tu-26's fitted bay joins the bay-door poses (closed, half, open).
-    for ac in ("f22", "f22n", "b52", "f117", "b2", "b1b", "tu160", "f111", "tu26"):
+    for ac in ("f22", "f22n", "b52", "f117", "b2", "b1b", "tu160", "f111", "tu26", "tu95"):
         for bay in ("0", "0.5", "1"):
             add(f"bay-{ac}-{bay}", ["--free-flight", "--aircraft", ac, "--flight-view", "1", "--flight-look", "150,-30", "--flight-bay", bay])
     return out
@@ -2919,6 +2999,23 @@ def fight_scenarios() -> list[Scenario]:
                   "player); with BMB-AI's aim error, lag and swing rate a few rounds hit (4 of 253).",
         )
     )
+    # T95-6 (2026-11-16): the Tu-95's tail turret (the cone's point, slewed aft, 2,000 rounds of
+    # the twin 23 mm) through the same BMB-AI aim model: aim error, lag and swing rate.
+    out.append(
+        Scenario(
+            name="flight-tu95-tail-gun",
+            lane="flight",
+            args=[
+                "--aircraft", "f22", "--probe-enemy-aircraft", "tu95", "--probe-enemy-skill", "ace",
+                "--probe-geometry", "rear", "--separation", "1", "--probe-guns",
+                "--ai-probe-ticks", "3000", "--no-audio",
+            ],
+            check=tu95_tail_gun_problems,
+            timeout=600,
+            notes="T95-6: an AI Tu-95's slewed twin 23 mm tail turret fires astern at a fighter in its rear arc "
+                  "(enemy_gun hits on the player), with BMB-AI's aim error, lag and swing rate, so a minority of the rounds hit.",
+        )
+    )
     return out
 
 
@@ -2942,6 +3039,11 @@ def b52_tail_gun_problems(output: str, aircraft: str = "B-52") -> list[str]:
         # the unit test's (`combat::slew`).
         problems.append(f"the tail gun hit {hits} of {shots} rounds, more than {TAIL_GUN_MAX_SHARE:.0%}: a laser")
     return problems
+
+
+def tu95_tail_gun_problems(output: str) -> list[str]:
+    """T95-6: the same check for the Tu-95's twin GSh-23 turret (`T23_1.JT`, slewed aft)."""
+    return b52_tail_gun_problems(output, "Tu-95")
 
 
 TAIL_GUN_MAX_SHARE = 0.35
@@ -3112,7 +3214,7 @@ def variety_scenarios() -> list[Scenario]:
 
 # Transports and airliners: their higher G rows end well short of the 1 G row's
 # top speed, the band where they once could not pull at all (John, 2026-10-08).
-HEAVY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "b747", "a310", "b52", "tu160"]
+HEAVY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "b747", "a310", "b52", "tu160", "tu95"]
 
 
 # The B-52H's record has only +3 and +2 G rows, and its tank divides the 2 G row by the

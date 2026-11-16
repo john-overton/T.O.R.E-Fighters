@@ -4160,3 +4160,118 @@ doors and lining), `ai_wings::release::an_ai_bomb_leaves_the_tu26_bay_grid_insid
 the probe's bay check (`flight-animation-tu26`), and the battery scenarios
 `flight-bay-fire-tu26-row5`, `flight-bay-fire-tu26-pylon-row7`, `bay-tu26-0`, `-0.5`, `-1` and
 `render-tu26-clearance`.
+
+## Tu-95 bay, pylons and tail gun (T95-5, 2026-11-16)
+
+Implementation specification, **opinionated** and **fitted**, agent-authored (T95-5), applying the
+coordinator's first-pass decisions for John to review (bomber batch C, Tu-95 items 6 to 9). A game
+configuration, not a claim of original behaviour. The measurements and the choices are in
+[Tu-95 stations, bays and pylons](../formats/aircraft-variety.md#tu-95-bear-h-stations-bays-and-pylons-t95-5-2026-11-16).
+It reuses the B-52's machinery ([B-52 bay](#b-52-bay-pylons-and-tail-gun-b52-5-2026-11-15)):
+`bays::STATIONS`, `GRIDS` and `OPENINGS` rows read by `placed_on`, `bay_doors::{centre_doors,
+centre_lining}`, `Location::Beam`, the F-22's door timing and B52-6's slewed gun mount. Nothing in the
+simulation's rules changed; the Tu-95 joins the tables.
+
+**Stations (feet right / up / forward).**
+
+| Row | Station | Mount | Capacity, class |
+| ---: | --- | --- | --- |
+| 7 | belly bay, `Location::Magazine`, shared grid | 0 / -3.70 / +8.64 (`T95_ROW_FORWARD` 13.0 plus `T95_ORIGIN_AHEAD` -4.36) | 6, 16,000 lb |
+| 8 | wing pair, `Location::Beam`, one beam a wing, record `[36, -6, 27]` | +/-12.0 / -2.0 (record; lugs 1.08 ft under the wing) / +9.0 | 10 (five a wing), no class |
+| 3 | tail turret, slewed aft | 0 / +2.0 / -80.67 | 2,000 rounds |
+
+**Bay (feet).** Belly plane -3.70 (the skin's height at the hinge lines of a V keel, z -5.55 units at
+2/3 ft a unit; the keel is 0.97 ft lower); opening x +/-2.75, 0.0 to 26.0 forward; recess 5.5 deep
+(roof +1.80); two doors 2.75 wide hinged on the outer edges, swinging 90 degrees down in the flight's
+1.00 s bay travel, hanging to -6.45 (2.9 ft over the gear contact line). A lined box (ceiling and
+four walls) and three lane rails (x -1.59, 0, +1.59, 0.6 ft from the ceiling) close the recess under an
+intact top skin; the lining draws only while the doors are off their seat. Code: the Tu-95 row of
+`bays::OPENINGS` (`centre` 0, `inner` 0, `outer` `T95_BAY_HALF`, `inner_depth` equal to `depth`),
+`tu95_animation.rs`.
+
+**Grid (`bays::GRIDS`).** Floor 5.5 by 26.0 ft (`2 * T95_BAY_HALF` by `T95_BAY_FORE - T95_BAY_AFT`),
+ceiling `T95_BELLY + T95_BAY_DEPTH`. An AS-16 (15.7 ft, 3.0 ft span, 1.49 ft diameter) hangs at a pitch
+of its diameter plus 0.1 ft (1.59 ft): **3 abreast, 1 long, 2 tiers = 6**, which is the row's count and
+the default. A Mk 82 (1.27 ft span) hangs at 1.3 ft: 4 abreast, so the five admitted bombs hold up to
+the record's six by weight and count.
+
+**What the bay admits.** Retail mask `0x1180`, count 6, class 160. The sweep loaded each of the 35
+admitted stores at the row's count (at most six) in the open bay; worst clearances in feet, doors open
+(0.05 ft is the line; a short table, the full one is
+`.local/m3-aircraft/checks/T95-5/bay-sweep.txt`):
+
+| Store (shape), count | Side wall | Door leaf | Aft end | Fore end | Roof | Above belly plane | Rails | Nearest store | Verdict |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `AGM65A` (MAVRK.SH) x6 | -0.03 | 0.43 | 4.88 | 4.47 | 3.41 | 0.43 | 2.81 | 0.01 | refused |
+| `AGM84E` (SLAM.SH) x6 | -0.26 | 0.54 | 3.77 | 7.63 | 1.56 | 0.52 | 1.08 | 0.00 | refused |
+| `AS16` (KIKBK.SH) x6 | 0.10 | 0.52 | 5.15 | 5.15 | 1.27 | 0.52 | 0.75 | 0.00 | stays |
+| `CBU87` (CB87.SH) x6 | 0.40 | 0.46 | 4.91 | 5.44 | 3.82 | 0.38 | 3.22 | 0.00 | refused |
+| `FAB250` (F250.SH) x6 | 0.32 | 0.33 | 5.23 | 7.72 | 4.27 | 0.28 | 3.67 | 0.25 | stays |
+| `GBU12` (GB12.SH) x6 | -0.75 | 0.82 | -0.96 | 5.12 | 1.70 | 0.71 | 1.12 | 0.00 | refused |
+| `MK82` (MK82.SH) x6 | 0.35 | 0.32 | 4.12 | 7.03 | 4.34 | 0.25 | 3.74 | 0.25 | stays |
+| `MK82AIR` (MK82A.SH) x4 | 0.35 | 0.34 | 14.80 | 3.90 | 4.33 | 0.26 | 3.74 | 0.40 | stays |
+| `MK82P3` (MK82.SH) x6 | 0.35 | 0.32 | 4.12 | 7.03 | 4.34 | 0.25 | 3.74 | 0.25 | stays |
+| `MK84` (MK84.SH) x6 | 0.40 | 0.48 | -3.18 | 7.34 | 3.62 | 0.39 | 3.07 | 0.11 | refused |
+
+Refused by name (`aircraft_stations::TU95_BAY_REFUSED`, **30** stores): `AGM45`, `AGM65A`, `AGM65G`,
+`AGM84E`, `AGM88`, `AS14`, `AS30`, `AT12`, `AT2`, `CBU87`, `CBU89`, `FAB1000`, `FAB500`, `GBU10`,
+`GBU10A`, `GBU12`, `GBU16`, `GBU28`, `GBU29`, `GBU29P`, `GBU30`, `GBU38`, `MK20`, `MK82HD`, `MK82P`,
+`MK84`, `PAVEWA3`, `PAVEWAY`, `RBK250`, `RBK500`. **Kept: `AS16`, `FAB250`, `MK82`, `MK82AIR`,
+`MK82P3`.** The AS-16 is the one store kept below the line: its fins touch the next missile's (0.00 ft
+nearest store, a cruciform 3 ft span at a 1.59 ft pitch) and clear everything else by 0.10 ft or more;
+it is the aircraft's default load, and the real launcher folds the wings. `AS15.JT` stays refused (no
+mask bit). Per-shape centring (each shape's own origin offset) would admit more of the long stores
+and is not built (as for the B-52).
+
+**Pylons (`Location::Beam`).** `TU95.PT` row 8 keeps its record position `[36, -6, 27]`, mask `0x1025`
+(the pair flag, the base bit, the active-radar bit the AS-16 needs) and a capacity of 10 with no weight
+class (the class byte holds 255 at most and ten AS-16 weigh 26,400 lb). Five a wing hang from one flat
+beam: a rear row of three and a front row of two, pitch 3.1 ft (the span plus 0.1 ft), rows 16.5 ft
+(1.05 lengths) apart centred on 9.0 ft forward, lugs 1.08 ft under the wing. `weapon_allowed` leaves
+only `AS16.JT` on it. The generic wing rack (two pylons a side) crossed the fins (ten pairs under 0.05
+ft); the record's forward 35 units (11.67 ft) put the front row's noses 0.09 ft from the inboard
+propeller disc, so it is 27.
+
+**Pylon clearances, feet** (`TORE_STORES_PREVIEW_T95CLEAR=1`, ten AS-16; the station is the beams and
+stores as drawn; the wing figure is the stores' bodies only, the beam meets the wing by design; ground
+is the lowest point above the gear contact line, -9.33 ft; positive is clear;
+`.local/m3-aircraft/checks/T95-5/pylon-sweep.txt`):
+
+| Load | Inboard disc | Inboard nacelle | Fuselage | Gear down | Wing | Ground | Nearest store |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 10 `AS16` | 2.20 | 4.82 | 4.15 | 6.92 | 0.26 | 7.70 | 0.78 |
+
+the disc is the inboard propeller's blur image (the plane 31.5 ft forward, 16 ft out and beyond);
+the nacelle is the faces 19 to 25 ft out under the wing. Before the move to 9.0 ft forward the same
+load read 0.09 ft to the disc.
+
+**Release.** Bay: the press asks for the doors; the weapon leaves once `State::bay` is at 0.95 and the
+doors close after it (`flight-bay-fire-tu95-row7`, six Mk 82: the default AS-16 needs a target the
+preview does not give it). A pilot-opened bay releases at once. **AI:** the AI's release does not wait
+for doors and its bay doors stay drawn shut
+(`an_ai_bomb_leaves_the_tu95_bay_grid_inside_the_centred_opening`).
+
+**Signature.** `State::bay_available()` is true for the Tu-95 (a row in `bays::STATIONS`) and the
+open-bay term applies by itself; it reaches the RCS page only.
+
+**Tail gun.** The mount is the drawn tail cone's point, 80.67 ft aft and 2.0 ft up
+(`TU95_GUN_MOUNT` `[0, 6, -242]`); the record's slew (heading 180 degrees, 45 degree arcs) is read by
+the B52-6 mount, so the gun fires astern from there. Rows 5 and 6 (the Bear-A to F turrets) hold
+nothing.
+
+Provenance: the belly skin, the cone, the wing height and the disc are measured from `TU95.SH`; the
+six-missile bay and the ten pylon missiles are cited public figures (Wikipedia "Kh-55"); the width,
+depth, doors, grid, beam, refusals and every offset are fitted (agent, 2026-11-16).
+
+## Tu-95 default load and release cells (T95-6, 2026-11-16)
+
+The default load is 16 AS-16: six in the belly bay and ten on the beam pylons (row 8 starts loaded; the
+coordinator's brief, opinionated). The human's presses (`a2g-release-origin-tu95`) and the AI's release
+(`Station::next_release_point`) read the same cells. Bay (feet right, up, forward of the reference point): the
+bottom tier first at 2.12 ft under it, outermost lane first alternating sides (-1.59, +1.59, 0.00 at 8.64 ft
+forward), then the second tier 1.59 ft up. Beams: the front row at 17.24 ft ahead (15.10 and 12.00 ft out, left
+then right), then the rear row at 0.76 ft ahead (8.90, 15.10 and 12.00 ft out), 0.58 ft under the reference
+point at the drawn wing's underside, 1 ft pylon depth. Both AS-16 rows are Active radar surface missiles: they
+want the A-G page and a designated target (`a2g-sarh-as16-tu95`: both rows launch and kill the lead truck; the
+bay's leaves a second later, behind its doors). See the
+[aircraft variety section](../formats/aircraft-variety.md#tu-95-bear-h-ordnance-sensors-hud-and-cockpit-t95-67-2026-11-16).

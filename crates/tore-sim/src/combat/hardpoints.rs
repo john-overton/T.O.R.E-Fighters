@@ -1581,12 +1581,21 @@ pub fn placed_on(
         );
     }
     let axes = tore_formats::aircraft::scale::right_up_forward(id);
-    if id.source() == AircraftId::B52
-        && hardpoint == tore_formats::aircraft::stations::B52_PYLONS
-        && h.location == Location::Wing.byte()
+    if h.location == Location::Wing.byte()
+        && matches!(
+            (id.source(), hardpoint),
+            (
+                AircraftId::B52,
+                tore_formats::aircraft::stations::B52_PYLONS
+            ) | (
+                AircraftId::Tu95,
+                tore_formats::aircraft::stations::TU95_WING_PYLONS
+            )
+        )
     {
-        // The B-52's underwing pylon pair (B52-5): a wing station placed as the
-        // record says, its stores hung from one adapter beam.
+        // The B-52's underwing pylon pair (B52-5) and the Tu-95's (T95-5): a
+        // wing station placed as the record says, its stores hung from one
+        // adapter beam (the 3 ft span missiles cross fins on the generic rack).
         let (mount, mut rack) = placed_scaled(h, model, axes);
         rack.location = BEAM_BYTE;
         return (mount, rack);
@@ -2412,6 +2421,95 @@ mod tests {
             let first = rack.release_point(mount, 6, 0, 5, size);
             assert!(first[0] < 0. && first[2] > mount[2]);
         }
+    }
+
+    #[test]
+    fn the_tu95_bay_row_hangs_six_as16_three_abreast_in_two_tiers_inside_its_opening() {
+        use super::super::bays::{T95_BELLY, opening};
+        let o = opening(AircraftId::Tu95).unwrap();
+        let size = StoreSize::of_shape(Some("KIKBK.SH"));
+        let mut h = hardpoint(3, 0x1180);
+        h.count = 6;
+        let (mount, rack) = placed_on(AircraftId::Tu95, 7, &h, None);
+        assert_eq!(rack.location(), Location::Magazine);
+        assert!(rack.location().drawn() && rack.location().bay());
+        assert_eq!(rack.grid(), Some([5.5, 26.]));
+        assert_eq!((mount[0], mount[1]), (0., T95_BELLY));
+        let places: Vec<_> = (0..6)
+            .map(|k| rack.store_point(mount, 6, 0, k, size))
+            .collect();
+        for (slot, at) in places.iter().enumerate() {
+            assert_eq!(
+                *at,
+                rack.release_point(mount, 6, slot as u32, slot as u16, size)
+            );
+            assert_eq!(at[2], mount[2]);
+            assert!(at[0].abs() + size.width / 2. * 0.71 < o.outer, "{at:?}");
+        }
+        // Three lanes in each of two tiers; the first to leave is the bottom
+        // tier's outermost lane, and nothing leaves from above a store left
+        // under it.
+        let mut lanes: Vec<f64> = places.iter().map(|p| p[0]).collect();
+        lanes.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        lanes.dedup();
+        assert_eq!(lanes.len(), 3);
+        let order: Vec<_> = (0..6)
+            .rev()
+            .map(|slot| rack.release_point(mount, 6, u32::from(5 - slot), slot, size))
+            .collect();
+        assert!(order[0][0] < 0. && order[1][0] > 0. && order[0][0] == -order[1][0]);
+        assert!(order.windows(2).all(|w| w[1][1] >= w[0][1] - 1e-9));
+        assert!(order[5][1] > order[0][1] + 1.5);
+        // Row 8 is not a bay; the gun row is not either.
+        assert_ne!(
+            placed_on(AircraftId::Tu95, 3, &hardpoint(1, 0x180a), None)
+                .1
+                .location(),
+            Location::Magazine
+        );
+    }
+
+    #[test]
+    fn the_tu95_wing_row_hangs_five_as16_a_wing_from_one_beam_clear_of_each_other() {
+        let row = Hardpoint {
+            location: Location::Wing.byte(),
+            flags: 0x1025,
+            position: [36, -6, 27],
+            store: None,
+            count: 10,
+            weight_class: 0,
+            slew: [0; 4],
+        };
+        let (mount, rack) = placed_on(AircraftId::Tu95, 8, &row, None);
+        assert_eq!(rack.location(), Location::Beam);
+        assert!((mount[0] - 12.).abs() < 1e-9 && (mount[2] - 9.).abs() < 1e-9);
+        let size = StoreSize::of_shape(Some("KIKBK.SH"));
+        // Ten stores, five a wing: one beam, three abreast in a rear row and
+        // two in the front row.
+        assert_eq!(rack.sides(mount, 10), [5, 5]);
+        assert_eq!(rack.pylons(5), 1);
+        let at: Vec<_> = (0..5)
+            .map(|k| rack.store_point(mount, 10, 0, k, size))
+            .collect();
+        let pitch = beam_pitch(size);
+        assert!((pitch - 3.1).abs() < 1e-9, "{pitch}");
+        assert!(at.iter().all(|p| (p[1] - at[0][1]).abs() < 1e-9));
+        assert!(((at[0][2] - at[3][2]).abs() - 1.05 * size.length).abs() < 1e-9);
+        // The missiles' fins (3 ft span) clear the next lane's by the 0.1 ft
+        // of the beam's pitch, and the rows are 1.05 lengths apart.
+        assert!((at[1][0] - at[0][0]).abs() >= size.width);
+        // The front row's nose (12.2 ft ahead of the AS-16's origin) stops short
+        // of the inboard propeller disc plane, 31.7 ft forward.
+        let nose = at[3][2] + 12.2;
+        assert!(nose < 31.7 - 2., "{nose}");
+        // The outermost fin tip stays inside the inboard disc's inner edge
+        // (16 ft out) or ahead of nothing: the lanes span 8.9 to 15.1 ft.
+        assert!(at.iter().all(|p| p[0] > 8.0 && p[0] < 16.0));
+        // The left wing mirrors it and empties first.
+        let left = rack.store_point(mount, 10, 1, 0, size);
+        assert!((left[0] + at[0][0]).abs() < 1e-9 && left[2] == at[0][2]);
+        let first = rack.release_point(mount, 10, 9, 4, size);
+        assert_eq!(first, rack.store_point(mount, 10, 1, 4, size));
     }
 
     #[test]

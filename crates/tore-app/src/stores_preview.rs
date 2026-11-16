@@ -17,6 +17,7 @@ use crate::{
 mod b52_clearance;
 mod pod_clearance;
 mod tu160_clearance;
+mod tu95_clearance;
 use std::path::Path;
 use tore_formats::aircraft::{Aircraft, AircraftId};
 use tore_sim::{
@@ -477,6 +478,17 @@ pub fn run() -> AppResult<()> {
         }
         if std::env::var_os("TORE_STORES_PREVIEW_TU160CLEAR").is_some() {
             tu160_clearance::report(
+                short,
+                id,
+                &airframe,
+                &art,
+                &loads[1].1,
+                &airframe.start(&world),
+            );
+            continue;
+        }
+        if std::env::var_os("TORE_STORES_PREVIEW_T95CLEAR").is_some() {
+            tu95_clearance::report(
                 short,
                 id,
                 &airframe,

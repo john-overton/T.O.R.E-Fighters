@@ -1669,7 +1669,16 @@ impl Sequence {
                     target,
                     TAXI_LEG_LOOKAHEAD_FT,
                 );
-                let heading = bearing_deg(s.position, aim);
+                let mut heading = bearing_deg(s.position, aim);
+                // Fitted (T95-9): an aircraft whose wheels need power to
+                // taxi ([`Situation::taxi_throttle_floor`]) rolls on past an
+                // anchor it has been told to stop at (its brakes are weak),
+                // and steering for the anchor behind it turned it round
+                // through 150 degrees and 30 ft off the pavement. Once
+                // stopping it holds the leg's own course instead.
+                if self.stopping && s.taxi_throttle_floor > 0.0 {
+                    heading = bearing_deg(self.taxi_leg_start(), target);
+                }
                 let error = wrap_deg(heading - s.heading_deg).abs();
                 let parking_close = self.phase == Phase::TaxiClear
                     && self.parking_leg()
@@ -2807,6 +2816,37 @@ mod tests {
         far.leg_origin = [0., 0., 7750.];
         let (throttle, brakes) = ground(&mut far, &on_ground([-300., 0., 7750.], 90., 40.));
         assert!(!brakes && throttle > 0.0, "{throttle} {brakes}");
+    }
+
+    /// T95-9: a taxiing aircraft whose wheels need power (the Tu-95, the
+    /// B-52) that has rolled 20 ft past an anchor it is stopping at holds
+    /// the leg's course while it stops; a fighter's law is the old one
+    /// exactly and steers back for the anchor behind it.
+    #[test]
+    fn a_heavy_stopping_past_an_anchor_holds_the_legs_course() {
+        let yaw_of = |floor: f64| {
+            let mut seq = landing();
+            seq.runway = anchored();
+            seq.phase = Phase::TaxiClear;
+            seq.leg = 1;
+            seq.slot = Some(0);
+            seq.leg_origin = [0., 0., 7750.];
+            seq.stopping = true;
+            // 20 ft past the anchor at (225, 7750) and 4 ft to its side, heading
+            // along the leg (90 degrees), rolling at 8 ft/s.
+            let mut s = on_ground([245., 0., 7754.], 90., 8.);
+            s.taxi_throttle_floor = floor;
+            match seq.step(&s).command.control {
+                Control::Ground { yaw, .. } => yaw,
+                other => panic!("{other:?}"),
+            }
+        };
+        let fighter = yaw_of(0.);
+        let heavy = yaw_of(0.58);
+        // The fighter turns hard for the anchor 20 ft behind it; the heavy
+        // holds the leg's own course and asks for no turn.
+        assert!(fighter.abs() > 0.5, "{fighter}");
+        assert!(heavy.abs() < 0.05, "{heavy}");
     }
 
     // -----------------------------------------------------------------------

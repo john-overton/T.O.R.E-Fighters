@@ -1041,6 +1041,32 @@ Not changed: the top speeds (the record's 1,080 kt and 598 kt edges; the loaded 
 settles at 962 to 1,000 kt at 36,000 ft and 533 to 554 kt at sea level), the 43,635 ft
 ceiling, the G rows (3.2 G at the pull, Jane's +2.5 G) and the roll limit.
 
+## Tupolev Tu-95 Bear-H (T95-8, 2026-11-16)
+
+The Tu-95 flies the `variety` configuration built from `TU95.PT` with the BMB-C2 weights (empty 198,415 lb,
+tank 148,150 lb, 414,470 lb maximum takeoff), the record's own G rows, fuel flow (4 lb/s) and ceiling, a
+**fitted thrust of 100,000 lbf** (the first pass's 129,000 changed, see the
+[review](../formats/aircraft-variety.md#tu-95-bear-h-flight-review-t95-8-2026-11-16)), and these terms of
+its own; every other aircraft keeps the shared value. All are fitted, agent decisions:
+
+- **Clean-drag shape.** The shared drag is the full thrust at the 1 G top-speed edge on the square law, times
+  the loading. For a loaded Bear that put the level top speed at 0.83 of the edge (295 kt at sea level) and the
+  climb ceiling at 9,600 ft. Its clean drag is instead 0.56 of that on the square law plus 0.44 on the twelfth
+  power of speed over the edge: 1 at the edge, 0.39 of the thrust at 0.8 of it. 400 kt at 25,000 ft burns
+  2.29 lb/s (about 7,100 nautical miles from the tank, published 8,100) and the best sustained climb is 1,800
+  to 2,700 ft/min (published 2,000).
+- **Speed edge.** One vertex in the record's 1 G polygon puts the fast edge at 842 ft/s (499 kt, Mach 0.83) at
+  25,000 ft, the game's own Jane's figure; the 0 G row stays 55 ft/s over it. Sea level (355 kt) and 36,000 ft
+  (462 kt) are the record's. Level top speed at 25,000 ft is 467 to 476 kt (was 357 to 375).
+- **Thrust lapse** 38,000 ft (shared 70,000). **Rolling deceleration** 4.8 ft/s squared (shared 0.8): the
+  388,894 lb takeoff run is 7,400 ft (GRE 1), lifting off at 137 kt. **Brake deceleration** 1.0 (shared 18): a
+  337,041 lb landing rolls 4,400 ft after a 135 kt touchdown.
+- **Nose alignment** 0.4, the transports' and the B-52's.
+
+Not changed: the stall reference (liftoff 137 kt against Jane's 162 kt at the maximum weight, approach 147 kt
+at 292,744 lb against Jane's 146 kt at 297,620 lb), the ceiling (40,750 ft; the climb schedule reaches 39,600 to
+40,500 ft), the G rows and the roll limit. The model has no thrust that falls with speed.
+
 ## Unknown evidence
 
 Retail hover power, altitude ceiling, nozzle travel/rate, rotor torque, lift

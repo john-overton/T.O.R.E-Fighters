@@ -462,6 +462,21 @@ class HeavyBomberTests(unittest.TestCase):
         self.assertTrue(any("never connected" in p for p in ai.tu26_gun_fight_problems(text.replace("hits=3", "hits=0"))))
         self.assertTrue(any("spent" in p for p in ai.tu26_gun_fight_problems(text.replace("rounds=1949", "rounds=2006").replace("rounds=1948", "rounds=2006").replace("rounds=1947", "rounds=2006"))))
 
+    def test_the_tu95_mission_scenarios_exist_and_the_gun_fight_check_reads_as16_and_shots(self):
+        names = {s.name for s in ai.scenarios()}
+        for name in ("ai-tu95-quick-mission-2v2", "ai-tu95-vs-su27-2v2", "ai-merged-airfield-tu95-wing2",
+                     "ai-heavy-takeoff-tu95-gre-a1", "ai-heavy-land-tu95-ukr-a2"):
+            self.assertIn(name, names)
+        stores = "\n".join(
+            f"AI stores: actor={n} tanks=0 external_fuel=0 payload=42329 stations=[23mmx1 x1900, AS-16 x6, AS-16 x10]"
+            for n in (1, 2, 3)
+        )
+        text = stores + "\nAI probe totals: wings=3 ticks=7200 shots=263 dropped=0 warnings=0\n"
+        problems = ai.tu95_gun_fight_problems(text)
+        self.assertFalse([p for p in problems if "AS-16" in p or "shot" in p or "stores" in p], problems)
+        self.assertTrue(any("lost AS-16" in p for p in ai.tu95_gun_fight_problems(text.replace("AS-16 x10", "AS-16 x9", 1))))
+        self.assertTrue(any("never fired" in p for p in ai.tu95_gun_fight_problems(text.replace("shots=263", "shots=0"))))
+
 
 if __name__ == "__main__":
     unittest.main()

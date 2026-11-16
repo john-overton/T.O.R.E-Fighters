@@ -4,6 +4,11 @@
 //! `variety_rotors` at the shared rate like the C-130's.
 //! See docs/formats/aircraft-variety.md "Tu-95 shape and rig (T95-2/3, 2026-11-15)".
 //!
+//! T95-5 adds the fitted weapon bay: the four belly triangles are cut into two
+//! door leaves while the doors are off their seat and a lined recess draws then
+//! (the shared `bay_doors` helpers, as the B-52's; docs/formats/aircraft-variety.md,
+//! "Tu-95 Bear-H stations, bays and pylons (T95-5, 2026-11-16)").
+//!
 //! TU95.SH ships exactly one state word, 0x33b0, the gear: six flat wheel plates
 //! in longitudinal planes (a main plate in each nacelle plane and a nose plate on
 //! the keel), both windings each. It has no elevator, aileron, flap, airbrake,
@@ -21,9 +26,49 @@ use tore_formats::{
     aircraft::{AircraftId, scale::scale_point},
     shape::{Face, Shape},
 };
+use tore_sim::combat::{bays::Opening, hardpoints::grid_cells, store_sizes::StoreSize};
 
 const ID: AircraftId = AircraftId::Tu95;
 const WORDS: [usize; 1] = [0x33b0];
+
+/// The four belly triangles the fitted bay is cut from (T95-5): the keel's two
+/// strips a side, y 0 to 71, x -5 to 6, z -7 on the centre line to -5 at the
+/// sides. They are the whole skin under the opening (y 0 to 39 units, x
+/// +/-4.125 units); a door leaf is whatever of them lies inside its rectangle.
+/// Source faces in the order right outer, right inner, left outer, left inner,
+/// each with its three corners in shape units.
+pub(crate) const BELLY: [usize; 4] = [0x1a38, 0x1a50, 0x22a7, 0x22c1];
+const BELLY_CORNERS: [[[f32; 3]; 3]; 4] = [
+    [[6., 71., -5.], [0., 71., -7.], [6., 0., -5.]],
+    [[0., 71., -7.], [1., 0., -7.], [6., 0., -5.]],
+    [[0., 71., -7.], [-5., 71., -5.], [-5., 0., -5.]],
+    [[0., 71., -7.], [-5., 0., -5.], [1., 0., -7.]],
+];
+/// The first address of the lining's faces (above every face of the shape).
+pub(crate) const LINING_BASE: usize = 0x7000;
+/// The face whose material the lining takes: the flat skin plate in front of
+/// the opening (y 71 to 88, subtype 0x63, no texture coordinates).
+const LINING_TEMPLATE: usize = 0x1998;
+/// The shape's feet a unit (it draws at 2/3 ft a unit).
+pub(crate) const UNIT: f64 = 2. / 3.;
+
+fn lining(address: usize) -> bool {
+    address >= LINING_BASE
+}
+
+/// The bay's furniture, feet: a rail under the ceiling on each lane's centre
+/// line, running the whole bay. Lanes are the columns of the shared grid for the
+/// AS-16, the bay's store (three abreast at 1.59 ft; fitted: stores of other
+/// sizes space their own grid, so the furniture is not a measure of the load).
+/// No posts: the bay is one row long.
+fn furniture(o: &Opening) -> Vec<[f64; 3]> {
+    let kickback = StoreSize::of_shape(Some("KIKBK.SH"));
+    let ([abreast, _], pitch) = grid_cells(kickback, [2. * o.outer, o.fore - o.aft]);
+    (0..abreast)
+        .map(|k| (k as f64 - (abreast as f64 - 1.) / 2.) * pitch)
+        .map(|x| [x, o.aft, o.fore])
+        .collect()
+}
 
 /// Tailplane: the right panel (two windings) and the left side (a root panel and
 /// an outer panel, two windings each). They are one continuous surface at
@@ -134,7 +179,9 @@ fn only(face: &Face, count: usize, allowed: &[[f32; 3]]) -> bool {
             .all(|&p| allowed.iter().any(|&q| is(p, q)))
 }
 
-pub struct Rig;
+pub struct Rig {
+    bay: Opening,
+}
 impl Rig {
     pub fn load(bytes: &[u8], mut shape: Shape) -> AppResult<(Self, Shape)> {
         if tore_formats::module::code(bytes)?.0.len() != 9148
@@ -214,6 +261,28 @@ impl Rig {
                 return Err(format!("unreviewed TU95.SH rudder face {address:x}").into());
             }
         }
+        // The belly: the four reviewed triangles, whole, with the opening
+        // wholly inside their span (y 0 to 71 units, x -5 to 6).
+        let opening = tore_sim::combat::bays::opening(ID).ok_or("Tu-95 bay opening missing")?;
+        for (address, corners) in BELLY.into_iter().zip(BELLY_CORNERS) {
+            if !only(one(&shape, address)?, 3, &corners) {
+                return Err(format!("unreviewed TU95.SH belly face {address:x}").into());
+            }
+        }
+        let units = |feet: f64| (feet / UNIT) as f32;
+        if units(opening.outer) > 5. || units(opening.aft) < 0. || units(opening.fore) > 71. {
+            return Err("the Tu-95 bay opening leaves its belly skin".into());
+        }
+        // The recess takes the material of the flat plate ahead of the opening.
+        let template = one(&shape, LINING_TEMPLATE)?.clone();
+        let rails = furniture(&opening);
+        let lining_faces = crate::bay_doors::centre_lining(&template, &opening, UNIT, &rails, &[])
+            .into_iter()
+            .enumerate()
+            .map(|(k, mut f)| {
+                f.address = LINING_BASE + k;
+                f
+            });
         // The gear word adds exactly the six plates and removes nothing.
         let neutral: BTreeSet<_> = shape.faces.iter().map(|f| f.address).collect();
         let down = Shape::with_state(bytes, &[(0x33b0, 1)].into())?;
@@ -248,7 +317,22 @@ impl Rig {
         shape
             .faces
             .extend(down.faces.into_iter().filter(|f| GEAR.contains(&f.address)));
-        Ok((Self, shape))
+        shape.faces.extend(lining_faces);
+        Ok((Self { bay: opening }, shape))
+    }
+    /// The faces a source face becomes: with the bay doors off their seat the
+    /// four belly triangles are cut into the two door leaves, turned down about
+    /// their hinges by `state.bay` (the doors' 1 second travel is the flight's);
+    /// the lining draws only then.
+    pub fn faces(&self, source: &Face, state: &State) -> Vec<Face> {
+        let a = source.address;
+        if BELLY.contains(&a) && state.bay > 0. {
+            return crate::bay_doors::centre_doors(source, state.bay, &self.bay, UNIT);
+        }
+        if lining(a) && state.bay <= 0. {
+            return Vec::new();
+        }
+        vec![source.clone()]
     }
 
     pub fn animate(&self, source: &Face, state: &State) -> Option<Face> {
@@ -287,6 +371,9 @@ impl Rig {
             }
             gear_positions(&mut result, state.gear);
             return Some(result);
+        }
+        if lining(a) && state.bay <= 0. {
+            return None;
         }
         Some(result)
     }
@@ -336,7 +423,9 @@ mod tests {
     /// disc's two halves together.
     #[test]
     fn the_tu95_rig_turns_whole_panels_about_their_hinges() {
-        let rig = Rig;
+        let rig = Rig {
+            bay: tore_sim::combat::bays::opening(ID).unwrap(),
+        };
         let moved = |s: &State, f: &Face| rig.animate(f, s).unwrap();
         let s0 = state();
 
@@ -531,5 +620,123 @@ mod tests {
         assert!(!crate::variety_rotors::keep_face(ID, 0x1ac1));
         assert!(crate::variety_rotors::keep_face(ID, 0x28d5));
         assert!(!crate::variety_rotors::keep_face(ID, 0x2932));
+    }
+    /// T95-5: the fitted bay. Shut, the four belly triangles are whole and the
+    /// lining is gone; open, the leaves hang from the hinge lines 2.75 ft (4.125
+    /// units) either side of the centre line, their free edges a leaf's width
+    /// (4.125 units) under the hinge height, and the lining draws: a ceiling,
+    /// four walls and a rail for each of the three lanes of AS-16.
+    #[test]
+    fn the_tu95_bay_cuts_its_belly_into_door_leaves_and_lines_a_closed_recess() {
+        let rig = Rig {
+            bay: tore_sim::combat::bays::opening(ID).unwrap(),
+        };
+        let bay = rig.bay;
+        let belly: Vec<Face> = BELLY
+            .into_iter()
+            .zip(BELLY_CORNERS)
+            .map(|(address, corners)| face(address, &corners))
+            .collect();
+        let hinge_z = (bay.belly / UNIT) as f32;
+        assert!((hinge_z + 5.55).abs() < 1e-4);
+        // A belly triangle's area in plan, shape units squared.
+        let plan = |f: &Face| {
+            let n = f.positions.len();
+            (0..n)
+                .map(|i| {
+                    let (a, b) = (f.positions[i], f.positions[(i + 1) % n]);
+                    f64::from(a[0]) * f64::from(b[1]) - f64::from(b[0]) * f64::from(a[1])
+                })
+                .sum::<f64>()
+                .abs()
+                / 2.
+        };
+        let whole: f64 = belly.iter().map(plan).sum();
+        let mut s = state();
+        s.bay = 0.;
+        let shut: Vec<Face> = belly.iter().flat_map(|f| rig.faces(f, &s)).collect();
+        assert_eq!(shut.len(), 4);
+        assert!(
+            shut.iter()
+                .zip(&belly)
+                .all(|(a, b)| a.positions == b.positions)
+        );
+        // Shut, the lining draws nothing and is never animated.
+        let ceiling = face(
+            LINING_BASE,
+            &[[-4.125, 0., 2.], [4.125, 0., 2.], [4.125, 39., 2.]],
+        );
+        assert!(rig.faces(&ceiling, &s).is_empty() && rig.animate(&ceiling, &s).is_none());
+        // Open: the leaves hang, the rest of the skin stays in its plane.
+        s.bay = 1.;
+        let open: Vec<Face> = belly.iter().flat_map(|f| rig.faces(f, &s)).collect();
+        let hanging: Vec<&Face> = open
+            .iter()
+            .filter(|f| f.positions.iter().any(|p| p[2] < hinge_z - 1.8))
+            .collect();
+        assert!(hanging.len() >= 2, "{} leaf pieces", hanging.len());
+        let low = hanging
+            .iter()
+            .flat_map(|f| f.positions.iter())
+            .map(|p| p[2])
+            .fold(f32::MAX, f32::min);
+        assert!((low - (hinge_z - 4.125)).abs() < 1e-3, "{low}");
+        // The skin outside the leaves keeps its area in plan (a hanging leaf has
+        // none): the opening takes 5 ft by 26 ft, 8.25 by 39 units.
+        let rest: f64 = open
+            .iter()
+            .filter(|f| !f.positions.iter().any(|p| p[2] < hinge_z - 1.8))
+            .map(plan)
+            .sum();
+        assert!(
+            rest < whole && rest > whole - 8.25 * 39. - 1e-3,
+            "{rest} of {whole}"
+        );
+        // A vertex of the leaves stays near each hinge line at x +/-4.125 units
+        // (the V skin is up to 0.2 unit off the mean hinge height there; a leaf
+        // is several pieces, only some of them touch the hinge).
+        for side in [4.125f32, -4.125] {
+            assert!(
+                hanging
+                    .iter()
+                    .flat_map(|f| &f.positions)
+                    .any(|p| { (p[0] - side).abs() < 0.4 && (p[2] - hinge_z).abs() < 0.4 }),
+                "no vertex on the hinge at {side}"
+            );
+        }
+        // Half open the free edges hang on the quarter turn's sine and cosine:
+        // a leaf's lowest point is a point of the keel's V (1.1 to 1.45 units under
+        // the hinge height) turned by the angle.
+        s.bay = 0.5;
+        let half = belly.iter().flat_map(|f| rig.faces(f, &s));
+        let low = half
+            .flat_map(|f| f.positions)
+            .map(|p| p[2])
+            .fold(f32::MAX, f32::min);
+        let turn = FRAC_PI_2 as f32 * 0.5;
+        let at = |dz: f32| hinge_z + dz * turn.cos() - 4.125 * turn.sin();
+        assert!(
+            low > at(-1.46) - 0.02 && low < at(-1.1) + 0.02,
+            "{low} in {} to {}",
+            at(-1.46),
+            at(-1.1)
+        );
+        // The lining: a ceiling, four walls and five faces a lane rail, drawn
+        // while the bay is off its seat, closed under the roof.
+        s.bay = 1.;
+        assert_eq!(rig.faces(&ceiling, &s).len(), 1);
+        let template = face(LINING_TEMPLATE, &[[0.; 3]; 4]);
+        let rails = furniture(&bay);
+        assert_eq!(rails.len(), 3, "three lanes of AS-16 abreast");
+        let faces = crate::bay_doors::centre_lining(&template, &bay, UNIT, &rails, &[]);
+        assert_eq!(faces.len(), 5 + 5 * 3);
+        let roof = ((bay.belly + bay.depth) / UNIT) as f32;
+        assert_eq!(
+            faces
+                .iter()
+                .filter(|f| f.positions.iter().all(|p| p[2] == roof))
+                .count(),
+            1
+        );
     }
 }

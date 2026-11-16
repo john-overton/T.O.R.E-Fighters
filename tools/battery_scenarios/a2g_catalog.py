@@ -48,7 +48,11 @@ AIRCRAFT = re.compile(
 # bay and two AIM-9 rails take the two novelty bombs).
 # T26-5 (2026-11-16): 5,350 weapon placements measured (the Tu-26's bay, intake and glove refusals, 129 to 84);
 # the recovered (23) and Cheat-only (278) counts are unchanged.
-AUDIT = re.compile(r"^ordnance audit: 54 aircraft, 23 recovered weapon stations, \d+ weapon placements, "
+# T95-5 (2026-11-16): the Tu-95's bay row refuses 30 stores that do not clear (weapon placements 5,395
+# to 5,365); the recovered, tank and Cheat-only counts are unchanged.
+# T95-6 (2026-11-16): the Tu-95's pylon row starts loaded with ten AS-16, so it is no longer an optional
+# empty row: 22 recovered stations (from 23); weapon, tank and Cheat-only placements are unchanged.
+AUDIT = re.compile(r"^ordnance audit: 54 aircraft, 22 recovered weapon stations, \d+ weapon placements, "
                    r"257 tank placements, (\d+) weapon and 9 tank records; passed$", re.M)
 # Aircraft with a bomb or rocket station the A2G records fit; the cargo and
 # radar aircraft carry nothing.
@@ -88,7 +92,7 @@ def scenarios() -> list[Scenario]:
             args=["--validate-ordnance", "--no-audio"],
             timeout=600,
             expect=[
-                r"ordnance audit: 54 aircraft, 23 recovered weapon stations, \d+ weapon placements, 257 tank placements, \d+ weapon and 9 tank records; passed",
+                r"ordnance audit: 54 aircraft, 22 recovered weapon stations, \d+ weapon placements, 257 tank placements, \d+ weapon and 9 tank records; passed",
                 r"ordnance audit: 1 designator pods, \d+ pod placements, one to an aircraft, loaded and restored through the saved mission; passed",
                 r"ordnance audit: 2 novelty records, 284 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed",
             ],

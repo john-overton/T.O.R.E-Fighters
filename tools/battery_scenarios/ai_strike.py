@@ -1984,6 +1984,113 @@ def f111_quick_wing_problems(output: str) -> list[str]:
     return problems
 
 
+# The Tu-95's bay (T95-5 and T95-9; `combat::bays::GRIDS`, row 7 = station 1) lays Mk 82 four abreast, 1.3 ft
+# apart (the outer pair 1.95 ft out, the inner 0.65 ft), the first row 16.19 ft ahead of the reference
+# point and the second 8.64 ft ahead, all 2.98 ft under it; the human's own run leaves from the same places
+# (`a2g-run --station 1 --load MK82`, checked once by hand in T95-9). The wing beams (row 8, station 2) take
+# the AS-16 only, so there is no bomb stick from them.
+TU95_BAY_COLUMNS = (-1.95, 1.95, -0.65, 0.65)
+TU95_BAY_ROWS_FORWARD = (16.19, 8.64)
+TU95_BAY_UP = -2.98
+
+
+def tu95_bay_cells(count: int) -> list[tuple[float, float, float]]:
+    """The first `count` Mk 82 places of the Tu-95's bay row: (right, up, forward) feet."""
+    cells = [(column, TU95_BAY_UP, forward) for forward in TU95_BAY_ROWS_FORWARD for column in TU95_BAY_COLUMNS]
+    return cells[:count]
+
+
+def tu95_bay_stick_problems(run: Run, output: str, label: str) -> list[str]:
+    """A Tu-95 bay stick: all six Mk 82 of the bay row leave 0.25 s apart from the row's own places, the
+    doors open before the first and shut after the last, impacts, egress, not lost."""
+    problems = consistency_problems(run, label)
+    problems += bay_door_problems(run, label)
+    releases = run.of("RELEASE")
+    if len(releases) != 6:
+        problems.append(f"{label}: {len(releases)} releases, want a stick of 6")
+    times = run.times("RELEASE")
+    if any(abs((b - a) - 0.25) > 0.02 for a, b in zip(times, times[1:])):
+        problems.append(f"{label}: the stick is not 0.25 s apart: {times}")
+    origins = b52_origins(output)
+    if len(origins) != len(releases):
+        problems.append(f"{label}: {len(origins)} origin lines for {len(releases)} releases")
+    for n, (origin, want) in enumerate(zip(origins, tu95_bay_cells(6))):
+        if abs(origin[0] - want[0]) > 0.1 or abs(origin[1] - want[1]) > 0.1 or abs(origin[2] - want[2]) > 0.5:
+            problems.append(f"{label}: bomb {n + 1} left from {origin}, the row's place is {want}")
+    if len(set(origins)) != len(origins):
+        problems.append(f"{label}: two bombs left from one place")
+    if any(r.get("station") != "1" for r in releases):
+        problems.append(f"{label}: released from stations {sorted({r.get('station') for r in releases})}, want the bay row (1)")
+    if not run.of("IMPACT"):
+        problems.append(f"{label}: no bomb landed")
+    if not run.of("EGRESS"):
+        problems.append(f"{label}: no EGRESS after the stick")
+    if run.of("LOST"):
+        problems.append(f"{label}: the Tu-95 was lost")
+    if run.setup.get("aircraft") != "Tu95":
+        problems.append(f"{label}: flew {run.setup.get('aircraft')}, want Tu95")
+    return problems
+
+
+def tu95_stick_problems(output: str) -> list[str]:
+    """`ai-strike-tu95-stick`: an AI Tu-95 at 20,000 ft drops the six Mk 82 of its belly bay (T95-9): the
+    doors open for it (BMB-AI), one bomb every 0.25 s from the row's six places (front row first, outermost
+    first), the doors shut after the last, egress."""
+    runs = parse_runs(output)
+    if len(runs) != 1:
+        return [f"expected one strike run, got {len(runs)}"]
+    problems = tu95_bay_stick_problems(runs[0], output, "Tu-95 stick")
+    if any(number(r.get("alt_ft")) < 15000 for r in runs[0].of("RELEASE")):
+        problems.append("released below the 15,000 ft this run's threat floor")
+    return problems
+
+
+def tu95_quick_wing_problems(output: str) -> list[str]:
+    """`ai-strike-tu95-quick-wing`: a Quick Mission with the Ukraine factory as the ground target: the Tu-95
+    wing takes the Strike role (the mission's bomber-class default) and flies the same stick from its bay."""
+    runs = parse_runs(output)
+    if len(runs) != 1:
+        return [f"expected one strike run, got {len(runs)}"]
+    problems = tu95_bay_stick_problems(runs[0], output, "Tu-95 quick wing")
+    role = (runs[0].first("ROLE") or {}).get("role")
+    if role != "strike":
+        problems.append(f"Tu-95 quick wing: the wing was given role {role}, want strike")
+    return problems
+
+
+def tu95_antiship_limit_problems(station: str):
+    """`ai-strike-tu95-antiship` and `-antiship-beams` (T95-9): an AI Tu-95 with two AS-16 on the bay row
+    (station 1) or the wing beams (station 2) picks the Krivak with its radar missile and flies at it,
+    **and releases nothing in the 90 s the run covers**, with the bay doors shut. This pins a known limit
+    (docs/formats/aircraft-variety.md, T95-9): the AS-16 record's zone 1 reaches 6.58 nmi and the AI fires
+    inside half of that (20,000 ft slant), within the reach of the fleet's own defences, which end a
+    Tu-95 (393 hit points) once it is inside about 30,000 ft; a heavy holds its height and the missile
+    wants the target near its own level."""
+
+    def check(output: str) -> list[str]:
+        runs = parse_runs(output)
+        if len(runs) != 1:
+            return [f"expected one strike run, got {len(runs)}"]
+        run, label = runs[0], f"Tu-95 AS-16 station {station}"
+        problems = consistency_problems(run, label)
+        selections = run.of("SELECTION")
+        if not selections or selections[0].get("kind") != "RadarAgm" or selections[0].get("station") != station:
+            problems.append(f"{label}: selected {[(f.get('kind'), f.get('station')) for f in selections[:1]]}, want a RadarAgm from station {station}")
+        if run.setup.get("target") != KRIVAK_ID:
+            problems.append(f"{label}: aimed at {run.setup.get('target')}, want the Krivak")
+        if run.setup.get("aircraft") != "Tu95" or run.setup.get("load") != "AS16.JT":
+            problems.append(f"{label}: flew {run.setup.get('aircraft')} with {run.setup.get('load')}")
+        if run.of("RELEASE"):
+            problems.append(f"{label}: released {len(run.of('RELEASE'))}: the known limit may be fixed, update the notes")
+        if run.of("BAY"):
+            problems.append(f"{label}: the bay doors moved with no release due")
+        if run.of("LOST"):
+            problems.append(f"{label}: the Tu-95 was lost inside the 90 s window")
+        return problems
+
+    return check
+
+
 def _runs(skills_and_profiles, miss=True, **extra) -> list[dict]:
     wanted = []
     for skill, profile in skills_and_profiles:
@@ -2561,6 +2668,37 @@ def scenarios() -> list[Scenario]:
               "route to it crosses a 730 ft rise and the pass is lost to its own bombs, an open item in "
               "docs/formats/aircraft-variety.md, F111-9.)",
     ))
+    # T95-9: the Tu-95 flies its bay stick and the quick-mission strike; the AS-16 runs pin a known limit.
+    extra.append(Scenario(
+        name="ai-strike-tu95-stick", lane="flight",
+        args=pilot_run("UKR", "QUCOL", "--aircraft", "tu95", "--load", "MK82", "--station", "1", "--count", "6",
+                       "--altitude", "20000", "--from", "12", "--seconds", "200", "--follow-egress"),
+        timeout=600, expect=[r"RELEASE", r"ORIGIN", r"IMPACT", r"EGRESS"], check=tu95_stick_problems,
+        notes="An AI Tu-95 (a Heavy) on the column at 20,000 ft, 12 nm out, six Mk 82 in its belly bay: the doors "
+              "open before the first bomb, the six leave 0.25 s apart from the row's places (front row of four "
+              "first, outermost first, then the back pair), the doors shut after the last, then egress.",
+    ))
+    extra.append(Scenario(
+        name="ai-strike-tu95-quick-wing", lane="flight",
+        args=pilot_run("UKR", "QUFACT", "--aircraft", "tu95", "--load", "MK82", "--station", "1", "--count", "6",
+                       "--quick-wing", "--seconds", "500", "--follow-egress"),
+        timeout=900, expect=[r"ROLE", r"RELEASE", r"IMPACT", r"EGRESS"], check=tu95_quick_wing_problems,
+        notes="A Quick Mission with the Ukraine factory as the ground target: a Tu-95 wing gets the Strike role from "
+              "the mission's bomber-class default, opens its doors and drops the six Mk 82 of its belly bay at the "
+              "5,000 ft heavy floor, kills the factory, then egresses.",
+    ))
+    for station, where in (("1", "belly bay"), ("2", "wing beams")):
+        extra.append(Scenario(
+            name="ai-strike-tu95-antiship" + ("" if station == "1" else "-beams"), lane="flight",
+            args=pilot_run("UKR", "QUSFLT", "--unit", KRIVAK_ID, "--aircraft", "tu95", "--load", "AS16",
+                           "--station", station, "--count", "2", "--altitude", "20000", "--from", "15",
+                           "--seconds", "90"),
+            timeout=600, expect=[r"SELECTION", r"summary"], check=tu95_antiship_limit_problems(station),
+            notes=f"KNOWN LIMIT (T95-9): an AI Tu-95 with two AS-16 on its {where}, 15 nm from the Ukraine surface "
+                  "fleet at 20,000 ft, picks the Krivak with its radar missile and flies at it, and has released "
+                  "nothing 90 s in (the fleet outreaches the missile's 6.58 nmi and the Tu-95 does not come down "
+                  "to the missile's level). The run fails, by design, the day the AI can fire it.",
+        ))
     return extra + [
         Scenario(
             name="ai-strike-laser-self", lane="flight",

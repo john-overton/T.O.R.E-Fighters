@@ -162,3 +162,9 @@ The Tu-26's `T23_1.JT` row carries the same slew words as the B-52's (heading 32
 human's sight, the networked client and the AI follow it (`ai_wings::tail_gun_tests::the_retail_tu26_and_tu95_gun_rows_are_slewed_tail_guns_that_fire_astern`). The
 HUD reads `TAIL 2000 23MMX1`; the muzzle is the nozzle exit plane (T26-5). A human's rounds leave astern (frame `tail-gun-external` shows the tracers going
 aft from the tail). `flight-livefire-tu26-slot1` fires it. See [the Tu-26 section](../formats/aircraft-variety.md#tu-26-backfire-c-ordnance-sensors-hud-and-cockpit-t26-67-2026-11-16).
+
+## Update (T95-6, 2026-11-16): the Tu-95's tail turret
+
+The Tu-95's `T23_1.JT` tail turret (row 3, moved to the cone's point by T95-5) reads the same slew words and fires
+astern with the same `TAIL` cue and the same BMB-AI aim model as the B-52's: `flight-tu95-tail-gun` has an AI Tu-95
+hit 5 of 180 rounds on an F-22 closing from astern. No code changed; the mount follows its record.

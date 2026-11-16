@@ -45,7 +45,11 @@ const AIRCRAFT: usize = 54;
 /// Tu-95's empty pylon row (row 8) are two more optional weapon rows (BMB-C1
 /// and BMB-C2, 2026-11-15): the empty selection is the AS-16, a default store
 /// of another row that each now admits (batch C alone was 22 from 20).
-const RECOVERED_STATIONS: usize = 23;
+/// 22 from 23 (T95-6, 2026-11-16, measured): the Tu-95's pylon row (row 8) now
+/// starts loaded with its ten AS-16 (`aircraft_stations::TU95_WING_DEFAULT`), so it
+/// is a default store row, no longer an optional empty one; weapon, tank, Cheat-only
+/// and pod placements do not move (`TU95.PT` 3 source rows, 0 optional).
+const RECOVERED_STATIONS: usize = 22;
 const TANK_RECORDS: usize = 9;
 /// 3,817 from 3,684: the F-16A's four wing and wingtip rows join the roster
 /// (slice F16A-4, 133 compatible supported-weapon placements: two 0x07e5 rows
@@ -188,7 +192,17 @@ const TANK_RECORDS: usize = 9;
 /// integration the coordinator recomputes (B4).
 /// 5,292 with the Tu-26 (-45) on top of the B-1B, the Tu-160 and the F-111F (2026-11-16,
 /// batch B and C integration; the merged total is measured by `--validate-ordnance` at the end of the round).
-const WEAPON_PLACEMENTS: usize = 5292;
+/// 5,365 from 5,395 (T95-5, 2026-11-16, measured by `--validate-ordnance`): the
+/// Tu-95's belly bay row (row 7, `0x1180`) refuses 30 of the 35 stores its mask
+/// admitted because they do not clear the opened bay at the row's count
+/// (`aircraft_stations::TU95_BAY_REFUSED`), so `TU95.PT` goes from 36 to 6
+/// placements: the bay keeps the AS-16, `FAB250.JT`, `MK82.JT`, `MK82AIR.JT` and
+/// `MK82P3.JT`, and the pylon row keeps its one AS-16. Normal catalog 5 stores
+/// (was 35). Batch C's merge with the Tu-26's own bay refusals (T26-5) is for the
+/// coordinator to recompute (B4).
+/// 5,262 with the Tu-95 (-30) on top of the B-1B, the Tu-160, the F-111F and the Tu-26 (2026-11-16,
+/// batch B and C integration; the merged total is measured by `--validate-ordnance` at the end of the round).
+const WEAPON_PLACEMENTS: usize = 5262;
 /// 188 from 182: the F-16A's centreline tank row (F150.GAS or F250.GAS) plus
 /// the tank selection its two 0x07e5 wing rows accept, 6 tank placements.
 /// 192 from 188: the MiG-31 (M31-1). 201 from 192: the Mirage 2000 (M2K-1).

@@ -11,6 +11,7 @@ mod b52;
 mod lift;
 mod tu160;
 mod tu26;
+mod tu95;
 pub use lift::{
     BodyParameters, CorridorPoint, HandlingTargets, JetParameters, LiftEngines, LiftKind,
     PoweredLift, RotorLayout, RotorParameters, RotorRotation, TiltrotorParameters,
@@ -89,8 +90,8 @@ impl VarietyFlightModel {
         use AircraftId::*;
         let alignment_rate = match a.id.source() {
             // The B-52 takes the transports' 0.4, not the fighters' 0.7 (B52-8);
-            // so does the Tu-160 (T160-8).
-            C130 | Ac130 | E3 | Il76 | E2 | B52 | Tu160 => 0.4,
+            // so do the Tu-160 (T160-8) and the Tu-95 (T95-8).
+            C130 | Ac130 | E3 | Il76 | E2 | B52 | Tu160 | Tu95 => 0.4,
             B747 | A310 => 0.3,
             _ => 0.7,
         };
@@ -211,6 +212,9 @@ impl VarietyFlightModel {
         // The Tu-26's ground-run terms (T26-8, fitted).
         if a.id.source() == Tu26 {
             tu26::fit(&mut tuning, &mut configuration);
+        }
+        if a.id.source() == Tu95 {
+            tu95::fit(&mut tuning, &mut configuration);
         }
         // Transports and airliners: a little more drag, so full power in
         // level flight settles at 96 percent of the top speed, just under
@@ -878,8 +882,18 @@ pub(crate) mod tests {
         seconds: usize,
         hold: bool,
     ) -> crate::flight::State {
+        fly_level(&b52_like(), altitude, kt, fuel, seconds, hold)
+    }
+    fn fly_level(
+        aircraft: &Aircraft,
+        altitude: f64,
+        kt: f64,
+        fuel: f64,
+        seconds: usize,
+        hold: bool,
+    ) -> crate::flight::State {
         use crate::flight::{DT, PilotInput, State};
-        let mut s = State::new(&b52_like(), [0., altitude, 0.]).unwrap();
+        let mut s = State::new(aircraft, [0., altitude, 0.]).unwrap();
         s.enable_research(1).unwrap();
         s.cheats.unlimited_fuel = true;
         s.fuel = fuel;
@@ -916,17 +930,33 @@ pub(crate) mod tests {
             }
             let model = AircraftModel::for_aircraft(&synthetic(id)).unwrap();
             let c = model.configuration();
-            let b52 = id.source() == AircraftId::B52;
-            // The B-52's, the B-1B's and the Tu-160's drag shapes are the only three (B52-8,
-            // B1B-8, T160-8); the B-1B keeps every other term of the shared family. The
-            // Tu-160 shares the stall fraction idea (T160-8) with its own values; the lapse
-            // is the B-52's alone.
-            let shaped = b52 || id.source() == AircraftId::B1b || id.source() == AircraftId::Tu160;
-            let fitted = b52 || id.source() == AircraftId::Tu160;
-            assert_eq!(c.aerodynamics.drag_shape.is_some(), shaped, "{id:?}");
-            assert_eq!(model.stall_reference_fraction() != 1., fitted, "{id:?}");
-            assert_eq!(c.tuning.thrust_lapse_feet != 70_000., b52, "{id:?}");
-            // The transports, the B-52 and the Tu-160 turn their noses at 0.4 a second.
+            // Which aircraft carry which fitted terms (every one named, B52-8, B1B-8, T160-8,
+            // T26-8 and T95-8): the drag shape (the B-52, the B-1B, the Tu-160 and the Tu-95),
+            // the stall reference (the B-52 and the Tu-160, with their own values), the thrust
+            // lapse (the B-52 and the Tu-95) and the ground deceleration (the B-52, the Tu-26
+            // and the Tu-95); the lapse is the B-52's and the Tu-95's alone.
+            let listed = |ids: &[AircraftId]| ids.contains(&id.source());
+            assert_eq!(
+                c.aerodynamics.drag_shape.is_some(),
+                listed(&[AircraftId::B52, AircraftId::B1b, AircraftId::Tu160, AircraftId::Tu95]),
+                "{id:?}"
+            );
+            assert_eq!(
+                model.stall_reference_fraction() != 1.,
+                listed(&[AircraftId::B52, AircraftId::Tu160]),
+                "{id:?}"
+            );
+            assert_eq!(
+                c.tuning.thrust_lapse_feet != 70_000.,
+                listed(&[AircraftId::B52, AircraftId::Tu95]),
+                "{id:?}"
+            );
+            assert_eq!(
+                c.tuning.rolling_deceleration != 0.8,
+                listed(&[AircraftId::B52, AircraftId::Tu26, AircraftId::Tu95]),
+                "{id:?}"
+            );
+            // The transports, the B-52, the Tu-160 and the Tu-95 turn their noses at 0.4 a second.
             assert_eq!(
                 c.tuning.alignment_rate == 0.4,
                 matches!(
@@ -938,6 +968,7 @@ pub(crate) mod tests {
                         | AircraftId::E2
                         | AircraftId::B52
                         | AircraftId::Tu160
+                        | AircraftId::Tu95
                 ),
                 "{id:?}"
             );
@@ -1202,6 +1233,70 @@ pub(crate) mod tests {
         // 66,000 lbf, which is what the AI's taxi law needs (BMB-AI).
         let balance = tu26::ROLLING_DECELERATION * 273_370. / (66_000. * 32.174);
         assert!((0.5..0.95).contains(&balance), "{balance}");
+    }
+    /// The Tu-95's flight terms (T95-8, 2026-11-16): a Tu-95 built from
+    /// synthetic values near the corrected record (fitted thrust, real weights
+    /// and fuel, the record's 355 kt sea-level and fitted 499 kt 25,000 ft
+    /// edges), against the figures the terms were fitted to, loosely: a
+    /// climb near the published 2,000 ft/min, a cruise burn that gives a range
+    /// near the published 8,100 nautical miles, and a top speed that reaches
+    /// the 499 kt Jane's gives at 25,000 ft.
+    fn tu95_like() -> Aircraft {
+        let mut a = synthetic(AircraftId::Tu95);
+        for (key, value) in [
+            ("thrust", "100000"),
+            ("weight", "198415"),
+            ("internalFuel", "148150"),
+            ("maxTakeoffWeight", "414470"),
+            ("fuelConsumption", "4"),
+            ("loadedDrag", "60"),
+        ] {
+            a.fields.get_mut(key).unwrap().value = value.into();
+        }
+        for e in &mut a.envelopes {
+            e.points = vec![
+                [210., 0.],
+                [350., 33_500.],
+                [520., 40_750.],
+                [730., 40_375.],
+                [780., 36_000.],
+                [842., 25_000.],
+                [600., 0.],
+            ];
+        }
+        a
+    }
+    #[test]
+    fn the_tu95_climbs_cruises_and_tops_out_near_the_published_figures() {
+        // Sea level, 300 kt, 346,565 lb (a full tank): the specific excess
+        // power from the speed gained in level flight; published rate of
+        // climb 2,000 ft/min (33 ft/s), the model reads about 40 ft/s.
+        let a = tu95_like();
+        let before = fly_level(&a, 0., 300., 148_150., 1, false);
+        let after = fly_level(&a, 0., 300., 148_150., 4, false);
+        let gained = (after.speed - before.speed) / 3.;
+        let ps = 0.5 * (after.speed + before.speed) * gained / 32.174;
+        assert!((25. ..60.).contains(&ps), "excess power {ps} ft/s");
+        // 400 kt at 25,000 ft holding speed: the burn gives a range of 6,000
+        // to 9,000 nautical miles from the 148,150 lb tank (published 8,100).
+        let cruise = fly_level(&a, 25_000., 400., 74_000., 400, true);
+        let range_nm = 148_150. / (4. * cruise.throttle) * 400. / 3600.;
+        assert!((6_000. ..9_000.).contains(&range_nm), "range {range_nm} nm");
+        // Full power at 25,000 ft, half the tank gone, settles within 5
+        // percent of the 499 kt edge (Jane's: Mach 0.83, 499 kt).
+        let top = fly_level(&a, 25_000., 450., 40_000., 300, false);
+        assert!(
+            (top.speed / 1.68781 - 499.).abs() < 25.,
+            "{}",
+            top.speed / 1.68781
+        );
+        // And at sea level near the 350 kt Jane's gives.
+        let low = fly_level(&a, 0., 300., 40_000., 300, false);
+        assert!(
+            (low.speed / 1.68781 - 350.).abs() < 20.,
+            "{}",
+            low.speed / 1.68781
+        );
     }
     #[test]
     fn the_mirage_f1_gear_low_point_scales_with_its_shape_height() {

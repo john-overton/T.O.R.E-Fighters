@@ -1264,3 +1264,43 @@ placements (`TU26.PT` 84), 257 tank placements, 82 pod placements, 278 Cheat-onl
 is the record's after BMB-C2 and T26-5: the 23 mm tail turret (2,000 rounds), six `AS16.JT` (two on the intake-trunk pair, two on each glove pair), the bay row empty with an empty
 AS-16 selection (273,370 lb maximum, 253,971 lb with the default load and 110,230 lb of fuel). The live-fire slots, in the default-store order, are the gun (slot 1), the three AS-16 rows (slots 2 to 4,
 refused by the practice aircraft, a surface missile) and the never-loaded bay row (slot 5). See [the Tu-26 section](../formats/aircraft-variety.md#tu-26-backfire-c-ordnance-sensors-hud-and-cockpit-t26-67-2026-11-16).
+
+## Tu-95 bay refusals (T95-5, 2026-11-16)
+
+T95-5 gives the Tu-95 its fitted belly bay on the shared magazine grid
+([stores specification](../spec/stores-on-pylons.md#tu-95-bay-pylons-and-tail-gun-t95-5-2026-11-16)).
+The bay row (`TU95.PT` row 7, mask `0x1180`, six, class 160) admitted 35 stores; the sweep measured
+each at the row's count in the opened bay (5.5 by 26.0 ft, roof 5.5 ft over the belly plane) and
+**30 are refused by name** (`aircraft_stations::TU95_BAY_REFUSED`) because they leave under 0.05 ft to
+a wall, a door leaf, the roof, an end, the floor, a rail or a neighbour. Five stay: `AS16.JT` (the
+default, under a fin-contact exception), `FAB250.JT`, `MK82.JT`, `MK82AIR.JT` and `MK82P3.JT`. The
+pylon row (row 8) keeps its one placement (`AS16.JT`, BMB-C2) and moves to 9.0 ft forward as a
+`Location::Beam`; the tail turret moves to the tail cone. Nothing else changes.
+
+| Pin | Before | After | Why |
+| --- | ---: | ---: | --- |
+| Weapon placements | 5,395 | 5,365 | `TU95.PT` 36 to 6: the bay refuses 30 |
+| `TU95.PT` normal catalog | 35 stores | 5 | the bay's five and the pylon's `AS16` |
+| Aircraft, tank, recovered stations, Cheat-only, pods | 54 / 257 / 23 / 278 / 82 | unchanged | Cheat loading ignores the refusals |
+
+```text
+ordnance TU95.PT: 3 source rows, 1 optional weapon rows, 6 compatible weapon placements, 0 tank placements; defaults and restart passed; catalog 5 normal, 83 Cheat
+ordnance audit: 54 aircraft, 23 recovered weapon stations, 5365 weapon placements, 257 tank placements, 82 weapon and 9 tank records; passed
+```
+
+Measured with `--validate-ordnance` on `m3-tu95` at the batch C integration base (profile refreshed
+first). The Tu-26's own bay refusals (T26-5, on its branch, not in this base) move other rows; the
+coordinator recomputes the merged totals (B4). The `menus-ordnance-availability` expected line reads
+5365; `a2g-catalog` and `test_battery_a2g.py` carry the unchanged 54, 23, 257 and 278.
+
+## Tu-95 default load (T95-6, 2026-11-16)
+
+The Tu-95's pylon row (`TU95.PT` row 8) now starts loaded with its ten AS-16 beside the bay's six (the
+coordinator's brief), so it is a default store row and no longer an optional empty one. Measured with
+`--validate-ordnance` on `m3-tu95` (profile refreshed first): aircraft 54, recovered weapon stations **22 (from
+23)**, weapon placements 5,365, tank placements 257, Cheat-only 278 and designator pods 82, all unchanged.
+`ordnance TU95.PT: 3 source rows, 0 optional weapon rows, 6 compatible weapon placements, 0 tank placements;
+defaults and restart passed; catalog 5 normal, 83 Cheat`. The `menus-ordnance-availability` and `a2g-catalog`
+expected lines and `test_battery_a2g.py` read 22. Load Ordnance reads 388,894 of 414,470 lb. The Tu-26's
+own branch moves its own rows; the coordinator recomputes the merged totals (B4). See the
+[Tu-95 section](../formats/aircraft-variety.md#tu-95-bear-h-ordnance-sensors-hud-and-cockpit-t95-67-2026-11-16).

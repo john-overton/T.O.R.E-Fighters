@@ -768,7 +768,7 @@ three batch C reviews in
 | Tu-26 | 1 G fast edge at 36,000 ft, ft/s | 1,933 (1,145 kt) | 1,823 (1,080 kt) | Mach 1.88, 1,080 kt, `TU26.INF`: **fitted** cap (0 G 2,084 to 1,974, the 151 ft/s step kept; sea level, 1,010 ft/s, stays) |
 | Tu-26 | Bay row 5 flags | `0x1500` | `0x1120` | designator bit `0x400` cleared (**fitted**, B7: no pod on a bomb bay) and the active-radar bit `0x20` set so the bay takes the Kh-15 (`AS16.JT`; the real jet's six-round rotary launcher, `TU26.INF`) |
 | Tu-26 | Glove rows 7 and 8, capacity (default load) | 4 and 6 AS-16 | 2 and 2 | the real four underwing Kh-15 (`TU26.INF`, "four more underwing"; Wikipedia: six internal, four underwing), one a side on each glove pair; **opinionated** |
-| Tu-95 | Thrust, lbf (4 x NK-12MV) | 355,080 | 129,000 | the record is 4 x 14,795 shp x 6 (`TU95.INF`, Wikipedia "Kuznetsov NK-12"), the rule that made the C-130's 108,192; **fitted** at the AC-130U's 2.18 lbf per shp |
+| Tu-95 | Thrust, lbf (4 x NK-12MV) | 355,080 | 100,000 | the record is 4 x 14,795 shp x 6 (`TU95.INF`, Wikipedia "Kuznetsov NK-12"), the rule that made the C-130's 108,192; **fitted** (BMB-C2 first pass 129,000, the AC-130U's 2.18 lbf per shp; T95-8, 2026-11-16, took 100,000 to fit the takeoff run and climb with one number, see [the Tu-95 flight review](../formats/aircraft-variety.md#tu-95-bear-h-flight-review-t95-8-2026-11-16)) |
 | Tu-95 | Empty weight, lb | 264,550 | 198,415 | 90,000 kg, `TU95.INF` (Bear-H); Wikipedia "Tupolev Tu-95" (Tu-95MS) 198,416 |
 | Tu-95 | Internal fuel, lb | 100,000 | 148,150 | 67,200 kg, Wikipedia "Tupolev Tu-95" (Tu-95MS) |
 | Tu-95 | Maximum take-off, lb | 407,850 | 414,470 | 188,000 kg, `TU95.INF` (Bear-H) and Wikipedia (the record's is Jane's Bear-F) |
@@ -784,8 +784,8 @@ three batch C reviews in
 
 Unchanged on purpose: the Tu-26's maximum take-off weight (273,370 lb), fuel (110,230 lb)
 and fuel flows (10 and 66 lb/s, which already match the NK-25's cited fuel consumption at
-the real thrust), name and speed at sea level; the Tu-95's ceiling (40,750 ft), speeds, fuel
-flow (4 lb/s) and tail turret (2,000 rounds); the Su-34's afterburner thrust (59,510 lbf,
+the real thrust), name and speed at sea level; the Tu-95's ceiling (40,750 ft), sea-level and 36,000 ft
+speed edges (the 25,000 ft edge changed in T95-8, below), fuel flow (4 lb/s) and tail turret (2,000 rounds); the Su-34's afterburner thrust (59,510 lbf,
 within 0.2 percent of the real 59,400), maximum take-off weight (97,000 lb), G limits
 (-4 / +9), ceiling (55,000 ft), sea-level edge (741 kt) and name `Su-34 Platypus`.
 
@@ -835,3 +835,16 @@ thrust, weights, fuel and the stations are unchanged. What a player notices: the
 ft; its 326,285 lb lasts 52 minutes in afterburner instead of 31. The flight terms that go with them (a drag
 shape, a stall reference, a wheel brake) are model code, not record readings: see
 [the Tu-160 flight review](../formats/aircraft-variety.md#tu-160-flight-review-t160-8-2026-11-16).
+
+## Tu-95 Bear-H flight review: thrust and 25,000 ft speed edge (T95-8, 2026-11-16)
+
+Agent decisions, **fitted**, from the flight review ([figures and sources](../formats/aircraft-variety.md#tu-95-bear-h-flight-review-t95-8-2026-11-16)).
+
+| Aircraft | Field | Retail | Game | Source |
+| --- | --- | ---: | ---: | --- |
+| Tu-95 | Thrust, lbf | 355,080 | 100,000 | replaces the BMB-C2 first pass's 129,000 (table above): one number for takeoff, climb and cruise, just above the cited 71,600 to 95,400 lbf at the 162 kt takeoff speed; the takeoff run needs a rolling term of 4.8 ft/s squared (about 9.8 at 129,000) |
+| Tu-95 | 1 G fast edge at 25,000 ft, ft/s (new vertex) | 725 (a straight line, 430 kt) | 842 (499 kt) | Mach 0.83, 499 kt at 25,000 ft, `TU95.INF` (Bear-H) and Wikipedia "Tupolev Tu-95" (Tu-95MS): **fitted** vertex; the 0 G row 897 (the record's 55 ft/s step); sea level (600 ft/s) and 36,000 ft (780 ft/s) stay |
+
+The other aircraft's records are untouched. The flight terms (drag shape, lapse, rolling and brake deceleration, alignment) are code, not record
+values: `crates/tore-sim/src/models/variety/tu95.rs`.
+

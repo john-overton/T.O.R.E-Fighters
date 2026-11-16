@@ -1694,6 +1694,70 @@ class Tu26Tests(unittest.TestCase):
             self.assertIn(name, names)
 
 
+class Tu95Tests(unittest.TestCase):
+    """The Tu-95 strike checks (slice T95-9)."""
+
+    def stick(self, cells=None, **kwargs):
+        cells = s.tu95_bay_cells(6) if cells is None else cells
+        return b2_run(cells, station=1, **kwargs).replace("aircraft=B2", "aircraft=Tu95")
+
+    def test_the_bay_rows_first_places_are_the_right_ones(self):
+        cells = s.tu95_bay_cells(6)
+        self.assertEqual([c[0] for c in cells], [-1.95, 1.95, -0.65, 0.65, -1.95, 1.95])
+        self.assertEqual([c[2] for c in cells], [16.19] * 4 + [8.64] * 2)
+        self.assertEqual({c[1] for c in cells}, {-2.98})
+
+    def test_a_full_bay_stick_passes_and_a_quick_wing_wants_the_strike_role(self):
+        self.assertEqual(s.tu95_stick_problems(self.stick()), [])
+        quick = self.stick().replace("PROFILE t=0.000 name=none", "ROLE t=0.000 plane=1 role=strike\nai-strike: PROFILE t=0.000 name=none")
+        self.assertEqual(s.tu95_quick_wing_problems(quick), [])
+        self.assertTrue(any("role" in p for p in s.tu95_quick_wing_problems(self.stick())))
+
+    def test_a_short_stick_a_wrong_cell_a_shut_door_or_the_wrong_row_fails(self):
+        cells = s.tu95_bay_cells(6)
+        self.assertTrue(any("stick of 6" in p for p in s.tu95_stick_problems(self.stick(cells[:2]))))
+        self.assertTrue(any("one place" in p for p in s.tu95_stick_problems(self.stick([cells[0]] * 6))))
+        wrong = [(c[0] + 3.0, c[1], c[2]) for c in cells]
+        self.assertTrue(any("row's place" in p for p in s.tu95_stick_problems(self.stick(wrong))))
+        shut = self.stick().replace("bay=1.00", "bay=0.00")
+        self.assertTrue(any("doors at 0.00" in p for p in s.tu95_stick_problems(shut)))
+        other_row = b2_run(cells, station=2).replace("aircraft=B2", "aircraft=Tu95")
+        self.assertTrue(any("bay row (1)" in p for p in s.tu95_stick_problems(other_row)))
+        self.assertTrue(any("Tu95" in p for p in s.tu95_stick_problems(b2_run(cells, station=1))))
+
+    def test_the_antiship_limit_run_wants_a_radar_missile_pick_and_no_release(self):
+        def limit(station="1", release=False, bay=False, lost=False, kind="RadarAgm"):
+            lines = [
+                f"ai-strike: setup aircraft=Tu95 load=AS16.JT station={station} count=2 rounds=2 target=0x50000003 "
+                "name=Krivak target_at=1,2,3 hp=500 skill=1 profile=none handback=none order=none mode=none",
+                "ai-strike: PROFILE t=0.000 name=none requested=none note=chosen",
+                "ai-strike: start t=0.000 plane=0 range_ft=91140 alt_ft=20000 speed_kt=450",
+                f"ai-strike: SELECTION t=0.008 target=0x50000003 station={station} kind={kind} side=2 class=0x2000 name=Krivak",
+            ]
+            if bay:
+                lines.append("ai-strike: BAY t=70.000 state=open bay=0.96")
+            if release:
+                lines.append(f"ai-strike: RELEASE t=80.000 n=1 weapon=AS16.JT station={station} alt_ft=20000 speed_kt=400 "
+                             "range_ft=1 pass=1 aim_ft=0 inside=yes lead_ft=0 dive_deg=0 bay=0.00")
+            if lost:
+                lines.append("ai-strike: LOST t=50.000 reason=destroyed crashed=yes")
+            lines.append("ai-strike: summary t=90.000 ran_s=90.0 profile=level releases=0 impacts=0 kills=0 egress=no "
+                         "lost=no activity=Attacking target_hp=500/500 closest_ft=52000 store_rounds_left=2")
+            if not release:
+                lines.append("ai-strike: no release")
+            lines.append("ai-strike: done")
+            return "\n".join(lines)
+
+        check1, check2 = s.tu95_antiship_limit_problems("1"), s.tu95_antiship_limit_problems("2")
+        self.assertEqual(check1(limit()), [])
+        self.assertEqual(check2(limit("2")), [])
+        self.assertTrue(any("known limit may be fixed" in p for p in check1(limit(release=True))))
+        self.assertTrue(any("doors moved" in p for p in check1(limit(bay=True))))
+        self.assertTrue(any("was lost" in p for p in check1(limit(lost=True))))
+        self.assertTrue(any("RadarAgm" in p for p in check1(limit(kind="Bomb"))))
+        self.assertTrue(any("station 2" in p for p in check2(limit("1"))))
+
+
 if __name__ == "__main__":
     unittest.main()
 

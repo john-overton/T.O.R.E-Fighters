@@ -3745,6 +3745,43 @@ mod tests {
         assert!(!tore_world::surface::resolve::night_stealth(&night));
     }
 
+    /// T95-9 (2026-11-16): the Tu-95 Bear-H is offered as the player's
+    /// aircraft and in every AI wing field, by its own selection key
+    /// (`TU95.PT`), and a draft carries it as the player and in every wing. It
+    /// never stands in for the Tu-26 or the Su-34, the other batch C bombers,
+    /// and the stealth night rule is not its.
+    #[test]
+    fn the_tu95_is_a_quick_mission_player_and_a_wing_choice() {
+        let mut q = full_catalog();
+        assert_eq!(AircraftId::Tu95.selection_key(), "TU95.PT");
+        let player = q
+            .aircraft_files
+            .iter()
+            .position(|f| f == AircraftId::Tu95.selection_key())
+            .unwrap();
+        assert_eq!(q.aircraft_names[player], "Tu- 95 Bear-H");
+        q.apply(6, player);
+        assert_eq!(q.player(), Some(AircraftId::Tu95));
+        for field in AI_AIRCRAFT_FIELDS {
+            let index = q.ai_choice(AircraftId::Tu95).unwrap();
+            assert_eq!(q.values(field)[index], "Tu- 95 Bear-H");
+            q.apply(field, index);
+            assert_eq!(q.wing_aircraft(field), Some(AircraftId::Tu95));
+        }
+        let spec = q.mission_spec().unwrap();
+        assert_eq!(spec.wings[0].aircraft, AircraftId::Tu95);
+        for wing in spec.wings.iter().skip(1) {
+            assert_eq!(wing.aircraft, AircraftId::Tu95);
+        }
+        assert!(
+            !tore_formats::quick_template::tables::NIGHT_STEALTH_AIRCRAFT
+                .contains(&AircraftId::Tu95.pt())
+        );
+        let mut night = spec;
+        night.condition = tore_world::mission::Condition::Night;
+        assert!(!tore_world::surface::resolve::night_stealth(&night));
+    }
+
     /// Slice GRI-9: the Saab Gripen is offered as the player's aircraft and,
     /// because the AI can fly it, in every AI wing field. The identity the
     /// mission flies is named exactly (`GRIPEN.PT`), never aliased to another

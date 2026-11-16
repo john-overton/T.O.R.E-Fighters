@@ -329,6 +329,11 @@ F111_LOAD = "AGM84E.JT,AGM84E.JT,AGM84E.JT,AGM84E.JT,MK82.JT"
 # with AS-16 first and leaves the bay for the two Mk 82; `--a2g bomb` takes the first bomb, the Mk 82. The
 # watching client must draw the pylon and bay stores, and see a Mk 82 leave the bay with the belly doors open.
 TU26_STORES_MISSION = STORES_MISSION.replace("wing friendly 1 F16C.PT 2 average\n", "wing friendly 1 TU26.PT 2 average\n")
+# T95-9 (2026-11-16): the same mission with both players in Tu-95s. The bay row (row 7, station 1) is the only
+# station that takes a Mk 82 (the wing beams carry the AS-16 only), so `tore-bot --load MK82.JT` hangs two
+# Mk 82 in the belly bay, and `--a2g bomb` takes it. The watching client must draw the bay stores and see a Mk 82
+# leave with the bay doors open.
+TU95_STORES_MISSION = STORES_MISSION.replace("wing friendly 1 F16C.PT 2 average\n", "wing friendly 1 TU95.PT 2 average\n")
 # The strike handback with a B-2 (the F-117 has no radar to set up a pass with), airborne at 20,000 ft so the heavy needs no climb to its release floor: the human's pass is
 # continued by the AI, whose bay doors must open for the release and be seen to open from the other client.
 B2_STRIKE_MISSION = STRIKE_MISSION.replace(
@@ -479,6 +484,12 @@ def drive_stores_tu26(d: Drive) -> None:
     drive_stores(d, TU26_STORES_MISSION, "AS16.JT,AS16.JT,AS16.JT,MK82.JT", doors=True, bomb="MK82.JT")
 
 
+def drive_stores_tu95(d: Drive) -> None:
+    """`net-a2g-stores` with both players in Tu-95s (T95-9): a Mk 82 leaves the bomber's belly bay on the
+    watcher's screen, the watcher sees the bomber's bay doors open for it, and the AI's stores still empty."""
+    drive_stores(d, TU95_STORES_MISSION, "MK82.JT", doors=True)
+
+
 def scenarios() -> list[Scenario]:
     return [
         Scenario(
@@ -514,6 +525,10 @@ def scenarios() -> list[Scenario]:
         ),
         Scenario(
             name="net-a2g-stores-tu26", lane="net", args=[], driver=drive_stores_tu26, uses=("server", "bot"),
+            timeout=420,
+        ),
+        Scenario(
+            name="net-a2g-stores-tu95", lane="net", args=[], driver=drive_stores_tu95, uses=("server", "bot"),
             timeout=420,
         ),
         Scenario(

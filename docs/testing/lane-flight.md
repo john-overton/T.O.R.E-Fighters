@@ -153,6 +153,14 @@ fit lowered, the AI's pass from 12 nm opens the bay a second late and exits with
 16 nm all drop the six (a timing edge of the AI's bay lead, T160-9's). Results: the
 [variety flight baseline](../baselines/variety-flight.md#tupolev-tu-160-validation-2026-11-16).
 
+Update (T95-8, 2026-11-16): `tu95` joins `VARIETY_AIRCRAFT`, `LIFTOFF_AIRCRAFT` (liftoff, retail-stall and
+approach scenarios) and `HEAVY_AIRCRAFT` (`flight-variety-gcurve-tu95`) in `flight.py`, with fitted windows (liftoff
+135 to 165 kt, recorded 137.1; approach 145 to 170 kt, recorded 158.1), a 10,000 tick takeoff limit and 18,000 tick
+run (`TAKEOFF_TICKS_MAX`, `TAKEOFF_RUN_TICKS`) and Greece airport 1 (`THEATER_FOR`). `ai.py` adds
+`ai-heavy-takeoff-tu95-gre-a1` and `ai-heavy-land-tu95-ukr-a2` (90,000 ticks; the landing tolerated off-pavement ticks like
+the B-52's until T95-9, 2026-11-16, which closed its taxi-in: it now demands the pavement). Results: the
+[variety flight baseline](../baselines/variety-flight.md#tupolev-tu-95-bear-h-validation-2026-11-16).
+
 Update (MF1-8, 2026-11-11): the Mirage F1 results, clean and with the default load,
 with the full-stick pull by fuel against the Mirage 2000, the Gripen, the F-5E and
 the F-16A, are in the
@@ -426,6 +434,9 @@ adds order kinds.
 | `ai-strike-tu26-pylon` (T26-9, 2026-11-16) | An AI Tu-26 on `~QUCOL` at 20,000 ft, 12 nm out, six Mk 82 on the inner glove row (`--station 2 --count 6`) | Six releases 0.25 s apart from the two gloves alternating from the left (right -11.33, 11.33, -12.02, 12.02, -10.64, 10.64 ft, up -4.69 to -4.12, forward 4.33), the doors never move, six impacts, egress, not lost |
 | `ai-strike-tu26-quick-wing` (T26-9) | A Quick Mission with the Ukraine factory as the ground target and a Tu-26 wing (`--quick-wing --station 4 --count 8`) | `ROLE strike`, the bay stick of eight (`ai-strike-tu26-stick`'s cells) at 4,949 ft with the belly doors open before and shut after, the factory killed, egress, not lost |
 | `ai-strike-tu26-antiship` (T26-9) | An AI Tu-26 with two AGM-84E on the inner glove row (`--station 2 --count 2`), 15 nm from the Ukraine surface fleet's Krivak at 20,000 ft, 60 s | One Harpoon leaves each glove (right -11.33 and 11.33 ft, up -4.2, forward 4.33), the doors never move, both hit and the Krivak is destroyed (29 s). The Tu-26's own AS-16 is not flown by the AI at a ship (the T160-9 dependency, [AI strike spec](../spec/ai-strike.md)) |
+| `ai-strike-tu95-stick` (T95-9, 2026-11-16) | An AI Tu-95 (Heavy) on `~QUCOL` at 20,000 ft, 12 nm out, six Mk 82 in the belly bay (`--station 1 --count 6`) | The doors open before the first bomb (a `BAY` line), six releases 0.25 s apart each with `bay=1.00`, from the row's six places (right -1.95, 1.95, -0.65, 0.65 ft at 16.19 ft forward, then -1.95 and 1.95 ft at 8.64 ft; up -2.98), station 1, the doors read shut 1.5 to 6 s after the last, an impact, egress, not lost |
+| `ai-strike-tu95-quick-wing` (T95-9) | A Quick Mission with the Ukraine factory as the ground target and a Tu-95 wing (`--quick-wing --station 1 --count 6`) | `ROLE strike`, the same bay stick of six with the doors open for it at the 5,000 ft heavy floor, the factory killed, egress, not lost |
+| `ai-strike-tu95-antiship`, `ai-strike-tu95-antiship-beams` (T95-9) | An AI Tu-95 with two AS-16 on the bay row (`--station 1`) or the wing beams (`--station 2`), 15 nm from the Ukraine surface fleet's Krivak at 20,000 ft, 90 s | **Pins a known limit**: the radar missile is selected (`SELECTION kind=RadarAgm`, the station asked for) and aimed at the Krivak, and **nothing is released**, no `BAY` line, not lost. The run fails by design the day the AI can fire the AS-16 (see aircraft variety, T95-9) |
 | `a2g-release-origin-b2` (B2-6) | The human trigger on the B-2's four bay rows (`--a2g-run --attack release`, 12 presses a Mk 82 row, 4 a Paveway row) | Each release leaves where it hangs: outermost first, alternating sides, front row before back, bottom tier first |
 | `ai-strike-tu160-stick` (T160-6, 2026-11-16) | An AI Tu-160 (Heavy) on `~QUCOL` at 20,000 ft, 12 nm out, the forward bay's six Mk 82 (`--aircraft tu160 --load MK82`) | Six releases from the grid's own places (four abreast at 45.73 then 38.18 ft ahead, -1.95 ft up), doors open for the release, an impact, egress, not lost; the cells equal the human's in `a2g-release-origin-tu160` |
 | `a2g-release-origin-tu160` (T160-6, 2026-11-16) | The human trigger on the Tu-160's bays (`--a2g-run --attack release`, 6 AS-16 a bay, 6 Mk 82 of the forward bay) | Each release leaves where it hangs: AS-16 three abreast (-1.59, +1.59, 0), forward row then back (38.61 and 22.66 ft forward, aft bay -12.73 and -28.68); Mk 82 four abreast |
@@ -1176,3 +1187,29 @@ run 3,500 to 5,500 ft and landing roll 3,500 to 5,000 ft through `LIFTOFF_RUN_FT
 `APPROACH_FUEL_SHARE`; at 65 percent the scripted flare touches down at 12.1 ft/s) for the approach. `ai-heavy-takeoff-tu26-gre-a1` joins the [AI lane](lane-ai.md); the landing twin was
 not added (the AI Tu-26 lands short at Simferopol, see the review). Results: the
 [variety flight baseline](../baselines/variety-flight.md#tupolev-tu-26-backfire-c-validation-2026-11-16).
+
+Update (T95-5, 2026-11-16): the Tu-95's bay, pylons and tail turret join the flight lane.
+`flight-bay-fire-tu95-row7` (the one-press release through the fitted bay with six Mk 82: the doors open
+to 0.95 before the bomb leaves and close after it; the default AS-16 needs a target the stores preview does
+not give it), `flight-bay-fire-tu95-pylon-row8` (an AS-16 leaves the underwing beam with the doors shut, ten
+loaded), `flight-bay-tu95-0`, `-0.5` and `-1` (the `--flight-bay` frames) and `render-tu95-clearance`
+(headless, `TORE_STORES_PREVIEW_T95CLEAR=1`: the six default AS-16 clear the open bay's doors, walls, roof,
+floor, rails and ends by 0.05 ft or more, their fins touching each other being the one accepted exception;
+ten pylon AS-16 clear each other, the inboard propeller disc, the nacelle, the fuselage and the gear).
+`STATIONS["tu95"]` is `[2000, 6, 0]` (the tail turret, the six bay AS-16 and the empty pylon row), so
+`flight-livefire-tu95-slot1` to `-slot3` and `flight-jettison-tu95-slot2` run too. `flight-animation-tu95`
+now requires the bay control (the four belly triangles whole at 0 with no lining; open, the 20 lining
+faces and the leaves hanging on a quarter turn). The menus expected line reads 5,365 weapon placements.
+
+Update (T95-6/7, 2026-11-16): the Tu-95's ordnance, countermeasures and tail turret join the flight lane.
+`STATIONS["tu95"]` is now `[2000, 6, 10]` (the pylon row starts loaded with ten AS-16), so
+`flight-livefire-tu95-slot1` to `-slot3` and `flight-jettison-tu95-slot2` and `-slot3` run; slots 2 and 3 (the
+bay's and the beams' AS-16, surface missiles) are in `REFUSED_SLOTS` (the Weapons window reads `TARGET TYPE`,
+`NO LOCK`, nothing fires). New: `a2g-sarh-as16-tu95` (an AS-16 from the bay and one from the beam each designated
+on the A-G page through the Bear's radar, launched at the lead truck of `~QUCOL` and killing it; the bay's leaves
+at least half a second after the beam's, the door wait), `a2g-release-origin-tu95` (the human's presses leave from
+the bay grid's cells and the beams' rows, each within 0.05 ft of where it hangs; the unit test
+`an_ai_tu95_leaves_the_bay_and_the_beams_from_the_humans_places` pins the AI to the same cells),
+`flight-tu95-tail-gun` (the B-52's scenario with an AI Tu-95: 5 of 180 rounds hit the F-22, the same 35 percent
+ceiling) and `flight-countermeasures-tu95` (99 chaff and 99 flares, five and three released). The `menus` and
+`a2g-catalog` expected lines read 22 recovered weapon stations (from 23).

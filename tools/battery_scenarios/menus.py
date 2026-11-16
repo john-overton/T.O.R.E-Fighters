@@ -509,7 +509,9 @@ def scenarios() -> list[Scenario]:
             # Batch B merge (2026-11-16, interim, before the measured total): 5,337 = 5,395 - 51 (B-1B) - 10 (Tu-160) + 3 (F-111F).
             # T26-5 (2026-11-16): 5,350 weapon placements, the Tu-26's bay row refuses 19 stores, its intake pair 17 and its glove rows 4 and 5 (Tu-26 129 to 84, minus 45; measured; the coordinator recomputes the total at integration).
             # Batch B and C merge (2026-11-16, interim, before the measured total): 5,292 = 5,395 - 51 (B-1B) - 10 (Tu-160) + 3 (F-111F) - 45 (Tu-26).
-            expect=[r"ordnance audit: 54 aircraft, 23 recovered weapon stations, 5292 weapon placements, 257 tank placements, 82 weapon and 9 tank records; passed"],
+            # T95-5 (2026-11-16): 5,365 weapon placements, measured: the Tu-95's bay row refuses 30 stores that do not clear the opened bay (TU95.PT 36 to 6); every other pin is unchanged.
+            # Batch B and C merge (2026-11-16, interim, before the measured total): 5,262 = 5,395 - 51 (B-1B) - 10 (Tu-160) + 3 (F-111F) - 45 (Tu-26) - 30 (Tu-95); 22 recovered stations (T95-6).
+            expect=[r"ordnance audit: 54 aircraft, 22 recovered weapon stations, 5262 weapon placements, 257 tank placements, 82 weapon and 9 tank records; passed"],
             notes="All reviewed source stations, compatible supported weapons/tanks, empty defaults and accepted-load restoration. The audit fails when a supported weapon or tank record is missing or a pinned count moves (ordnance_audit.rs).",
         )
     )

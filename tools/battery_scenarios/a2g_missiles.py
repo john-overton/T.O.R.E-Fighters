@@ -285,6 +285,24 @@ def antiship_tu26_problems(output: str) -> list[str]:
     return problems
 
 
+def tu95_as16_problems(output: str) -> list[str]:
+    """T95-6 (2026-11-16): an AS-16 from the Tu-95's belly bay (run 1) and one from its pylon beam
+    (run 2) are each designated on the A-G page through the Bear's radar (`TU95R.SEE`, enabled in
+    T95-7), locked CUED, launched and kill the column's lead truck. The bay's missile waits for the
+    doors (the press asks for them, the store leaves at 0.95): it leaves about a second after the
+    pylon's."""
+    parts = runs(output)
+    if len(parts) != 2:
+        return [f"{len(parts)} runs finished, want 2"]
+    problems: list[str] = []
+    _cued_kill(parts[0], "Tu-95 AS-16 from the bay", problems)
+    _cued_kill(parts[1], "Tu-95 AS-16 from the pylon beam", problems)
+    bay, beam = (LAUNCH.search(part) for part in parts)
+    if bay and beam and float(bay.group(1)) - float(beam.group(1)) < 0.5:
+        problems.append(f"the bay's AS-16 left at {bay.group(1)} s, the beam's at {beam.group(1)} s: no door wait")
+    return problems
+
+
 def sarh_problems(output: str) -> list[str]:
     parts = runs(output)
     if len(parts) != 2:
@@ -512,6 +530,16 @@ def scenarios() -> list[Scenario]:
             then=[Step(fleet + ["--aircraft", "rafale", "--load", "AM39"], timeout=300)],
             check=antiship_problems,
             notes="Harpoon and Exocet at the Krivak on the A-G track.",
+        ),
+        Scenario(
+            name="a2g-sarh-as16-tu95", lane="flight",
+            args=col + ["--aircraft", "tu95", "--load", "AS16", "--station", "1", "--count", "2", "--attack", "sarh",
+                        "--from", "4", "--altitude", "3000"],
+            timeout=300,
+            then=[Step(col + ["--aircraft", "tu95", "--load", "AS16", "--station", "2", "--count", "2",
+                              "--attack", "sarh", "--from", "4", "--altitude", "3000"], timeout=300)],
+            check=tu95_as16_problems,
+            notes="T95-6: the Tu-95's default AS-16, one from the belly bay (the doors open first) and one from the pylon beam, each designated on the A-G page through the Bear's radar, launched at the column's lead truck and killing it.",
         ),
         Scenario(
             name="a2g-antiship-b52", lane="flight",

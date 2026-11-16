@@ -254,6 +254,42 @@ pub const T26_BAY_DEPTH: f64 = 5.2;
 /// ft aft of centre, which the two rows of eight still clear (fitted).
 pub const T26_ORIGIN_AHEAD: f64 = -4.37;
 
+/// The Tu-95's belly plane over its bay, feet up (T95-5, measured in `TU95.SH`
+/// at 2/3 ft a unit): the keel is a shallow V (z -7 units on the centre line,
+/// -5 at the sides, so the skin rises 0.33 to 0.4 unit a unit out), and the two
+/// hinge lines of the doors, 2.75 ft either side, stand where the skin is: z
+/// -5.35 (left), -5.63 and -5.75 units (right) between the bay's ends, -5.55
+/// units on average, -3.70 ft. The recess walls start here; the keel sags 0.97
+/// ft below it on the centre line.
+pub const T95_BELLY: f64 = -5.55 * 2. / 3.;
+/// Half the width of the Tu-95's bay opening, feet: 5.5 ft wide (BOMBERS-
+/// DECISIONS-C item 6 asked for about 5 ft; the 3 ft span AS-16 stands three
+/// abreast with its outer fin tips 2.65 ft out, 0.15 ft through a 2.5 ft wall),
+/// inside the fuselage's 7.3 ft width and the belly's V (fitted, agent
+/// decision, T95-5, 2026-11-16).
+pub const T95_BAY_HALF: f64 = 2.75;
+/// The Tu-95's opening runs from shape y 0 to 39 units: 0 to 26 ft forward of
+/// the reference point (fitted: the record's bay row is 12.67 ft forward, 38
+/// record units, the middle of it within 0.4 ft), wholly inside the four belly
+/// triangles that run y 0 to 71 units.
+pub const T95_BAY_AFT: f64 = 0.;
+pub const T95_BAY_FORE: f64 = 26.;
+/// How deep the Tu-95's recess is under its belly plane, feet (fitted): the
+/// roof stands at +1.80 ft, 0.7 ft under the top skin over the walls (z 3.75
+/// units, 2.5 ft) and 1.27 ft over the highest point of two tiers of AS-16
+/// (measured, the open bay report).
+pub const T95_BAY_DEPTH: f64 = 5.5;
+/// Where the Tu-95's one bay row (`TU95.PT` row 7) hangs its stores, feet
+/// forward: the middle of the 26 ft opening, 13.0 ft, plus how far ahead of
+/// the AS-16's middle its shape's origin lies ([`T95_ORIGIN_AHEAD`]).
+pub const T95_ROW_FORWARD: f64 = (T95_BAY_AFT + T95_BAY_FORE) / 2.;
+/// How far ahead of an AS-16's (`KIKBK.SH`) middle its shape origin (the point
+/// a store hangs and leaves from) lies, feet: negative, the origin is 4.36 ft
+/// behind the middle (the missile spans -3.5 to +12.2 ft about it; measured with
+/// the bay clearance report, T95-5). The mount is the bay's middle plus this, so
+/// the drawn store is centred in the opening (5.15 ft to each end).
+pub const T95_ORIGIN_AHEAD: f64 = -4.36;
+
 /// Every bay station, in aircraft and row order. Add a row per station.
 pub const STATIONS: &[BayStation] = &[
     BayStation {
@@ -389,6 +425,14 @@ pub const STATIONS: &[BayStation] = &[
         aircraft: AircraftId::Tu26,
         row: 5,
         mount: [0., T26_BELLY, T26_BAY_FORWARD + T26_ORIGIN_AHEAD],
+    },
+    // The Tu-95's one bay row (T95-5): the retail row 7, lifted from 11.7 ft
+    // below the reference point to the belly plane, a grid of [`GRIDS`] over
+    // the whole 26 ft opening.
+    BayStation {
+        aircraft: AircraftId::Tu95,
+        row: 7,
+        mount: [0., T95_BELLY, T95_ROW_FORWARD + T95_ORIGIN_AHEAD],
     },
 ];
 
@@ -529,6 +573,16 @@ pub const GRIDS: &[BayGrid] = &[
         width: T26_BAY_WIDTH,
         length: T26_BAY_LENGTH,
         ceiling: T26_BELLY + T26_BAY_DEPTH,
+    },
+    // The Tu-95's one bay row (T95-5): the whole opening, 5.5 ft wide and 26 ft
+    // long, under a flat roof 5.5 ft over the belly plane. An AS-16 (15.7 ft,
+    // fins 3 ft) hangs 3 abreast, 1 long, two tiers: the six of the default.
+    BayGrid {
+        aircraft: AircraftId::Tu95,
+        row: 7,
+        width: 2. * T95_BAY_HALF,
+        length: T95_BAY_FORE - T95_BAY_AFT,
+        ceiling: T95_BELLY + T95_BAY_DEPTH,
     },
 ];
 
@@ -780,6 +834,22 @@ pub const OPENINGS: &[Opening] = &[
         belly: T26_BELLY,
         depth: T26_BAY_DEPTH,
         inner_depth: T26_BAY_DEPTH,
+        rail: [0., 0.],
+    },
+    // The Tu-95 (T95-5, fitted on measured belly skin): one bay on the centre
+    // line like the B-52's, two doors hinged on the outer edges (drawn by
+    // `bay_doors::centre_doors`), 5.5 ft wide, 26 ft long, cut from the four belly
+    // triangles at the hinge height (-3.70 ft) under a flat roof 5.5 ft over it.
+    Opening {
+        aircraft: AircraftId::Tu95,
+        centre: 0.,
+        inner: 0.,
+        outer: T95_BAY_HALF,
+        aft: T95_BAY_AFT,
+        fore: T95_BAY_FORE,
+        belly: T95_BELLY,
+        depth: T95_BAY_DEPTH,
+        inner_depth: T95_BAY_DEPTH,
         rail: [0., 0.],
     },
 ];
@@ -1111,6 +1181,47 @@ mod tests {
         assert!(o.belly + o.depth < 5.3);
         // The Tu-95's and the Tu-160's rows are not this bay's.
         assert_eq!(station(AircraftId::Tu95, 5), None);
+    }
+
+    #[test]
+    fn the_tu95_has_one_gridded_bay_row_of_three_lanes_and_two_tiers() {
+        use super::super::hardpoints::{grid_capacity, grid_cells, grid_point};
+        use super::super::store_sizes::StoreSize;
+        assert!(reviewed(AircraftId::Tu95) && station(AircraftId::Tu95, 8).is_none());
+        assert!(
+            station(AircraftId::Tu95, 3).is_none() && alternative(AircraftId::Tu95, 7).is_none()
+        );
+        let o = opening(AircraftId::Tu95).unwrap();
+        // One centred bay, two doors on the outer edges (`inner` 0), 5.5 ft wide
+        // and 26 ft long, under a flat roof 5.5 ft over the belly plane.
+        assert_eq!((o.centre, o.inner, o.rail), (0., 0., [0., 0.]));
+        assert!((2. * o.outer - 5.5).abs() < 1e-9 && (o.fore - o.aft - 26.).abs() < 1e-9);
+        assert_eq!(o.inner_depth, o.depth);
+        // The hinge plane is the measured skin height, -5.55 units at 2/3 ft.
+        assert!((o.belly / (2. / 3.) + 5.55).abs() < 1e-9);
+        let mount = station(AircraftId::Tu95, 7).unwrap();
+        assert_eq!((mount[0], mount[1]), (0., T95_BELLY));
+        assert!((mount[2] - (13. + T95_ORIGIN_AHEAD)).abs() < 1e-9);
+        let floor = grid(AircraftId::Tu95, 7).unwrap();
+        assert_eq!(floor, [5.5, 26., T95_BELLY + T95_BAY_DEPTH]);
+        // An AS-16 (`KIKBK.SH`, 15.7 ft, fins 3 ft) stands three abreast at its
+        // 1.59 ft pitch, one long, and the roof allows two tiers: the six of the
+        // default, no more.
+        let kickback = StoreSize::of_shape(Some("KIKBK.SH"));
+        let ([abreast, along], pitch) = grid_cells(kickback, [floor[0], floor[1]]);
+        assert_eq!((abreast, along), (3, 1));
+        assert!((pitch - 1.59).abs() < 1e-9);
+        assert_eq!(grid_capacity(kickback, [floor[0], floor[1]], o.depth), 6);
+        let at = |slot| grid_point(mount, 6, slot, kickback, [floor[0], floor[1]]);
+        let mut places: Vec<_> = (0..6).map(at).collect();
+        places.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        places.dedup();
+        assert_eq!(places.len(), 6);
+        // The fin tips of the outer lane stay inside the walls (0.1 ft over
+        // the cruciform fins' 2.65 ft) and the top tier's under the roof.
+        assert!(places.iter().all(|p| p[0].abs() + 1.06 < o.outer));
+        let top = places.iter().map(|p| p[1]).fold(f64::MIN, f64::max);
+        assert!(top + kickback.width / 2. < o.belly + o.depth);
     }
 
     #[test]

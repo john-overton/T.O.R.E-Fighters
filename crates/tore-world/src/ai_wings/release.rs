@@ -611,4 +611,145 @@ mod tests {
             assert!(forward > opening.aft && forward < opening.fore, "{forward}");
         }
     }
+
+    /// T95-5: an AI bomb leaves the Tu-95's bay row 7 (a grid magazine on the shared
+    /// grid) inside its one centred opening; its doors stay shut (the B-52's and
+    /// F-22's precedent).
+    #[test]
+    fn an_ai_bomb_leaves_the_tu95_bay_grid_inside_the_centred_opening() {
+        use tore_formats::aircraft::{AircraftId, Hardpoint};
+        use tore_sim::combat::{bays, hardpoints};
+        let (mut wings, _) = build(None);
+        let mut state = combat_fixture(false);
+        state.projectiles.clear();
+        let id = wings.mission().actors()[1].id();
+        let mut config = state.own().configuration().clone();
+        config.stations[0].weapon = mk82_pack(config.stations[0].weapon.clone());
+        let row = Hardpoint {
+            location: 3,
+            flags: 0x1180,
+            position: [0, -35, 38],
+            store: Some("AS16.JT".into()),
+            count: 6,
+            weight_class: 160,
+            slew: [0; 4],
+        };
+        let (mount, rack) = hardpoints::placed_on(AircraftId::Tu95, 7, &row, None);
+        config.stations[0].mount = mount;
+        config.stations[0].rack = rack;
+        config.stations[0].count = 6;
+        wings.configs.insert(id, config.clone());
+        let weapon = config.stations[0].weapon.clone();
+        let ground = |_: f64, _: f64| 0.;
+        let emitted = wings.release(&launch(id, 0x5000_0001), &mut state, &weapon, &[], &ground);
+        assert!(emitted > 0);
+        let launcher = crate::combat::launcher(wings.mission().actor(id).unwrap().flight());
+        let opening = bays::opening(AircraftId::Tu95).unwrap();
+        // The first bomb leaves a cell of the grid inside the opening; the pack
+        // record (six stores, 2 ft apart) stages across that point, which only
+        // the pack does, so the stores' mean is what is held to the opening.
+        // Every round starts within the opening's length.
+        let sides: Vec<f64> = state
+            .projectiles
+            .iter()
+            .map(|p| p.position[0] - launcher.position[0])
+            .collect();
+        let middle = sides.iter().sum::<f64>() / sides.len() as f64;
+        assert!(middle.abs() < opening.outer, "{sides:?}");
+        for p in &state.projectiles {
+            let forward = p.position[2] - launcher.position[2];
+            assert!(forward > opening.aft && forward < opening.fore, "{forward}");
+        }
+    }
+    /// T95-6: the places an AI Tu-95 lets its AS-16 go from are the human's: the
+    /// station's own release point (`Station::next_release_point`, the one the
+    /// strike's gate and the shared release read) walks the bay's six cells and
+    /// the beams' ten in the order the `a2g-release-origin-tu95` scenario
+    /// measures on a human's presses (feet right, up, forward; the bay's cells
+    /// are the bottom tier first, outermost lane first, alternating sides; the
+    /// beam's the front row first, outermost lane first, left then right).
+    #[test]
+    fn an_ai_tu95_leaves_the_bay_and_the_beams_from_the_humans_places() {
+        use tore_formats::aircraft::{AircraftId, Hardpoint};
+        use tore_sim::combat::hardpoints;
+        let (_wings, _) = build(None);
+        let state = combat_fixture(false);
+        let mut weapon = state.own().configuration().stations[0].weapon.clone();
+        weapon.source = "AS16.JT".into();
+        weapon.shape = Some("KIKBK.SH".into());
+        weapon.burst.actual_rounds_per_game = 1;
+        weapon.burst.projectiles_in_pod = 1;
+        let places = |row: usize, hardpoint: Hardpoint| -> Vec<[f64; 3]> {
+            let (mount, rack) = hardpoints::placed_on(AircraftId::Tu95, row, &hardpoint, None);
+            let mut station = state.own().configuration().stations[0].clone();
+            station.weapon = weapon.clone();
+            station.mount = mount;
+            station.rack = rack;
+            station.count = hardpoint.count as u16;
+            (1..=hardpoint.count as u32)
+                .rev()
+                .map(|rounds| station.next_release_point(rounds))
+                .collect()
+        };
+        // The beams' height is read off the drawn wing's underside (the
+        // scenario's -0.58 ft); with no model here it is the record's, so only
+        // the bay's height and every cell's right and forward are compared.
+        let near = |got: Vec<[f64; 3]>, want: &[[f64; 3]], axes: &[usize]| {
+            assert_eq!(got.len(), want.len());
+            for (n, (g, w)) in got.iter().zip(want).enumerate() {
+                for &axis in axes {
+                    assert!(
+                        (g[axis] - w[axis]).abs() < 0.006,
+                        "{n}: {g:?} against {w:?}"
+                    );
+                }
+            }
+        };
+        let bay = Hardpoint {
+            location: 3,
+            flags: 0x1180,
+            position: [0, -35, 38],
+            store: Some("AS16.JT".into()),
+            count: 6,
+            weight_class: 160,
+            slew: [0; 4],
+        };
+        near(
+            places(7, bay),
+            &[
+                [-1.59, -2.12, 8.64],
+                [1.59, -2.12, 8.64],
+                [0.0, -2.12, 8.64],
+                [-1.59, -0.53, 8.64],
+                [1.59, -0.53, 8.64],
+                [0.0, -0.53, 8.64],
+            ],
+            &[0, 1, 2],
+        );
+        let beams = Hardpoint {
+            location: 4,
+            flags: 0x1025,
+            position: [36, -6, 27],
+            store: Some("AS16.JT".into()),
+            count: 10,
+            weight_class: 0,
+            slew: [0; 4],
+        };
+        near(
+            places(8, beams),
+            &[
+                [-15.10, -0.58, 17.24],
+                [15.10, -0.58, 17.24],
+                [-12.00, -0.58, 17.24],
+                [12.00, -0.58, 17.24],
+                [-8.90, -0.58, 0.76],
+                [8.90, -0.58, 0.76],
+                [-15.10, -0.58, 0.76],
+                [15.10, -0.58, 0.76],
+                [-12.00, -0.58, 0.76],
+                [12.00, -0.58, 0.76],
+            ],
+            &[0, 2],
+        );
+    }
 }
