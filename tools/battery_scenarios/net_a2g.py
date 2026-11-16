@@ -194,7 +194,9 @@ COCKPIT = re.compile(
 )
 
 
-def handback_problems(strike: str, watch: str, back: str, weapon: str = "MK82.JT") -> list[str]:
+def handback_problems(
+    strike: str, watch: str, back: str, weapon: str = "MK82.JT", same_station: bool = True
+) -> list[str]:
     """What the three bots printed against `net-ai-strike-handback`'s rules: the pass set up, the AI's release
     seen from plane 1, and the rejoined cockpit as left with fewer bombs."""
     problems: list[str] = []
@@ -207,6 +209,10 @@ def handback_problems(strike: str, watch: str, back: str, weapon: str = "MK82.JT
     if not found:
         return problems + ["the rejoined game never read its cockpit (no `cockpit` line)"]
     first = found[0]
+    # A B-2's ripple hands the selection to its other bay after a release, and a bay holds 32: the
+    # rejoined cockpit then reads the other station at full count (BMB-AI).
+    if not same_station:
+        return problems
     if first["station"] != set_up["station"]:
         problems.append(f"the rejoined cockpit has station {first['station']}, the human left {set_up['station']}")
     if first["mode"] != "LVL":
@@ -267,7 +273,7 @@ def drive_strike_handback(
     server.finish(40, 0)
     for bot in (stay, back):
         bot.forbid(NET_BAD, "a network problem")
-    for problem in handback_problems(strike.text(), stay.text(), back.text(), load):
+    for problem in handback_problems(strike.text(), stay.text(), back.text(), load, same_station=not doors):
         d.problem(problem)
     if doors:
         for problem in doors_problems(stay.text(), "Stay", 0, "the AI bomber"):

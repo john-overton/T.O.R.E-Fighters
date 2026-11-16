@@ -11147,3 +11147,150 @@ mission batteries, `--smoke-test`, a B-52 gun over the wire.
 Provenance: slew words spec-derived (retail records); the forward/slewed rule, the AI swing, the `TAIL` cue, the radar preset and the eye
 fitted, agent decisions 2026-11-15. No retail bytes committed.
 
+
+## AI fixes for the bombers (BMB-AI, 2026-11-16)
+
+Implementation mode, slice BMB-AI (shared AI fixes found in bomber batch A; the coordinator's first pass
+of 2026-11-15 on F117-9, B2-6/9 and B52-6/7). All the rules are `fitted`, agent decisions; the specs are
+[AI airfield sequences](../spec/ai-airfield.md#heavy-bombers-and-aircraft-that-cannot-fly-slow-clean-bmb-ai-2026-11-16),
+[AI strike](../spec/ai-strike.md#bay-doors-bmb-ai-2026-11-16) and
+[AI gun employment](../spec/ai-gun-employment.md#tail-gun-aim-error-and-swing-rate-bmb-ai-2026-11-16). No version
+bump (protocol 84 and simulation version 12 are unreleased; [note](net-protocol.md)). This closes the
+"AI landing speed", "AI doors" and "Net bots" questions above and B52-6's open item 2. Raw output is local:
+`.local/m3-aircraft/checks/BMB-AI/`.
+
+### Fix 1 and 2: landing, takeoff and taxi
+
+**Cause (landing).** Not the loaded-elevator rule alone. The AI's slowest planned speed is its loaded
+minimum level speed at the current flaps, and the flaps (x0.75 on the stall speed) came down only below
+200 kt. An aircraft whose flaps-up minimum is above 200 kt can never fly slow enough to lower them, so
+it held its clean minimum to the ground. Flaps-up minimum at 1,500 ft, by fuel share:
+
+| Aircraft | 100 percent | 75 | 50 | 25 |
+| --- | --- | --- | --- | --- |
+| F-117 | 218 | 210 | 197 | 184 |
+| B-2 | 204 | 178 | 165 | 151 |
+| B-52 | 230 | 183 | 168 | 150 |
+| B-1B | 209 | 194 | 183 | 158 |
+| Tu-160 | 268 | 238 | 209 | 179 |
+| F-104 | 238 | 229 | 220 | 211 |
+| MiG-31 | 200 | 187 | 173 | 160 |
+| every other aircraft | at most 186 (A-7), none above 190.5 | | | |
+
+The new threshold is `max(200 kt, 1.05 x flaps-up minimum)`, so exactly the aircraft whose minimum is
+above 190.5 kt change (the seven above, at the weights marked): **every other aircraft's flaps law, and so
+its final speeds, are bit for bit what they were** (the 1.05 and the 200 kt cannot differ below 190.5 kt).
+The B-1B, Tu-160, F-104 and MiG-31 change at their heavy weights; they belong to other slices and gain the
+fix with no work of theirs. The battery evidence for the others is below.
+
+**Cause (takeoff).** The climb-out raised gear and flaps at 650 ft above the ground whatever the speed.
+The B-2 at 357,000 lb lifted off at 156 kt (flapped minimum 154, clean 213), climbed at 4 degrees with
+its gear down and gained no speed (154 kt at 650 ft), raised the flaps and sank into the ground 10 s
+later (`AI probe`: Destroyed at 195.9 s, 214 kt, 62 ft up). **The B-52 never moved**: rolling deceleration
+4.8 ft/s squared (B52-8's fit for the takeoff run; the shared value is 0.8) against the 3.6 that 0.4 throttle
+of its engines gives, and the taxi law never asks for more: it sat at its parking spot for 900 s.
+
+**Change.** `airfield.rs`: `flaps_speed`, `too_slow_for_flaps_up` (the climb-out waits for 1.05 x the clean
+minimum, climbs 1.5 degrees, gear up above 100 ft, 400 s timeout); `taxi_throttle` adds a floor and a
+cap of 1 for an aircraft whose wheels need over 0.2 throttle (`mission::taxi_throttle_of`).
+`mission.rs`: `Situation::clean_minimum_fps` from `speed_limits_with_flaps(flight, 0)`.
+
+**Before and after** (probes, debug build, profile `.local/m3-aircraft/profile`):
+
+| Probe | Before | After |
+| --- | --- | --- |
+| F-117 wing of two at Southampton (12,000 ft), full fuel 52,000 lb: touchdown | 223 kt | 196 kt, parked on the pavement |
+| B-2 at Athens or Southampton (12,000 ft), 357,000 lb: takeoff | crashed 10 s after 650 ft | airborne at 199 to 205 s, flies on |
+| B-2 land order after takeoff, Southampton, full weight: touchdown | (could not fly) | 160 kt, rolled out, parked, 0 ticks off the pavement |
+| B-2 airborne to Simferopol (5,532 ft), 60,000 lb fuel: touchdown | 219 to 232 kt, go-around, crash | 139 kt, parked on the pavement |
+| B-52 at Southampton, Athens or Mikonos: takeoff | never left its spot | airborne at 197 to 200 s |
+| B-52 land order at Southampton, 488,000 lb: touchdown | (could not fly) | 162 kt, stops on the runway, 743 ticks off the pavement in the taxi-in |
+| B-52 to Simferopol, 80,000 lb fuel: touchdown | (could not fly) | 131 kt, parked; 1,201 ticks off the pavement (touched down about 650 ft short) |
+| F-117 to Simferopol, 7,000 lb fuel | 224 kt | 174 kt, parked on the pavement |
+| B-2 takeoff, Simferopol (5,532 ft), full weight | ran off the pavement | rolls off the end for 9 s (1,081 ticks) and is airborne at 202 s |
+
+Numbers by weight, from the flight model's own limits (flaps down, 1,500 ft): B-2 final 165 kt at full
+fuel, 141 at half, 130 at a quarter; B-52 174, 147, 135; F-117 190, 174 (the cap), 174. The B-52 at
+270,000 lb (about 25 percent fuel) lands at 135 kt, the published figure.
+
+**What stays open.** (1) The F-117's slowest speed is its lowest envelope row (the 0 G edge, weight
+scaled), which the flaps do not lower, so it lands at 170 to 190 kt, not 155 to 165: a real F-117 is lighter
+and rows are not flap aware, and changing that rule would change many aircraft (the F-4, A-7, F-104 and
+C-130 also sit on it). At Khasab (4,060 ft) the F-117 still overruns and is destroyed. (2) A B-2 at full
+weight needs about 7,200 ft to lift off: Mikonos (7,246 ft) and the 12,000 ft fields are fine, Simferopol
+is not; a B-52 at 488,000 lb rolls about 5,450 ft after touchdown and runs about 1,000 ft past the end of
+a 5,532 ft runway. These are the model's weights and fitted brakes, not the AI law: they land at a landing
+weight. (3) The B-52's taxi-in leaves the pavement for a few seconds (known, not traced).
+
+**Unchanged for the others (evidence).** The same 124 scenarios (`ai-takeoff-*` 56, `ai-ground-*`,
+`ai-theater-*-takeoff|land-pair`, `ai-records-land-*`, `ai-merged-airfield-{f18,c130,f117}-*`, `ai-ils-terrain-*`,
+`ai-airfield-taxi-*`, `ai-lost-lead-*`) ran on the binary before the slice (`checks/BMB-AI/base-battery`: 123 passed,
+the one failure `ai-ils-terrain-fra-a9` is a pre-existing launch error) and after (`new-battery`: the same 123 pass,
+same failure). Their `AI probe phases`, final actor lines and `AI probe totals` (which carry the run's checksum) are
+**identical in 123 of 124 logs, bit for bit** (`compare.py`); the one that differs is the F-117 cycle, the intended
+change (Airborne 91.5 to 96.0 s, touchdown 223 to 196 kt). A C-130, IL-76, E-3, 747, A310 and AC-130 ground-start
+takeoff from Odesa with a land order (`tx-base-*` against `tx-new2-*`, same phases, actor lines and totals) are
+identical too. The E-3 destroyed itself after takeoff on the old binary and still does (not traced; it may be the same raised-flaps
+stall, but holding the climb-out for every transport would change all their climb-outs: open). The
+F-104, MiG-31 and Tu-160 climb-outs lengthen (Airborne 87.2 to 98.9, 87.4 to 91.5 and 154.7 to 166.4 s) because they
+are in the class too.
+
+### Fix 3: AI bay doors
+
+The AI's release read no door state: an AI F-117, B-2, B-52 or F-22 let its bomb go out of a shut belly and
+its stores (not drawn behind shut doors) never showed. `StationSpec::bay` (new, coded in the checkpoint) marks
+bay stores; the strike holds a bay release until `OwnState::bay_doors` is 0.95 and asks for the doors 1.5 s
+before its computed release; a bay missile in the weapon service waits through `path_blocked`; the doors are
+held 1 s after the last store and shut a second later, driven through the same `Switch::Bay` a human's key sets, so
+`State::bay` is the one door fraction everything reads. The AI actor checkpoint gains `bay_hold_until`.
+`tore-bot` prints `bay doors [ID=W ...]` (the widest each other aircraft's doors read on its screen).
+
+Evidence: `ai-strike-f117` (own pass and quick wing), `ai-strike-b2-stick`, `ai-strike-b2-paveway`: every
+RELEASE line has `bay=1.00`, the doors open before the first release and read shut 1.5 to 6 s after the
+last (new `BAY` lines); `net-a2g-stores-f117`: the watching client reads the bomber's doors at 1.00 on
+its screen (human F-117 with `tore-bot --a2g bomb`); `net-ai-strike-handback-b2`: the AI that takes over a
+dropped B-2 opens its doors and the other client sees it. The open-bay RCS term reads `State::bay`
+(`scope.rs`, `docs/radar.md`) so it follows the AI's doors; the rows other radars read still carry no
+deployment (a decision John has not made), so no radar sees an AI's open bay yet. A replay records the
+door device for every aircraft as it records any.
+
+### Fix 4: tail-gun accuracy
+
+An AI B-52 hit a closing F-22 with 89 of 128 rounds. The barrel now swings at 30 degrees a second at most,
+trails the lead by 0.2 s of its rate, and carries a 1.0 degree aim error redrawn twice a second plus 0.35
+degree a round, deterministic in actor, station, half second and round. Per range (unit test, a still lead
+astern, 28 ft contact sphere): 500 ft over 90 percent, 1,000 ft over 50, 2,000 to 3,000 ft 10 to 25 percent,
+5,000 ft under 6. `flight-b52-tail-gun` (F-22 closing 1,800 ft off the tail from 5,800 ft): 2 of 176 rounds
+(was 89 of 128); the check now fails above 35 percent. Forward guns are untouched (`flight-livefire-*`,
+`ai-guns-*` and the AI gun scenarios are in the final battery).
+
+### Fix 5: tore-bot
+
+`--a2g bomb` and `--a2g strike` take the first station whose weapon falls on the bomb equation or is a
+laser weapon and still holds a round, not the Mk 82 by name. New: `net-a2g-stores-f117` (an F-117
+wing of two, `--load PAVEWA3.JT`, the watcher sees a GBU-27 leave plane 0 and its doors open) and
+`net-ai-strike-handback-b2`. An F-117 cannot set up a strike pass (it has no radar for the role's A-G page),
+so the handback drive uses the B-2.
+
+### Tests and scenarios added
+
+| Name | What it pins |
+| --- | --- |
+| `airfield::the_flaps_come_down_at_200_kt_unless_the_clean_minimum_is_higher` | the 200 kt rule for a fighter, 1.05 x for a heavy |
+| `airfield::a_climb_out_below_the_clean_minimum_keeps_the_flaps_and_waits_for_speed` | flaps, gear, 1.5 degrees, the timeout; the fighter finishes at 650 ft as before |
+| `airfield::the_taxi_throttle_adds_the_floor_a_heavy_needs_and_nothing_to_a_fighter` | the taxi law |
+| `strike_tests::a_bays_bomb_waits_for_the_doors_and_the_strike_asks_for_them` | strike gate and demand |
+| `controller::a_missile_in_a_bay_waits_for_the_doors_and_the_controller_asks_for_them` | weapon service gate and demand |
+| `slew::a_tail_gunner_is_dangerous_up_close_and_not_a_laser` and two more | hit share by range, determinism, swing rate |
+| `ai-heavy-takeoff-{b2,b52}-gre-a1`, `ai-heavy-takeoff-f117-gre-a2`, `ai-heavy-land-{b2,b52,f117}-ukr-a2`, `ai-merged-airfield-{b2,b52}-wing2` | the heavies' takeoff, landing at a retail length and the full cycle (touchdown speed bounded) |
+| `ai-strike-*` door checks, `net-a2g-stores-f117`, `net-ai-strike-handback-b2` | doors open for the release, on the wire |
+
+### Open for John
+
+1. **F-117 landing speed** is 170 to 190 kt (real 155 to 165); a flap-aware 0 G floor would fix it and move many
+   other aircraft's finals.
+2. **Landing weights.** The AI lands at its takeoff weight in short missions; a B-52 at 488,000 lb overruns
+   a 5,532 ft runway and a B-2 at 357,000 lb cannot take off from one. Offer these only where they fit, or let
+   the AI shed fuel?
+3. **Radar rows** carry no gear, flap or bay deployment (the open-bay RCS term shows only on the RCS page).
+4. **B-52 taxi** leaves the pavement for seconds after landing and parking.
