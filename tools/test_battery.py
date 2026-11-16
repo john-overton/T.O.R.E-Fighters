@@ -1,4 +1,6 @@
+import argparse
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -37,6 +39,67 @@ class ProfileTests(unittest.TestCase):
                 self.assertEqual((dest / "settings.conf").read_text(), "settings")
                 self.assertEqual((source / "replays" / "old.tore-replay").read_text(), "finished")
                 self.assertEqual((source / "replays" / "old.partial").read_text(), "unfinished")
+
+
+    def test_shared_caches_link_to_the_source_profile_and_survive_removal(self):
+        from unittest.mock import patch
+
+        for fallback in (False, True):
+            with self.subTest(fallback=fallback), tempfile.TemporaryDirectory() as folder:
+                source = Path(folder) / "source"
+                dest = Path(folder) / "work" / "data"
+                (source / "vegetation-cache").mkdir(parents=True)
+                (source / "vegetation-cache" / "FRA-1.bin").write_text("built once")
+                (source / "settings.conf").write_text("settings")
+                if fallback:
+                    with patch.object(battery.subprocess, "run", side_effect=OSError):
+                        battery.clone_profile(source, dest, shared_caches=True)
+                else:
+                    battery.clone_profile(source, dest, shared_caches=True)
+                for name in battery.SHARED_CACHES:
+                    self.assertTrue((dest / name).is_symlink(), name)
+                    self.assertEqual((dest / name).resolve(), (source / name).resolve())
+                self.assertEqual((dest / "vegetation-cache" / "FRA-1.bin").read_text(), "built once")
+                (dest / "city-cache" / "UKR-2.city").write_text("added by a scenario")
+                self.assertEqual((dest / "settings.conf").read_text(), "settings")
+                battery.finish_data(argparse.Namespace(), dest, passed=True)
+                self.assertFalse(dest.exists())
+                self.assertEqual((source / "vegetation-cache" / "FRA-1.bin").read_text(), "built once")
+                self.assertEqual((source / "city-cache" / "UKR-2.city").read_text(), "added by a scenario")
+
+    def test_a_data_root_holds_the_copy_and_keeps_only_what_is_asked_for(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "source"
+            source.mkdir()
+            (source / "settings.conf").write_text("settings")
+            run_dir = root / "out" / "20261116-120000"
+            ram = root / "ram"
+            for passed, keep_failed, kept in ((True, True, False), (False, True, True), (False, False, False)):
+                with self.subTest(passed=passed, keep_failed=keep_failed):
+                    opts = argparse.Namespace(
+                        profile=str(source), data_root=str(ram), shared_caches=False,
+                        keep_data=False, keep_failed_data=keep_failed,
+                    )
+                    work = run_dir / "work" / "s"
+                    work.mkdir(parents=True, exist_ok=True)
+                    data = battery.scenario_data(opts, run_dir, work, "s")
+                    self.assertTrue(data.is_symlink())
+                    real = ram / run_dir.name / "s"
+                    self.assertEqual(data.resolve(), real.resolve())
+                    self.assertEqual((data / "settings.conf").read_text(), "settings")
+                    (data / "logs").mkdir()
+                    (data / "logs" / "game.log").write_text("ran")
+                    battery.refresh_data(opts, data)  # a driver's retry starts from a fresh copy
+                    self.assertFalse((data / "logs").exists())
+                    (data / "game.log").write_text("ran")
+                    battery.finish_data(opts, data, passed)
+                    self.assertFalse(real.exists())
+                    self.assertFalse(data.is_symlink())
+                    self.assertEqual(data.exists(), kept)
+                    if kept:
+                        self.assertEqual((data / "game.log").read_text(), "ran")
+                        shutil.rmtree(data)
 
 
 class JudgeTests(unittest.TestCase):
