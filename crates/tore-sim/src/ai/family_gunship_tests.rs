@@ -142,6 +142,7 @@ fn gun(station: u8, rounds: u32) -> Store {
         frag_radius_ft: 0.,
         falls_free: false,
         flight: None,
+        bay: false,
     }
 }
 

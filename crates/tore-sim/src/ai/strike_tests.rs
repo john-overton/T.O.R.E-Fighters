@@ -41,6 +41,7 @@ pub(super) fn own(position: Vector, speed: f64) -> OwnState {
         alive: true,
         fuel_endurance_s: 3_600.,
         time_home_s: Some(600.),
+        bay_doors: 1.0,
         rotorcraft: false,
         internal_fuel_lbs: 8_000.,
         radar_emitting: true,
@@ -117,6 +118,7 @@ pub(super) fn bomb(rounds: u32) -> Store {
         frag_radius_ft: 300.,
         falls_free: false,
         flight: None,
+        bay: false,
     }
 }
 
@@ -678,6 +680,54 @@ fn the_floor_the_zone_and_a_warning_hold_the_release_back() {
     // Clear of all three it goes.
     world.inputs.solution = Some(solution(TARGET_AT, aim_point, true));
     assert!(strike.step(&world.context(40)).release.is_some());
+}
+
+/// BMB-AI (2026-11-16): a store in a bay leaves only with the doors open. The
+/// strike asks for them as the release nears (and while it waits), holds the
+/// release until they are open, and a store on a pylon never waits.
+#[test]
+fn a_bays_bomb_waits_for_the_doors_and_the_strike_asks_for_them() {
+    let run = |bay: bool, doors: f64, due: bool| {
+        let mut world = quiet_world();
+        world.inputs.stores[0].bay = bay;
+        let mut strike = Strike::new(9);
+        strike.force(Some(Pass::Level), None);
+        strike.step(&world.context(0));
+        let (aim, _) = strike.aim();
+        let aim_point = [aim[0], 0., 24_000. + aim[1]];
+        world.own.position = [0., 4_000., 15_000.];
+        world.own.agl_ft = 4_000.;
+        world.own.bay_doors = doors;
+        world.inputs.solution = Some(solution(TARGET_AT, aim_point, due));
+        let order = strike.step(&world.context(10));
+        (order.release.is_some(), strike.bay_demand())
+    };
+    // The release is due with the doors shut: nothing leaves, they are asked for.
+    assert_eq!(run(true, 0., true), (false, true));
+    assert_eq!(run(true, 0.9, true), (false, true));
+    // Open (0.95 or more): it goes.
+    assert_eq!(run(true, 0.95, true), (true, true));
+    assert_eq!(run(true, 1., true), (true, true));
+    // Not due, and the estimate far off: the doors stay shut and are not asked for.
+    assert_eq!(run(true, 0., false), (false, false));
+    // A store on a pylon never waits and never asks.
+    assert_eq!(run(false, 0., true), (true, false));
+    // A release the doors would hold anyway is held for the usual reasons too:
+    // a warning inhibits it with the doors open.
+    let mut world = quiet_world();
+    world.inputs.stores[0].bay = true;
+    let mut strike = Strike::new(9);
+    strike.force(Some(Pass::Level), None);
+    strike.step(&world.context(0));
+    let (aim, _) = strike.aim();
+    world.own.position = [0., 4_000., 15_000.];
+    world.own.agl_ft = 4_000.;
+    world.own.bay_doors = 1.;
+    let mut warned = solution(TARGET_AT, [aim[0], 0., 24_000. + aim[1]], true);
+    warned.warning = true;
+    world.inputs.solution = Some(warned);
+    assert_eq!(strike.step(&world.context(10)).release, None);
+    assert!(!strike.bay_demand(), "no release is wanted, so no doors");
 }
 
 /// B2-9: the record's zone 1 maximum holds a fighter's bomb back (above) but
@@ -1552,6 +1602,7 @@ fn a_drag_bomb_lays_down_clear_of_its_fuze_and_its_fragments() {
         frag_radius_ft: 600.,
         falls_free: false,
         flight: None,
+        bay: false,
         ..bomb(4)
     };
     assert_eq!(laydown_height_ft(&big, 700.), 700.);
@@ -1860,6 +1911,7 @@ fn glide_store() -> Store {
     Store {
         falls_free: true,
         flight: None,
+        bay: false,
         ..laser_store()
     }
 }

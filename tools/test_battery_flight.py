@@ -331,6 +331,16 @@ class LossTests(unittest.TestCase):
         self.assertTrue(flight.PLAYER_LINE.search(line))
 
 
+class TailGunTests(unittest.TestCase):
+    """BMB-AI (2026-11-16): the AI B-52's tail gun hits a minority of its rounds, not almost all."""
+
+    def test_a_gunner_that_hits_a_few_rounds_passes_and_a_laser_fails(self):
+        self.assertEqual(flight.b52_tail_gun_problems("enemy_gun=2/176"), [])
+        self.assertEqual(flight.b52_tail_gun_problems("enemy_gun=0/176"), [])
+        self.assertTrue(any("a laser" in p for p in flight.b52_tail_gun_problems("enemy_gun=89/128")))
+        self.assertTrue(any("never fired" in p for p in flight.b52_tail_gun_problems("enemy_gun=0/0")))
+
+
 class ScenarioListTests(unittest.TestCase):
     def test_names_are_unique_and_prefixed(self):
         names = [s.name for s in flight.scenarios()]

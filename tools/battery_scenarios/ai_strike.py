@@ -939,6 +939,7 @@ def f117_strike_problems(output: str) -> list[str]:
     problems: list[str] = []
     for index, (run, label) in enumerate(zip(runs, ("own pass", "quick wing"))):
         problems += consistency_problems(run, label)
+        problems += bay_door_problems(run, label)
         if run.setup.get("aircraft") != "F117" or run.setup.get("load") != "PAVEWA3.JT":
             problems.append(f"{label}: flew {run.setup.get('aircraft')} with {run.setup.get('load')}, want an F117 with PAVEWA3.JT")
         plane = (run.first("start") or {}).get("plane", "0")
@@ -1130,6 +1131,39 @@ B2_OPENING_FORWARD = (-3.0, 16.33)
 ORIGIN_LINE = re.compile(r"^ai-strike: ORIGIN t=(\S+) n=(\d+) station=(\d+) right=(\S+) up=(\S+) forward=(\S+)$", re.M)
 
 
+# BMB-AI (2026-11-16): an AI release from a bay waits for the doors, as a human's does. The doors
+# read open from 0.95 and shut again at 0.05; a bay release holds them open a second and they
+# take a second to close, so they read shut about 1.9 s after the last bomb (a little earlier or
+# later by the tick the check samples).
+BAY_READY = 0.95
+BAY_SHUT_AFTER_S = (1.5, 6.0)
+
+
+def bay_door_problems(run: Run, label: str) -> list[str]:
+    """Every RELEASE line of a bay aircraft says `bay=` at least [`BAY_READY`], the doors opened
+    (a BAY open line) before the first release, and read shut again 1.5 to 6 s after the last."""
+    problems: list[str] = []
+    releases = run.of("RELEASE")
+    if not releases:
+        return problems
+    for r in releases:
+        if not number(r.get("bay")) >= BAY_READY:
+            problems.append(f"{label}: released with the bay doors at {r.get('bay')}, want {BAY_READY} or more")
+    opens = [float(f["t"]) for f in run.of("BAY") if f.get("state") == "open"]
+    shuts = [float(f["t"]) for f in run.of("BAY") if f.get("state") == "shut"]
+    first, last = run.times("RELEASE")[0], run.times("RELEASE")[-1]
+    if not opens:
+        problems.append(f"{label}: the bay doors never opened")
+    elif opens[0] > first:
+        problems.append(f"{label}: the doors opened at {opens[0]:.2f} s, after the first release at {first:.2f} s")
+    after = [t for t in shuts if t >= last]
+    if not after:
+        problems.append(f"{label}: the bay doors never closed after the last release")
+    elif not BAY_SHUT_AFTER_S[0] <= after[0] - last <= BAY_SHUT_AFTER_S[1]:
+        problems.append(f"{label}: the doors shut {after[0] - last:.1f} s after the last release, want {BAY_SHUT_AFTER_S[0]} to {BAY_SHUT_AFTER_S[1]} s")
+    return problems
+
+
 def b2_mk82_cells(bay: str, count: int) -> list[tuple[float, float, float]]:
     """The first `count` Mk 82 places of a B-2 bay: (right, up, forward) feet."""
     x = B2_BAY_X[bay]
@@ -1149,6 +1183,7 @@ def b2_stick_problems(output: str) -> list[str]:
         return [f"expected one strike run, got {len(runs)}"]
     run = runs[0]
     problems = consistency_problems(run, "B-2 stick")
+    problems += bay_door_problems(run, "B-2 stick")
     releases = run.of("RELEASE")
     if len(releases) != 8:
         problems.append(f"{len(releases)} releases, want a stick of 8")
@@ -1212,6 +1247,7 @@ def b2_paveway_problems(output: str) -> list[str]:
         return [f"expected one strike run, got {len(runs)}"]
     run = runs[0]
     problems = consistency_problems(run, "B-2 Paveway")
+    problems += bay_door_problems(run, "B-2 Paveway")
     origins = ORIGIN_LINE.findall(output)
     if len(origins) != 1:
         return problems + [f"{len(origins)} origin lines, want 1"]
