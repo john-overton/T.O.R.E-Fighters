@@ -11294,3 +11294,22 @@ so the handback drive uses the B-2.
    the AI shed fuel?
 3. **Radar rows** carry no gear, flap or bay deployment (the open-bay RCS term shows only on the RCS page).
 4. **B-52 taxi** leaves the pavement for seconds after landing and parking.
+
+### Checks (BMB-AI)
+
+All through `.local/m3-imports/light3.sh`, profile `.local/m3-aircraft/profile` (refreshed at the end), logs in
+`.local/m3-aircraft/checks/BMB-AI/`. `cargo fmt --all -- --check` clean; `cargo clippy --workspace --all-targets
+--locked -- -D warnings` clean; `cargo test --locked --workspace --no-fail-fast` 7,826 passed, 0 failed, 108
+ignored; `--validate-ordnance` passed; tools unittests OK (skipped 5); `tools/check_docs.py` passed (382 files);
+tore-app, tore-server and tore-session (tore-bot is its bin) rebuilt. Battery with `--jobs 2 to 5 --windows 1`:
+the whole AI lane (862 scenarios, in four runs because the first two died on tool faults of my own, below)
+passes except five that fail on the pre-slice binary too (`ai-ils-terrain-fra-a9`, a launch error;
+`ai-regress-visual-incoming-flap` and `ai-regress-envelope-edge-flap`, strict flapping and collision anomalies;
+`ai-roster-probe`, "payload outside aircraft mass limits"; `ai-probe-matrix`, flapping anomalies and exit 1); the four
+`ai-missile-*` scenarios need `cargo build --release -p tore-world --example missile_energy_cost` and pass with it;
+`flight-approach-*`, `flight-liftoff-*`, `*-b2*`, `*-b52*`, `*f117*`, `*tornado*`, `net-a2g-*`, the AI strike family,
+`replay-a2g-*`, `replay-rec-*`, `flight-livefire-*` and the AI gun scenarios: 423 scenarios, all passing but
+`replay-rec-missile-head-ir` (also fails on the pre-slice binary) and the scenarios this slice then corrected
+(below). `net-a2g-stores-f117` and `net-ai-strike-handback`, `-b2` pass. Faults of mine found by the run: a
+module-level regex named `TOUCHDOWN` shadowed the vertical landing checks' (renamed), and `replay-a2g-f117` still
+asserted shut doors for the AI.
