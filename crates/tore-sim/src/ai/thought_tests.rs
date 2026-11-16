@@ -154,6 +154,7 @@ fn own_state() -> OwnState {
         alive: true,
         fuel_endurance_s: 3_600.,
         time_home_s: Some(600.),
+        bay_doors: 1.0,
         rotorcraft: false,
         internal_fuel_lbs: 8_000.,
         radar_emitting: true,
@@ -186,6 +187,7 @@ fn hostile(id: u32, position: [f64; 3]) -> TargetView {
 fn missile_station(maximum_range_ft: f64) -> StationView {
     StationView {
         slew: Default::default(),
+        bay: false,
         station: StationId(0),
         guided: true,
         capability: weapon_service::StoreCapability::AIR_TO_AIR_MISSILE,

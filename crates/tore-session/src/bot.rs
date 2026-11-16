@@ -816,10 +816,29 @@ pub struct StoresSeen {
     /// Each other aircraft's stations as first drawn: whole stores, by
     /// aircraft and the station's place in its list.
     first: std::collections::BTreeMap<(u32, usize), u16>,
+    /// The widest each other aircraft's bay doors stood open in a frame, in
+    /// hundredths (0 shut, 100 open), by aircraft (BMB-AI, 2026-11-16): only
+    /// aircraft whose doors were ever seen open are listed.
+    pub doors: std::collections::BTreeMap<u32, u16>,
 }
 
 impl StoresSeen {
     fn see(&mut self, frame: &ClientFrame) {
+        for pose in frame
+            .picture
+            .targets
+            .iter()
+            .filter(|pose| pose.id != frame.plane.0)
+        {
+            // The bay door device (index 4 of the animated devices).
+            let door = pose
+                .devices
+                .map_or(0, |d| (d[4].clamp(0., 1.) * 100.).round() as u16);
+            if door > 0 {
+                let widest = self.doors.entry(pose.id).or_insert(0);
+                *widest = (*widest).max(door);
+            }
+        }
         let others = frame
             .picture
             .targets
@@ -847,6 +866,18 @@ impl StoresSeen {
                 }
             }
         }
+    }
+
+    /// The line `tore-bot` prints beside the stores line (BMB-AI): the widest
+    /// each other aircraft's bay doors stood open in its frames, by aircraft,
+    /// `doors [ID=0.99 ...]` (empty when none was seen open).
+    pub fn doors_line(&self) -> String {
+        let doors: Vec<String> = self
+            .doors
+            .iter()
+            .map(|(id, widest)| format!("{id}={}.{:02}", widest / 100, widest % 100))
+            .collect();
+        format!("doors [{}]", doors.join(" "))
     }
 
     /// The line `tore-bot` prints.

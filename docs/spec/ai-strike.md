@@ -1439,6 +1439,36 @@ and is open to change.
   ST-RA replay, ST-B baseline, ST-A acceptance. The evidence will be a baseline
   at `docs/baselines/ai-strike.md` when the round is accepted.
 
+## Bay doors (BMB-AI, 2026-11-16)
+
+Implementation, slice BMB-AI (agent decision on the coordinator's first pass of 2026-11-15). Until
+now an AI aircraft let its bombs go out of a shut belly: the shared release reads no door state, so
+an AI F-22, F-117, B-2 or B-52 released with its doors drawn shut, and its stores (which are not drawn
+while the doors are shut) never showed. A player sees the same bay open before a release, hold,
+and close; the AI now does the same.
+
+| Rule | Label |
+| --- | --- |
+| A store that hangs in a weapon bay (`StationSpec::bay`: not internal, a bay rack location) leaves only with the doors at 0.95 or more (`combat::bays::DOORS_READY`, the human's `bay_ready`) | spec-derived (the player's rule, [stores on pylons](stores-on-pylons.md)) |
+| A strike asks for the doors 1.5 s before its computed release point (`BAY_LEAD_S`, from the release estimate), while a due release waits for them, and through a stick | fitted (agent) |
+| A bay missile in the weapon service (the F-22's AIM-120, AIM-9): the doors are asked for from 1.5 s (6 quarter seconds) before its tracking delay ends and while it fires; the service holds the shot a tick at a time (`Withheld`) until they are open | fitted (agent) |
+| After a store leaves a bay the doors stay open 1 s (`DOORS_HOLD_TICKS`, 120 ticks) and close in the second after | spec-derived (the player's hold) |
+| The doors are the aircraft's own `State::bay`, moved by the same switch a human's open-bay key sets, so the drawn doors, the snapshot's door device (every client) and a replay's recorded device follow with no new bytes | spec-derived |
+| An aircraft with no bay never waits: its `OwnState::bay_doors` reads 1 | fitted (agent) |
+
+Not changed: a pylon store is released as before (a pylon aircraft never asks for doors); the B-2
+still empties one bay at a time. The open-bay radar term (`docs/radar.md`) reads `State::bay`, so it
+follows the AI's doors wherever it is read (the RCS page); the combat rows other radars read still carry
+no gear, flap or bay deployment, a decision John has not made, so a SAM site does not see an AI's open
+bay yet.
+
+Evidence: unit tests `a_bays_bomb_waits_for_the_doors_and_the_strike_asks_for_them` (strike) and
+`a_missile_in_a_bay_waits_for_the_doors_and_the_controller_asks_for_them` (controller); every RELEASE line
+of the AI strike driver now carries `bay=` and the run prints `BAY` lines when the doors open and shut
+(`ai-strike-f117`, `ai-strike-b2-stick`, `ai-strike-b2-paveway`: each release at bay 0.95 or more, the
+doors open before the first release and shut 1.5 to 6 s after the last); `net-a2g-stores-f117` and
+`net-ai-strike-handback-f117` read the doors on a second client.
+
 ## Defensive store jettison
 
 John requested AI defensive jettison on 2026-10-15. The shared

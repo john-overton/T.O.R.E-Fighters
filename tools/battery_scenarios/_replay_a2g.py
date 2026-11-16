@@ -393,14 +393,16 @@ F117_PASS = [*RUN, *COLUMN, "--aircraft", "f117", "--load", "PAVEWA3", "--statio
 
 
 # The same pass flown by an AI wingman on the human lead's spot (a buddy laser), recorded: the AI's
-# bomb leaves the left bay with its doors shut (AI doors stay shut, coordinator first pass).
+# bomb leaves the left bay with its doors open (BMB-AI, 2026-11-16: the AI opens them for the release,
+# and the recording carries the door device as it does for a human).
 F117_AI_PASS = [*RUN, *COLUMN, "--pilot", "ai", "--aircraft", "f117", "--load", "PAVEWA3", "--station", "0",
                 "--order", "engage-my-target", "--order-at", "3", "--seconds", "150"]
 
 
 def f117_ai_problems(work: Path, output: str) -> list[str]:
     """The AI-flown F-117's recording replays as the run drew it, and holds one guided release from
-    the AI's station 0 at the fitted left bay mount with the doors shut from start to end."""
+    the AI's station 0 at the fitted left bay mount; its recorded doors are shut at the start and read
+    0.95 or more at some tick (BMB-AI)."""
     problems = []
     if len(VERIFY.findall(output)) < 2:
         problems.append("f117 (AI wingman): its recording does not replay as the run drew it (no second verify-render PASS)")
@@ -417,8 +419,11 @@ def f117_ai_problems(work: Path, output: str) -> list[str]:
     if not left or abs(left[0].get("x_ft", 0) + 3.0) > 1e-6 or left[0].get("location") != 0x83:
         problems.append(f"f117 (AI wingman): its left bay station was recorded as {left[:1]}, want x -3.0, location 131")
     bay = [r["devices"]["bay"] for r in rows if r.get("id") == ai[0] and isinstance(r.get("devices"), dict)]
-    if not bay or max(bay) != 0:
-        problems.append(f"f117 (AI wingman): its doors were recorded open: max {max(bay) if bay else None}")
+    if not bay or bay[0] != 0 or max(bay) < 0.95:
+        problems.append(
+            f"f117 (AI wingman): its doors were recorded first {bay[0] if bay else None}, widest {max(bay) if bay else None}; "
+            "want shut at the start and open (0.95 or more) for the release"
+        )
     return problems
 
 

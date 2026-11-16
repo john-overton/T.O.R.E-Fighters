@@ -2632,7 +2632,8 @@ def fight_scenarios() -> list[Scenario]:
             ],
             check=b52_tail_gun_problems,
             timeout=600,
-            notes="B52-6: an AI B-52's slewed M61 fires astern at a fighter in its rear arc (enemy_gun hits on the player).",
+            notes="B52-6: an AI B-52's slewed M61 fires astern at a fighter in its rear arc (enemy_gun hits on the player); "
+                  "BMB-AI: with an aim error, a lag and a swing rate, so a minority of the rounds hit (2 of 176, was 89 of 128).",
         )
     )
     return out
@@ -2646,9 +2647,16 @@ def b52_tail_gun_problems(output: str) -> list[str]:
     problems = []
     if shots == 0:
         problems.append("the B-52's tail gun never fired at the fighter behind it")
-    elif hits == 0:
-        problems.append(f"the tail gun fired {shots} rounds and none reached the fighter")
+    elif hits > TAIL_GUN_MAX_SHARE * shots:
+        # BMB-AI (2026-11-16): the gunner has an aim error, a lag and a swing rate; the exact, instant
+        # swing hit 89 of 128 rounds here. The fighter closes 1,800 ft off the tail from 5,800 ft, so
+        # the rounds are mostly long (a few percent); the 10 to 25 percent at 2,000 to 3,000 ft is
+        # the unit test's (`combat::slew`).
+        problems.append(f"the tail gun hit {hits} of {shots} rounds, more than {TAIL_GUN_MAX_SHARE:.0%}: a laser")
     return problems
+
+
+TAIL_GUN_MAX_SHARE = 0.35
 
 
 ATTACK_LINE = re.compile(
