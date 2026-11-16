@@ -1119,3 +1119,32 @@ Cheat-only count, stale at 240 since BMB-A1, now 276) and `tools/test_battery_a2
 54 aircraft, 22 recovered stations and 257 tank placements (and match any weapon count).
 Earlier sections that quote 51 aircraft, 5,145 weapon placements and 249 tank placements
 stay as written for their own states.
+
+## Batches A, B and C integration: the pins recomputed (2026-11-16)
+
+Batch C (BMB-C1 and BMB-C2) was built from batch B's base (5,145 weapon placements, 249 tank
+placements, 20 recovered stations), before round 2 moved the B-2 and B-52 bays onto the
+shared grid. The pins were not added: every total below is measured by `--validate-ordnance`
+on the merged tree (profile refreshed from the retail media first). Batch C moves no row of
+batches A or B, so no placement moves twice. B52-6/7 moves none.
+
+| Pin | Batches A and B | Batch C alone | Merged | Why |
+| --- | ---: | ---: | ---: | --- |
+| Aircraft | 51 | 54 (from 51) | 54 | the Tu-26, Tu-95 and Su-34 join |
+| Weapon placements | 5,093 | 5,447 (from 5,145) | 5,395 | 5,093 plus 302: Tu-26 129, Tu-95 36, Su-34 137 |
+| Tank placements | 249 | 257 | 257 | the Su-34's two `0x07e5` rows take 8 |
+| Recovered weapon stations | 21 | 22 (from 20) | 23 | 21 plus the Tu-26's bay row and the Tu-95's pylon row |
+| Cheat-only placements | 260 | 276 (from 258) | 278 | 260 plus the 18 pairs on the batch C rows |
+| Designator pod placements | 80 | 82 | 82 | the Su-34's rows 6 and 7 keep the retail designator bit |
+| Weapon and tank records | 82 / 9 | 82 / 9 | 82 / 9 | |
+
+```text
+ordnance audit: 54 aircraft, 23 recovered weapon stations, 5395 weapon placements, 257 tank placements, 82 weapon and 9 tank records; passed
+ordnance audit: 1 designator pods, 82 pod placements, one to an aircraft, loaded and restored through the saved mission; passed
+ordnance audit: 2 novelty records, 278 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
+```
+
+The `menus-ordnance-availability` expected line reads 54 aircraft, 23 recovered stations,
+5,395 weapon and 257 tank placements; `a2g-catalog` carries 54, 23, 257 and 278;
+`test_battery_a2g.py` carries 54, 23 and 257. Earlier sections quoting 22 recovered stations,
+5,447 weapon placements or 276 Cheat-only placements stay as written for their own states.

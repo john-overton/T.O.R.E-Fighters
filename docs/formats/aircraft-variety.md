@@ -11206,7 +11206,7 @@ that says `swing::spec` returns only the Tornado's was already stale after batch
 | Rig | Gear word only; the other words pinned, unmapped | As batches A and B: the shared fitted gear law until each aircraft's rig slice. The Tu-95's propeller discs (four blur discs of eight coincident faces, no state word) are not mapped. `--animation-probe` reports the unmapped surfaces as required failures, the expected result. |
 | Ground alignment | The fighters' 0.7 default (the transports and B-52 use 0.4) | Flight tuning is each aircraft's X-8. |
 | Strike class | All three by the rule, `OVERRIDES` unchanged (one entry, `F111.PT`) | The Su-34 gets Fighter (the Flankers' class: the fighter passes plus the level run), acceptable for a Flanker strike variant. |
-| Tu-26 and Tu-95 tail gun | `T23_1.JT` is in `guns()` | The B-52's M61 precedent. The rear-facing mount is B52-6's; until it lands the tail guns fire along the nose like the B-52's did. |
+| Tu-26 and Tu-95 tail gun | `T23_1.JT` is in `guns()` | The B-52's M61 precedent. The rear-facing mount is B52-6's, merged on 2026-11-16 (see the batch A, B and C integration note below): both tail guns read the record's slew words (180 degrees, 30 degrees of arc) and fire astern. |
 
 **Findings.**
 
@@ -11381,3 +11381,15 @@ edge and 1.6 degree rest sweep (T26-3); the Su-34's G limit (+9, the page lists 
 +7), ceiling (55,000 ft, the usual figure is 48,000) and retail designator-pod flag on rows 6
 and 7 (two pod placements); the Tu-26's glove-row bomb capacity (cut with the AS-16 count);
 the Tu-26 bay's admission of the Harpoon and AM-39 with the AS-16 bit.
+
+## Bomber batches A, B and C integration: the tail guns and the pins (2026-11-16)
+
+`m3-bomb-c` took `m3-aircraft` (batch A complete, batch B's identities, SWING-1, round 2's
+shared bay grid, B2-6/9, round 3's pins) and, with it, B52-6/7's slewed gun mount
+(`m3-aircraft` already held `m3-b52` at `fdd34154`). The batch C Hardpoint rows carry no
+literal slew words: they are decoded from the record (`slewH`, `slewP`, `slewLimitH`,
+`slewLimitP`), so the Tu-26's and Tu-95's `T23_1.JT` row 3 reads 180 degrees and fires
+astern with no further change; the Tu-95's dorsal and ventral rows (5 and 6, cleared by
+BMB-C2) stay empty and are not stations. Pinned by
+`the_retail_tu26_and_tu95_gun_rows_are_slewed_tail_guns_that_fire_astern` in
+`ai_wings/tail_gun_tests.rs`. The "rear-facing mount lands later" caveats above are met.
