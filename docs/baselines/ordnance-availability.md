@@ -1148,3 +1148,31 @@ The `menus-ordnance-availability` expected line reads 54 aircraft, 23 recovered 
 5,395 weapon and 257 tank placements; `a2g-catalog` carries 54, 23, 257 and 278;
 `test_battery_a2g.py` carries 54, 23 and 257. Earlier sections quoting 22 recovered stations,
 5,447 weapon placements or 276 Cheat-only placements stay as written for their own states.
+
+## Tu-95 bay refusals (T95-5, 2026-11-16)
+
+T95-5 gives the Tu-95 its fitted belly bay on the shared magazine grid
+([stores specification](../spec/stores-on-pylons.md#tu-95-bay-pylons-and-tail-gun-t95-5-2026-11-16)).
+The bay row (`TU95.PT` row 7, mask `0x1180`, six, class 160) admitted 35 stores; the sweep measured
+each at the row's count in the opened bay (5.5 by 26.0 ft, roof 5.5 ft over the belly plane) and
+**30 are refused by name** (`aircraft_stations::TU95_BAY_REFUSED`) because they leave under 0.05 ft to
+a wall, a door leaf, the roof, an end, the floor, a rail or a neighbour. Five stay: `AS16.JT` (the
+default, under a fin-contact exception), `FAB250.JT`, `MK82.JT`, `MK82AIR.JT` and `MK82P3.JT`. The
+pylon row (row 8) keeps its one placement (`AS16.JT`, BMB-C2) and moves to 9.0 ft forward as a
+`Location::Beam`; the tail turret moves to the tail cone. Nothing else changes.
+
+| Pin | Before | After | Why |
+| --- | ---: | ---: | --- |
+| Weapon placements | 5,395 | 5,365 | `TU95.PT` 36 to 6: the bay refuses 30 |
+| `TU95.PT` normal catalog | 35 stores | 5 | the bay's five and the pylon's `AS16` |
+| Aircraft, tank, recovered stations, Cheat-only, pods | 54 / 257 / 23 / 278 / 82 | unchanged | Cheat loading ignores the refusals |
+
+```text
+ordnance TU95.PT: 3 source rows, 1 optional weapon rows, 6 compatible weapon placements, 0 tank placements; defaults and restart passed; catalog 5 normal, 83 Cheat
+ordnance audit: 54 aircraft, 23 recovered weapon stations, 5365 weapon placements, 257 tank placements, 82 weapon and 9 tank records; passed
+```
+
+Measured with `--validate-ordnance` on `m3-tu95` at the batch C integration base (profile refreshed
+first). The Tu-26's own bay refusals (T26-5, on its branch, not in this base) move other rows; the
+coordinator recomputes the merged totals (B4). The `menus-ordnance-availability` expected line reads
+5365; `a2g-catalog` and `test_battery_a2g.py` carry the unchanged 54, 23, 257 and 278.

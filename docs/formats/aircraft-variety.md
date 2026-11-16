@@ -15323,6 +15323,10 @@ No afterburner and no flame word: exhaust and brake are `Expectation::Unsupporte
 false; nothing breaks. The shape has no bay word (T95-5 adds the fitted bay and doors), so bay is
 `Unsupported` too.
 
+Update (T95-5, 2026-11-16): the fitted bay is in ([Tu-95 stations, bays and pylons](#tu-95-bear-h-stations-bays-and-pylons-t95-5-2026-11-16)),
+so bay is `Required` now and `--animation-probe tu95` checks it (0 failures); the neutral face count
+(125) and the other rows above are as they were.
+
 `--animation-probe tu95`: 125 neutral faces (155 less the 30 hidden propeller phases), scale 0.6666667,
 **0 required failures and 0 check failures**, scope `reviewed-controls-and-attachments`. Elevator and
 rudder are `required moved` (5 distinct poses each), gear 22, rotor 4 (the fourth sample is one whole
@@ -15563,3 +15567,118 @@ astern with no further change; the Tu-95's dorsal and ventral rows (5 and 6, cle
 BMB-C2) stay empty and are not stations. Pinned by
 `the_retail_tu26_and_tu95_gun_rows_are_slewed_tail_guns_that_fire_astern` in
 `ai_wings/tail_gun_tests.rs`. The "rear-facing mount lands later" caveats above are met.
+
+## Tu-95 Bear-H stations, bays and pylons (T95-5, 2026-11-16)
+
+Implementation mode (bomber batch C, slice T95-5), by an agent (Claude Sonnet). It applies the
+coordinator's first-pass decisions for John to review (`BOMBERS-DECISIONS-C.md`, Tu-95 items 6, 7,
+8 and 9, "BMB-C1/C2") and the B-52 and B-2 pattern: the shared `combat::bays` tables (`STATIONS`,
+`GRIDS`, `OPENINGS`), `bay_doors::centre_doors` and `centre_lining`, `Location::Magazine`,
+`Location::Beam` and the B52-6 slewed gun mount. Earlier sections stay as written (B11); this
+replaces the [Tu-95 bay and pylon survey](#tu-95-bay-and-pylon-survey-for-john) proposal and the
+"no bay" lines of [Tu-95 shape and rig](#tu-95-shape-and-rig-t95-23-2026-11-15). The numbers and the
+clearance tables are in the
+[stores specification](../spec/stores-on-pylons.md#tu-95-bay-pylons-and-tail-gun-t95-5-2026-11-16).
+
+Provenance: the belly skin, the tail cone, the wing height and the propeller discs are **measured**
+from `TU95.SH`; the six-missile bay and the ten pylon missiles are cited public figures (Wikipedia,
+"Kh-55", the T95-0 review); the bay's width, depth, door count, grid, the pylon beam and every
+refusal are **fitted** or **opinionated** (agent decisions, 2026-11-16). No retail bytes are committed.
+
+**Stations after T95-5.** The record's nine rows are kept; only positions and masks move.
+
+| Row | What it is now | Position (feet right / up / forward) | Capacity, class | Default |
+| ---: | --- | --- | --- | --- |
+| 3 | tail turret, `T23_1.JT`, slewed aft (`Station.slew`) | 0 / +2.0 / -80.67 (was 0 / 0 / -33.3) | 2,000 rounds | `T23_1.JT` x2,000 |
+| 5, 6 | the Bear-A to F dorsal and ventral turrets | cleared by BMB-C2, not stations | | none |
+| 7 | belly bay, `Location::Magazine`, shared grid | 0 / -3.70 (belly plane) / +8.64 (the bay's middle, 13.0, less the missile's origin offset) | 6, class 160 (16,000 lb) | 6 `AS16.JT` |
+| 8 | wing pylons, `Location::Beam`, one beam a wing | +/-12.0 / -2.0 (record; the lugs hang 1.08 ft under the wing) / +9.0 (was +11.67) | 10 (five a wing), no weight class | none |
+| 0, 1, 2, 4 | the fixed sensor rows (`VIS300.SEE`, `TU95R.SEE`, `TU95.ECM`, `SU37L.SEE`) | unchanged, no body | | as retail |
+
+`SU37L.SEE` stays a fixed row with no body (decision 9, B7 satisfied). No sensor pod hangs on a
+station the real aircraft does not have: the bay mask `0x1180` has no designator bit and the pylon
+mask `0x1025` none either.
+
+**Bay (decision 6).** The retail row hangs 11.7 ft below the reference point, 2.4 ft under the gear's
+ground-contact plane. `TU95.SH` has no bay word, so the opening is cut from the belly skin, like the
+B-52's. The belly there is four triangles (`1a38`, `1a50` on the right, `22a7`, `22c1` on the left,
+y 0 to 71 units) forming a shallow V: z -7 units on the keel, rising 0.33 to 0.4 unit a unit out to z
+-5 at x -5 and +6. The opening is **5.5 ft wide** (about 5, widened from 5.0 so the six missiles'
+outer fin tips stand inside the walls: 0.10 ft clear, they were 0.15 ft through a 2.5 ft wall) and
+**26.0 ft long** (shape y 0 to 39 units, 0 to 26 ft forward; the record's 12.67 ft is inside it). The
+belly plane, where the doors hinge and the walls start, is the skin height at the two hinge lines 2.75
+ft out: -5.35 (left), -5.63 and -5.75 units (right), -5.55 units on average, **-3.70 ft**; the keel
+sags 0.97 ft below it. Two doors, each 2.75 ft wide, hinged on the outer edges, swing 90 degrees down
+in the flight's 1.00 s bay travel and hang to -6.45 ft, 2.9 ft above the gear contact line (-9.33). The
+V makes each leaf hang tilted 15 to 19 degrees outward at its free edge (the leaf is cut from the
+sloping skin and turns rigidly); cosmetic, accepted. A lined box closes the recess under the intact top
+skin: ceiling, four walls and a rail under the ceiling at each of the three lanes of the grid (20
+faces, no posts: the bay is one row long), drawn only while the doors are off their seat, in the
+material of the flat skin plate ahead of the opening (`1998`). The roof is **5.5 ft over the belly
+plane (+1.80 ft)**, 0.7 ft under the top skin over the walls (2.5 ft) and 1.27 ft over the top tier.
+The real Tu-95MS carries its six missiles on a rotary launcher in a ring; the shared grid has no ring,
+so the fitted approximation is **three abreast and two tiers** (the T95-0 proposal). The rig is
+`tu95_animation.rs` (`BELLY`, `LINING_BASE`, `Rig::faces`), the opening a row of `bays::OPENINGS`.
+
+**Grid.** The row is a row of the shared `bays::GRIDS` (floor 5.5 by 26.0 ft, ceiling the roof):
+an AS-16 (`KIKBK.SH`, 15.7 ft, fins 3 ft) stands three abreast at the grid's 1.59 ft pitch (its
+diameter plus 0.1 ft), one long (26.0 ft over 15.95 ft), and the roof allows two tiers, so the row
+holds six by room, which is the record's count. The mount is the bay's middle plus the missile's origin
+offset (the drawn missile spans -3.5 to +12.2 ft about its origin, 4.36 ft behind its middle), so it is
+centred 5.15 ft from each end. The ripple is the shared grid's: bottom tier first, outermost lane
+first alternating sides.
+
+**What the bay admits (`T95_BAY_REFUSED`, decision 6).** The retail mask `0x1180` (bomb and infrared
+bits) admitted 35 stores. A sweep loaded each at the row's count (at most six) and measured the open
+bay (the report below; `.local/m3-aircraft/checks/T95-5/bay-sweep.txt`). **Five stay** and 30 are
+refused by name, because they leave under 0.05 ft to a wall, a door leaf, the roof, an end, the floor,
+a rail or a neighbour, or pass through one, mainly: the long stores (`MK84`, `FAB1000`, the GBU-12/16/28/29/30
+and Paveway family), the 3 ft span missiles the infrared bit admits (`AGM84E`, `AGM88`, `AGM45`,
+`AS14`, `AS30`, `AGM65`, `AT12`) and the bombs whose fins touch their neighbours at this pitch
+(`CBU87`, `CBU89`, `FAB500`, `GBU38`, `MK20`, `MK82HD`, `MK82P`, `RBK250`, `RBK500`, `AT2`). The
+five that stay: `FAB250`, `MK82`, `MK82AIR`, `MK82P3` (they clear everything by 0.25 ft or more) and
+`AS16`, the default, which clears everything except its own neighbours: **its fins touch the next
+missile's (0.00 ft)**, the one exception to the 0.05 ft line, kept because six AS-16 are the aircraft's
+load (the real launcher folds the wings; the stand-in cannot). `AS15.JT` (the Kh-55 stand-in, 220
+lb) stays refused as in the Tu-160 decision: the mask has no bit for it, no list entry is needed.
+Cheat loading is unchanged. `--validate-ordnance`: weapon placements 5,395 to 5,365 (`TU95.PT` 36 to 6).
+
+**Pylons (decision 7, opinionated).** Row 8 is the record's wing row, moved by BMB-C2 to x +/-12 ft
+(shape x 18 units), 2.0 ft under the reference point (above the gear line: the lowest store is 7.7 ft
+over the contact line) with the mask cut to the AS-16 and ten stores (the Tu-95MS16's ten pylon
+Kh-55s; the real arrangement was not found). The generic wing rack hangs five a side on two pylons
+and crosses the missiles' fins (ten pairs under 0.05 ft), so the row is a `Location::Beam` like the
+B-52's: three abreast (pitch the 3 ft span plus 0.1 ft) in a rear row of three and a front row of two,
+rows 1.05 lengths (16.5 ft) apart, centred on the row's point. T95-5 moves the record's forward
+offset from 35 to **27 units (9.0 ft)**: at 35 the front row's noses reached 32.1 ft forward and
+stood 0.09 ft from the inboard propeller disc (31.7 ft); at 9.0 ft they stop 2.2 ft short. The beam is
+drawn by `pylons.rs::beam_pylon` (generic). The AS-16 is the only store the row admits.
+
+**Guns (decision 8).** The tail turret (row 3, `T23_1.JT`, 2,000 rounds, 2 rounds a shot) moves from
+33.3 ft aft to the point of the drawn tail cone, 80.67 ft aft and 2.0 ft up (`TU95.SH` y -121 and z 3
+units), and keeps its record slew (heading 180 degrees, 45 degree arcs), which B52-6's mount reads, so
+the gun fires astern. Rows 5 and 6 hold nothing.
+
+**Default load and weight.** The bay holds its six AS-16 (15,840 lb, class 160); the pylon row starts
+empty and keeps an empty AS-16 selection, so Load Ordnance offers ten. The loadout counts stores in
+the weight as it does for the B-52 (the start-fuel fix keeps a default load under the maximum).
+
+**Release.** Bay: the press asks for the doors; a store leaves once `State::bay` is at 0.95 and the
+doors close after it (the F-22's timing). Pylons release from the beam with the doors shut. The AI
+releases through the shared strike release, which does not wait for doors: an AI Tu-95's doors stay
+drawn shut while its bombs leave (the B-52's and F-22's precedent). `State::bay_available()` is true
+for the Tu-95 (a row in `bays::STATIONS`), so the open-bay RCS term applies.
+
+**Open for John.**
+1. The bay is 5.5 ft wide, not 5 (the AS-16's fins would be 0.15 ft through a 2.5 ft wall).
+2. Six AS-16 stand with their fins touching (the one exception to the 0.05 ft line); the real six-
+   missile ring is not drawn. Alternatives: refuse the AS-16 (no default), or a wider pitch (a grid
+   change).
+3. The bay admits five stores (the AS-16 and four bombs, 500 lb class and under); the real Bear-H
+   carries no bombs, so the four are only a consequence of the masks (refuse them too?).
+4. The pylon row moved to 9.0 ft forward (the record's 11.7 ft hit the propeller disc); five a side.
+5. The door leaves hang tilted by the keel's V.
+6. The tail turret sits at the cone's point, 80.7 ft aft; the real turret is under the fin.
+
+**Checks.** See the plan's T95-5 entry; clearance, sweep and frame files are in
+`.local/m3-aircraft/checks/T95-5/` and `.local/m3-aircraft/frames/T95-5/`.

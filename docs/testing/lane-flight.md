@@ -1039,3 +1039,16 @@ at least 0.05 ft with the doors open, and no two touch).
 Update (B2-5, 2026-11-15): the B-2's default load is the two Mk 82 bays alone (64 bombs, 32,000 lb), so
 `flight-liftoff-b2` records 155.2 kt after 7,232 ft (was 158.1 kt) and `flight-approach-b2` 167.5 kt (was 166.2 kt);
 the windows (140 to 165 kt and 140 to 170 kt) are unchanged.
+
+Update (T95-5, 2026-11-16): the Tu-95's bay, pylons and tail turret join the flight lane.
+`flight-bay-fire-tu95-row7` (the one-press release through the fitted bay with six Mk 82: the doors open
+to 0.95 before the bomb leaves and close after it; the default AS-16 needs a target the stores preview does
+not give it), `flight-bay-fire-tu95-pylon-row8` (an AS-16 leaves the underwing beam with the doors shut, ten
+loaded), `flight-bay-tu95-0`, `-0.5` and `-1` (the `--flight-bay` frames) and `render-tu95-clearance`
+(headless, `TORE_STORES_PREVIEW_T95CLEAR=1`: the six default AS-16 clear the open bay's doors, walls, roof,
+floor, rails and ends by 0.05 ft or more, their fins touching each other being the one accepted exception;
+ten pylon AS-16 clear each other, the inboard propeller disc, the nacelle, the fuselage and the gear).
+`STATIONS["tu95"]` is `[2000, 6, 0]` (the tail turret, the six bay AS-16 and the empty pylon row), so
+`flight-livefire-tu95-slot1` to `-slot3` and `flight-jettison-tu95-slot2` run too. `flight-animation-tu95`
+now requires the bay control (the four belly triangles whole at 0 with no lining; open, the 20 lining
+faces and the leaves hanging on a quarter turn). The menus expected line reads 5,365 weapon placements.

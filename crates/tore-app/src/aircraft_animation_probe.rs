@@ -323,13 +323,13 @@ impl Control {
                         | Id::B52
                         | Id::B1b
                         | Id::Tu26
+                        // T95-3: the Tu-95 shape has no bay word; T95-5 (2026-11-16)
+                        // adds the fitted belly bay and its doors.
+                        | Id::Tu95
                 ) =>
             {
                 Expectation::Required
             }
-            // T95-3: the Tu-95 shape has no bay word; T95-5 adds the fitted
-            // belly bay and its doors.
-            Self::Bay if id == Id::Tu95 => Expectation::Unsupported,
             Self::Bay => Expectation::Unknown,
             Self::VectorPitch if matches!(id, Id::Av8 | Id::Yak141) => Expectation::Required,
             Self::VectorPitch | Self::VectorYaw if id == Id::X31 => Expectation::Required,

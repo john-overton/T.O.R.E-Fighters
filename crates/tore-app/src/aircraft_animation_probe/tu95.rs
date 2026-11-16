@@ -3,9 +3,10 @@
 //! plates and the four propeller discs (ten kept faces). Measures the shared
 //! Airframe output and never repeats the rig's algorithm. Witness points are
 //! named in shape units and scaled with the aircraft's own per-axis scale (the
-//! identity: the 2/3 ft a unit is the probe's `scale`). The aileron, flaps, brake,
-//! bay and exhaust are not in the shape, so the probe requires that they move
-//! nothing.
+//! identity: the 2/3 ft a unit is the probe's `scale`). The aileron, flaps, brake
+//! and exhaust are not in the shape, so the probe requires that they move
+//! nothing. The fitted bay (T95-5): the four belly triangles cut into door
+//! leaves and a lined recess.
 use super::*;
 use tore_formats::aircraft::scale::scale_point;
 
@@ -15,6 +16,11 @@ const RUDDER: [usize; 2] = [0x2117, 0x2135];
 /// Each plate as one rigid pair of windings: left main, right main, nose.
 const PLATES: [[usize; 2]; 3] = [[0x29f9, 0x2a2f], [0x2a14, 0x2a4a], [0x2a65, 0x2a88]];
 const GEAR: [usize; 6] = [0x29f9, 0x2a2f, 0x2a14, 0x2a4a, 0x2a65, 0x2a88];
+/// The belly triangles the fitted bay is cut from, and the first address of the
+/// lining (a ceiling, four walls and five faces a lane rail, three lanes).
+const BELLY: [usize; 4] = [0x1a38, 0x1a50, 0x22a7, 0x22c1];
+const LINING_BASE: usize = 0x7000;
+const LINING: usize = 5 + 3 * 5;
 /// The kept faces of the four discs (right inboard, right outboard, left
 /// inboard, left outboard in two halves) and their hubs.
 const DISCS: [(&[usize], [f32; 3]); 4] = [
@@ -315,6 +321,44 @@ fn rotor(value: f64, reference: &[Face], pose: &[Face], scale: f32, m: &mut Metr
     }
 }
 
+/// The fitted bay: shut (0) the belly triangles are whole (their lowest point is
+/// the keel's, z -7 units) and no lining draws; open (above 0) the lining draws
+/// and the leaves hang from the hinge lines (x +/-2.75 ft at the mean belly
+/// height, within the V skin's 0.2 unit). A leaf's free edge is a point of the
+/// keel's V, `dz` below the hinge height (1.1 to 1.45 units: the keel is z -7
+/// units, the skin on the cut line -6.67 to -6.85), so a quarter-turn sweep puts
+/// it `dz * cos - leaf * sin` below the hinge height (`leaf` the leaf's width).
+fn bay(value: f64, _reference: &[Face], pose: &[Face], scale: f32, m: &mut Metrics) {
+    let o = tore_sim::combat::bays::opening(ID).expect("Tu-95 bay");
+    let hinge_z = o.belly as f32 / scale;
+    let lining = pose.iter().filter(|f| f.address >= LINING_BASE).count();
+    let skins: Vec<&Face> = pose.iter().filter(|f| BELLY.contains(&f.address)).collect();
+    let lowest = skins
+        .iter()
+        .flat_map(|f| f.positions.iter())
+        .map(|p| p[2])
+        .fold(f32::MAX, f32::min);
+    if value == 0. {
+        m.reviewed_direction_failures +=
+            usize::from(lining != 0 || skins.len() != 4 || lowest < -7. - 1e-4);
+        return;
+    }
+    m.reviewed_direction_failures += usize::from(lining != LINING);
+    // A vertex of the skin stays near each hinge line.
+    let leaf = o.outer as f32 / scale;
+    for side in [leaf, -leaf] {
+        let held = skins
+            .iter()
+            .flat_map(|f| f.positions.iter())
+            .any(|p| (p[0] - side).abs() < 0.4 && (p[2] - hinge_z).abs() < 0.4);
+        m.reviewed_anchor_missing |= !held;
+    }
+    let turn = value as f32 * std::f32::consts::FRAC_PI_2;
+    let at = |dz: f32| (hinge_z + dz * turn.cos() - leaf * turn.sin()).min(-7.);
+    let (low, high) = (at(-7. - hinge_z - 0.02), at(-6.67 - hinge_z + 0.02));
+    m.reviewed_direction_failures += usize::from(lowest < low - 0.02 || lowest > high + 0.02);
+}
+
 pub(super) fn check(
     c: Control,
     value: f64,
@@ -328,6 +372,7 @@ pub(super) fn check(
         Control::Rudder => rudder(value, reference, pose, scale, m),
         Control::Gear => gear(value, reference, pose, scale, m),
         Control::Rotor => rotor(value, reference, pose, scale, m),
+        Control::Bay => bay(value, reference, pose, scale, m),
         _ => {}
     }
 }

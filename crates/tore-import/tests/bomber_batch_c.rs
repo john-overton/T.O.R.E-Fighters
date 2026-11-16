@@ -185,7 +185,7 @@ fn the_corrected_records_carry_the_real_figures_and_station_flags() {
         (40_750, 4)
     );
     let pylons = &tu95.hardpoints[stations::TU95_WING_PYLONS];
-    assert_eq!(pylons.position, [36, -6, 35]);
+    assert_eq!(pylons.position, [36, -6, 27]);
     assert_eq!(
         (pylons.flags, pylons.count, pylons.weight_class),
         (0x1025, 10, 0)

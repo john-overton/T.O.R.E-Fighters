@@ -123,6 +123,11 @@ STATIONS["faxx"] = STATIONS["f22n"]
 # six a wing); its three bay rows (3, 5 and 6, nine Mk 82 each) start empty and keep an
 # empty Mk 82 selection, so three never-loaded slots follow.
 STATIONS["b52"] = [1242, 12, 0, 0, 0]
+# The Tu-95 Bear-H (T95-5, 2026-11-16): the tail turret (row 3, 2,000 rounds, now at the drawn
+# tail cone), the six default AS-16 in the belly bay (row 7) and the pylon row (row 8, ten
+# AS-16, empty by default and keeping an empty AS-16 selection). Rows 5 and 6 (the Bear-A to F
+# turrets) hold nothing and are not stations.
+STATIONS["tu95"] = [2000, 6, 0]
 
 
 def _numbers(output: str, prefix: str) -> dict:
@@ -1387,6 +1392,31 @@ def slot_scenarios() -> list[Scenario]:
             timeout=300,
             notes="B-52 bay release: the doors open before the Mk 82 leaves and close after it, as the F-22's and F-117's do.",
         ))
+    # T95-5 (2026-11-16): the Tu-95's fitted belly bay (row 7) through the same actual one-press
+    # release with six Mk 82 (the default AS-16 needs a target the preview does not give it): the
+    # doors open to 0.95 before the bomb leaves, then close; the pylon row 8 takes the AS-16 only.
+    out.append(Scenario(
+        name="flight-bay-fire-tu95-row7", lane="flight",
+        args=["--stores-preview", "{work}/frames"], window=True,
+        env={"TORE_STORES_PREVIEW_AIRCRAFT": "tu95",
+             "TORE_STORES_PREVIEW_RECORDS": "7=MK82.JT:6",
+             "TORE_STORES_PREVIEW_FUEL": "100000",
+             "TORE_STORES_PREVIEW_FIRE": "7"},
+        expect=["Stores firing: tu95 row=7 PASS"],
+        outputs=["frames/tu95-fire-row7-t000.png", "frames/tu95-fire-row7-t400.png"],
+        timeout=300,
+        notes="Tu-95 bay release: the doors open before the Mk 82 leaves and close after it, as the F-22's and the B-52's do.",
+    ))
+    out.append(Scenario(
+        name="flight-bay-fire-tu95-pylon-row8", lane="flight",
+        args=["--stores-preview", "{work}/frames"], window=True,
+        env={"TORE_STORES_PREVIEW_AIRCRAFT": "tu95", "TORE_STORES_PREVIEW_FIRE": "8",
+             "TORE_STORES_PREVIEW_RECORDS": "8=AS16.JT:10", "TORE_STORES_PREVIEW_FUEL": "100000"},
+        expect=["Stores firing: tu95 row=8 PASS"],
+        outputs=["frames/tu95-fire-row8-t000.png", "frames/tu95-fire-row8-t400.png"],
+        timeout=300,
+        notes="Tu-95 pylon release: an AS-16 leaves the underwing beam with the bay doors shut (ten loaded, five a wing; the row takes the AS-16 alone).",
+    ))
     out.append(Scenario(
         name="flight-bay-fire-b52-pylon-row7", lane="flight",
         args=["--stores-preview", "{work}/frames"], window=True,
@@ -2155,7 +2185,7 @@ def capture_scenarios() -> list[Scenario]:
     # AL1 and refuses a ground start ("an enemy airfield").
     for ac in AIRCRAFT:
         add(f"groundstart-{ac}", ["--free-flight", "--aircraft", ac, "--theater", "UKR", "--ground-start", "9", "--flight-view", "1", "--flight-look", "150,-15", "--flight-zoom", "1.5"])
-    for ac in ("f22", "f22n", "b52", "f117", "b2"):
+    for ac in ("f22", "f22n", "b52", "f117", "b2", "tu95"):
         for bay in ("0", "0.5", "1"):
             add(f"bay-{ac}-{bay}", ["--free-flight", "--aircraft", ac, "--flight-view", "1", "--flight-look", "150,-30", "--flight-bay", bay])
     return out

@@ -191,8 +191,10 @@ pub const TU95_WING_PYLONS: usize = 8;
 /// 36 is 12 ft out (fitted, opinionated), up -6 is 2 ft below the reference
 /// point, 0.7 ft above the 1.3 ft wing underside's lowest plane and 7.3 ft
 /// above the gear's ground-contact plane (-28 units; the retail -35 was 2.4 ft
-/// below it), forward 35 stays (the record's).
-pub const TU95_WING_POSITION: [i32; 3] = [36, -6, 35];
+/// below it). Forward 27 is 9.0 ft (T95-5, fitted; the record's 35, 11.7 ft,
+/// put the beam's front row of AS-16 0.09 ft from the inboard propeller disc, the
+/// 15.7 ft missiles reaching 32.1 ft forward; at 9.0 ft they stop 2.4 ft short).
+pub const TU95_WING_POSITION: [i32; 3] = [36, -6, 27];
 /// The Tu-95's pylon row mask: the retail `0x17e5` (every seeker, bomb, tank
 /// and pod bit) down to the reviewed row, the pair flag, the base bit and the
 /// active-radar seeker bit the AS-16 needs (`0x1025`).
@@ -201,6 +203,65 @@ pub const TU95_WING_FLAGS: i32 = 0x1025;
 /// ten underwing Kh-55s, Wikipedia "Kh-55", read 2026-11-15; opinionated, the
 /// real pylon arrangement was not found).
 pub const TU95_WING_COUNT: i32 = 10;
+/// The Tu-95's tail turret row (`TU95.PT` row 3, `T23_1.JT`, slewed aft): its
+/// mount moves to the drawn tail cone ([`TU95_GUN_MOUNT`], T95-5).
+pub const TU95_GUN: usize = 3;
+/// Where the Tu-95's tail turret hangs, record units (a third of a foot): on the
+/// centre line at the point of the drawn tail cone, 80.7 ft aft and 2.0 ft up
+/// (`TU95.SH` y -121 and z 3 units at 2/3 ft a unit). The retail mount is
+/// (0, 0, -100), 33.3 ft aft, 47 ft ahead of the cone (T95-0). Fitted; the
+/// coordinator's decision for T95-5 (BOMBERS-DECISIONS-C Tu-95 item 8).
+pub const TU95_GUN_MOUNT: [i32; 3] = [0, 6, -242];
+/// The Tu-95's internal bay row (`TU95.PT` row 7, `AS16.JT` x6, class 160): a
+/// fitted belly bay, 5 by 26 ft, two doors ([`tore_sim::combat::bays`], T95-5).
+/// The row keeps its record count, class and mask; only the stores that do not
+/// clear the opened bay are refused ([`TU95_BAY_REFUSED`]).
+pub const TU95_BAY: usize = 7;
+/// Stores the Tu-95's bay row refuses though its mask `0x1180` (bomb and
+/// infrared bits) and its class admit them, where the measured grid (the
+/// shared magazine grid of B2-5, fitted to the 5.5 by 26.0 ft opening under a
+/// flat roof 5.5 ft over the belly plane, stores hung by their shape's origin)
+/// leaves under 0.05 ft to a wall, a door leaf, the roof, the ends, the floor,
+/// a rail or a neighbour at the row's count, or runs through one. Five stay:
+/// `FAB250.JT`, `MK82.JT`, `MK82AIR.JT` and `MK82P3.JT` clear everything, and
+/// `AS16.JT`, the default, clears everything but its neighbours: its cruciform
+/// fins (3 ft span) touch the next missile's at the grid's 1.59 ft pitch (0.00
+/// ft; the real rotary launcher folds its wings), the one exception to the
+/// line, kept because the row's six AS-16 are the aircraft's load. Measured with
+/// the bay clearance sweep, T95-5, 2026-11-16, in `docs/spec/stores-on-pylons.md`.
+/// `AS15.JT` (the Kh-55 stand-in) is not here: the mask refuses it already.
+pub const TU95_BAY_REFUSED: [&str; 30] = [
+    "AGM45.JT",
+    "AGM65A.JT",
+    "AGM65G.JT",
+    "AGM84E.JT",
+    "AGM88.JT",
+    "AS14.JT",
+    "AS30.JT",
+    "AT12.JT",
+    "AT2.JT",
+    "CBU87.JT",
+    "CBU89.JT",
+    "FAB1000.JT",
+    "FAB500.JT",
+    "GBU10.JT",
+    "GBU10A.JT",
+    "GBU12.JT",
+    "GBU16.JT",
+    "GBU28.JT",
+    "GBU29.JT",
+    "GBU29P.JT",
+    "GBU30.JT",
+    "GBU38.JT",
+    "MK20.JT",
+    "MK82HD.JT",
+    "MK82P.JT",
+    "MK84.JT",
+    "PAVEWA3.JT",
+    "PAVEWAY.JT",
+    "RBK250.JT",
+    "RBK500.JT",
+];
 /// The Su-34's gun row (`SU34.PT` row 5, `GSH301.JT`) whose round count
 /// [`adjust_defaults`] sets to the real magazine (BMB-C2).
 pub const SU34_GUN: usize = 5;
@@ -381,7 +442,11 @@ pub fn weapon_allowed(id: AircraftId, row: usize, source: &str) -> bool {
         }
         // The Tu-95's wing pylons take the AS-16 and nothing else (BMB-C2):
         // the active-radar bit the Kh-15 needs also admits the Harpoon class.
-        AircraftId::Tu95 => row != TU95_WING_PYLONS || source == "AS16.JT",
+        AircraftId::Tu95 => match row {
+            TU95_WING_PYLONS => source == "AS16.JT",
+            TU95_BAY => !TU95_BAY_REFUSED.contains(&source),
+            _ => true,
+        },
         AircraftId::Tornado => match row {
             TORNADO_SHOULDER => !TORNADO_SHOULDER_REFUSED.contains(&source),
             TORNADO_INNER_WING => !TORNADO_INNER_WING_REFUSED.contains(&source),
@@ -1032,6 +1097,7 @@ pub fn adjust_defaults(id: AircraftId, rows: &mut Vec<Hardpoint>) {
             for row in &mut rows[TU95_EXTRA_GUNS] {
                 row.store = None;
             }
+            rows[TU95_GUN].position = TU95_GUN_MOUNT;
             let pylons = &mut rows[TU95_WING_PYLONS];
             pylons.position = TU95_WING_POSITION;
             pylons.flags = TU95_WING_FLAGS;
@@ -2156,13 +2222,15 @@ mod tests {
         expected[5].3 = None;
         expected[6].3 = None;
         expected[TU95_WING_PYLONS].1 = 0x1025;
-        expected[TU95_WING_PYLONS].2 = [36, -6, 35];
+        expected[TU95_WING_PYLONS].2 = [36, -6, 27];
         expected[TU95_WING_PYLONS].4 = 10;
         expected[TU95_WING_PYLONS].5 = 0;
+        // T95-5: the tail turret moves to the drawn tail cone.
+        expected[TU95_GUN].2 = [0, 6, -242];
         assert_eq!(key(&rows), expected);
-        // The tail turret and the bay row are untouched.
+        // The tail turret keeps its rounds and store; the bay row is untouched.
         assert_eq!(rows[3].store.as_deref(), Some("T23_1.JT"));
-        assert_eq!((rows[3].count, rows[3].position), (2_000, [0, 0, -100]));
+        assert_eq!((rows[3].count, rows[3].position), (2_000, TU95_GUN_MOUNT));
         assert_eq!(rows[7].store.as_deref(), Some("AS16.JT"));
         // 12 ft out, above the gear's ground-contact plane (-28 units).
         assert_eq!(rows[TU95_WING_PYLONS].position[0], 36);
@@ -2177,6 +2245,24 @@ mod tests {
         for source in ["AGM84A.JT", "AM39.JT", "AIM120.JT", "MK82.JT", "AS15.JT"] {
             assert!(!weapon_allowed(AircraftId::Tu95, TU95_WING_PYLONS, source));
             assert!(weapon_allowed(AircraftId::Tu95, 7, source), "{source}");
+        }
+        // T95-5: the bay row refuses the stores that do not clear the opened
+        // bay by name and keeps the five that do (the AS-16 under its fin
+        // exception); the pylon row is the AS-16 alone.
+        assert_eq!(TU95_BAY_REFUSED.len(), 30);
+        for source in TU95_BAY_REFUSED {
+            assert!(
+                !weapon_allowed(AircraftId::Tu95, TU95_BAY, source),
+                "{source}"
+            );
+            assert!(!weapon_allowed(AircraftId::Tu95, TU95_WING_PYLONS, source));
+            assert!(weapon_allowed(AircraftId::Tu26, 5, source));
+        }
+        for source in ["AS16.JT", "FAB250.JT", "MK82.JT", "MK82AIR.JT", "MK82P3.JT"] {
+            assert!(
+                weapon_allowed(AircraftId::Tu95, TU95_BAY, source),
+                "{source}"
+            );
         }
         assert!(weapon_allowed(AircraftId::Tu26, 8, "AGM84A.JT"));
         // Su-34.

@@ -122,6 +122,41 @@ def b52_clearance_problems(output: str) -> list[str]:
     return problems
 
 
+def tu95_clearance_problems(output: str) -> list[str]:
+    """The Tu-95's six default AS-16 clear the open bay and its 10 pylon AS-16 clear each other, the
+    inboard propeller disc and the nacelle (T95-5). The bay's missiles touch their neighbours' fins
+    (0.00 ft, the one accepted exception: the real rotary launcher folds its wings), so that column
+    is not held to the line; every other column is."""
+    problems = []
+    stores = [line for line in output.splitlines() if re.match(r"Bay clearance: row7 KIKBK\.SH slot\d:", line)]
+    if len(stores) != 6:
+        problems.append(f"{len(stores)} bay stores reported, expected 6")
+    for line in stores:
+        for label in ("side wall", "door leaf", "aft end", "fore end", "roof", "above the belly plane", "rails and posts"):
+            m = re.search(rf"{label} (-?[\d.]+)", line)
+            if not m:
+                problems.append(f"no {label} in {line[:48]}")
+            elif float(m.group(1)) < 0.05:
+                problems.append(f"{line[:46]} clears the {label} by only {m.group(1)} ft")
+    if not re.search(r"Bay clearance: tu95 6 stores, nearest pair [\d.]+ ft", output):
+        problems.append("no closest-pair line for the 6 bay stores")
+    m = re.search(r"Pylon clearance: tu95 10 stores, nearest pair (-?[\d.]+) ft .*, (\d+) pairs under", output)
+    if not m or int(m.group(2)) != 0:
+        problems.append("the pylon stores touch each other")
+    m = re.search(r"Pylon clearance: tu95 row 8 KIKBK\.SH x10: inboard disc (-?[\d.]+) .*?inboard nacelle (-?[\d.]+) .*?fuselage (-?[\d.]+) .*?gear (-?[\d.]+) .*?wing \(stores only\) (-?[\d.]+) .*?lowest point (-?[\d.]+)", output)
+    if not m:
+        problems.append("no pylon line for the 10 AS-16")
+    else:
+        disc, nacelle, fuselage, gear, wing, ground = (float(m.group(i)) for i in range(1, 7))
+        if min(disc, nacelle, fuselage, gear) < 1.0:
+            problems.append(f"the pylon AS-16 are within a foot of the disc, nacelle, fuselage or gear ({disc}, {nacelle}, {fuselage}, {gear})")
+        if wing < 0.05:
+            problems.append(f"the pylon AS-16 touch the wing ({wing} ft)")
+        if ground < 5.0:
+            problems.append(f"the pylon AS-16 hang only {ground} ft above the gear contact line")
+    return problems
+
+
 def skin_capture_problems(output: str) -> list[str]:
     """Every aircraft skin capture drew a non-blank frame."""
     captures = [line for line in output.splitlines() if line.startswith("Scene capture:")]
@@ -175,6 +210,15 @@ def scenarios() -> list[Scenario]:
                  "TORE_STORES_PREVIEW_RECORDS": "3=MK82.JT:9,5=MK82.JT:9,6=MK82.JT:9"},
             expect=["Bay clearance: b52 opening", "Pylon clearance: b52 row 7"], check=b52_clearance_problems,
             notes="Headless B-52 clearances in feet (B52-5): 27 Mk 82 in the open bay against the doors, walls, roof, floor, rails and each other; 12 default Harpoons on the pylons against the pod, the flap strip up and down, the fuselage, the gear and the ground.",
+        ),
+        Scenario(
+            name="render-tu95-clearance", lane="flight",
+            args=["--stores-preview", "{work}/stores"],
+            env={"TORE_STORES_PREVIEW_CPU": "1", "TORE_STORES_PREVIEW_T95CLEAR": "1",
+                 "TORE_STORES_PREVIEW_AIRCRAFT": "tu95",
+                 "TORE_STORES_PREVIEW_RECORDS": "8=AS16.JT:10"},
+            expect=["Bay clearance: tu95 opening", "Pylon clearance: tu95 row 8"], check=tu95_clearance_problems,
+            notes="Headless Tu-95 clearances in feet (T95-5): the 6 default AS-16 in the open bay against the doors, walls, roof, floor, rails and ends (their fins touch each other, the one accepted exception); 10 AS-16 on the pylon beams against each other, the inboard propeller disc, the nacelle, the fuselage, the gear and the wing.",
         ),
         Scenario(
             name="render-ah64-stub-wing-pylons", lane="flight",
