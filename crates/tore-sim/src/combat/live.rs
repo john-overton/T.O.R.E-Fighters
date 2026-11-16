@@ -1212,11 +1212,13 @@ impl Configuration {
                     // The Mirage F1's belly pair refuses the Magic (the only
                     // default weapon), so its empty selection is the Mk 82.
                     (AircraftId::Mf1, 5) => Some("MK82.JT"),
-                    // The B-52's two empty bay rows (BMB-A1, 2026-11-15; the
-                    // record's rows 5 and 6, flags 0x1120) retain an empty
-                    // bomb selection: the Harpoon and the M61 are the only
-                    // defaults and neither fits them.
-                    (AircraftId::B52, 5 | 6) => Some("MK82.JT"),
+                    // The B-52's three bay rows (BMB-A1, 2026-11-15, rows 5
+                    // and 6; B52-5 the same for row 3, which no longer holds
+                    // the Harpoons) start empty and retain an empty bomb
+                    // selection: the Harpoon and the M61 are the only
+                    // defaults and neither fits a bay row (the Harpoon is
+                    // pylon only, `aircraft_stations::B52_BAY_REFUSED`).
+                    (AircraftId::B52, 3 | 5 | 6) => Some("MK82.JT"),
                     _ => None,
                 };
                 if let Some(name) = fallback {

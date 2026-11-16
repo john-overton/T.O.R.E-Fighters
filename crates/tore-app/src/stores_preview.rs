@@ -14,6 +14,7 @@ use crate::{
     snapshot::{ProjectilePose, RenderSnapshot, StorePose, store_poses},
     terrain::{Overrides, Terrain},
 };
+mod b52_clearance;
 mod pod_clearance;
 use std::path::Path;
 use tore_formats::aircraft::{Aircraft, AircraftId};
@@ -256,6 +257,15 @@ pub fn run() -> AppResult<()> {
                 loadout.quantities[slot] = count;
             }
         }
+        // `TORE_STORES_PREVIEW_FUEL=POUNDS` sets the internal fuel (a bomber
+        // loaded with bay stores is over its maximum weight at the default
+        // tank, B52-5).
+        if let Some(fuel) = std::env::var("TORE_STORES_PREVIEW_FUEL")
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok())
+        {
+            loadout.fuel_lbs = fuel.clamp(0., loadout.internal_capacity_lbs);
+        }
         for (station, count) in loadout
             .configuration
             .stations
@@ -446,6 +456,17 @@ pub fn run() -> AppResult<()> {
         if std::env::var_os("TORE_STORES_PREVIEW_CLEARANCE").is_some() {
             clearance_report(short, &airframe, &art, &loads[1].1);
         }
+        if std::env::var_os("TORE_STORES_PREVIEW_B52CLEAR").is_some() {
+            b52_clearance::report(
+                short,
+                id,
+                &airframe,
+                &art,
+                &loads[1].1,
+                &airframe.start(&world),
+            );
+            continue;
+        }
         if std::env::var_os("TORE_STORES_PREVIEW_BAYCLEAR").is_some() {
             bay_clearance(short, id, &airframe, &art, &loads[1].1);
             continue;
@@ -458,7 +479,15 @@ pub fn run() -> AppResult<()> {
         let ground = f64::from(world.height(state.position[0] as f32, state.position[2] as f32));
         state.position[1] = ground.max(0.) + HEIGHT_FT;
         state.gear = 0.;
-        state.flaps = 0.;
+        // `TORE_STORES_PREVIEW_FLAPS=0..1` poses the flaps (the B-52's pylons
+        // beside its drooping flap strips, B52-5); `TORE_STORES_PREVIEW_GEAR=1` the gear.
+        state.flaps = std::env::var("TORE_STORES_PREVIEW_FLAPS")
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok())
+            .map_or(0., |value| value.clamp(0., 1.));
+        if std::env::var_os("TORE_STORES_PREVIEW_GEAR").is_some() {
+            state.gear = 1.;
+        }
         if let Some(degrees) = sweep {
             state.speed = tore_sim::combat::swing::speed_for_sweep(degrees);
         }
@@ -587,6 +616,7 @@ pub fn run() -> AppResult<()> {
                     s.rack.location(),
                     tore_sim::combat::hardpoints::Location::Wing
                         | tore_sim::combat::hardpoints::Location::Separate
+                        | tore_sim::combat::hardpoints::Location::Beam
                 )
             })
             .max_by_key(|s| s.count)

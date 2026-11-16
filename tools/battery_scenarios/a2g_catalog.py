@@ -34,7 +34,9 @@ AIRCRAFT = re.compile(
 # weapon count here matches any number, and 222 Cheat-only placements stay as measured.
 # BMB-A1 (2026-11-15): 48 aircraft, 20 recovered stations (the B-52's two empty bay rows) and
 # 240 Cheat-only placements after the B-52, B-2 and F-117 joined; tank placements stay 233.
-AUDIT = re.compile(r"^ordnance audit: 48 aircraft, 20 recovered weapon stations, \d+ weapon placements, "
+# B52-5 (2026-11-15): 21 recovered stations (the B-52's third empty bay row) and 242 Cheat-only
+# placements (the B-52's underwing pylon row).
+AUDIT = re.compile(r"^ordnance audit: 48 aircraft, 21 recovered weapon stations, \d+ weapon placements, "
                    r"233 tank placements, (\d+) weapon and 9 tank records; passed$", re.M)
 # Aircraft with a bomb or rocket station the A2G records fit; the cargo and
 # radar aircraft carry nothing.
@@ -74,9 +76,9 @@ def scenarios() -> list[Scenario]:
             args=["--validate-ordnance", "--no-audio"],
             timeout=600,
             expect=[
-                r"ordnance audit: 48 aircraft, 20 recovered weapon stations, \d+ weapon placements, 233 tank placements, \d+ weapon and 9 tank records; passed",
+                r"ordnance audit: 48 aircraft, 21 recovered weapon stations, \d+ weapon placements, 233 tank placements, \d+ weapon and 9 tank records; passed",
                 r"ordnance audit: 1 designator pods, \d+ pod placements, one to an aircraft, loaded and restored through the saved mission; passed",
-                r"ordnance audit: 2 novelty records, 240 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed",
+                r"ordnance audit: 2 novelty records, 242 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed",
             ],
             forbid=[r"PROBLEM"],
             check=catalog_problems,

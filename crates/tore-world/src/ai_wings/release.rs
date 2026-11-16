@@ -297,4 +297,46 @@ mod tests {
             assert!(forward > opening.aft && forward < opening.fore, "{forward}");
         }
     }
+    /// B52-5: an AI bomb leaves the B-52's bay row 5 (a grid magazine) from the
+    /// bay's own mount on the centre line, within the 26 ft opening; its doors
+    /// stay shut (the F-22's and F-117's precedent: the AI's release does not
+    /// wait for them, and `bay_ready` is not part of its release).
+    #[test]
+    fn an_ai_bomb_leaves_the_b52_bay_row_from_its_mount_on_the_centre_line() {
+        use tore_formats::aircraft::AircraftId;
+        use tore_sim::combat::{bays, hardpoints};
+        let (mut wings, _) = build(None);
+        let mut state = combat_fixture(false);
+        state.projectiles.clear();
+        let id = wings.mission().actors()[1].id();
+        let mut config = state.own().configuration().clone();
+        config.stations[0].weapon = mk82_pack(config.stations[0].weapon.clone());
+        config.stations[0].mount = bays::station(AircraftId::B52, 5).unwrap();
+        config.stations[0].rack = hardpoints::Rack {
+            location: hardpoints::MAGAZINE_BYTE,
+            ..Default::default()
+        };
+        wings.configs.insert(id, config.clone());
+        let weapon = config.stations[0].weapon.clone();
+        let ground = |_: f64, _: f64| 0.;
+        let emitted = wings.release(&launch(id, 0x5000_0001), &mut state, &weapon, &[], &ground);
+        assert_eq!(emitted, 6);
+        let launcher = crate::combat::launcher(wings.mission().actor(id).unwrap().flight());
+        let bay = bays::centre_bay(AircraftId::B52).unwrap();
+        // A mount on the centre line stages a six-pack across the aircraft (the
+        // shared release's centreline rule, 2.05 ft apart, so out to 5 ft either
+        // side; only the pack record does this, the real bay's stores are single),
+        // symmetric about the centre line; every round starts within the
+        // opening's length.
+        let sides: Vec<f64> = state
+            .projectiles
+            .iter()
+            .map(|p| p.position[0] - launcher.position[0])
+            .collect();
+        assert!((sides.iter().sum::<f64>() / 6.).abs() < 0.2, "{sides:?}");
+        for p in &state.projectiles {
+            let forward = p.position[2] - launcher.position[2];
+            assert!(forward > bay.aft && forward < bay.fore, "{forward}");
+        }
+    }
 }

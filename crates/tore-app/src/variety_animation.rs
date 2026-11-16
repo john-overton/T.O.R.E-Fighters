@@ -324,7 +324,7 @@ fn specification(id: Id) -> Option<Spec> {
             // 2/3 ft a unit (decision 6, John 2026-11-15). Update (B52-3 and
             // B52-4, 2026-11-15): the B-52 loads through its own
             // `b52_animation` rig (stabilizer, flap wedges, rudder, trucks and
-            // outriggers, interim bay plates); this row pins the layout, the
+            // outriggers; B52-5 the fitted bay and doors); this row pins the layout, the
             // scale and `supported`.
             Id::B52 => (
                 27204,
@@ -951,6 +951,7 @@ impl Rig {
         match &self.specific {
             Some(SpecificRig::F22(rig)) => rig.faces(source, state),
             Some(SpecificRig::F14(rig)) => rig.faces(source, state),
+            Some(SpecificRig::B52(rig)) => rig.faces(source, state),
             Some(SpecificRig::F117(rig)) => rig.faces(source, state),
             _ => vec![source.clone()],
         }

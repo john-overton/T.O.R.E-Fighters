@@ -3518,3 +3518,132 @@ the external-store signature.
 Provenance: stations, bays, doors, rail, timing and the 3.0 ft mount fitted (agent
 2026-11-15); the 1 s bay travel, the 0.95 gate and the hold are the F-22's; the refusal of
 `GBU16` and the Paveway II admission applied from John's decision 25.
+
+## B-52 bay, pylons and tail gun (B52-5, 2026-11-15)
+
+Implementation specification, **opinionated** (John, 2026-11-15, bomber batch A decisions 7, 8,
+9, 10 and 13) and **fitted**, agent-authored, B52-5. A game configuration, not a claim of
+original behaviour. The measurements and the choices are in
+[B-52 bay, pylons and tail gun](../formats/aircraft-variety.md#b-52-bay-pylons-and-tail-gun-b52-5-2026-11-15).
+It reuses the F-117's bay machinery
+([F-117 weapon bays](#f-117-weapon-bays-f117-5-2026-11-15)): `bays::STATIONS` rows read by
+`placed_on`, `bay_doors.rs`, the F-22's door timing.
+
+**Stations (feet right / up / forward).**
+
+| Row | Station | Mount | Capacity, class |
+| ---: | --- | --- | --- |
+| 3 | bay, forward row, `Location::Magazine`, 3 x 3 grid | 0 / -6.0 / +13.87 | 9, 7,000 lb |
+| 5 | bay, middle row | 0 / -6.0 / +5.20 | 9, 7,000 lb |
+| 6 | bay, aft row | 0 / -6.0 / -3.46 | 9, 7,000 lb |
+| 7 | underwing pair, `Location::Beam`, one beam a wing, record `[52, 8, 31]` | +/-17.33 / 2.67 (record; the stores' lugs hang 1 ft under the wing) / +10.33 | 18, 17,000 lb |
+| 4 | M61 tail gun | 0 / +2.0 / -92.0 | 1,242 rounds |
+
+**Bay (feet).** Belly plane -6.0 (flat belly panel, z -9 units at 2/3 ft a unit); opening x
++/-3.0, 26.0 long (-8.67 to +17.33 forward); recess 6.0 deep (roof 0.0); two doors 3.0 wide
+hinged on the outer edges, swinging 90 degrees down in the flight's 1.00 s bay travel, hanging
+to -9.0 (0.3 ft above the gear contact line, -9.33). A lined box (ceiling and four walls) closes
+the recess under an intact top skin (13.3 ft above the belly). Three rails hang 0.6 ft from the
+ceiling over the lanes (x -1.42, 0 and +1.42 for a 500 lb class store) and six posts stand from the
+floor to the ceiling at the two inner row boundaries; the lining draws only while the doors are
+off their seat. Code: `bays::CENTRE_BAYS`, `bay_doors::{centre_doors, centre_lining}`,
+`b52_animation.rs`.
+
+**Grid (`bays::GRIDS`, `BayGrid`).** Each bay row is one 8.67 ft slab, three lanes by three tiers,
+one store long. Pitch between lanes and tiers is the larger of the store's span and its
+diameter, plus 0.15 ft. The bottom tier is nearest the belly (axis half the span plus 0.08 ft
+above the plane). Stores fill from the bottom tier and, in a tier, from the middle lane, then
+the right, then the left; the highest slot, last filled, leaves first, so a row releases bottom
+tier first and nothing falls through another store. The row's mount is its slab middle plus
+0.87 ft, the `MK82.SH` family's origin offset (it spans -4.52 to +2.78 ft about the point a store
+hangs and leaves from), so the drawn 500 lb bomb is centred in its slab. **Relation to B2-5:**
+the existing `Location::Magazine` hangs stores in one tandem lane only (nine Mk 82 would be 67 ft
+long). B2-5 builds a general multi-lane magazine grid in parallel; this one is the minimum the
+B-52 needs, kept as per-aircraft data (`GRIDS`, one row per bay station) plus one `if let` in
+`Rack::store_point` that finds the grid by the station's mount. At the merge the rows move to B2-5's
+grid and these three items are deleted; the 3 x 3 layout and the pitch rule are the data to carry.
+(B2-5's committed grid arrived mid-slice and was not visible here: the per-row numbers are the named
+constants `B52_ROW_FLOOR_WIDTH` 6.0, `B52_ROW_LENGTH` 8.67 and `B52_ROW_CEILING` 6.0 in `combat::bays`,
+shaped for a `GRIDS` row; `centre` 0 and `inner_depth` equal to `depth`.)
+
+**What the bay admits.** Capacity 9 and class 70 a row (21,000 lb); 27 stores of 500 lb class, or
+fewer of heavier ones by weight. Retail masks `0x1100` (row 3) and `0x1120` (rows 5 and 6). The
+bay sweep loaded each admitted store full in all three rows. Worst clearances in feet over the
+27 stores, doors open (`.local/m3-aircraft/checks/B52-5/bay-sweep.txt`; 0.05 ft is the line):
+
+| Store (shape) | Side wall | Door leaf | Aft end | Fore end | Roof | Above belly plane | Rails and posts | Nearest store |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `MK82`, `MK82P3` (`MK82.SH`) | 1.13 | 1.15 | 0.68 | 0.68 | 2.00 | 0.25 | 0.58 | 0.51 |
+| `FAB250` (`F250.SH`) | 1.02 | 1.06 | 1.79 | 0.48 | 1.77 | 0.28 | 0.38 | 0.55 |
+| `GBU38` (`GB38.SH`) | 0.34 | 0.35 | 0.80 | 0.16 | 0.61 | 0.08 | 0.06 | 0.15 |
+| `RBK250` (`RBK2.SH`) | 0.82 | 0.85 | 1.52 | 0.75 | 1.71 | 0.22 | 0.65 | 0.15 |
+
+Refused by name (`aircraft_stations::B52_BAY_REFUSED`, 20 stores): `AGM45`, `AGM84A`, `AGM84E`,
+`AGM88`, `AM39`, `AS16`, `AT2`, `CBU87`, `CBU89`, `FAB1000`, `FAB500`, `GBU29`, `GBU29P`,
+`GBU30`, `MK20`, `MK82AIR`, `MK82HD`, `MK82P`, `MK84`, `RBK500`. Measured at full load they
+leave under 0.05 ft to a wall, the roof, the floor, a rail or post or a neighbour, or pass
+through one (worst cases: `MK84` fore end -1.04 and nearest store 0.00; the GBU-27 class side wall
+-5.25; `AGM84E`, 12.6 ft, is a pylon store; the HARM side wall -2.16; the Snakeye and `MK20` fore
+end -1.12 and -0.87, because their origins are not the `MK82.SH`'s). The open door leaves hang
+against the side walls (3.0 ft out), so the leaf figure is read below the belly plane.
+**The real 8 heavy stores (Mk 84) are not carried.** Per-shape centring (each shape's own origin
+offset in `store_sizes`) would admit the Snakeye, the MK20 and the cluster bombs; it is not
+built (open for John).
+
+**Pylons (`Location::Beam`).** The pair is an authored row (`B52.PT` row 7, appended while the
+record is retail) at 17.33 ft out and 10.33 ft forward; the wing underside reads 3.8 to 4.0 ft
+there. A wing's stores hang from one flat beam, three abreast (pitch the store's span plus 0.1
+ft, or its diameter plus 0.3 ft, whichever is more), rows 1.05 store lengths apart centred on
+the pylon's point, all level, lugs 1.0 ft under the surface (`hardpoints::beam_offset`); the left
+wing mirrors. The highest slot, the front row's last, leaves first. The drawn pylon is the beam
+(0.5 ft deep, as wide and long as the rows) and a slab up to the underside (`pylons.rs`).
+Default: 12 `AGM84E` (`SLAM.SH`, 14.6 ft), six a wing, two rows of three 15.3 ft apart.
+Refused (`B52_PYLON_REFUSED`): `AGM45`, `AGM88`, `GBU29`, `GBU29P`, `GBU30` (13.7 to 13.9 ft
+stores whose rows reach the flap strip and the trailing edge, 0.00 to 0.01 ft at capacity).
+
+**Pylon clearances, feet** (`TORE_STORES_PREVIEW_B52CLEAR=1`; every store at its capacity; the
+station is the pylons and stores as drawn; the wing figure is the stores' bodies only, the pylon
+meets the wing by design; ground is the lowest point above the gear contact line, -9.33 ft;
+positive is clear; `.local/m3-aircraft/checks/B52-5/pylon-sweep.txt`):
+
+| Load | Inboard pod | Flap strip up / down 15 deg | Fuselage | Gear down | Wing | Ground | Nearest store |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 12 `AGM84E` (default) | 8.27 | 0.32 / 0.36 | 4.58 | 7.44 | 0.32 | 10.59 | 0.73 |
+| 18 `MK82` | 10.63 | 0.53 / 0.57 | 6.62 | 10.38 | 0.89 | 11.30 | 0.36 |
+| 18 `GBU38` | 9.81 | 0.37 / 0.42 | 5.96 | 9.52 | 0.47 | 10.93 | 0.10 |
+| 18 `FAB250` | 10.57 | 0.59 / 0.62 | 6.56 | 10.45 | 0.93 | 11.20 | 0.32 |
+| 8 `MK84` | 9.87 | 0.60 / 0.63 | 5.97 | 10.05 | 0.85 | 10.73 | 0.54 |
+| 16 `GBU30` (refused) | 4.42 | 0.00 / 0.00 | 1.52 | 7.22 | 0.00 | 8.91 | 0.10 |
+
+The full table (22 stores) is in the sweep file. No admitted store touches the inboard pod
+(nearest 8.3 ft, the default Harpoons), the fuselage, the gear or the ground; the nearest to the flap strip is the 0.32 ft
+of the default Harpoons' upper fins under the wing's trailing region with the flaps up (the 15
+degree droop opens it to 0.36 ft). The pod faces are taken as the airframe faces 28 to 42 ft out
+and under 3 ft up.
+
+**Release.** Bay: the press asks for the doors; the weapon leaves once `State::bay` is at 0.95
+(tick 116, 0.958, in `flight-bay-fire-b52-row3`, `-row5` and `-row6`), the doors stay 1 s and close
+1 s later. A pilot-opened bay releases at once. Pylon: from the beam with the doors shut
+(`flight-bay-fire-b52-pylon-row7`, an 18 Mk 82 load). Live fire: `flight-livefire-b52-slot1` to
+`-slot5` (the gun 1,242 rounds, the 12 Harpoons, three never-loaded bay rows). **AI:** the AI's
+release does not wait for doors and its bay doors stay drawn shut (the F-22's and the F-117's
+precedent; `an_ai_bomb_leaves_the_b52_bay_row_from_its_mount_on_the_centre_line`).
+
+**Signature.** `State::bay_available()` is true for the B-52 (rows in `bays::STATIONS`), and the
+open-bay term (1.5 times at full travel) applies by itself; it reaches the RCS page only (as for
+the F-22 and the F-117). Stores in the bay add nothing to the external-store signature; pylon
+stores do (3 per store and 2 per 1,000 lb).
+
+**Default load and weight.** 12 `AGM84E` on the pylons (16,588 lb with fittings), no bay stores.
+`Loadout::total_lbs` counts every store that is not internal, bay stores included, so the default
+tank, capped to the maximum take-off weight (488,000 lb), starts at 286,402 lb (it was 303,000 lb
+with the Harpoons in the bay, which BMB-A2 counted as outside). A bay load needs fuel taken out
+in the editor.
+
+**Tail gun.** The M61 mount is the drawn tail cone, 92.0 ft aft and 2.0 ft up. Fire direction is
+the aircraft's nose: aircraft hardpoint slew headings and limits are not read, so the retail
+rear-facing arcs (heading 32,760, 30 degrees) do not apply, before or after.
+
+Provenance: the opening length, the belly plane, the tail cone and the wing height are measured
+from `B52.SH`; the 6 ft width, the 27-bomb and 12-Harpoon loads are cited public figures
+(aircraftinformation.info, Wikipedia); everything else is fitted (agent, 2026-11-15).

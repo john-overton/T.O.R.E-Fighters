@@ -919,3 +919,33 @@ ordnance audit: 2 novelty records, 240 Cheat-only placements, refused without Ch
 The `menus-ordnance-availability` expected line reads 4,784. Earlier sections stay as
 written for their own states.
 
+
+## B-52 bay rows, underwing pylons and default load (B52-5, 2026-11-15)
+
+Opinionated (John, 2026-11-15, decisions 7 to 9), fitted limits
+([B-52 bay, pylons and tail gun](../spec/stores-on-pylons.md#b-52-bay-pylons-and-tail-gun-b52-5-2026-11-15)).
+`B52.PT` rows 3, 5 and 6 (the internal bay) are capped to nine stores and 7,000 lb a row and start
+empty; row 7 is appended, the underwing pylon pair (capacity 18, 17,000 lb class, flags `0x1105`),
+holding the default 12 `AGM84E.JT`. The bay rows refuse 20 stores that the retail masks admit
+and that do not fit the measured open bay (`MK82`, `MK82P3`, `FAB250`, `GBU38` and `RBK250`
+stay); the pylon row refuses `AGM45`, `AGM88`, `GBU29`, `GBU29P` and `GBU30`. The row-7 class is 170,
+not B52-0's 200: a default weapon loads at its weight limit and the saved-load check needs it to
+equal the default count, and 20,000 lb admitted 14 Harpoons. Pins moved:
+
+| Pin | From | To | Why |
+| --- | ---: | ---: | --- |
+| Recovered weapon stations | 20 | 21 | row 3 is a third empty bay row with an empty Mk 82 selection |
+| Weapon placements | 4,784 | 4,746 | `B52.PT` 71 to 33 (five stores on each of three bay rows, 18 on the pylon row, less refusals; normal catalog 18) |
+| Cheat-only placements | 240 | 242 | the pylon row takes the two novelty bombs under Cheat loading |
+| Aircraft, tank placements, pod placements, records | 48, 233, 80, 82 / 9 | unchanged | |
+
+```text
+ordnance B52.PT: 5 source rows, 3 optional weapon rows, 33 compatible weapon placements, 0 tank placements; defaults and restart passed; catalog 18 normal, 83 Cheat
+ordnance audit: 48 aircraft, 21 recovered weapon stations, 4746 weapon placements, 233 tank placements, 82 weapon and 9 tank records; passed
+ordnance audit: 1 designator pods, 80 pod placements, one to an aircraft, loaded and restored through the saved mission; passed
+ordnance audit: 2 novelty records, 242 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed
+```
+
+The `menus-ordnance-availability` and `a2g-catalog` expected lines read 21 stations, 4,746 and 242.
+At the merge with the B-2's bay work the coordinator recomputes the weapon total (B4). Earlier
+sections stay as written for their own states.

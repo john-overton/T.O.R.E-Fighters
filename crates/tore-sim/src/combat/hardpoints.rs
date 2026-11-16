@@ -181,6 +181,11 @@ pub enum Location {
     Separate,
     /// Fitted Raptor bay magazines, forward store released first.
     Magazine,
+    /// T.O.R.E's own, never a source record's: a wing station whose stores
+    /// hang from one heavy stores adapter beam, three abreast in rows one
+    /// behind another ([`beam_offset`], the B-52's underwing pylons, B52-5,
+    /// 2026-11-15).
+    Beam,
     /// T.O.R.E's own, never a source record's: a store on a rail on the
     /// *inboard* flank of another station's pylon, facing the fuselage,
     /// [`SHOULDER_OUT`] inboard of the pylon's centre line ([`station_move`],
@@ -202,6 +207,8 @@ pub const SEPARATE_BYTE: u8 = 0x82;
 pub const MAGAZINE_BYTE: u8 = 0x83;
 /// [`Location::InboardRail`]'s byte, outside the source's 0 to 5.
 pub const INBOARD_RAIL_BYTE: u8 = 0x84;
+/// [`Location::Beam`]'s byte, outside the source's 0 to 5.
+pub const BEAM_BYTE: u8 = 0x85;
 
 /// How long the Tornado's AIM-9 rail on the inboard flank of its wing pylon is
 /// drawn, feet (fitted, agent decision, TOR-11, 2026-11-12, after John: "the
@@ -237,6 +244,7 @@ impl Location {
             SEPARATE_BYTE => Self::Separate,
             MAGAZINE_BYTE => Self::Magazine,
             INBOARD_RAIL_BYTE => Self::InboardRail,
+            BEAM_BYTE => Self::Beam,
             other => Self::Other(other),
         }
     }
@@ -253,6 +261,7 @@ impl Location {
             Self::Separate => SEPARATE_BYTE,
             Self::Magazine => MAGAZINE_BYTE,
             Self::InboardRail => INBOARD_RAIL_BYTE,
+            Self::Beam => BEAM_BYTE,
             Self::Other(byte) => byte,
         }
     }
@@ -274,6 +283,7 @@ impl Location {
                 | Self::Wingtip
                 | Self::Shoulder
                 | Self::InboardRail
+                | Self::Beam
         )
     }
     /// How far outboard of its pylon's centre line a store on this location's
@@ -576,6 +586,11 @@ impl Rack {
             1.
         };
         if self.location() == Location::Magazine {
+            // A bay station with a grid (the B-52's rows): lanes and tiers,
+            // not a tandem rail, bottom tier first (`bays::BayGrid`).
+            if let Some(grid) = super::bays::BayGrid::at(mount) {
+                return grid.point(mount, per_side, slot, size.width, size.top);
+            }
             // Fitted tandem rails inside the Raptor's narrow model bays.
             // Highest slot empties first, so the forward store leaves first.
             let offset = (f64::from(slot) - f64::from(per_side - 1) / 2.) * (size.length + 0.25);
@@ -609,6 +624,14 @@ impl Rack {
         on: u16,
         size: StoreSize,
     ) -> Vector {
+        if self.location() == Location::Beam {
+            // Both wings' beams alike: the left mirrors the right.
+            let mut offset = beam_offset(k, on, size);
+            if side == 1 && self.two_sided(mount) {
+                offset[0] = -offset[0];
+            }
+            return offset;
+        }
         let mut offset = slot_offset(k, on, size);
         if self.location() == Location::Shoulder && on == 2 {
             offset[0] = if k == 0 {
@@ -718,6 +741,40 @@ pub fn slot_offset(k: u16, on: u16, size: StoreSize) -> Vector {
         _ => [0., -(RACK_DEPTH / 2. + size.top)],
     };
     [right, up, forward]
+}
+
+/// How many stores a heavy stores adapter beam hangs abreast ([`beam_offset`]).
+pub const BEAM_ABREAST: u16 = 3;
+
+/// How far apart the centre lines of stores abreast on a beam hang, feet: a
+/// store's body clear of its neighbour by 0.3 ft, and at least its fin span
+/// plus 0.1 ft, so two stores' fins clear each other whichever way they are
+/// set (the first 0.72-of-the-span rule, for fins at 45 degrees, let the
+/// cluster bombs' crossed fins touch; fitted, B52-5, agent decision).
+pub fn beam_pitch(size: StoreSize) -> f64 {
+    (2. * size.top + 0.3).max(size.width + 0.1)
+}
+
+/// Where the `k`th store of a beam carrying `on` stores of `size` sits
+/// against the beam's point: [`BEAM_ABREAST`] to a row (the middle, then the
+/// right, then the left), the rows 1.05 lengths apart and centred on the
+/// point, all at the point's height (their lugs on the beam's flat underside).
+/// A partial last row is the front one's neighbour. The highest slot, the
+/// front row's last, empties first. Fitted (B52-5).
+pub fn beam_offset(k: u16, on: u16, size: StoreSize) -> Vector {
+    if on <= 1 {
+        return [0., 0., size.lug_aft];
+    }
+    let rows = on.div_ceil(BEAM_ABREAST);
+    let row = k / BEAM_ABREAST;
+    let forward = (f64::from(row) - f64::from(rows - 1) / 2.) * 1.05 * size.length;
+    let pitch = beam_pitch(size);
+    let right = match k % BEAM_ABREAST {
+        0 => 0.,
+        1 => pitch,
+        _ => -pitch,
+    };
+    [right, 0., forward]
 }
 
 /// The position and rack of source hardpoint record `h` as the stores hang
@@ -1326,6 +1383,16 @@ pub fn placed_on(
         );
     }
     let axes = tore_formats::aircraft::scale::right_up_forward(id);
+    if id.source() == AircraftId::B52
+        && hardpoint == tore_formats::aircraft::stations::B52_PYLONS
+        && h.location == Location::Wing.byte()
+    {
+        // The B-52's underwing pylon pair (B52-5): a wing station placed as the
+        // record says, its stores hung from one adapter beam.
+        let (mount, mut rack) = placed_scaled(h, model, axes);
+        rack.location = BEAM_BYTE;
+        return (mount, rack);
+    }
     let Some(moved) =
         station_move(id, hardpoint).filter(|m| m.location == Location::from_byte(h.location))
     else {
@@ -1877,6 +1944,153 @@ mod tests {
                 .location(),
             Location::Magazine
         );
+    }
+
+    #[test]
+    fn the_b52_bay_rows_hang_nine_mk82_in_a_grid_and_release_bottom_first() {
+        use super::super::bays::{B52_BELLY, B52_ORIGIN_AHEAD, B52_SLAB, centre_bay};
+        let o = centre_bay(AircraftId::B52).unwrap();
+        let size = StoreSize::of_shape(Some("MK82.SH"));
+        let mut h = hardpoint(3, 0x1100);
+        h.count = 9;
+        let mut first_forward = f64::MAX;
+        for row in [3, 5, 6] {
+            let (mount, rack) = placed_on(AircraftId::B52, row, &h, None);
+            assert_eq!(rack.location(), Location::Magazine);
+            assert!(rack.location().drawn() && rack.location().bay());
+            assert_eq!((mount[0], mount[1]), (0., B52_BELLY));
+            // The bay's row slab holds the 7.3 ft store between its ends.
+            assert!(mount[2] - size.length / 2. > mount[2] - B52_SLAB / 2.);
+            let middle = mount[2] - B52_ORIGIN_AHEAD;
+            assert!(
+                middle - B52_SLAB / 2. >= o.aft - 1e-9 && middle + B52_SLAB / 2. <= o.fore + 1e-9
+            );
+            first_forward = first_forward.min(mount[2]);
+            // Nine stores, nine distinct places, every one inside the bay.
+            let mut places = Vec::new();
+            for slot in 0..9 {
+                let at = rack.store_point(mount, 9, 0, slot, size);
+                assert_eq!(
+                    at,
+                    rack.release_point(mount, 9, u32::from(slot), slot, size)
+                );
+                assert!(at[0].abs() + size.width / 2. < o.half, "{at:?}");
+                assert!(
+                    at[1] - size.width / 2. > o.belly
+                        && at[1] + size.width / 2. < o.belly + o.depth
+                );
+                assert_eq!(at[2], mount[2]);
+                places.push(at);
+            }
+            places.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            places.dedup();
+            assert_eq!(places.len(), 9);
+            // The first to leave (the highest slot) is the bottom tier's middle
+            // lane; each later one is no lower, so nothing falls through
+            // another store.
+            let order: Vec<_> = (0..9)
+                .rev()
+                .map(|slot| rack.release_point(mount, 9, u32::from(slot), slot, size))
+                .collect();
+            assert_eq!(order[0][0], 0.);
+            assert!(order.windows(2).all(|w| w[1][1] >= w[0][1] - 1e-9));
+            assert!(order[8][1] > order[0][1] + 2. * size.width);
+        }
+        // Row 3 is the forward row, 13 ft ahead of the reference point (its slab's
+        // middle).
+        assert!(
+            (13. + B52_ORIGIN_AHEAD - placed_on(AircraftId::B52, 3, &h, None).0[2]).abs() < 1e-9
+        );
+        assert!(first_forward < 0.);
+        // The gun is not a bay station.
+        assert_ne!(
+            placed_on(AircraftId::B52, 4, &hardpoint(1, 0x180a), None)
+                .1
+                .location(),
+            Location::Magazine
+        );
+    }
+
+    #[test]
+    fn the_b52_pylon_pair_stands_where_measured_and_hangs_its_stores_from_one_beam() {
+        // The wing's underside 3.8 ft above the reference point, flat over the
+        // pair (the measured wing, B52-0): 11.4 units at 1/3 ft a unit.
+        let wing = Shape {
+            lines: Vec::new(),
+            faces: vec![tore_formats::shape::Face {
+                positions: vec![
+                    [0., -200., 11.4],
+                    [200., -200., 11.4],
+                    [200., 200., 11.4],
+                    [0., 200., 11.4],
+                ],
+                colors: vec![1; 4],
+                fog: Default::default(),
+                uv: Vec::new(),
+                texture: String::new(),
+                subtype: 0x20,
+                normal: None,
+                address: 0,
+            }],
+            billboards: Vec::new(),
+            state_words: Default::default(),
+        };
+        let model = Underside::of(&wing, 1. / 3.);
+        let row = Hardpoint {
+            location: Location::Wing.byte(),
+            flags: 0x1105,
+            position: [52, 8, 31],
+            store: Some("AGM84E.JT".into()),
+            count: 18,
+            weight_class: 170,
+        };
+        let (mount, rack) = placed_on(AircraftId::B52, 7, &row, Some(&model));
+        // 17.3 ft out, 10.3 ft forward, the record's 2.7 ft up kept as the axis
+        // under the wing; the underside read at the record is 3.8 ft.
+        assert!((mount[0] - 52. / 3.).abs() < 1e-9 && (mount[2] - 31. / 3.).abs() < 1e-9);
+        assert_eq!(rack.location(), Location::Beam);
+        assert!(rack.location().external() && rack.paired);
+        assert!((f64::from(rack.over[sample::RECORD].unwrap()) - 3.8).abs() < 1e-4);
+        // Twelve Harpoons, six a wing: one beam, three abreast in two rows,
+        // each store's lugs the pylon depth under the wing.
+        let size = StoreSize::of_shape(Some("HARPN.SH"));
+        assert_eq!(rack.sides(mount, 12), [6, 6]);
+        assert_eq!(rack.pylons(6), 1);
+        let places = rack.side_pylons(mount, 0, 6, size);
+        assert_eq!(places.len(), 1);
+        assert_eq!(places[0].slots, [0, 1, 2, 3, 4, 5]);
+        let at: Vec<_> = (0..6)
+            .map(|k| rack.store_point(mount, 12, 0, k, size))
+            .collect();
+        let pitch = beam_pitch(size);
+        assert!((pitch - 3.1).abs() < 1e-9, "{pitch}");
+        for k in 0..6 {
+            assert!((at[k][1] - at[0][1]).abs() < 1e-9, "level under the beam");
+            assert!(
+                (rack.store_depth(mount, 12, 0, k as u16, size).unwrap() - PYLON_DEPTH).abs()
+                    < 1e-9
+            );
+        }
+        // Two rows 1.05 lengths apart, the same three lanes each, the stores
+        // abreast further apart than their fins reach (their span).
+        assert!(((at[0][2] - at[3][2]).abs() - 1.05 * size.length).abs() < 1e-9);
+        assert_eq!(
+            [at[0][0], at[1][0], at[2][0]],
+            [at[3][0], at[4][0], at[5][0]]
+        );
+        assert!((at[1][0] - at[0][0]).abs() >= size.width);
+        // The rows are centred on the pylon's point and the right-hand
+        // pair's mirror hangs the left wing's.
+        assert!((at[0][2] + at[3][2] - 2. * mount[2]).abs() < 1e-9);
+        let left: Vec<_> = (0..6)
+            .map(|k| rack.store_point(mount, 12, 1, k, size))
+            .collect();
+        assert!((left[0][0] + at[0][0]).abs() < 1e-9 && left[0][2] == at[0][2]);
+        // The beam's ripple order: the highest slot, the front row's last,
+        // leaves first.
+        let first = rack.release_point(mount, 12, 11, 5, size);
+        assert_eq!(first, left[5], "the left wing's beam empties first");
+        assert!((first[0] + at[5][0]).abs() < 1e-9 && first[2] == at[5][2]);
     }
 
     #[test]
