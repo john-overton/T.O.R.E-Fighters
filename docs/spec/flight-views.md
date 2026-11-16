@@ -355,3 +355,14 @@ to 18.8 feet ahead with its crown 4.6 feet up at 14.6 feet; the seat is the cano
 feet over the crown, so Back looks over the glass and down the spine (frame
 `cockpit-view-back-f2`). The replay's Back, cockpit and HUD cameras and the listening seat use the
 same table. Evidence in [the F-117 section](../formats/aircraft-variety.md#f-117-ordnance-sensors-and-cockpit-f117-67-2026-11-15).
+
+## Pilot's eye on the F-111F (2026-11-16, F111-7)
+
+The per-identity Back eye table (`mirrors::eye_offset`) gains the F-111F: 5 feet up and 25 feet
+ahead of the model origin (fitted, agent decision), where every other aircraft except the B-2, the
+F-117 and the B-52 keeps 7 and 10. Measured on the real-size F-111F shape (2/3 ft a unit times 0.859,
+1.0 and 0.827), the cockpit hump rises to a crown 3.3 feet up from 23.3 to 27.3 feet ahead, the windscreen
+falls to 2.8 feet at 28 feet and the canopy ends at 30.7 feet; the seat is the crown's middle, 1.7 feet
+over it, so Back looks over the hump and down the spine to the fin (frame `cockpit-view-back-f2`). The
+replay's Back, cockpit and HUD cameras and the listening seat use the same table. Evidence in [the F-111F
+section](../formats/aircraft-variety.md#f-111f-ordnance-sensors-hud-and-cockpit-f111-67-2026-11-16).

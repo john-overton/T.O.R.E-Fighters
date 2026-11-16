@@ -28,6 +28,8 @@ pub use chatter::{Chatter, Contact, ContactView, FuelLevel, Member};
 mod engagement;
 pub use engagement::Preset;
 #[cfg(test)]
+mod f111_tests;
+#[cfg(test)]
 mod f117_tests;
 mod ground;
 mod gunship;

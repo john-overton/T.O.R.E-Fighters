@@ -369,3 +369,17 @@ Sensor View name; no other aircraft changed). The jammer row is gone (BMB-A2), s
 chaff and no flare line. The laser works from the fixed row with a GBU-27 released from the bay (`a2g-laser-f117`:
 lased, released, guided, the tank destroyed). The RCS page reads `SIG 1` closed and `SIG 2` with the bay open.
 See [the F-117 section](../formats/aircraft-variety.md#f-117-ordnance-sensors-and-cockpit-f117-67-2026-11-15).
+
+## F-111F sensors: radar and jammer reviewed, Pave Tack, 2026-11-16 (F111-6, F111-7)
+
+The F-111F's `A6R.SEE` and `A6.ECM` (the A-6's records) were unreviewed, so it flew with no radar
+and no jammer. Both are reviewed now (fitted): `--sensor-summary` reads `F111: radar A6R.SEE search 50 nmi
+60x60 deg track 25 nmi 45x45 deg look-down 0 TRANSITIONAL; infrared AV8IR.SEE search 15 nmi 60x60 deg track
+15 nmi 45x45 deg; visual VIS240.SEE search 10 nmi 120x90 deg track 5 nmi 120x90 deg; jammer A6.ECM
+TRANSITIONAL strength 0.30; signature radar 100 infrared 100`. The radar window reads `TWS 10 ... TRACK`
+once on, the RWR lights `JAM` with the jammer on, and the Weapons window reads `30 CHAFF`, `30 FLARE`. The laser
+and FLIR pair (`PAVESPK.SEE`, `AV8IR.SEE`, and the pod on the bay row) show as PAVE TACK in text only: the
+target camera window's title, the Load Ordnance sensor line and pod card, and the replay Sensor View
+(the infrared channel reads FLIR). The RCS page reads `SIG 165` with the doors shut and `SIG 248` with the bay
+open (default load, first GBU-28 released). Laser designation works: `a2g-laser-f111`. See [the F-111F
+section](../formats/aircraft-variety.md#f-111f-ordnance-sensors-hud-and-cockpit-f111-67-2026-11-16).

@@ -136,6 +136,10 @@ def f117_laser_problems(output: str) -> list[str]:
     return _own_laser_problems(output, "F-117 GBU-27 from the bay on the IRADS spot")
 
 
+def f111_laser_problems(output: str) -> list[str]:
+    return _own_laser_problems(output, "F-111F GBU-28 on the Pave Tack's spot")
+
+
 def _own_laser_problems(output: str, label: str) -> list[str]:
     parts = runs(output)
     if len(parts) != 1:
@@ -339,6 +343,15 @@ def scenarios() -> list[Scenario]:
             timeout=300,
             check=f117_laser_problems,
             notes="The F-117's IRADS turret (the fixed Pave Spike row, no pod body) lases a tank and a GBU-27 from the left bay guides onto it and destroys it (F117-6).",
+        ),
+        Scenario(
+            name="a2g-laser-f111", lane="flight",
+            args=run("UKR", "QUCOL", "laser", "--aircraft", "f111", "--load", "GBU28", "--station", "0",
+                     "--count", "1", "--altitude", "15000", "--speed", "480", "--from", "6", "--seconds", "120"),
+            timeout=300,
+            check=f111_laser_problems,
+            notes="The F-111F's Pave Tack (the pod on its bay row, shown as PAVE TACK; the fixed Pave Spike row is the "
+                  "same laser) lases a tank and a GBU-28 from the inner wing pylon guides onto it and destroys it (F111-6, F111-7).",
         ),
         Scenario(
             name="a2g-laser-b2", lane="flight",

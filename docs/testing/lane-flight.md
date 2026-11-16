@@ -1050,3 +1050,12 @@ AGM-65G row, is a refused surface-missile slot). New scenarios:
 | `flight-bay-fire-f111-pylon-row7` | the same from the fixed outer pylon (`7=MK82P.JT:2`) | a bomb leaves row 7 with the bay doors shut, `Stores firing: f111 row=7 PASS` |
 | `render-f111-clearance` | headless `TORE_STORES_PREVIEW_BAYCLEAR` of the two Mk 82 in the open bay | at least 0.05 ft to the door planes, ends and roof, above the closed belly plane, 0.05 ft between the bombs |
 | `a2g-release-origin-f111` | `--a2g-run` releases of the outer pylon's Mk 82 at 200 and 650 knots and of the default GBU-28 on the inner pylon | each store leaves from where it hangs: 15.46 ft out and 1.31 ft ahead at 200 knots, 15.28 ft out and 0.08 ft aft at 650 (the wing held to 26 degrees by the outer store); the GBU-28 8.30 / 2.38 and 8.41 / 2.22 |
+
+Update (F111-6, 2026-11-16): three scenarios for the F-111F's sensors and guided stores.
+
+| Scenario | Does | Pass when |
+| --- | --- | --- |
+| `a2g-laser-f111` | `--attack laser --aircraft f111 --load GBU28 --station 0` from 15,000 ft at 480 kt: the Pave Tack lases a tank, a GBU-28 leaves the inner wing pylon | Released guiding on aircraft 0's spot with the laser lasing, ends guiding within 40 ft, destroys the tank |
+| `a2g-maverick-f111` | `--attack maverick --load AGM65G --station 2 --count 4` (the outer pylon's four AGM-65G, through the A-G radar channel) | The column's lead truck is killed (`hp 0/200`) |
+| `flight-countermeasures-f111` | `--live-fire --aircraft f111`, five chaff and three flare commands | 30 chaff and 30 flares from the `A6.ECM` row, carried counts fall by the releases (the shared countermeasure check) |
+

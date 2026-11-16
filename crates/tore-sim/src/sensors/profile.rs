@@ -148,6 +148,11 @@ impl Preset {
             // AC-130's class (Transitional). Without it the record decodes
             // as unreviewed and the B-52 flew with no radar at all.
             "B52R.SEE" => Some(Self::Transitional),
+            // The F-111F's radar (F111-7, 2026-11-16, fitted, agent decision):
+            // the A-6's `A6R.SEE`, an attack and terrain-following set of the
+            // F-14's and A-7's era (Transitional). Without it the record
+            // decodes as unreviewed and the F-111F flew with no radar.
+            "A6R.SEE" => Some(Self::Transitional),
             "F18R.SEE" | "MIG29R.SEE" | "SU24R.SEE" | "SU27R.SEE" | "F22R.SEE" | "F15R.SEE"
             | "E3R.SEE" | "E2R.SEE" | "MIG31R.SEE" => Some(Self::Advanced),
             _ => None,
@@ -254,9 +259,10 @@ impl Generation {
         match record.to_ascii_uppercase().as_str() {
             "F4.ECM" | "MIG21.ECM" | "AV8.ECM" | "YAK141.ECM" | "KA50.ECM" | "A7.ECM"
             | "F104.ECM" => Some(Self::Early),
-            "F14.ECM" | "MIG29.ECM" | "SU24.ECM" | "AC130.ECM" | "B52.ECM" | "A10.ECM" => {
-                Some(Self::Transitional)
-            }
+            // `A6.ECM` (F111-7, 2026-11-16, fitted, agent decision): the F-111F's
+            // own jammer, reviewed with its radar; the B-52's and F-14's class.
+            "F14.ECM" | "MIG29.ECM" | "SU24.ECM" | "AC130.ECM" | "B52.ECM" | "A10.ECM"
+            | "A6.ECM" => Some(Self::Transitional),
             "F18.ECM" | "SU27.ECM" | "F22.ECM" | "F15.ECM" | "MIG31.ECM" => Some(Self::LateColdWar),
             _ => None,
         }
@@ -742,14 +748,14 @@ mod tests {
     #[test]
     fn an_unreviewed_radar_or_ecm_still_decodes_into_a_profile() {
         // A record with no reviewed assignment decodes, with an inert tuning.
-        let radar = RadarProfile::from_seeker("A6R.SEE", &seeker(3)).unwrap();
+        let radar = RadarProfile::from_seeker("EA6R.SEE", &seeker(3)).unwrap();
         assert_eq!(radar.preset, Preset::Unreviewed);
         assert!(!radar.reviewed());
         assert_eq!(radar.search.maximum_ft, 60_000.);
         assert_eq!(radar.track.maximum_ft, 60_000.);
         assert!(!radar.notch.enabled);
 
-        let ecm = JammerProfile::from_countermeasures("A6.ECM", &Countermeasures::NONE).unwrap();
+        let ecm = JammerProfile::from_countermeasures("EA6.ECM", &Countermeasures::NONE).unwrap();
         assert_eq!(ecm.generation, Generation::Unreviewed);
         assert!(!ecm.reviewed());
 
@@ -792,7 +798,7 @@ mod tests {
 
     #[test]
     fn an_unreviewed_record_loads_without_enabling_a_flying_channel() {
-        let a = aircraft_with(&["A6R.SEE", "A6.ECM"]);
+        let a = aircraft_with(&["EA6R.SEE", "EA6.ECM"]);
         let profiles = SensorProfiles::from_source(&a, |name| {
             Ok(if name.ends_with(".SEE") {
                 sensor_bytes(name, 3)
@@ -809,21 +815,21 @@ mod tests {
             profiles
                 .unreviewed_radar
                 .as_ref()
-                .is_some_and(|r| !r.reviewed() && r.record == "A6R.SEE")
+                .is_some_and(|r| !r.reviewed() && r.record == "EA6R.SEE")
         );
         assert!(
             profiles
                 .unreviewed_jammer
                 .as_ref()
-                .is_some_and(|j| !j.reviewed() && j.record == "A6.ECM")
+                .is_some_and(|j| !j.reviewed() && j.record == "EA6.ECM")
         );
         let summary = profiles.summary();
         assert!(
-            summary.contains("A6R.SEE UNREVIEWED (not enabled)"),
+            summary.contains("EA6R.SEE UNREVIEWED (not enabled)"),
             "{summary}"
         );
         assert!(
-            summary.contains("A6.ECM UNREVIEWED (not enabled)"),
+            summary.contains("EA6.ECM UNREVIEWED (not enabled)"),
             "{summary}"
         );
     }
@@ -835,6 +841,23 @@ mod tests {
         assert_eq!(Preset::for_record("b52r.see"), Some(Preset::Transitional));
         // The Tu-160's record it renames stays unreviewed until its own slice.
         assert_eq!(Preset::for_record("TU160R.SEE"), None);
+    }
+
+    /// F111-7: the F-111F's radar and jammer records are reviewed, so it flies
+    /// with both; the EA-6B's stay unreviewed.
+    #[test]
+    fn the_f111_radar_and_jammer_records_are_reviewed_transitional() {
+        assert_eq!(Preset::for_record("A6R.SEE"), Some(Preset::Transitional));
+        assert_eq!(Preset::for_record("a6r.see"), Some(Preset::Transitional));
+        assert_eq!(
+            Generation::for_record("A6.ECM"),
+            Some(Generation::Transitional)
+        );
+        assert_eq!(Preset::for_record("EA6R.SEE"), None);
+        assert_eq!(Generation::for_record("EA6.ECM"), None);
+        let radar = RadarProfile::from_seeker("A6R.SEE", &seeker(3)).unwrap();
+        assert!(radar.reviewed());
+        assert_eq!(radar.notch, Preset::Transitional.notch());
     }
 
     #[test]

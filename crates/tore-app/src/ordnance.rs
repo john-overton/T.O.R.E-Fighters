@@ -1289,7 +1289,7 @@ impl Ordnance {
                     designator_card(
                         &mut c,
                         &self.sprites,
-                        &self.designator_catalog[index],
+                        &self.named_pod(&self.designator_catalog[index]),
                         (x, y),
                         self.selected == Some(CatalogEntry::Designator(index)),
                         if self.selected == Some(CatalogEntry::Designator(index)) {
@@ -1400,7 +1400,7 @@ impl Ordnance {
                 designator_card(
                     &mut c,
                     &self.sprites,
-                    pod,
+                    &self.named_pod(pod),
                     (x + 3, y + 14),
                     self.station == index,
                     // A pod on a station blinks its box between red and yellow.
@@ -1803,6 +1803,23 @@ fn guidance(w: &Weapon) -> &'static str {
             1 => "laser",
             _ => "",
         },
+    }
+}
+/// The name the page shows for a designator pod: the record's own ("Pave
+/// Spike"), or the aircraft's own for a pod it calls something else (the
+/// F-111F's bay pod is its Pave Tack, F111-7; text only).
+fn pod_name(aircraft: tore_formats::aircraft::AircraftId, pod: &DesignatorStore) -> String {
+    aircraft
+        .sensor_names()
+        .map_or_else(|| pod.name.clone(), |names| names.pod.to_owned())
+}
+impl Ordnance {
+    /// `pod` with the name the page shows for it on this aircraft ([`pod_name`]).
+    fn named_pod(&self, pod: &DesignatorStore) -> DesignatorStore {
+        DesignatorStore {
+            name: pod_name(self.loadout.configuration.aircraft, pod),
+            ..pod.clone()
+        }
     }
 }
 /// A laser designator pod's card: its name, its weight and "laser" in the
@@ -4403,7 +4420,29 @@ mod tests {
                 Some("Built-in IRADS: no pod needed for laser ordnance.")
             );
         }
+        // F111-7: the F-111F's laser and FLIR pair is its Pave Tack.
+        ui.loadout.configuration.aircraft = tore_formats::aircraft::AircraftId::F111;
+        for gimbal in [CONE, Gimbal::Hemisphere] {
+            ui.loadout.configuration.sight = Some(sensor(true, gimbal));
+            assert_eq!(
+                sensor_helper(&ui.loadout, false).as_deref(),
+                Some("Built-in PAVE TACK: no pod needed for laser ordnance.")
+            );
+        }
         ui.loadout.configuration.aircraft = own;
+    }
+    /// F111-7: the F-111F's bay pod reads "Pave Tack" on the page whatever
+    /// the record calls it; every other aircraft shows the record's name.
+    #[test]
+    fn the_f111s_bay_pod_is_named_pave_tack_on_the_page() {
+        use tore_formats::aircraft::AircraftId;
+        let ui = with_pod_station();
+        let pod = ui.designators.first().expect("the fixture's pod");
+        assert_eq!(pod.name, "Pave Spike");
+        assert_eq!(pod_name(AircraftId::F111, pod), "Pave Tack");
+        for id in [AircraftId::F16C, AircraftId::F15E, AircraftId::B2] {
+            assert_eq!(pod_name(id, pod), "Pave Spike", "{id:?}");
+        }
     }
     /// The first and last row of `ink` in the page's pixels, and whether any
     /// of it is there.

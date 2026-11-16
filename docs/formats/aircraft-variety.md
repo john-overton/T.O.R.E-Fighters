@@ -15906,3 +15906,156 @@ rails, refusal lists, defaults and the sweep hold's wiring are fitted (agent dec
 the 26 degree limit is the coordinator's first pass (one secondary source, no primary found);
 the 5,000 lb pylon rating and the Pave Tack's bay carriage are cited (Wikipedia, F111-0). No retail
 bytes are committed.
+
+Update (F111-6/7, 2026-11-16): the pod now reads "Pave Tack" on the Load Ordnance page, the four rail refusals are
+remeasured on the outboard shoulder and stand, and the A-6's radar and jammer records are reviewed; see
+[F-111F ordnance, sensors, HUD and cockpit](#f-111f-ordnance-sensors-hud-and-cockpit-f111-67-2026-11-16).
+
+
+## F-111F ordnance, sensors, HUD and cockpit (F111-6/7, 2026-11-16)
+
+Slices F111-6 (ordnance, default load, countermeasures) and F111-7 (sensors, HUD, cockpit, instruments)
+ran together (implementation mode, bomber batch B). They apply the coordinator's first-pass decisions for the
+F-111F (`BOMBERS-DECISIONS-B.md`, "F-111F Aardvark" items 6, 8 and 9; John's to review). Earlier F-111F
+sections stay as written (B11): F111-5 left the bay pod reading "Pave Spike" and the rail refusals
+measured on the inboard flank, and this section is the answer to both. Everything here is **fitted** or
+**opinionated** (agent decisions, 2026-11-16) unless it says retail. Frames are under
+`.local/m3-aircraft/frames/F111-6/`, logs under `.local/m3-aircraft/checks/F111-6/`.
+
+### F111-6: the load, live fire, release origins
+
+**Load Ordnance page.** The default load is what F111-5 set, checked here on the page (frame
+`load-ordnance`): the Internal Bay row shows **Pave Tack, 1 loaded (max 1)**; the wing rows show GBU-28/B 2 loaded
+(max 2), MK-82HD 6-Pack 2 loaded (max 2) on rows 6 and 8, AGM-65G Maverick 4 loaded (max 4), and the two AIM-9
+rail rows are empty; weight 99,999 of 100,000 lb with 28,413 lb of fuel (87 percent), so the page has 1 lb
+available. Load Ordnance has no named loads for any aircraft, so there are no presets to check. The sensor line
+under the page reads `Built-in PAVE TACK: no pod needed for laser ordnance.`
+
+**Live fire of every slot.** `flight-livefire-f111-slot1` to `slot7` (F111-5's, with `SHOTS_PER_ROUND` 6 on the two
+`MK82P.JT` rows) and `flight-jettison-f111-slot2` to `slot4` pass again on this tree (battery below). Slot 3, the
+AGM-65G row, stays a refused surface-missile slot (a live-fire target is an aircraft); the Maverick is flown at a
+ground target instead (below). Slots 5 to 7 (the bay with its pod, the two empty rails) are the never-loaded slots.
+
+**Release origins.** The human's release left from the cell the stores hang in at 200 and 650 knots
+(`a2g-release-origin-f111`, F111-5's: outer pylon 15.46 ft out and 1.31 ft ahead spread, carried 10 degrees aft
+with the wing held to 26 degrees; inner pylon 8.30 ft out), and the AI's release takes the same configuration and the
+same release (`State::release_strike` against `State::release_round`): `ai_wings::release::tests::
+an_ai_bomb_leaves_the_f111_bay_and_its_outer_pylon_from_their_own_places` pins the bay row and the outer pylon.
+Both are rerun on this tree and agree.
+
+**Guided stores against a target.** Two new scenarios.
+- `a2g-laser-f111` (`--a2g-run UKR QUCOL --attack laser --aircraft f111 --load GBU28 --station 0 --count 1`, 15,000 ft,
+  480 kt): the Pave Tack designates the tank, a GBU-28 from the inner wing pylon releases at 15.2 s (kind Laser,
+  range 23,237 ft inside its reach 14,995 to 25,987 ft, `laser Lasing`, buddy no), guides onto the spot and lands 6.7
+  ft from the tank, which is destroyed (`hp 0/200`). The sight's sensor is the bay pod's hemisphere laser (the loaded
+  pod comes before the fixed row, `Configuration::sight_sensor`).
+- `a2g-maverick-f111` (`--load AGM65G --station 2 --count 4 --attack maverick`, 3,000 ft, 350 kt): the lead truck of the
+  column is designated through the **A-G radar channel** (the F-111F has a radar now, below), locked, the AGM-65G
+  launched and the truck destroyed (miss 23 ft).
+
+**Countermeasures.** The record's own `A6.ECM` row works: 30 chaff and 30 flares (the Weapons window `30 CHAFF 30 FLARE`),
+five and three released in `flight-countermeasures-f111` (the same check as the B-2's: carried counts fall by exactly the
+releases, five cartridges in the air), and `--jammer-on` lights `JAM` on the RWR window (frame
+`countermeasures-chaff-flare-jammer`, strip `systems-rwr-weapons-strip-2x-jam-chaff-flare`). The chaff and flares leave from
+the standard tail outlet. The jammer was **not enabled before**: see Sensors.
+
+### F111-7: sensors
+
+`--sensor-summary` reads `F111: radar A6R.SEE search 50 nmi 60x60 deg track 25 nmi 45x45 deg look-down 0 TRANSITIONAL;
+infrared AV8IR.SEE search 15 nmi 60x60 deg track 15 nmi 45x45 deg; visual VIS240.SEE search 10 nmi 120x90 deg track 5 nmi
+120x90 deg; jammer A6.ECM TRANSITIONAL strength 0.30; signature radar 100 infrared 100`. All five sensor rows are the
+real aircraft's kinds (a terrain-following and attack radar, a jammer with chaff and flares, a FLIR and a laser in the
+Pave Tack, a visual set), and none is a pod body on a station the real aircraft lacks: the radar, jammer, FLIR and visual
+rows stay fixed rows with no body, and the one pod is the Pave Tack on the bay, a real station (F111-5).
+
+**Radar and jammer reviewed (fitted, agent decision, John to confirm).** `A6R.SEE` and `A6.ECM` (the A-6's records, the F-111F's
+template) had no preset or generation assignment, so they decoded as `UNREVIEWED (not enabled)` and the F-111F flew with
+no radar and no jammer at all, as the B-52 did before B52-7. `A6R.SEE` is now `Preset::Transitional` and `A6.ECM`
+`Generation::Transitional` (`sensors::profile`; [radar](../radar.md#presets)), the class of the F-14's radar and the B-52's
+jammer. One line each to revert. The EA-6B's records stay unreviewed (the tests that used the A-6's as the unreviewed
+sample now use them). The radar window reads `TWS 10 ... TRACK` (frame `target-cam-pave-tack-gbu28-laser`), there is no
+ground-mapping mode (the shared radar has none, as for the B-2 and B-52), and a surface missile is refused against an aircraft as everywhere
+(the Maverick row's live-fire slot).
+
+**PAVE TACK (text only).** One table entry, `AircraftId::sensor_names()`, now has the F-111F beside the F-117:
+`SensorNames { sight: "PAVE TACK", infrared: "FLIR", pod: "Pave Tack" }` (a new `pod` field for the Load Ordnance card;
+the F-117's repeats `IRADS` and is unused). The readers are the F117-7 ones:
+
+| Where | Every other aircraft | The F-111F |
+| --- | --- | --- |
+| Window 4's title | `TARGET CAM` | `PAVE TACK` (a weapon's seeker picture keeps `TARGET CAM`; frames `cockpit-front-view`, `target-cam-pave-tack-gbu28-laser`) |
+| Load Ordnance sensor line | `Built-in laser designator: no pod needed...` or `Aircraft laser pod equipped` | `Built-in PAVE TACK: no pod needed for laser ordnance.` |
+| Load Ordnance pod card (bay row and catalog) | the record's `Pave Spike` | `Pave Tack` (`ordnance::pod_name`) |
+| Radar window, infrared channel | `IR` | `FLIR` |
+| Replay Sensor View | the sensor record's name | `PAVE TACK` for the laser row, `FLIR` for the infrared row |
+
+Everything else says what the shared code says. `--sensor-summary` and the logs keep the retail file names. Tests:
+`aircraft::tests::only_the_f117_and_the_f111_have_their_own_sensor_names`, `ordnance::tests::the_f111s_bay_pod_is_named_pave_tack_on_the_page`
+and the extended helper-line test, `views::sight_label_tests::the_sensor_view_names_the_f111s_laser_pave_tack`.
+
+**The bay pod is a designator for the AI too.** The sight rule is one function of the configuration
+(`Configuration::sight_sensor`: a loaded pod first, else the fixed row) and the AI reads the same one for its lase duty
+(`AiWings::can_lase`, `capability`), its lase hold and its jettison (the pod leaves with the stores). New retail-reading
+tests (`ai_wings/f111_tests.rs`): an AI F-111F built from the real record carries the pod on the bay row's station, its sight
+is the pod's hemisphere laser, `can_lase` and the ground-order capability say designator and strike, and with the pod
+gone (jettisoned, or two bombs on the bay row) the fixed Pave Spike row still lases, so it stays a designator. The
+strike class is **Attack**: BMB-B1 already added the `F111.PT` override (a test pins it), so nothing was needed here.
+
+**RCS page.** Page 0 reads `SIG 165` with the doors shut and `SIG 248` with the bay open (frames `rcs-page-closed`,
+`rcs-page-bay-open`, `crop3x-rcs-closed-vs-bay-open`; a live-fire run on the default load, the first GBU-28 just released: the record's 100
+plus the store terms, and the open-bay term).
+
+### F111-7: HUD and cockpit
+
+| Item | Value |
+| --- | --- |
+| `AircraftId::hud()` | `AC130.HUD` (the record's own, naming `~ac130_p`) |
+| Cockpit stem, shape stem | `AC130`, `F111` |
+| Forward art | `~AC130H.PIC`, **1280 x 490**; no overlay pictures |
+| Record `viewOffset` | 0, 20, 60 (no host code reads it) |
+
+Pinned by the retail-reading test `crates/tore-import/tests/f111_cockpit.rs` (the five sensor rows, the radar, the names, the HUD module
+and its panel frame, the art size, no overlays, `viewOffset`).
+
+**Glass aperture (measured).** The AC-130's art is one window the size of the picture: **the mask covers 504,831 of its 505,305
+transparent pixels** (99.9 percent; the polygon is the whole picture and the opaque art trims it, losing the polygon's last
+column and row only). The new retail-reading test `hud_aperture::tests::the_f111_glass_is_the_transparent_area_of_the_ac130_art` reads the
+real art, pins the size, checks that the F-111F's mask is the AC-130's, covers no opaque pixel and keeps at least 99.5 percent of the
+transparent area. It does not fail closed. The HUD draws as the AC-130's does over the six small windows (frame `cockpit-front-view`:
+there is no cockpit art to draw behind, only the panels).
+
+**Eye (fitted, measured).** `mirrors::eye_offset` gains the F-111F: **5 ft up and 25 ft ahead** of the model origin (the shared seat is 7 up
+and 10 ahead). Measured on `F111.SH` after the per-axis factors (2/3 ft a unit times 0.859, 1.0, 0.827): the spine rises from 2.8 ft at 8.7 ft
+ahead to a crown 3.3 ft up from 23.3 to 27.3 ft ahead, the windscreen falls to 2.8 ft at 28 ft and the canopy ends at 30.7 ft (1.1 ft) before the
+nose cone. The shared seat is 15 ft aft of the crown and 4 ft over the spine, outside the cockpit. The seat is the crown's middle, 1.7 ft over
+it (the B-52's margin), so F2 Back looks over the hump and down the spine to the fin and tailerons (frame `cockpit-view-back-f2`). Readers
+and tests as the B-2's: `mirrors::tests::only_the_b2_the_f117_the_b52_and_the_f111_have_their_own_pilot_eye`,
+`flight_views::tests::back_from_a_b2_sits_at_its_own_seat`. The record's `viewOffset` is not used.
+
+**Rear view.** F2 Back from the eye above (frame `cockpit-view-back-f2`). As for the B-52, **no rear-view HUD exists** in the game, so no rear
+cue was built; the six windows stay.
+
+### AIM-9 rail refusals remeasured
+
+All eleven stores the infrared mask offers the rails were clipped on the **outboard shoulder** (where F111-5 put the rails) at the spread, 26 and 72.5
+degree wing with Cheat loading (the list ignored; `checks/F111-6/scripts/railscan.py`, `railscan.txt`). The seven admitted stores (`AA2`, `AA8`, `AA11`,
+`AA11B`, `AIM9B`, `AIM9M`, `AIM9X`) clip 0.00 ft everywhere; the four refused clip `R550` 0.40, `PL7` 0.83 (0.50 on the left rail at 72.5), `AT12` 0.44 and
+`GBU12` 1.02 ft, all over the 0.3 ft line. **`F111_RAIL_REFUSED` stays `PL7`, `R550`, `AT12`, `GBU12`**, now measured where the rails hang. See the
+[stores specification](../spec/stores-on-pylons.md).
+
+### Pins
+
+No pin moved: `--validate-ordnance` reads 54 aircraft, 23 recovered weapon stations, 5,398 weapon placements, 257 tank placements, 83 pod placements, 284
+Cheat-only, before and after (F111-5's values). The relabel and the sensor review change no placement.
+
+### Open for John
+
+1. **Radar and jammer enabled** as Transitional (fitted): the F-111F now has a radar window and a JAM light. The alternative is the old no-radar jet.
+2. **Eye** 5 ft up, 25 ft ahead (fitted); the AC-130 family has no art behind the HUD, so the cockpit view is the panels over the sky.
+3. **No rear-view HUD** and no ground-mapping radar mode (shared, a sensor change).
+4. **The pod body** is still the Pave Spike model (F111-5) while it reads Pave Tack everywhere; and it still does not rotate out of its cradle.
+5. The radar's 50 and 25 nmi are the A-6 record's, not a cited F-111F figure.
+6. The guns and live fire of every aircraft were not rerun: no shared gun or sight code changed.
+
+Provenance: sensor rows, HUD module, art and the template records retail; the radar and jammer assignments, the label text, the glass test, the eye entry
+and the scenarios fitted (agent decisions, 2026-11-16); strike class and HUD binding the coordinator's first pass. No retail bytes committed.

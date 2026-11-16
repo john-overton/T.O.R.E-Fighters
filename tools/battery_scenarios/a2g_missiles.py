@@ -365,6 +365,15 @@ def scenarios() -> list[Scenario]:
             notes="The Gripen's default-load AGM-65G (row 6, inner wing) is designated, locks CUED on the page, launches and kills the column's lead truck (GRI-6).",
         ),
         Scenario(
+            name="a2g-maverick-f111", lane="flight",
+            args=col + ["--aircraft", "f111", "--load", "AGM65G", "--station", "2", "--count", "4",
+                        "--attack", "maverick", "--from", "6", "--altitude", "3000"],
+            timeout=300,
+            expect=[r"^a2g-run: kill 0x50000000 class 0x0400$", r"^a2g-run: target 0x50000000 hp 0/200$"],
+            notes="The F-111F's default-load AGM-65G (row 7, the outer wing pylon, four a side) is designated, "
+                  "launched from the page and kills the column's lead truck (F111-6).",
+        ),
+        Scenario(
             name="a2g-maverick-f5e", lane="flight",
             args=col + ["--aircraft", "f5e", "--load", "AGM65G", "--station", "2", "--count", "2",
                         "--attack", "maverick", "--from", "6", "--altitude", "3000"],

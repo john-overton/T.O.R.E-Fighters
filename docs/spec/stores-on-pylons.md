@@ -3933,3 +3933,13 @@ Guards: `bays.rs` `the_f111_has_one_centred_bay_with_a_grid_for_two_abreast_and_
 the probe's `bay` check (`--animation-probe f111`); battery `flight-bay-fire-f111-row9`,
 `flight-bay-fire-f111-pylon-row7`, `render-f111-clearance`, `a2g-release-origin-f111`,
 `flight-livefire-f111-slot1` to `slot7`.
+
+### F-111F AIM-9 rail refusals remeasured on the outboard shoulder (F111-6, 2026-11-16)
+
+F111-5 put rails 10 and 11 on the outboard shoulder but kept the Tornado's four refusals, measured on the
+inboard flank. All eleven stores the infrared mask offers were clipped again with Cheat loading (which
+ignores the lists) on the outboard shoulder at the spread, 26 and 72.5 degree wing (`checks/F111-6/scripts/railscan.py`,
+`railscan.txt`; against the airframe at the 0.3 ft line, both rails loaded). The seven admitted stores clip
+0.00 ft at every sweep. The four refused clip: `R550` 0.40 ft (all three sweeps), `PL7` 0.83 ft (0.50 at 72.5 on
+the left rail), `AT12` 0.44 ft and `GBU12` 1.02 ft. `F111_RAIL_REFUSED` is therefore **unchanged**, now measured
+on the outboard shoulder it names. See [the F-111F section](../formats/aircraft-variety.md#f-111f-ordnance-sensors-hud-and-cockpit-f111-67-2026-11-16).
